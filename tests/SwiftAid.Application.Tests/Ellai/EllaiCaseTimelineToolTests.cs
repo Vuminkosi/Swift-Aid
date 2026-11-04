@@ -29,6 +29,17 @@ public sealed class EllaiCaseTimelineToolTests
     }
 
     [Fact]
+    public async Task TimelineLabelsEachAgentRoleWithoutInventingAQualityAssessment()
+    {
+        var id = Guid.NewGuid();
+        var result = await Broker(new TimelineQuery(id, true, multiRole: true)).InvokeAsync(Context(), Request(id), default);
+        Assert.True(result.Allowed);
+        Assert.Contains("Ellai Follow-up: Follow-up activity recorded", result.ResultSummary, StringComparison.Ordinal);
+        Assert.Contains("Ellai Agent: Activity recorded", result.ResultSummary, StringComparison.Ordinal);
+        Assert.DoesNotContain("Data Quality", result.ResultSummary, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task DeniedOrMissingActorDoesNotExposeTimeline()
     {
         var id = Guid.NewGuid();
@@ -63,7 +74,7 @@ public sealed class EllaiCaseTimelineToolTests
     private static EllaiToolRequest Request(Guid id) =>
         new(EllaiToolNames.CaseTimeline, new Dictionary<string, string> { ["case_id"] = id.ToString("D") });
 
-    private sealed class TimelineQuery(Guid id, bool allowed) : ICaseTimelineQuery
+    private sealed class TimelineQuery(Guid id, bool allowed, bool multiRole = false) : ICaseTimelineQuery
     {
         public int Calls { get; private set; }
         public Task<CaseTimelineResult> GetAsync(ActorContext actor, Guid caseId, int? limit,
@@ -79,6 +90,11 @@ public sealed class EllaiCaseTimelineToolTests
             {
                 new CaseTimelineEntry(Guid.Empty, "IntakePromoted", "derived receipt", CaseTimelineEntryKind.Derived, 0, 1, Guid.Empty, "secret-actor", null, now, 1),
                 new CaseTimelineEntry(Guid.NewGuid(), "CaseAssignmentAcknowledged", "Assignment acknowledged", CaseTimelineEntryKind.Authoritative, 7, 1, Guid.NewGuid(), "secret-actor", null, now, 1)
+                {
+                    AgentActivities = multiRole
+                        ? [new CaseAgentActivity(Guid.NewGuid(), "ops.followup", "ignored", "1", now),
+                           new CaseAgentActivity(Guid.NewGuid(), "unknown", "ignored", "1", now)] : []
+                }
             };
             return Task.FromResult(new CaseTimelineResult(CaseTimelineAccess.Found, new CaseTimeline(header, entries) { WorkSummary = new CaseTimelineWorkSummary(2, 1, now.AddDays(1)) }));
         }

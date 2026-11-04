@@ -156,7 +156,7 @@ public sealed class CaseTimelineQuery(
                 return MapAuthoritative(row) with
                 {
                     AgentActivities = activities.Take(20).Select(activity => new CaseAgentActivity(activity.ActivityId,
-                        activity.RoleId, "Reported-data quality assessed", activity.Version, activity.RecordedAtUtc)).ToArray(),
+                        activity.RoleId, CaseAgentActivityPresentation.ActivityLabel(activity.RoleId), activity.Version, activity.RecordedAtUtc)).ToArray(),
                     AgentActivitiesTruncated = activities.Length > 20
                 };
             }).ToList();

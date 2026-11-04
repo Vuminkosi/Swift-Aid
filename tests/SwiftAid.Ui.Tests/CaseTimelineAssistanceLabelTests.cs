@@ -59,3 +59,16 @@ public sealed class CaseTimelineFollowUpLabelTests
         Assert.Equal("Follow-up", categoryMapper!.Invoke(null, ["CaseFollowUpAcknowledged", CaseTimelineEntryKind.Authoritative]));
     }
 }
+
+public sealed class CaseAgentActivityPresentationTests
+{
+    [Theory]
+    [InlineData("ops.quality", "Data Quality", "Reported-data quality assessed")]
+    [InlineData("ops.followup", "Follow-up", "Follow-up activity recorded")]
+    [InlineData("unknown", "Agent", "Activity recorded")]
+    public void ActivityLabelsAreRoleSpecificAndBounded(string roleId, string roleLabel, string activityLabel)
+    {
+        Assert.Equal(roleLabel, CaseAgentActivityPresentation.RoleLabel(roleId));
+        Assert.Equal(activityLabel, CaseAgentActivityPresentation.ActivityLabel(roleId));
+    }
+}

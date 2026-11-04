@@ -93,10 +93,10 @@
                                 </button>
                                 @if (entry.AgentActivities is { Count: > 0 })
                                 {
-                                    <ul aria-label="Ellai activity for this report revision">
+                                    <ul aria-label="Ellai activity for this event">
                                         @foreach (var activity in entry.AgentActivities)
                                         {
-                                            <li>Ellai · Data Quality: Reported-data quality assessed
+                                            <li>Ellai - @CaseAgentActivityPresentation.RoleLabel(activity.RoleId): @CaseAgentActivityPresentation.ActivityLabel(activity.RoleId)
                                                 <time datetime="@activity.RecordedAtUtc.ToString("O")">@activity.RecordedAtUtc.ToLocalTime().ToString("g")</time>
                                             </li>
                                         }

@@ -465,7 +465,7 @@ public sealed class EllaiToolBroker
         var lines = entries.SelectMany(entry =>
             new[] { $"{entry.RecordedAtUtc:O}: {entry.Label} (v{entry.AggregateVersion})" }
                 .Concat((entry.AgentActivities ?? []).Take(MaxItems).Select(activity =>
-                    $"{activity.RecordedAtUtc:O}: Ellai Data Quality assessed reported-data quality.")));
+                    $"{activity.RecordedAtUtc:O}: Ellai {CaseAgentActivityPresentation.RoleLabel(activity.RoleId)}: {CaseAgentActivityPresentation.ActivityLabel(activity.RoleId)}.")));
         var id = caseId.ToString("D");
         var evidence = new EvidenceRef("CaseQueue", id,
             timeline.Header.AggregateVersion.ToString(CultureInfo.InvariantCulture), null, id);

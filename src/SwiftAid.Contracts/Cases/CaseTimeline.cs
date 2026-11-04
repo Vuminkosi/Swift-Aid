@@ -47,6 +47,24 @@ public sealed record CaseTimelineEntry(
 public sealed record CaseAgentActivity(Guid ActivityId, string RoleId, string Label,
     string Version, DateTimeOffset RecordedAtUtc);
 
+/// <summary>Closed, non-model-authored activity labels shared by timeline clients and Ellai.</summary>
+public static class CaseAgentActivityPresentation
+{
+    public static string RoleLabel(string? roleId) => roleId switch
+    {
+        "ops.quality" => "Data Quality",
+        "ops.followup" => "Follow-up",
+        _ => "Agent"
+    };
+
+    public static string ActivityLabel(string? roleId) => roleId switch
+    {
+        "ops.quality" => "Reported-data quality assessed",
+        "ops.followup" => "Follow-up activity recorded",
+        _ => "Activity recorded"
+    };
+}
+
 /// <summary>Minimum-necessary case header for the timeline view. No report content.</summary>
 public sealed record CaseTimelineHeader(
     Guid CaseId,
