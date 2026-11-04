@@ -154,6 +154,16 @@ public sealed class EllaiReasoningBackendTests
             Assert.True(format.GetProperty("json_schema").GetProperty("strict").GetBoolean());
             Assert.True(format.GetProperty("json_schema").GetProperty("schema").GetProperty("properties").TryGetProperty("fields", out _));
         }
+        var guidanceSchema = JsonSerializer.Deserialize<JsonElement>("""{"type":"object","properties":{"steps":{"type":"array","items":{"type":"string"}}},"required":["steps"],"additionalProperties":false}""");
+        await adapter.CompleteStructuredAsync([new("user", "synthetic guidance")], 16384, guidanceSchema, default);
+        using (var payload = JsonDocument.Parse(handler.RequestBody!))
+        {
+            var schema = payload.RootElement.GetProperty("response_format").GetProperty("json_schema");
+            Assert.Equal("guidance_plan", schema.GetProperty("name").GetString());
+            Assert.False(schema.GetProperty("strict").GetBoolean());
+            Assert.Equal(guidanceSchema.GetRawText(), schema.GetProperty("schema").GetRawText());
+            Assert.Equal("low", payload.RootElement.GetProperty("reasoning_effort").GetString());
+        }
         await adapter.CompleteAsync([new("user", "ordinary Ellai")], 64, default);
         using var normal = JsonDocument.Parse(handler.RequestBody!);
         Assert.False(normal.RootElement.TryGetProperty("response_format", out _));

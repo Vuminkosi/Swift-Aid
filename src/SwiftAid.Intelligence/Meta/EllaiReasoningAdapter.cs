@@ -35,8 +35,12 @@ public sealed class EllaiReasoningAdapter(HttpClient http, EllaiOptions options)
         IReadOnlyList<EllaiChatMessage> messages, int maxTokens, CancellationToken ct) =>
         CompleteCoreAsync(messages, maxTokens, reportVoice: true, ct);
 
+    public Task<EllaiReasoningResult> CompleteStructuredAsync(
+        IReadOnlyList<EllaiChatMessage> messages, int maxTokens, JsonElement schema, CancellationToken ct) =>
+        CompleteCoreAsync(messages, maxTokens, false, ct, schema);
+
     private async Task<EllaiReasoningResult> CompleteCoreAsync(
-        IReadOnlyList<EllaiChatMessage> messages, int maxTokens, bool reportVoice, CancellationToken ct)
+        IReadOnlyList<EllaiChatMessage> messages, int maxTokens, bool reportVoice, CancellationToken ct, JsonElement? schema = null)
     {
         ArgumentNullException.ThrowIfNull(messages);
         if (!options.HasReasoningRoute)
@@ -50,7 +54,7 @@ public sealed class EllaiReasoningAdapter(HttpClient http, EllaiOptions options)
         }
 
         var wireMessages = messages.Select(MetaCompatibleChatMessage.ToPayload).ToList();
-        var payload = reportVoice
+        var payload = reportVoice || schema.HasValue
             ? JsonSerializer.Serialize(new
             {
                 model = options.ReasoningModel,
@@ -60,7 +64,7 @@ public sealed class EllaiReasoningAdapter(HttpClient http, EllaiOptions options)
                 response_format = new
                 {
                     type = "json_schema",
-                    json_schema = new { name = "report_voice", strict = true, schema = ReportVoiceSchema }
+                    json_schema = new { name = reportVoice ? "report_voice" : "guidance_plan", strict = reportVoice, schema = schema ?? ReportVoiceSchema }
                 }
             })
             : JsonSerializer.Serialize(new { model = options.ReasoningModel, messages = wireMessages, max_tokens = maxTokens });

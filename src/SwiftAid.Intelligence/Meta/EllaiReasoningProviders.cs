@@ -12,6 +12,9 @@ namespace SwiftAid.Intelligence.Meta;
 /// receives secrets, case narratives or original audio beyond the prompt.</summary>
 public interface IEllaiReasoningProvider
 {
+    Task<EllaiReasoningResult> CompleteStructuredAsync(
+        IReadOnlyList<EllaiChatMessage> messages, int maxTokens, JsonElement schema, CancellationToken ct) =>
+        CompleteAsync(messages, maxTokens, ct);
     string Backend { get; }
 
     string Model { get; }
@@ -44,6 +47,9 @@ public interface IEllaiReasoningProvider
 public sealed class MetaEllaiReasoningProvider(
     EllaiReasoningAdapter inner, EllaiOptions options) : IEllaiReasoningProvider
 {
+    public Task<EllaiReasoningResult> CompleteStructuredAsync(
+        IReadOnlyList<EllaiChatMessage> messages, int maxTokens, JsonElement schema, CancellationToken ct) =>
+        inner.CompleteStructuredAsync(messages, maxTokens, schema, ct);
     public string Backend => "meta";
 
     public string Model => options.ReasoningModel;

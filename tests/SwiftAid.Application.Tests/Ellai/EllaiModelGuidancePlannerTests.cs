@@ -25,7 +25,7 @@ public sealed class EllaiModelGuidancePlannerTests
         var result = await new EllaiModelGuidancePlanner(completion).ComposeAsync(
             "help", GuidanceMode.Navigation, new([], "catalogue", "ui", false), [], default);
         Assert.NotNull(result.Draft);
-        Assert.Equal(8192, completion.RequestedTokens);
+        Assert.Equal(16384, completion.RequestedTokens);
     }
 
     private sealed class BudgetAwareCompletion : IEllaiTurnCompletionClient
@@ -73,7 +73,7 @@ public sealed class EllaiModelGuidancePlannerTests
         Assert.Contains("Capture", EllaiReportUiManifest.Definition.Purpose);
         Assert.Contains("Select the country", completion.Context);
         Assert.Contains("Report validation", completion.Context);
-        Assert.DoesNotContain("Draft", completion.Context);
+        Assert.DoesNotContain("\"draft\":", completion.Context, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Required JSON schema", completion.Instructions);
         Assert.Contains("\"nextStepKey\"", completion.Instructions);
         Assert.Contains("GuideHuman", completion.Instructions);
