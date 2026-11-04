@@ -433,6 +433,51 @@ public sealed class EllaiAgentFrameworkContractTests
         public void Dispose() { }
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ProposedActionCannotMisattributeAnExactObservedFact(bool correctReference)
+    {
+        var first = new EvidenceRef("ProductFact", "fact-1", "1", "path", "fact-1");
+        var second = new EvidenceRef("ProductFact", "fact-2", "1", "path", "fact-2");
+        using var model = new PlanMisattributionClient(correctReference ? first : second);
+        var agent = new EllaiFrameworkAgent(model);
+        var context = new EllaiToolContext("session", "epoch", "public.product-help", null, 4, true,
+            AllowedTools: new HashSet<string> { EllaiToolNames.ProductFacts });
+        var result = await agent.RunAsync(context, "Synthetic policy", [new ChatMessage(ChatRole.User, "Review")], 256,
+            _ => Task.FromResult(true), (_, request, _) => Task.FromResult(new EllaiToolResult(request.ToolName, true, null,
+                [first, second], "[fact-1; source path; revision 1] First.\n[fact-2; source path; revision 1] Second.", 2, false)),
+            new EllaiFrameworkUsage("session", new EllaiUsageLedger(), new InMemoryEllaiUsageStore()), default,
+            revalidateStreamObservations: _ => Task.FromResult(true));
+
+        Assert.NotNull(result);
+        Assert.Equal(correctReference ? DecisionKind.ProposePlan : DecisionKind.Answer, result.Kind);
+        Assert.Equal(!correctReference, agent.LastRepairUsed);
+    }
+
+    private sealed class PlanMisattributionClient(EvidenceRef cited) : IChatClient
+    {
+        private int _calls;
+        public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null,
+            CancellationToken cancellationToken = default)
+        {
+            if (++_calls == 1)
+                return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant,
+                    [new FunctionCallContent("facts", EllaiToolNames.ProductFacts, new Dictionary<string, object?> { ["topic"] = "report" })])));
+            if (_calls > 2) return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant, ValidDecision)));
+            var action = new AdminActionProposal("review", AdminActionKind.CreateAdministrativeReviewTask,
+                cited, null, null, [cited], "First.");
+            var original = EllaiModelTurnParser.Parse(ValidDecision).Turn!.FinalDecision!;
+            var decision = original with { Kind = DecisionKind.ProposePlan, PlanProposal = new PlanProposal("Review", [action]) };
+            return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant,
+                System.Text.Json.JsonSerializer.Serialize(new { final_decision = decision }, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web)))));
+        }
+        public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+        public void Dispose() { }
+    }
+
     [Fact]
     public async Task FrameworkRepairsMalformedToolArgumentsBeforeBrokerInvocation()
     {

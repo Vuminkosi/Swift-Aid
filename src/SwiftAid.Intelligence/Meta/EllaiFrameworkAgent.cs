@@ -392,19 +392,20 @@ public sealed class EllaiFrameworkAgent
 
     private static bool HasKnownMisattribution(EllaiDecision decision, IReadOnlyDictionary<EvidenceRef, List<string>> sources)
     {
-        foreach (var claim in decision.Claims)
+        bool Misattributed(string value, IReadOnlyList<EvidenceRef> evidence)
         {
-            var text = claim.Text.Trim();
+            var text = value.Trim();
             bool Matches(EvidenceRef reference, IReadOnlyList<string> lines) =>
                 (reference.SourceKind == "ProductFact" || reference.SourceKind == "CaseQueue" &&
                     (text.StartsWith($"case {reference.ResourceId};", StringComparison.Ordinal) ||
                      text.StartsWith($"case {reference.ResourceId} ·", StringComparison.Ordinal))) &&
                 lines.Contains(text, StringComparer.Ordinal);
-            if (sources.Any(item => Matches(item.Key, item.Value)) &&
-                !claim.Evidence.Any(reference => sources.TryGetValue(reference, out var lines) && Matches(reference, lines)))
-                return true;
+            return sources.Any(item => Matches(item.Key, item.Value)) &&
+                !evidence.Any(reference => sources.TryGetValue(reference, out var lines) && Matches(reference, lines));
         }
-        return false;
+        return decision.Claims.Any(claim => Misattributed(claim.Text, claim.Evidence)) ||
+            decision.PlanProposal is { } plan &&
+            plan.Actions.Any(action => Misattributed(action.FactualRationale, action.Evidence));
     }
 
     private static async Task<bool> PublishValidatedTextAsync(string text,
