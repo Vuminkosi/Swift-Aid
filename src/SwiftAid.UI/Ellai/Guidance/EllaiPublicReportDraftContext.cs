@@ -41,10 +41,18 @@ public sealed partial class EllaiPublicReportDraftContext
         Func<string, bool>? setLocality = null, Func<string, bool>? appendNarrative = null,
         Func<ReportedGender, bool>? setGender = null, Func<bool>? revertAge = null,
         Func<string, bool>? removeObservation = null,
-        Func<DateOnly?, EllaiRelativeOnsetDay?, string, bool>? setOnsetDate = null)
+        Func<DateOnly?, EllaiRelativeOnsetDay?, string, bool>? setOnsetDate = null,
+        object? reportIdentity = null, Func<ReportVoiceSuggestion, string, bool>? autoFillVoice = null)
     {
+        Func<Task>? stopVoice = null;
         lock (_gate)
         {
+            if (_voiceReportIdentity is not null && !ReferenceEquals(_voiceReportIdentity, reportIdentity))
+            {
+                if (_voiceRecording) stopVoice = _stopVoice;
+                ResetVoiceAssistanceLocked();
+            }
+            _voiceReportIdentity = reportIdentity;
             _owner = owner;
             _setAge = setAge;
             _addObservation = addObservation;
@@ -54,9 +62,10 @@ public sealed partial class EllaiPublicReportDraftContext
             _appendNarrative = appendNarrative ?? (_ => false);
             _setGender = setGender ?? (_ => false);
             _revertAge = revertAge ?? (() => false);
+            _autoFillVoice = autoFillVoice;
         }
+        if (stopVoice is not null) _ = stopVoice();
     }
-
     public bool FlushPending(object owner)
     {
         PendingEdit[] pending;

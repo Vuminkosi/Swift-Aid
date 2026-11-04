@@ -540,18 +540,18 @@
     private PublicReportDraft? _observedDraft;
     private ElementReference _stepHeading;
     private ElementReference _validationSummary;
-    private ElementReference _subjectValidationTarget;
-    private ElementReference _animalScopeValidationTarget;
-    private ElementReference _narrativeValidationTarget;
-    private ElementReference _ageValidationTarget;
-    private ElementReference _observationsValidationTarget;
-    private ElementReference _dateValidationTarget;
-    private ElementReference _timeValidationTarget;
-    private ElementReference _offsetValidationTarget;
-    private ElementReference _locationValidationTarget;
-    private ElementReference _regionValidationTarget;
-    private ElementReference _areaValidationTarget;
-    private ElementReference _localityValidationTarget;
+    private ElementReference _subjectValidationTarget = default;
+    private ElementReference _animalScopeValidationTarget = default;
+    private ElementReference _narrativeValidationTarget = default;
+    private ElementReference _ageValidationTarget = default;
+    private ElementReference _observationsValidationTarget = default;
+    private ElementReference _dateValidationTarget = default;
+    private ElementReference _timeValidationTarget = default;
+    private ElementReference _offsetValidationTarget = default;
+    private ElementReference _locationValidationTarget = default;
+    private ElementReference _regionValidationTarget = default;
+    private ElementReference _areaValidationTarget = default;
+    private ElementReference _localityValidationTarget = default;
     private string? _validationField;
     private string? _validationMessage;
     private SwiftAid.UI.Ellai.Guidance.EllaiValidationGuidance? _validationGuidance;
@@ -788,6 +788,9 @@
     public Guid? CurrentDraftId { get; set; }
 
     [Parameter]
+    public IntakeSubmission? SavedDraft { get; set; }
+
+    [Parameter]
     public RenderFragment? DetailsLeadContent { get; set; }
 
     [Parameter]
@@ -968,8 +971,8 @@
     {
         if (Services.GetService(typeof(SwiftAid.UI.Ellai.Guidance.EllaiPublicReportDraftContext)) is not
             SwiftAid.UI.Ellai.Guidance.EllaiPublicReportDraftContext context) return;
-        context.Register(this, SetReportedAge, GetReportedAge, AddReportedObservation, SetReportedLocality,
-            AppendReportedStatement, Draft, AutoFillVoiceSuggestion);
+        context.Register(this, age => SetReportedAge((int?)age), AddReportedObservation, SetReportedLocality,
+            AppendReportedStatement, reportIdentity: Draft, autoFillVoice: AutoFillVoiceSuggestion);
         if (!context.FlushPending(this))
             _stepError = "Ellai could not apply the report detail. Enter it in the report form to continue.";
     }
@@ -1007,7 +1010,7 @@
         if (!ReportVoiceAutofill.CanApply(suggestion, transcript, Draft, IsModified)) return false;
         return suggestion.Field switch
         {
-            "age" when ReportVoiceAutofill.TryGetAge(suggestion.Value, out var age) => SetReportedAge(age),
+            "age" when ReportVoiceAutofill.TryGetAge(suggestion.Value, out var age) => SetReportedAge((int?)age),
             "locality" => SetReportedLocality(suggestion.Value),
             "observation" => AddReportedObservation(suggestion.Evidence),
             _ => false
@@ -1813,45 +1816,15 @@
         var savedStep = _step;
         try
         {
-            IntakeSubmission submission;
-            GuestDraftFormSnapshot? formSnapshot = null;
-            try
-            {
-                submission = Draft.ToSubmission(
-                    CountryCatalogueVersion,
-                    ProcessingPolicyReference,
-                    ProcessingPolicyVersion,
-                    Countries,
-                    CountryCatalogueIsCurrent,
-                    allowUnverifiedCountryForDraft: true);
-            }
-            catch (InvalidOperationException)
-            {
-                _saveValidationAttempted = true;
-                _showManualPlaces |= !PublicReportDraft.IsValidPlaceName(Draft.RegionPresence, Draft.Region) ||
-                    !PublicReportDraft.IsValidPlaceName(Draft.AreaPresence, Draft.Area) ||
-                    !PublicReportDraft.IsValidPlaceName(Draft.LocalityPresence, Draft.Locality);
-                if (_step != 1)
-                {
-                    _step = 1;
-                    _focusStepHeadingAfterRender = true;
-                }
-                if (!EditableDraftSnapshotsSupported)
-                {
-                    _saveState = DraftSaveState.Invalid;
-                    return;
-                }
-                formSnapshot = Draft.ToFormSnapshot();
-                // The protected snapshot is authoritative for editing. This empty,
-                // unconfirmed carrier cannot be queued or mistaken for the entered values.
-                var carrier = new PublicReportDraft { SubjectScope = Draft.SubjectScope };
-                submission = carrier.ToSubmission(null, null, null, [], false);
-            }
-            if (formSnapshot is null && EditableDraftSnapshotsSupported &&
-                !sourceSnapshot.IsLosslesslyRepresentedBy(submission))
-                formSnapshot = sourceSnapshot.ToFormSnapshot();
-            _savingSnapshot = formSnapshot is null ? PublicReportDraft.FromSubmission(submission) : sourceSnapshot.Copy();
-            _activeSaveRequest = new PublicReportSaveRequest(CurrentDraftId, submission, formSnapshot);
+            var submission = Draft.ToDraftSubmission(
+                CountryCatalogueVersion,
+                ProcessingPolicyReference,
+                ProcessingPolicyVersion,
+                Countries,
+                CountryCatalogueIsCurrent,
+                CurrentDraftId is { } previousId && SavedDraft?.ClientSubmissionId == previousId ? SavedDraft : null);
+            _savingSnapshot = PublicReportDraft.FromSubmission(submission);
+            _activeSaveRequest = new PublicReportSaveRequest(CurrentDraftId, submission);
             await OnSaveDraft.InvokeAsync(_activeSaveRequest);
             var savedId = _activeSaveRequest.PersistedDraftId ?? _savingDraftId;
             var sameReport = ReferenceEquals(Draft, sourceDraft) && (CurrentDraftId == _savingDraftId || CurrentDraftId == savedId)
