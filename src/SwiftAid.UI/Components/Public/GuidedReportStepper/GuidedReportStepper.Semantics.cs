@@ -10,7 +10,8 @@ public partial class GuidedReportStepper
     public EllaiUiManifest Describe() => EllaiReportUiManifest.Definition;
 
     public EllaiUiState GetState() => new(ComponentId, _submitting || _saving,
-        _stepError is not null || _submitError is not null || _saveValidationAttempted && GetValidationGuidance().Count > 0,
+        _stepError is not null || _submitError is not null || _saveValidationAttempted && GetValidationGuidance().Count > 0 ||
+            _step == 2 && ServerValidationRevision > 0 && ServerValidationRevision != _dismissedServerValidationRevision,
         [new("report.entry", UiObservationState.Ready),
          new("report.save", !OnSaveDraft.HasDelegate ? UiObservationState.Unmounted :
              CanSaveDraft && !_saving ? UiObservationState.Ready : UiObservationState.Disabled,
@@ -108,6 +109,8 @@ public partial class GuidedReportStepper
             AddIfInvalid(HasCountryCatalogue && !CanConfirmCountry, "report.country-required");
             AddIfInvalid(CanConfirmCountry && !Draft.CountryConfirmed, "report.country-confirmed");
             AddIfInvalid(HasProcessingPolicy && !Draft.ProcessingConfirmed, "report.processing-confirmed");
+            AddIfInvalid(ServerValidationRevision > 0 && ServerValidationRevision != _dismissedServerValidationRevision,
+                "report.server-validation-unknown");
             return issues;
         }
         if (_step != 1 || !_detailsValidationAttempted && !_saveValidationAttempted) return [];

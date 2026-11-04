@@ -486,6 +486,7 @@
     private bool _showManualPlaces;
     private string? _observationChoiceMessage;
     private string? _submitError;
+    private long _dismissedServerValidationRevision;
     private bool _saving;
     private Guid? _savingDraftId;
     private Guid? _observedDraftId;
@@ -614,6 +615,9 @@
 
     [Parameter]
     public EventCallback<IntakeSubmission> OnSubmit { get; set; }
+
+    [Parameter]
+    public long ServerValidationRevision { get; set; }
 
     [Parameter]
     public string SubmitButtonLabel { get; set; } = "Submit report";
@@ -1198,6 +1202,7 @@
 
     private void HandleFieldChanged(object? sender, FieldChangedEventArgs args)
     {
+        _dismissedServerValidationRevision = ServerValidationRevision;
         _messageStore.Clear(args.FieldIdentifier);
         _stepError = null;
         _observationChoiceMessage = null;

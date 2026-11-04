@@ -32,6 +32,7 @@
                      PrivacyNoticeIsCurrent="@(!string.IsNullOrWhiteSpace(_privacyNoticeReference) && !string.IsNullOrWhiteSpace(_privacyNoticeVersion))"
                      SubmitAvailable="@CanSubmitReport"
                      Draft="_mobileDraft"
+                     ServerValidationRevision="_activeServerValidationRevision"
                      OnSendReport="SendReportAsync"
                      Feedback="@_sendError"
                      FeedbackIsError="@_sendErrorIsError"
@@ -40,6 +41,8 @@
 @code {
     private IntakeReceipt? _receipt;
     private readonly Guid _submissionId = Guid.NewGuid();
+    private long _serverValidationSequence;
+    private long _activeServerValidationRevision;
     private string? _sendError { get; set; }
     private bool _sending;
     private IReadOnlyList<PublicCountryOption> _countries = [];
@@ -182,6 +185,8 @@
         }
 
         _sending = true;
+        _activeServerValidationRevision = 0;
+        var submittedDraft = System.Text.Json.JsonSerializer.Serialize(_mobileDraft);
         try
         {
             var result = await IntakeSubmissionClient.SubmitAsync(submission with { ClientSubmissionId = _submissionId });
@@ -212,9 +217,12 @@
 
             _receipt = null;
             _sendErrorIsError = true;
+            if (result.Code == UiCapabilityResultCode.InvalidRequest &&
+                submittedDraft == System.Text.Json.JsonSerializer.Serialize(_mobileDraft))
+                _activeServerValidationRevision = ++_serverValidationSequence;
             _sendError = result.Code switch
             {
-                UiCapabilityResultCode.InvalidRequest => "Your report needs review before it can be sent. Check the highlighted entries and try again.",
+                UiCapabilityResultCode.InvalidRequest => "The last report was rejected, but the service did not identify a field. Your entries remain here. Go back and review the details before trying again.",
                 UiCapabilityResultCode.Conflict => "An earlier attempt may have been received with different details. Your entries remain here; check its status before sending a changed report.",
                 UiCapabilityResultCode.Retryable => "The report service is temporarily unavailable. Your entries remain on this screen — try again shortly.",
                 UiCapabilityResultCode.Cancelled => "We could not confirm whether the report was received. Your entries remain on this screen.",

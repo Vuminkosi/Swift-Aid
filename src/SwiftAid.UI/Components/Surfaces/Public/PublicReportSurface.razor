@@ -24,6 +24,7 @@
                          OnSaveDraft="OnSaveDraft"
                          DraftSavingAvailable="DraftSavingAvailable"
                          EditableDraftSnapshotsSupported="EditableDraftSnapshotsSupported"
+                         ServerValidationRevision="ServerValidationRevision"
                          SubmitButtonLabel="Send report"
                          SubmitProgressLabel="Sending…"
                          DraftSaveButtonLabel="Save draft on this device"
@@ -167,6 +168,7 @@
     [Parameter, EditorRequired] public PublicReportDraft Draft { get; set; } = default!;
     [Parameter] public EventCallback<PublicReportSaveRequest> OnSaveDraft { get; set; }
     [Parameter] public bool EditableDraftSnapshotsSupported { get; set; }
+    [Parameter] public long ServerValidationRevision { get; set; }
     [Parameter] public EventCallback<IntakeSubmission> OnSendReport { get; set; }
     [Parameter] public string? Feedback { get; set; }
     [Parameter] public bool FeedbackIsError { get; set; }

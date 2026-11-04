@@ -13,6 +13,35 @@ namespace SwiftAid.Ui.Tests;
 public sealed partial class GuidedReportDraftPersistenceTests
 {
     [Fact]
+    public void ServerRejectionGuidesBackWithoutInventingAnInvalidFieldAndClearsAfterEdit()
+    {
+        var draft = CreateDraft();
+        draft.CountryCode = "SZ";
+        draft.CountryConfirmed = draft.ReportReviewConfirmed = draft.ProcessingConfirmed = true;
+        var component = CreateStepper(draft, _ => Task.CompletedTask);
+        component.Countries = [new("SZ", "Eswatini")];
+        component.CountryCatalogueVersion = "test-v1";
+        component.CountryCatalogueIsCurrent = true;
+        component.PrivacyNoticeReference = "/privacy";
+        component.PrivacyNoticeIsCurrent = true;
+        component.ProcessingPolicyReference = "/policy";
+        component.ProcessingPolicyVersion = "test-v1";
+        component.ServerValidationRevision = 1;
+        SetField(component, "_step", 2);
+
+        var issue = Assert.Single(component.GetState().ValidationIssues);
+        Assert.Equal("report.server-validation-unknown", issue.InputId);
+        Assert.Equal("ellai-report-return-details", issue.Anchor);
+        Assert.Contains("did not identify a field", issue.Message);
+        Assert.True(component.GetState().HasValidationErrors);
+        typeof(GuidedReportStepper).GetMethod("HandleFieldChanged", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .Invoke(component, [null, new Microsoft.AspNetCore.Components.Forms.FieldChangedEventArgs(
+                new Microsoft.AspNetCore.Components.Forms.FieldIdentifier(draft, nameof(PublicReportDraft.CountryConfirmed)))]);
+        Assert.Empty(component.GetState().ValidationIssues);
+        component.ServerValidationRevision = 2;
+        Assert.Equal("report.server-validation-unknown", Assert.Single(component.GetState().ValidationIssues).InputId);
+    }
+    [Fact]
     public async Task CurrentInputStatesAreValueFreeAndIncludeInvalidPartialDates()
     {
         var draft = CreateDraft();
