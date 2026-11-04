@@ -213,7 +213,7 @@ public sealed class EllaiToolBroker
         $"{EllaiToolNames.UiObserve}(controls, view=current, context?, feature?) — live mounted-control facts.",
         $"{EllaiToolNames.IngestionSchema}() — canonical case CSV fields, capture requirements and authority boundaries; no submission.",
         $"{EllaiToolNames.ValidateObservations}(observations_json) — validate a bounded JSON array of original reported strings; no inference or submission.",
-        $"{EllaiToolNames.PublicSessions}() - list published public sessions, without registration or scheduling.",
+        $"{EllaiToolNames.PublicSessions}(status?) - list published public sessions, optionally filtered by Scheduled, Completed, or Cancelled; no registration or scheduling.",
         $"{EllaiToolNames.Locations}(q, country?, limit?) — search the public geographic registry; present matches for user selection, never guess a location.",
         $"{EllaiToolNames.ImportDestinations}() — current authorized organization/workspace/country destinations for Workspace imports; staff only.",
         $"{EllaiToolNames.Imports}(workspace_id, organization_id, country) — the current user's recent imports in one permitted destination; staff only.",
@@ -631,17 +631,20 @@ public sealed class EllaiToolBroker
         try
         {
             const int limit = 10;
-            var page = await _communitySessions.QueryPublicAsync(new PublicSessionQuery(Limit: limit), ct).ConfigureAwait(false);
+            request.Arguments.TryGetValue("status", out var status);
+            var page = await _communitySessions.QueryPublicAsync(new PublicSessionQuery(Limit: limit, Status: status), ct).ConfigureAwait(false);
             var items = page.Items;
             var evidence = items.Count == 0
                 ? new[] { new EvidenceRef("PublicSessionSearch", "public-sessions", "1", "search", "public-sessions/1") }
                 : items.Select(item => new EvidenceRef("PublicSession", item.SessionId.ToString("D"),
                     item.Version.ToString(CultureInfo.InvariantCulture), "public-session", item.SessionId.ToString("D"))).ToArray();
             var continuation = page.Next is null ? string.Empty : " (more sessions may be available)";
-            var lines = items.Select(item => $"session {item.SessionId:D} · title {JsonSerializer.Serialize(item.Title)} · starts {item.StartUtc:O} · status {item.Status}{continuation}");
+            var searchScope = status is null ? "public sessions" : $"{status.ToLowerInvariant()} public sessions";
+            var filter = status is null ? string.Empty : $"; search filter {status}";
+            var lines = items.Select(item => $"session {item.SessionId:D} · title {JsonSerializer.Serialize(item.Title)} · starts {item.StartUtc:O} · status {item.Status}{filter}{continuation}");
             return new EllaiToolResult(request.ToolName, true, null, evidence,
-                items.Count == 0 ? (page.Next is null ? "No public sessions were found." :
-                    "No public sessions were found in this search; more may be available.") : string.Join("\n", lines),
+                items.Count == 0 ? (page.Next is null ? $"No {searchScope} were found." :
+                    $"No {searchScope} were found in this search; more may be available.") : string.Join("\n", lines),
                 items.Count, page.Next is not null, EllaiToolReasonCodes.Ok);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }

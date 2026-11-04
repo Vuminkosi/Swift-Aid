@@ -76,7 +76,9 @@ public sealed record EllaiToolTrace(int Version, bool HistoryIncluded, IReadOnly
                     (item.LocationReplayScope is null || item.ToolName == EllaiToolNames.Locations && item.LocationReplayScope.IsValid()) &&
                     (item.PublicSessionsDigest is null || item.ToolName == EllaiToolNames.PublicSessions &&
                         item.PublicSessionsDigest is { Length: 64 } &&
-                        item.PublicSessionsDigest.All(character => character is >= '0' and <= '9' or >= 'A' and <= 'F')));
+                        item.PublicSessionsDigest.All(character => character is >= '0' and <= '9' or >= 'A' and <= 'F')) &&
+                    (item.PublicSessionsStatus is null || item.ToolName == EllaiToolNames.PublicSessions &&
+                        item.PublicSessionsDigest is not null && EllaiObservedToolResult.IsPublicSessionStatus(item.PublicSessionsStatus)));
             valid = valid && parsed!.Observations!.All(item => item.CaseTimelineReplayScope is null ||
                 item.ToolName == EllaiToolNames.CaseTimeline && item.CaseTimelineReplayScope.IsValid());
             if (valid) trace = parsed;

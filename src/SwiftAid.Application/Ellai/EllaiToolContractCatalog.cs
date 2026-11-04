@@ -39,6 +39,7 @@ public static class EllaiToolContractCatalog
             ["import_id"] = "Canonical import identifier.",
             ["case_id"] = "Canonical case identifier.",
             ["window_days"] = "Required whole-day lookback window from 1 to 365 days.",
+            ["status"] = "Optional public session status: Scheduled, Completed, or Cancelled.",
         };
 
     private static readonly IReadOnlyDictionary<string, IReadOnlyList<string>> AllowedValues =
@@ -72,7 +73,7 @@ public static class EllaiToolContractCatalog
             [EllaiToolNames.ClassificationEvidence] = Contract(EllaiToolNames.ClassificationEvidence, ("case_id", true)),
             [EllaiToolNames.OwnedCaseCount] = Contract(EllaiToolNames.OwnedCaseCount, ("window_days", true)),
             [EllaiToolNames.CaseTimeline] = Contract(EllaiToolNames.CaseTimeline, ("case_id", true)),
-            [EllaiToolNames.PublicSessions] = Contract(EllaiToolNames.PublicSessions),
+            [EllaiToolNames.PublicSessions] = Contract(EllaiToolNames.PublicSessions, ("status", false)),
         });
 
     /// <summary>Read-only contracts indexed by canonical advertised tool name.</summary>
@@ -251,6 +252,7 @@ public static class EllaiToolContractCatalog
         (toolName, argumentName) switch
         {
             (EllaiToolNames.State, "projection") => Array.AsReadOnly(new[] { "feature", "queue" }),
+            (EllaiToolNames.PublicSessions, "status") => Array.AsReadOnly(new[] { "Scheduled", "Completed", "Cancelled" }),
             (EllaiToolNames.State, "workflow") => Array.AsReadOnly(new[] { "Reported", "UnderReview", "Active", "AwaitingFollowUp", "Resolved" }),
             (EllaiToolNames.State, "sort") => Array.AsReadOnly(new[] { "latest-reported", "latest-updated" }),
             _ => AllowedValues.GetValueOrDefault(argumentName)

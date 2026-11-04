@@ -258,8 +258,10 @@ public static class EllaiAuthorizedConversationContext
                         return decisions[turn.ClientUtteranceId] = false;
                     try
                     {
+                        var arguments = observation.PublicSessionsStatus is null ? new Dictionary<string, string>() :
+                            new Dictionary<string, string> { ["status"] = observation.PublicSessionsStatus };
                         var current = await invokeTool(toolContext, new EllaiToolRequest(EllaiToolNames.PublicSessions,
-                            new Dictionary<string, string>()), ct).ConfigureAwait(false);
+                            arguments), ct).ConfigureAwait(false);
                         ct.ThrowIfCancellationRequested();
                         if (current.ToolName != EllaiToolNames.PublicSessions || !current.Allowed || current.DenialReason is not null ||
                             current.ReasonCode != EllaiToolReasonCodes.Ok || current.Truncated != observation.Truncated ||

@@ -33,7 +33,8 @@ public sealed record EllaiObservedToolResult(
     EllaiUiObservationReplayScope? UiObservationReplayScope = null,
     EllaiClassificationReplayScope? ClassificationReplayScope = null,
     string? ImportDestinationsDigest = null,
-    EllaiLocationReplayScope? LocationReplayScope = null, string? PublicSessionsDigest = null)
+    EllaiLocationReplayScope? LocationReplayScope = null, string? PublicSessionsDigest = null,
+    string? PublicSessionsStatus = null)
 {
     public const string CurrentStaticFeatureVersion = "state-feature/1";
     public const string CurrentClockVersion = "server-clock/1";
@@ -72,6 +73,15 @@ public sealed record EllaiObservedToolResult(
             result.Evidence.Count == 1 && result.Evidence[0] is { SourceKind: "Receipt", FieldPath: null } reference &&
             reference.ResourceId == candidateReceipt && reference.EvidenceId == candidateReceipt)
             receiptLookupId = candidateReceipt;
+        var publicSessionsDigest = request.ToolName == EllaiToolNames.PublicSessions && result.ToolName == request.ToolName &&
+                (request.Arguments.Count == 0 || request.Arguments.Count == 1 &&
+                    request.Arguments.TryGetValue("status", out var status) && IsPublicSessionStatus(status)) &&
+                result.Allowed && result.DenialReason is null && result.ReasonCode == EllaiToolReasonCodes.Ok &&
+                (result.ItemCount == result.Evidence.Count && result.ItemCount is > 0 and <= 10 ||
+                 result.ItemCount == 0 && result.Evidence.Count == 1 &&
+                 result.Evidence[0] == new EvidenceRef("PublicSessionSearch", "public-sessions", "1", "search", "public-sessions/1"))
+                    ? ResultFingerprint(result) : null;
+
         return new(request.ToolName, result.Allowed, result.ReasonCode, result.Evidence.ToArray(), result.Truncated,
             scope, caseQuery, staticFeature ? CurrentStaticFeatureVersion : null,
             request.ToolName is EllaiToolNames.Topic or EllaiToolNames.Evidence or EllaiToolNames.CaseTimeline ? result.HistoryValidUntilUtc : null,
@@ -111,14 +121,13 @@ public sealed record EllaiObservedToolResult(
                 result.DenialReason is null && result.ReasonCode == EllaiToolReasonCodes.Ok && !result.Truncated &&
                 result.LocationReplayScope is { } locationScope && locationScope.IsValid() &&
                 locationScope.ResultDigest == ResultFingerprint(result) ? locationScope : null,
-            request.ToolName == EllaiToolNames.PublicSessions && result.ToolName == request.ToolName &&
-                request.Arguments.Count == 0 && result.Allowed && result.DenialReason is null &&
-                result.ReasonCode == EllaiToolReasonCodes.Ok &&
-                (result.ItemCount == result.Evidence.Count && result.ItemCount is > 0 and <= 10 ||
-                 result.ItemCount == 0 && result.Evidence.Count == 1 &&
-                 result.Evidence[0] == new EvidenceRef("PublicSessionSearch", "public-sessions", "1", "search", "public-sessions/1"))
-                    ? ResultFingerprint(result) : null);
+            publicSessionsDigest,
+            publicSessionsDigest is not null && request.Arguments.Count == 1 &&
+                request.Arguments.TryGetValue("status", out var publicStatus) && IsPublicSessionStatus(publicStatus)
+                    ? publicStatus : null);
     }
+
+    public static bool IsPublicSessionStatus(string? status) => status is "Scheduled" or "Completed" or "Cancelled";
 
     public static bool IsCanonicalReceiptId(string? value) => value is { Length: 37 } &&
         value.StartsWith("rcpt-", StringComparison.Ordinal) &&

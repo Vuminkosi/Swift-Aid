@@ -40,7 +40,7 @@ public sealed class EllaiCommunitySessionsSpecialist(IChatClient client, IEllaiF
         try
         {
             decision = await agent.RunAsync(context, trustedPolicy +
-                "\nYou are the community sessions specialist. Read only published public sessions. " +
+                "\nYou are the community sessions specialist. Read only published public sessions. Apply a status filter only when the user requests it. " +
                 "Never approve, submit, " +
                 "execute or invent an action. Return only a grounded Answer in the required final_decision JSON schema. " +
                 "Each claim text must exactly match one returned session line and cite its own session evidence. For an empty search, use the exact returned search message and cite its PublicSessionSearch evidence. " +
