@@ -115,7 +115,13 @@ public sealed class EllaiOwnedCaseCountPostgresTests
     [LiveCountFact]
     public Task LiveMuseWorkerWithholdsCountAfterPostgresGrantExpires() => RunWorkerCountAsync(revoke: true, liveModel: true);
 
-    private static async Task RunWorkerCountAsync(bool revoke, bool liveModel = false)
+    [LanguagePostgresFact]
+    public Task NllbWorkerCommitsAuthorizedPostgresCount() => RunWorkerCountAsync(revoke: false, liveLanguage: true);
+
+    [LanguagePostgresFact]
+    public Task NllbWorkerWithholdsCountAfterPostgresGrantExpires() => RunWorkerCountAsync(revoke: true, liveLanguage: true);
+
+    private static async Task RunWorkerCountAsync(bool revoke, bool liveModel = false, bool liveLanguage = false)
     {
         await using var fixture = await CaseAuthorityPostgresFixture.CreateAsync(frameworkFixture: true);
         var sessionId = "count-worker-" + Guid.NewGuid().ToString("N");
@@ -127,6 +133,7 @@ public sealed class EllaiOwnedCaseCountPostgresTests
             Enabled = true, ApiKey = "synthetic", ApiUrl = "https://fixture.invalid", ReasoningModel = "fixture"
         };
         using IChatClient model = liveModel ? EllaiMuseChatClientFactory.Create(options) : new CountClient();
+        using var languageHttp = new HttpClient();
         var services = new ServiceCollection();
         services.AddScoped(_ => fixture.CreateDbContext());
         services.AddScoped<PostgresEllaiSessionStore>();
@@ -134,6 +141,17 @@ public sealed class EllaiOwnedCaseCountPostgresTests
         services.AddScoped<IEllaiUtteranceOutboxStore>(sp => sp.GetRequiredService<PostgresEllaiSessionStore>());
         services.AddScoped<IEllaiUsageStore, PostgresEllaiUsageStore>();
         services.AddSingleton(consent).AddSingleton<EllaiUsageLedger>().AddSingleton<EllaiSessionResponseStore>();
+        if (liveLanguage)
+        {
+            var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["EllaiLanguage:Endpoint"] = Environment.GetEnvironmentVariable("SWIFTAID_TEST_LANGUAGE_ENDPOINT"),
+                ["EllaiLanguage:InternalKey"] = Environment.GetEnvironmentVariable("SWIFTAID_TEST_LANGUAGE_KEY")
+            }).Build();
+            services.AddSingleton<IEllaiLanguageClient>(new GrantExpiringTranslation(
+                revoke ? () => fixture.SetGrantExpiryAsync(DateTimeOffset.UtcNow.AddMinutes(-1)) : null,
+                new EllaiLanguageClient(languageHttp, config)));
+        }
         services.AddScoped<IDashboardAggregateQuery>(sp =>
         {
             var db = sp.GetRequiredService<SwiftAid.Infrastructure.Persistence.SwiftAidDbContext>();
@@ -162,12 +180,13 @@ public sealed class EllaiOwnedCaseCountPostgresTests
                     ? "How many of my readable managed cases were created in the last 30 days?" : "Count my cases", "cases", null,
                     EllaiMode.Ask, 1, "count-cycle", actor, true, "consent/0",
                     EllaiProcessingClassification.UserProvidedNonSensitive, EllaiProcessingClassification.UserProvidedNonSensitive,
-                    new HashSet<string> { EllaiToolNames.OwnedCaseCount }, EllaiConsentPurposes.PublicProductHelp, "count-turn");
+                    new HashSet<string> { EllaiToolNames.OwnedCaseCount }, EllaiConsentPurposes.PublicProductHelp, "count-turn",
+                    Languages: liveLanguage ? new("eng", "sna") : null);
                 Assert.NotNull(await store.TryAcceptUtteranceAsync(session with { SessionVersion = 2, CyclesUsed = 1 }, 1,
                     work.ClientUtteranceId, default, EllaiUtteranceWorkEnvelope.Serialize(work, work.ClientUtteranceId)));
             }
             await worker.StartAsync(default);
-            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(liveModel ? 180 : 30));
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(liveModel || liveLanguage ? 180 : 30));
             while (!barrier.Started.Task.IsCompleted)
             {
                 await Task.Delay(100, timeout.Token);
@@ -178,7 +197,7 @@ public sealed class EllaiOwnedCaseCountPostgresTests
             var responses = provider.GetRequiredService<EllaiSessionResponseStore>();
             var provisional = responses.ReadSince(sessionId, 0, take: 64).Responses;
             Assert.DoesNotContain(provisional, item => item.Text.Contains("managed case(s)", StringComparison.Ordinal));
-            if (revoke) await fixture.SetGrantExpiryAsync(DateTimeOffset.UtcNow.AddMinutes(-1));
+            if (revoke && !liveLanguage) await fixture.SetGrantExpiryAsync(DateTimeOffset.UtcNow.AddMinutes(-1));
             barrier.Release.TrySetResult();
             EllaiConversationTurn turn;
             do
@@ -197,7 +216,8 @@ public sealed class EllaiOwnedCaseCountPostgresTests
             else
             {
                 Assert.Equal("Completed", turn.Outcome);
-                Assert.StartsWith("2 managed case(s)", turn.AssistantText);
+                if (liveLanguage) Assert.False(string.IsNullOrWhiteSpace(turn.AssistantText));
+                else Assert.StartsWith("2 managed case(s)", turn.AssistantText);
                 var trace = System.Text.Json.JsonSerializer.Deserialize<EllaiToolTrace>(turn.ToolTraceJson!);
                 Assert.Contains(trace!.Observations, item => item.ToolName == EllaiToolNames.OwnedCaseCount &&
                     item.Evidence.Any(reference => reference.SourceKind == "DashboardAggregate"));
@@ -207,7 +227,8 @@ public sealed class EllaiOwnedCaseCountPostgresTests
                     await Task.Delay(50, timeout.Token);
                     published = responses.ReadSince(sessionId, 0, take: 64).Responses.ToArray();
                 } while (!published.Any(item => item.IsFinal && item.Outcome == "Completed"));
-                Assert.Contains(published, item => item.Text.StartsWith("2 managed case(s)", StringComparison.Ordinal));
+                if (liveLanguage) Assert.Contains(published, item => item.Text == turn.AssistantText);
+                else Assert.Contains(published, item => item.Text.StartsWith("2 managed case(s)", StringComparison.Ordinal));
             }
         }
         finally
