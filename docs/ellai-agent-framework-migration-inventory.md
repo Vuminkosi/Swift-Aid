@@ -4170,3 +4170,26 @@ tests/SwiftAid.Application.Tests/SwiftAid.Application.Tests.csproj --no-restore
 1,246, failed 0 and skipped 19 with `--no-build --no-restore -m:1 -nr:false`;
 the two focused boundary and repair filters passed 7/7. These synthetic tests
 do not establish deployed Gateway or live speech synthesis behavior.
+
+### Provisional segments and mixed final payloads — 2026-11-04
+
+The framework instructs the model to emit provisional verified segments only
+for a plain answer without UI actions or questions. Its final reconciliation
+previously checked answer kind and matching text but accepted an accompanying
+UI proposal, question, or administrative plan. Three synthetic streaming
+regressions reproduced this; three controls without provisional output passed.
+The final reconciliation now rejects those mixed completions. An already sent
+verified segment cannot be retracted; the invalid final decision and its extra
+payload are withheld. Normal decisions without provisional output retain their
+existing behavior.
+
+PASS: `EllaiAgentFrameworkContractTests` passed 151/151 with `dotnet test
+tests/SwiftAid.Application.Tests/SwiftAid.Application.Tests.csproj --no-restore
+-m:1 -nr:false --filter FullyQualifiedName~EllaiAgentFrameworkContractTests`.
+The Gateway `EllaiUtteranceWorkerOutcomeTests` filter passed 46/46 with
+`dotnet test tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj
+--no-restore -m:1 -nr:false -p:WasmBuildNative=false` and `OS=Windows_NT`,
+including the ordinary guidance-proposal persistence control. After commit
+`bed64800`, the six new cases passed again with `--no-build --no-restore`.
+Live-provider, deployed Gateway and independent security review remain unverified
+for this boundary.
