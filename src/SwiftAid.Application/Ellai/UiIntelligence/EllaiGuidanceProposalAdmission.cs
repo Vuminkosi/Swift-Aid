@@ -175,8 +175,12 @@ public sealed partial class EllaiGuidanceProposalAdmission(
                 if (cachedValidation.Plan is not null) return new("Ready", cachedValidation.Plan);
             }
         }
-        if (feature == EllaiNavigationManifest.FeatureId &&
-            EllaiPreplannedNavigation.Create(admitted.Objective!) is { } preplanned)
+        var preplanned = feature == EllaiNavigationManifest.FeatureId
+            ? EllaiPreplannedNavigation.Create(admitted.Objective!)
+            : feature == EllaiReportUiManifest.FeatureId && !authority.Features.Contains(EllaiNavigationManifest.FeatureId) && !reportAlreadyReceived
+                ? EllaiPreplannedReport.Create(admitted.Objective!, admitted.Catalogue)
+                : null;
+        if (preplanned is not null)
         {
             var refreshed = await AdmitAsync(sessionId, proposalId, authority, ct).ConfigureAwait(false);
             if (refreshed.Status != "Ready" || refreshed.InteractionEpoch != admitted.InteractionEpoch ||
