@@ -7,6 +7,7 @@ using SwiftAid.Contracts.Commands;
 using SwiftAid.Contracts.Geography;
 using SwiftAid.Contracts.Intake;
 using SwiftAid.Domain.Cases;
+using SwiftAid.Domain.Intake;
 
 namespace SwiftAid.Application.Tests;
 
@@ -329,6 +330,35 @@ public sealed class IntakePromotionProcessorTests
             ["Fever since morning.", "No travel history."],
             human.Report.Evidence.Observations.Select(item => item.Text).ToArray());
         Assert.Equal("ZW", human.Confirmations.OccurrenceCountryCode);
+    }
+
+    [Fact]
+    public void ReportedHumanAgeIsValidatedAndPromotedWithReporterProvenance()
+    {
+        var receiptId = Guid.NewGuid();
+        var submission = HumanSubmission() with { AgeYears = 26 };
+        IntakeSubmissionRules.Validate(submission);
+
+        var human = Assert.IsType<CaseReportEventData.HumanV2>(IntakePromotionMapper.ToReport(receiptId, submission));
+        Assert.True(human.Report.AgeYears.Value.HasValue);
+        Assert.Equal(26, human.Report.AgeYears.Value.Value);
+        Assert.Equal(ReportSourceKind.ReporterObservation, human.Report.AgeYears.Provenance.Source);
+        Assert.Equal($"intake:{receiptId:N}:age", human.Report.AgeYears.Provenance.StableReference);
+        Assert.Throws<ArgumentException>(() => IntakeSubmissionRules.Validate(submission with { AgeYears = -1 }));
+        Assert.Throws<ArgumentException>(() => IntakeSubmissionRules.Validate(submission with { SubjectScope = IntakeSubjectScope.Herd }));
+        Assert.Throws<ArgumentException>(() => IntakePromotionMapper.ToReport(receiptId, submission with { SubjectScope = IntakeSubjectScope.Herd }));
+    }
+
+    [Fact]
+    public void UnknownAgeKeepsLegacySerializedPayloadAndKnownAgeRoundTrips()
+    {
+        var submission = HumanSubmission();
+        var options = new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web);
+        var json = System.Text.Json.JsonSerializer.Serialize(submission, options);
+        Assert.DoesNotContain("ageYears", json);
+        var known = System.Text.Json.JsonSerializer.Serialize(submission with { AgeYears = 0 }, options);
+        Assert.Equal(0, System.Text.Json.JsonSerializer.Deserialize<IntakeSubmission>(known, options)!.AgeYears);
+        Assert.Null(System.Text.Json.JsonSerializer.Deserialize<IntakeSubmission>(json, options)!.AgeYears);
     }
 
     [Fact]

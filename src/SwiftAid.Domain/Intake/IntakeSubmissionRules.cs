@@ -13,7 +13,8 @@ public static class IntakeSubmissionRules
         limits ??= IntakeLimits.Default;
         limits.Validate();
         if (submission.SchemaVersion != 1 || submission.ClientSubmissionId == Guid.Empty ||
-            !Enum.IsDefined(submission.SubjectScope))
+            !Enum.IsDefined(submission.SubjectScope) || submission.AgeYears < 0 ||
+            submission.AgeYears.HasValue && submission.SubjectScope != IntakeSubjectScope.Human)
         {
             throw new ArgumentException("The intake report is invalid.", nameof(submission));
         }

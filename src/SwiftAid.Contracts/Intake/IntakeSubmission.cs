@@ -13,7 +13,12 @@ public sealed record IntakeSubmission(
     ReportedTime CapturedAt,
     ReportedTime Occurrence,
     LocationContext Location,
-    IntakeConfirmations Confirmations);
+    IntakeConfirmations Confirmations)
+{
+    /// <summary>Age in completed years as reported for a human subject; null means unknown.</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public int? AgeYears { get; init; }
+}
 
 public enum IntakeSubjectScope
 {
