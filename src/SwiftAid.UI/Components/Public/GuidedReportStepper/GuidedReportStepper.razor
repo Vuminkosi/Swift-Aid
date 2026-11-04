@@ -978,7 +978,7 @@
             _editContext.NotifyFieldChanged(new FieldIdentifier(Draft, nameof(Draft.OnsetDateInterpretedFromCaptureContext)));
             _editContext.NotifyFieldChanged(new FieldIdentifier(Draft, nameof(Draft.Narrative)));
             return true;
-        });
+        }, reportIdentity: Draft, autoFillVoice: AutoFillVoiceSuggestion);
         if (!EllaiDraftContext.FlushPending(this))
             _stepError = "Some details from this Ellai report conversation could not fit the form. Review the report and add those details manually.";
     }
