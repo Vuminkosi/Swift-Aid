@@ -53,6 +53,8 @@ public static class EllaiGuestEndpoints
     private static int ToMilliseconds(TimeSpan duration) =>
         (int)Math.Clamp(duration.TotalMilliseconds, 0, int.MaxValue);
 
+    internal static readonly object ValidatedAntiforgeryRequest = new();
+
     public static void MapEllaiGuestEndpoints(this IEndpointRouteBuilder endpoints)
     {
         ArgumentNullException.ThrowIfNull(endpoints);
@@ -68,6 +70,7 @@ public static class EllaiGuestEndpoints
                 try
                 {
                     await antiforgery.ValidateRequestAsync(http).ConfigureAwait(false);
+                    http.Items[ValidatedAntiforgeryRequest] = true;
                 }
                 catch (AntiforgeryValidationException)
                 {

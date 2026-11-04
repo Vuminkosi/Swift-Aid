@@ -106,6 +106,11 @@ public sealed class ReportVoiceEndpointTests
         var group = app.MapGroup("/sessions/{sessionId}").RequireAuthorization();
         var consentHandler = ReportVoiceEndpoints.ConsentAsync;
         group.MapPost("/consent", consentHandler);
+        group.MapPost("/checked-consent", consentHandler).AddEndpointFilter(async (context, next) =>
+        {
+            context.HttpContext.Items[EllaiGuestEndpoints.ValidatedAntiforgeryRequest] = true;
+            return await next(context);
+        });
         var extractHandler = ReportVoiceEndpoints.ExtractAsync;
         group.MapPost("/extract", extractHandler);
         var savedHandler = ReportVoiceEndpoints.TranscribeSavedAsync;
@@ -137,8 +142,10 @@ public sealed class ReportVoiceEndpointTests
         csrfRequest.Headers.Add("Cookie", "synthetic=1");
         Assert.Equal(HttpStatusCode.BadRequest, (await client.SendAsync(csrfRequest)).StatusCode);
 
-        Assert.Equal(HttpStatusCode.NoContent,
-            (await client.PostAsJsonAsync("/sessions/session/consent", new ReportVoiceConsentRequest(true))).StatusCode);
+        using var checkedRequest = new HttpRequestMessage(HttpMethod.Post, "/sessions/session/checked-consent")
+        { Content = JsonContent.Create(new ReportVoiceConsentRequest(true)) };
+        checkedRequest.Headers.Add("Cookie", "synthetic=1");
+        Assert.Equal(HttpStatusCode.NoContent, (await client.SendAsync(checkedRequest)).StatusCode);
         var voice = new EllaiVoiceTranscriptionService(app.Services.GetRequiredService<EllaiConsentService>(),
             app.Services.GetRequiredService<IEllaiConsentStore>(), app.Services.GetRequiredService<EllaiOptions>(), app.Services);
         Assert.True(await voice.HasSavedReportConsentAsync("session", default));
@@ -200,14 +207,21 @@ public sealed class ReportVoiceEndpointTests
         var group = app.MapGroup("/sessions/{sessionId}").RequireAuthorization();
         var consentHandler = ReportVoiceEndpoints.ConsentAsync;
         group.MapPost("/consent", consentHandler);
+        group.MapPost("/checked-consent", consentHandler).AddEndpointFilter(async (context, next) =>
+        {
+            context.HttpContext.Items[EllaiGuestEndpoints.ValidatedAntiforgeryRequest] = true;
+            return await next(context);
+        });
         var extractHandler = ReportVoiceEndpoints.ExtractAsync;
         group.MapPost("/extract", extractHandler);
         var savedHandler = ReportVoiceEndpoints.TranscribeSavedAsync;
         group.MapPost("/saved", savedHandler);
         await app.StartAsync();
         using var client = app.GetTestClient();
-        Assert.Equal(HttpStatusCode.NoContent,
-            (await client.PostAsJsonAsync("/sessions/session/consent", new ReportVoiceConsentRequest(true))).StatusCode);
+        using var checkedRequest = new HttpRequestMessage(HttpMethod.Post, "/sessions/session/checked-consent")
+        { Content = JsonContent.Create(new ReportVoiceConsentRequest(true)) };
+        checkedRequest.Headers.Add("Cookie", "synthetic=1");
+        Assert.Equal(HttpStatusCode.NoContent, (await client.SendAsync(checkedRequest)).StatusCode);
         using var audio = new ByteArrayContent(wav);
         audio.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("audio/wav");
         using var response = await client.PostAsync("/sessions/session/saved", audio);

@@ -56,6 +56,9 @@ public static class ReportVoiceEndpoints
 
     private static async Task<bool> ValidateCookieRequestAsync(HttpContext http)
     {
+        // The guest group validates before resolving its guest principal. Revalidating
+        // against the substituted principal would reject the already checked token.
+        if (http.Items[EllaiGuestEndpoints.ValidatedAntiforgeryRequest] is true) return true;
         if (!http.Request.Headers.ContainsKey("Cookie")) return true;
         try
         {
