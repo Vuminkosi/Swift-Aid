@@ -51,6 +51,13 @@ public sealed class EllaiOrganizationSweep(SwiftAidDbContext db, EllaiOrganizati
         if (!settings.Enabled) throw new InvalidOperationException("The scoped organization worker is disabled.");
         settings.Validate();
         var organizations = settings.SectorQueues.Keys.ToArray();
+        // Include the exact rules in the fenced policy so replicas cannot claim the
+        // same schedule revision while producing suggestions from different maps.
+        var canonicalRules = settings.SectorQueues.OrderBy(pair => pair.Key, StringComparer.Ordinal)
+            .SelectMany(pair => pair.Value.OrderBy(rule => rule.Key, StringComparer.Ordinal)
+                .Select(rule => new[] { pair.Key, rule.Key, rule.Value })).ToArray();
+        var policyBytes = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(new { options.PolicyVersion, Rules = canonicalRules });
+        var effectivePolicy = "organization-sha256:" + Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(policyBytes));
         var authorized = await db.WorkspaceOrganizations.AsNoTracking().AnyAsync(link =>
             link.WorkspaceId == workspaceId && link.Status == PersistentResourceStatus.Active &&
             organizations.Contains(link.OrganizationId) &&
@@ -61,19 +68,19 @@ public sealed class EllaiOrganizationSweep(SwiftAidDbContext db, EllaiOrganizati
         // Stable workspace jitter spreads new schedules across the first five minutes.
         var hash = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes("ops.organization:" + workspaceId));
         var jitter = System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(hash) % 300;
-        await schedule.ReconcileConfigurationAsync(workspaceId, "ops.organization", options.CadenceHours, options.PolicyVersion,
+        await schedule.ReconcileConfigurationAsync(workspaceId, "ops.organization", options.CadenceHours, effectivePolicy,
             options.ConfigurationRevision, DateTimeOffset.UtcNow.AddSeconds(jitter), ct);
         var configured = await db.Database.SqlQuery<int>($"""
             SELECT count(*)::int AS "Value" FROM ellai_operational_schedules
             WHERE workspace_id = {workspaceId} AND role_id = 'ops.organization'
-                AND cadence_hours = {options.CadenceHours} AND policy_version = {options.PolicyVersion}
+                AND cadence_hours = {options.CadenceHours} AND policy_version = {effectivePolicy}
                 AND configuration_revision = {options.ConfigurationRevision}
             """).SingleAsync(ct);
         if (configured != 1)
         {
             var samePolicy = await db.Database.SqlQuery<int>($"""
                 SELECT count(*)::int AS "Value" FROM ellai_operational_schedules
-                WHERE workspace_id = {workspaceId} AND role_id = 'ops.organization' AND policy_version = {options.PolicyVersion}
+                WHERE workspace_id = {workspaceId} AND role_id = 'ops.organization' AND policy_version = {effectivePolicy}
                 """).SingleAsync(ct);
             return samePolicy == 1 ? "configuration-mismatch" : "policy-mismatch";
         }
@@ -82,7 +89,7 @@ public sealed class EllaiOrganizationSweep(SwiftAidDbContext db, EllaiOrganizati
         var finished = false;
         try
         {
-            if (!string.Equals(lease.PolicyVersion, options.PolicyVersion, StringComparison.Ordinal)) return "policy-mismatch";
+            if (!string.Equals(lease.PolicyVersion, effectivePolicy, StringComparison.Ordinal)) return "policy-mismatch";
             for (var index = 0; index < options.BatchSize; index++)
             {
                 progress.WorkTurns++;
