@@ -348,6 +348,8 @@ public sealed class EllaiAgentFrameworkContractTests
     [InlineData("question")]
     [InlineData("spoken")]
     [InlineData("oversized-spoken")]
+    [InlineData("unknown-field")]
+    [InlineData("duplicate-field")]
     [InlineData("topic")]
     public async Task MalformedDecisionFieldsAreRepairedBeforeCompletion(string defect)
     {
@@ -378,6 +380,10 @@ public sealed class EllaiAgentFrameworkContractTests
                 "spoken" => ValidDecision.Replace("\"spokenText\":\"Done.\"", "\"spokenText\":null", StringComparison.Ordinal),
                 "oversized-spoken" => ValidDecision.Replace("\"spokenText\":\"Done.\"",
                     "\"spokenText\":\"" + new string('x', 2001) + "\"", StringComparison.Ordinal),
+                "unknown-field" => ValidDecision.Replace("\"schemaVersion\":2",
+                    "\"schemaVersion\":2,\"untrustedExtra\":true", StringComparison.Ordinal),
+                "duplicate-field" => ValidDecision.Replace("\"kind\":\"Answer\"",
+                    "\"kind\":\"Stop\",\"kind\":\"Answer\"", StringComparison.Ordinal),
                 "topic" => ValidDecision.Replace("\"topicRefs\":[]", "\"topicRefs\":[null]", StringComparison.Ordinal),
                 _ => throw new InvalidOperationException()
             } : ValidDecision;

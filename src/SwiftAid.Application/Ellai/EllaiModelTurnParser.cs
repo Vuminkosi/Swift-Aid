@@ -40,7 +40,10 @@ public static class EllaiModelTurnParser
 
     private static JsonSerializerOptions CreateOptions()
     {
-        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web)
+        {
+            UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow
+        };
         options.Converters.Add(new JsonStringEnumConverter());
         return options;
     }
@@ -71,6 +74,10 @@ public static class EllaiModelTurnParser
             }
 
             var root = document.RootElement;
+            if (HasDuplicateProperties(root))
+            {
+                return new ParsedModelTurn(null, "The reply contains duplicate properties.");
+            }
             var hasCalls = HasProperty(root, "tool_calls");
             var hasDecision = HasProperty(root, "final_decision");
             if (hasCalls == hasDecision)
@@ -81,6 +88,22 @@ public static class EllaiModelTurnParser
 
             return hasCalls ? ParseCalls(root) : ParseDecision(root);
         }
+    }
+
+    private static bool HasDuplicateProperties(JsonElement element)
+    {
+        if (element.ValueKind == JsonValueKind.Object)
+        {
+            var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var property in element.EnumerateObject())
+                if (!names.Add(property.Name) || HasDuplicateProperties(property.Value)) return true;
+        }
+        else if (element.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in element.EnumerateArray())
+                if (HasDuplicateProperties(item)) return true;
+        }
+        return false;
     }
 
     private static ParsedModelTurn ParseCalls(JsonElement root)

@@ -20,8 +20,7 @@ public sealed class EllaiModelTurnParserTests
     private const string DecisionJson = """
         {"schemaVersion":2,"kind":"Answer","displayText":"Queue reviewed.","spokenText":"Done.",
          "claims":[{"claimId":"c1","text":"Queue has 3 items.","kind":"Observed",
-           "evidence":[{"sourceKind":"queue","resourceId":"q1","version":"v3","fieldPath":null,"evidenceId":"e1"}],
-           "factualRationale":"Seen."}],
+           "evidence":[{"sourceKind":"queue","resourceId":"q1","version":"v3","fieldPath":null,"evidenceId":"e1"}]}],
          "questions":[],"uiIntents":[],"planProposal":null,"topicRefs":[],
          "resumeSuggestion":null,"stopReason":null}
         """;
@@ -77,6 +76,34 @@ public sealed class EllaiModelTurnParserTests
         Assert.NotNull(parsed.Turn.FinalDecision);
         Assert.Equal(DecisionKind.Answer, parsed.Turn.FinalDecision.Kind);
         Assert.Equal("Queue reviewed.", parsed.Turn.FinalDecision.DisplayText);
+    }
+
+    [Theory]
+    [InlineData("unknown")]
+    [InlineData("duplicate")]
+    [InlineData("case-duplicate")]
+    [InlineData("nested-duplicate")]
+    [InlineData("envelope-duplicate")]
+    public void AmbiguousOrUndeclaredDecisionPropertiesAreRejected(string defect)
+    {
+        const string valid = """
+            {"schemaVersion":2,"kind":"Answer","displayText":"Done.","spokenText":"Done.",
+             "claims":[{"claimId":"c","text":"Done.","kind":"Unknown","evidence":[]}],
+             "questions":[],"uiIntents":[],"planProposal":null,"topicRefs":[],"resumeSuggestion":null,"stopReason":null}
+            """;
+        var decision = defect switch
+        {
+            "unknown" => valid.Replace("\"schemaVersion\":2", "\"schemaVersion\":2,\"untrustedExtra\":true", StringComparison.Ordinal),
+            "duplicate" => valid.Replace("\"kind\":\"Answer\"", "\"kind\":\"Stop\",\"kind\":\"Answer\"", StringComparison.Ordinal),
+            "case-duplicate" => valid.Replace("\"kind\":\"Answer\"", "\"Kind\":\"Stop\",\"kind\":\"Answer\"", StringComparison.Ordinal),
+            "nested-duplicate" => valid.Replace("\"claimId\":\"c\"", "\"claimId\":\"other\",\"claimId\":\"c\"", StringComparison.Ordinal),
+            _ => valid
+        };
+        var envelope = defect == "envelope-duplicate"
+            ? "{\"final_decision\":" + valid + ",\"FINAL_DECISION\":" + valid + "}"
+            : "{\"final_decision\":" + decision + "}";
+
+        Assert.Null(EllaiModelTurnParser.Parse(envelope).Turn);
     }
 
     [Fact]
