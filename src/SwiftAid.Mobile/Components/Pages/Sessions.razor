@@ -141,6 +141,10 @@
             await Task.WhenAll(subscriptionTask, optionsTask);
             var subscription = await subscriptionTask;
             var options = await optionsTask;
+            if (subscription.Code != UiCapabilityResultCode.Denied &&
+                !SessionSubscriptionPresentation.IsMatchingRead(subscription, sessionId))
+                return ErrorSubscriptionState(sessionId, "Reminder status could not be verified. Refresh and try again.");
+            var matchingOptions = SessionSubscriptionPresentation.IsMatchingOptions(options, sessionId);
             var status = SessionSubscriptionPresentation.Status(subscription) switch
             {
                 SubscriptionStatus.RequiresAuthentication => PublicSessionsSurface.SessionSubscriptionStatus.RequiresAuthentication,
@@ -152,13 +156,13 @@
             return new PublicSessionsSurface.SessionSubscriptionPanelState(
                 sessionId,
                 status,
-                subscription.Value?.Version ?? options.Value?.Version ?? 0,
-                options.Succeeded && options.Value is { } value ? ToSurfaceOptions(value) : null,
+                subscription.Value?.Version ?? 0,
+                matchingOptions && options.Value is { } value ? ToSurfaceOptions(value) : null,
                 status == PublicSessionsSurface.SessionSubscriptionStatus.Unavailable
                     ? subscription.Message ?? subscription.Metadata.Notice ?? "Reminder status is unavailable."
-                    : options.Succeeded ? subscription.Message : options.Message ?? options.Metadata.Notice,
+                    : matchingOptions ? subscription.Message : options.Message ?? options.Metadata.Notice ?? "Reminder choices could not be verified.",
                 IsError: status == PublicSessionsSurface.SessionSubscriptionStatus.Unavailable ||
-                    !options.Succeeded && status != PublicSessionsSurface.SessionSubscriptionStatus.RequiresAuthentication,
+                    !matchingOptions && status != PublicSessionsSurface.SessionSubscriptionStatus.RequiresAuthentication,
                 CurrentChannel: subscription.Value?.Channel is { } currentChannel ? ToSurfaceChannel(currentChannel) : null);
         }
         catch (OperationCanceledException)

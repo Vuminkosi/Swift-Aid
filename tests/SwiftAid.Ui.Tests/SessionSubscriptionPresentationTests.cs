@@ -5,6 +5,22 @@ namespace SwiftAid.Ui.Tests;
 public sealed class SessionSubscriptionPresentationTests
 {
     [Fact]
+    public void ReadAndConsentOptionsMustMatchTheRequestedSession()
+    {
+        var id = Guid.NewGuid();
+        var metadata = new UiCapabilityMetadata("session-subscriptions", "1", UiCapabilityProvenance.LiveService, DateTimeOffset.UtcNow, true);
+        var read = new UiCapabilityResult<SubscriptionView>(UiCapabilityResultCode.Success,
+            new SubscriptionView(id, SubscriptionStatus.Active, 2, false), metadata);
+        var options = new UiCapabilityResult<SubscriptionOptions>(UiCapabilityResultCode.Success,
+            new SubscriptionOptions(id, "consent", 3, "Consent", [SubscriptionChannel.Email], true), metadata);
+        Assert.True(SessionSubscriptionPresentation.IsMatchingRead(read, id));
+        Assert.True(SessionSubscriptionPresentation.IsMatchingOptions(options, id));
+        Assert.False(SessionSubscriptionPresentation.IsMatchingRead(read, Guid.NewGuid()));
+        Assert.False(SessionSubscriptionPresentation.IsMatchingOptions(options, Guid.NewGuid()));
+        Assert.False(SessionSubscriptionPresentation.IsMatchingRead(read with { Value = read.Value! with { IsSynthetic = true } }, id));
+    }
+
+    [Fact]
     public void UpdateConfirmationRequiresCurrentLiveReceiptForTheRequestedSession()
     {
         var sessionId = Guid.NewGuid();

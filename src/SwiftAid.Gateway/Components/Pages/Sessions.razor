@@ -677,7 +677,7 @@
         try
         {
             var result = await SubscriptionClient.GetAsync(sessionId);
-            if (result.Code != UiCapabilityResultCode.Success || result.Value is null)
+            if (!SessionSubscriptionPresentation.IsMatchingRead(result, sessionId) || result.Value is null)
             {
                 return UnavailableSubscriptionState(sessionId, result.Message ?? result.Metadata.Notice);
             }
@@ -694,7 +694,7 @@
             if (status is PublicSessionsSurface.SessionSubscriptionStatus.Unsubscribed or PublicSessionsSurface.SessionSubscriptionStatus.Active)
             {
                 var optionsResult = await SubscriptionClient.GetSubscriptionOptionsAsync(sessionId);
-                if (optionsResult.Code == UiCapabilityResultCode.Success && optionsResult.Value is { } optionValue)
+                if (SessionSubscriptionPresentation.IsMatchingOptions(optionsResult, sessionId) && optionsResult.Value is { } optionValue)
                 {
                     options = new PublicSessionsSurface.SessionSubscriptionOptions(
                         optionValue.SessionId,

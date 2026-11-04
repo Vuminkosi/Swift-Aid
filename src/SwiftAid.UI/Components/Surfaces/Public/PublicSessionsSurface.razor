@@ -372,7 +372,7 @@
                     }
                 </MudAlert>
                 @if (_subscriptionState.Options is { IsCurrent: true, Channels.Count: > 0 } changeOptions &&
-                     changeOptions.SessionId == selected.SessionId && !string.IsNullOrWhiteSpace(changeOptions.ConsentReference) &&
+                     changeOptions.SessionId == selected.SessionId && changeOptions.Version == selected.Version && !string.IsNullOrWhiteSpace(changeOptions.ConsentReference) &&
                      !string.IsNullOrWhiteSpace(changeOptions.ConsentText))
                 {
                     <MudButton Variant="Variant.Text" Color="Color.Primary" Disabled="@IsSubscriptionBusy"
@@ -383,7 +383,7 @@
                     @(IsSubscriptionBusy ? "Saving…" : "Turn off reminders")
                 </MudButton>
             }
-            else if (_subscriptionState.Options is { } options && options.IsCurrent && options.Channels.Count > 0 &&
+            else if (_subscriptionState.Options is { } options && options.IsCurrent && options.Version == selected.Version && options.Channels.Count > 0 &&
                      !string.IsNullOrWhiteSpace(options.ConsentReference) && !string.IsNullOrWhiteSpace(options.ConsentText))
             {
                 <MudText Typo="Typo.body2" Class="public-session-subscription__consent">@options.ConsentText</MudText>
@@ -413,7 +413,7 @@
             else
             {
                 <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" role="status">
-                    @(_subscriptionState.Options is { IsCurrent: false }
+                    @(_subscriptionState.Options is { } unavailableOptions && (!unavailableOptions.IsCurrent || unavailableOptions.Version != selected.Version)
                         ? "These reminder choices have changed. Refresh before continuing."
                         : "Reminder choices are not available right now.")
                     @if (LoadSubscriptionStateAsync is not null)
@@ -1465,6 +1465,7 @@
 
     private bool CanSubscribe(SessionSubscriptionOptions options) =>
         options.SessionId == _selectedSessionId &&
+        SelectedSession is { } selected && selected.Version == options.Version &&
         options.IsCurrent &&
         _selectedReminderChannel is { } channel && options.Channels.Contains(channel) &&
         _reminderConsentAccepted &&

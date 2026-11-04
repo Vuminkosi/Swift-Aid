@@ -55,7 +55,7 @@ public sealed class PublicSessionQueryStateTests
     public async Task ActiveReminderShowsChangeActionOnlyWithCurrentConsentOptions(bool current)
     {
         var session = Session(Guid.NewGuid());
-        var options = new PublicSessionsSurface.SessionSubscriptionOptions(session.SessionId, "consent", 1,
+        var options = new PublicSessionsSurface.SessionSubscriptionOptions(session.SessionId, "consent", session.Version,
             "Reminder consent", [PublicSessionsSurface.SessionReminderChannel.Email], current);
         var state = new PublicSessionsSurface.SessionSubscriptionPanelState(session.SessionId,
             PublicSessionsSurface.SessionSubscriptionStatus.Active, 1, options, null,
@@ -94,7 +94,7 @@ public sealed class PublicSessionQueryStateTests
         var session = Session(Guid.NewGuid());
         var component = new PublicSessionsSurface();
         var type = typeof(PublicSessionsSurface);
-        var options = new PublicSessionsSurface.SessionSubscriptionOptions(session.SessionId, "consent", 1,
+        var options = new PublicSessionsSurface.SessionSubscriptionOptions(session.SessionId, "consent", session.Version,
             "Reminder consent", [PublicSessionsSurface.SessionReminderChannel.Email, PublicSessionsSurface.SessionReminderChannel.MobilePush], true);
         var state = new PublicSessionsSurface.SessionSubscriptionPanelState(session.SessionId,
             PublicSessionsSurface.SessionSubscriptionStatus.Active, 1, options, null,
@@ -117,6 +117,7 @@ public sealed class PublicSessionQueryStateTests
         var component = new PublicSessionsSurface();
         var type = typeof(PublicSessionsSurface);
         var id = Guid.NewGuid();
+        type.GetProperty(nameof(component.Sessions))!.SetValue(component, new[] { Session(id) with { Version = 7 } });
         var oldOptions = new PublicSessionsSurface.SessionSubscriptionOptions(id, "old-consent", 7,
             "Old terms", [PublicSessionsSurface.SessionReminderChannel.Email], true);
         var freshOptions = oldOptions with { ConsentReference = "new-consent", ConsentText = "New terms" };
@@ -154,6 +155,7 @@ public sealed class PublicSessionQueryStateTests
         var component = new PublicSessionsSurface();
         var type = typeof(PublicSessionsSurface);
         var id = Guid.NewGuid();
+        type.GetProperty(nameof(component.Sessions))!.SetValue(component, new[] { Session(id) with { Version = 7 } });
         var options = new PublicSessionsSurface.SessionSubscriptionOptions(id, "current-consent", 7,
             "Consent text", [PublicSessionsSurface.SessionReminderChannel.Email, PublicSessionsSurface.SessionReminderChannel.MobilePush], true);
         var state = new PublicSessionsSurface.SessionSubscriptionPanelState(id,
@@ -184,6 +186,31 @@ public sealed class PublicSessionQueryStateTests
         Assert.Equal(PublicSessionsSurface.SessionReminderChannel.MobilePush, captured.Channel);
         Assert.False(Field<bool>(component, "_editingReminder"));
         Assert.False(Field<bool>(component, "_reminderConsentAccepted"));
+    }
+
+    [Fact]
+    public async Task ReminderConsentCannotBeSubmittedForADifferentDisplayedSessionVersion()
+    {
+        var component = new PublicSessionsSurface();
+        var type = typeof(PublicSessionsSurface);
+        var id = Guid.NewGuid();
+        type.GetProperty(nameof(component.Sessions))!.SetValue(component, new[] { Session(id) with { Version = 3 } });
+        var options = new PublicSessionsSurface.SessionSubscriptionOptions(id, "consent", 4,
+            "Consent text", [PublicSessionsSurface.SessionReminderChannel.Email], true);
+        type.GetField("_selectedSessionId", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(component, id);
+        type.GetField("_subscriptionState", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(component,
+            new PublicSessionsSurface.SessionSubscriptionPanelState(id, PublicSessionsSurface.SessionSubscriptionStatus.Unsubscribed, 0, options, null));
+        type.GetField("_selectedReminderChannel", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(component, PublicSessionsSurface.SessionReminderChannel.Email);
+        type.GetField("_reminderConsentAccepted", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(component, true);
+        var calls = 0;
+        type.GetProperty(nameof(component.ExecuteSubscriptionActionAsync))!.SetValue(component,
+            (Func<PublicSessionsSurface.SessionSubscriptionAction, Task<PublicSessionsSurface.SessionSubscriptionPanelState?>>)(_ =>
+            {
+                calls++;
+                return Task.FromResult<PublicSessionsSurface.SessionSubscriptionPanelState?>(null);
+            }));
+        await InvokeAsync(component, "SubscribeAsync");
+        Assert.Equal(0, calls);
     }
 
     [Fact]
