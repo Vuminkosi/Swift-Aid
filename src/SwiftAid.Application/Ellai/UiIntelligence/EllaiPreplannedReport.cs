@@ -2,9 +2,23 @@
 
 namespace SwiftAid.Application.Ellai;
 
-/// <summary>Value-free, one-step guidance for exact public report questions.</summary>
+/// <summary>Value-free guidance for exact public report questions.</summary>
 internal static class EllaiPreplannedReport
 {
+    private static readonly IReadOnlySet<string> WalkthroughRequests = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        "guide me through the report",
+        "guide me through filing a report",
+        "show me how to complete a report",
+        "show me how to create and submit a report"
+    };
+
+    private static readonly string[] WalkthroughControls =
+    [
+        "report.entry", "report.subject", "report.narrative", "report.time-location",
+        "report.review", "report.confirmations", "report.submit", "report.receipt"
+    ];
+
     private static readonly IReadOnlyDictionary<string, string> Requests = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
     {
         ["choose report subject"] = "report.subject",
@@ -28,12 +42,19 @@ internal static class EllaiPreplannedReport
 
     public static EllaiGuidancePlanDraft? Create(string objective, UiRegistrySnapshot catalogue)
     {
-        if (string.IsNullOrWhiteSpace(objective) || !Requests.TryGetValue(objective.Trim().TrimEnd('?').TrimEnd(), out var controlId)) return null;
-        var descriptor = catalogue.Descriptors.SingleOrDefault(item => item.ControlId == controlId && item.FeatureId == EllaiReportUiManifest.FeatureId);
-        if (descriptor is null || string.IsNullOrWhiteSpace(descriptor.ObjectiveId) || string.IsNullOrWhiteSpace(descriptor.Semantics?.Purpose)) return null;
-        var step = new GuidancePlanStep("step-1", descriptor.ControlId, descriptor.ObjectiveId,
-            PlanStepBehavior.GuideHuman, null, null, [], [], descriptor.Semantics.Purpose, null);
+        if (string.IsNullOrWhiteSpace(objective)) return null;
+        var normalized = objective.Trim().TrimEnd('?').TrimEnd();
+        var controlIds = WalkthroughRequests.Contains(normalized) ? WalkthroughControls :
+            Requests.TryGetValue(normalized, out var controlId) ? [controlId] : Array.Empty<string>();
+        if (controlIds.Length == 0) return null;
+        var descriptors = controlIds.Select(id => catalogue.Descriptors.SingleOrDefault(item =>
+            item.ControlId == id && item.FeatureId == EllaiReportUiManifest.FeatureId)).ToArray();
+        if (descriptors.Any(descriptor => descriptor is null || string.IsNullOrWhiteSpace(descriptor.ObjectiveId) ||
+            string.IsNullOrWhiteSpace(descriptor.Semantics?.Purpose))) return null;
+        var steps = descriptors.Select((descriptor, index) => new GuidancePlanStep($"step-{index + 1}",
+            descriptor!.ControlId, descriptor.ObjectiveId!, PlanStepBehavior.GuideHuman, null, null, [], [],
+            descriptor.Semantics!.Purpose, index + 1 < descriptors.Length ? $"step-{index + 2}" : null)).ToArray();
         return new(EllaiGuidancePlanDraft.CurrentSchemaVersion, GuidancePlanStatus.Ready, objective,
-            GuidanceMode.Navigation, [step], [], null);
+            GuidanceMode.Navigation, steps, [], null);
     }
 }
