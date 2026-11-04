@@ -347,6 +347,7 @@ public sealed class EllaiAgentFrameworkContractTests
     [InlineData("kind")]
     [InlineData("question")]
     [InlineData("spoken")]
+    [InlineData("oversized-spoken")]
     [InlineData("topic")]
     public async Task MalformedDecisionFieldsAreRepairedBeforeCompletion(string defect)
     {
@@ -358,6 +359,7 @@ public sealed class EllaiAgentFrameworkContractTests
             _ => Task.FromResult(true), (_, _, _) => throw new InvalidOperationException(),
             new EllaiFrameworkUsage("session", new EllaiUsageLedger(), new InMemoryEllaiUsageStore()), default);
         Assert.Equal("Done.", result?.DisplayText);
+        Assert.Equal("Done.", result?.SpokenText);
         Assert.True(agent.LastRepairUsed);
         Assert.Equal(2, model.Calls);
     }
@@ -374,6 +376,8 @@ public sealed class EllaiAgentFrameworkContractTests
                 "question" => ValidDecision.Replace("\"kind\":\"Answer\"", "\"kind\":\"NeedInput\"", StringComparison.Ordinal)
                     .Replace("\"questions\":[]", "\"questions\":[{\"questionId\":null,\"text\":null,\"choiceIds\":null}]", StringComparison.Ordinal),
                 "spoken" => ValidDecision.Replace("\"spokenText\":\"Done.\"", "\"spokenText\":null", StringComparison.Ordinal),
+                "oversized-spoken" => ValidDecision.Replace("\"spokenText\":\"Done.\"",
+                    "\"spokenText\":\"" + new string('x', 2001) + "\"", StringComparison.Ordinal),
                 "topic" => ValidDecision.Replace("\"topicRefs\":[]", "\"topicRefs\":[null]", StringComparison.Ordinal),
                 _ => throw new InvalidOperationException()
             } : ValidDecision;

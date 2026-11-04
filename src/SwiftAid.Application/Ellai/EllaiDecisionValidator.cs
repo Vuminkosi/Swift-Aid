@@ -11,6 +11,8 @@ public static class EllaiDecisionValidator
 
     public const int MaxSpokenWords = 120;
 
+    public const int MaxSpokenChars = MaxDisplayChars;
+
     public const int MaxUiIntents = 3;
 
     public const int MaxPlanActions = 3;
@@ -36,9 +38,10 @@ public static class EllaiDecisionValidator
             errors.Add("DisplayText must be 1..2000 characters.");
         }
 
-        if (decision.SpokenText is null || CountWords(decision.SpokenText) > MaxSpokenWords)
+        if (decision.SpokenText is null || decision.SpokenText.Length > MaxSpokenChars ||
+            CountWords(decision.SpokenText) > MaxSpokenWords)
         {
-            errors.Add("SpokenText must be a string of at most 120 words.");
+            errors.Add("SpokenText must be a string of at most 2000 characters and 120 words.");
         }
 
         if (decision.UiIntents is null)
