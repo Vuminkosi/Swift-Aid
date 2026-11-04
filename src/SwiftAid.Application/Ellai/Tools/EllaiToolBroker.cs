@@ -127,6 +127,9 @@ public sealed record EllaiToolResult(
     /// <summary>Internal query identity for a replayable catalogue read.</summary>
     [System.Text.Json.Serialization.JsonIgnore]
     public EllaiUiCatalogueReplayScope? UiCatalogueReplayScope { get; init; }
+
+    [System.Text.Json.Serialization.JsonIgnore]
+    public EllaiUiObservationReplayScope? UiObservationReplayScope { get; init; }
 }
 
 /// <summary>Authorized typed evidence/app-state tool broker (ELL-T07 groundwork).
@@ -1119,12 +1122,20 @@ public sealed class EllaiToolBroker
             (string.Equals(report.ViewInstanceId, view.Trim(), StringComparison.Ordinal)
                 ? string.Empty
                 : $" Requested view '{view.Trim()}' differs from the latest report.");
-        return new EllaiToolResult(request.ToolName, true, null, evidence,
+        var result = new EllaiToolResult(request.ToolName, true, null, evidence,
             header + "\n" + string.Join("\n", lines) +
             (visibleIssue is null ? string.Empty : $"\nFirst client-reported validation issue ({visibleIssue.InputId}): {visibleIssue.Message}") +
             (inputLines.Count == 0 ? string.Empty : "\nInput state is client-reported and does not prove a draft was saved or submitted. " +
                 "Only reported visible inputs on requested controls are included; omitted inputs have unknown status.\n" + string.Join("\n", inputLines)),
             ordered.Count, false, EllaiToolReasonCodes.Ok);
+        if (stale) return result;
+        var canonical = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(new
+        {
+            report.ViewInstanceId, report.ContextStamp, report.Platform, report.CurrentNavigationId,
+            Controls = lines.ToArray(), Inputs = inputLines, Issue = visibleIssue?.InputId
+        });
+        return result with { UiObservationReplayScope = new(feature, requested.ToArray(),
+            Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(canonical))) };
     }
 
     private EllaiToolResult SearchDocs(EllaiToolRequest request)

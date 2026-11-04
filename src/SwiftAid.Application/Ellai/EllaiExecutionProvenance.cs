@@ -29,7 +29,8 @@ public sealed record EllaiObservedToolResult(
     EllaiUiCatalogueReplayScope? UiCatalogueReplayScope = null, string? CapabilityVersion = null,
     string? ReceiptListDigest = null, string? ReceiptLookupId = null, string? CaseListDigest = null,
     EllaiRetainedClassificationFilter? RetainedClassificationFilter = null, string? QueueProjectionVersion = null,
-    EllaiRetainedCaseReplay? RetainedCaseReplay = null)
+    EllaiRetainedCaseReplay? RetainedCaseReplay = null,
+    EllaiUiObservationReplayScope? UiObservationReplayScope = null)
 {
     public const string CurrentStaticFeatureVersion = "state-feature/1";
     public const string CurrentClockVersion = "server-clock/1";
@@ -102,7 +103,9 @@ public sealed record EllaiObservedToolResult(
                 request.Arguments.GetValueOrDefault("field") is null or "classification"
                     ? new EllaiRetainedClassificationFilter(retainedFilter, CaseListFingerprint(result)) : null,
             caseQuery is not null ? CurrentQueueProjectionVersion : null,
-            EllaiRetainedCaseReplay.Create(request, result));
+            EllaiRetainedCaseReplay.Create(request, result),
+            request.ToolName == EllaiToolNames.UiObserve && result.Allowed && !result.Truncated
+                ? result.UiObservationReplayScope : null);
     }
 
     public static bool IsCanonicalReceiptId(string? value) => value is { Length: 37 } &&
@@ -127,6 +130,15 @@ public sealed record EllaiObservedToolResult(
         });
         return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(content));
     }
+}
+
+/// <summary>Bounded references and digest for a fresh UI observation; no entered values are stored.</summary>
+public sealed record EllaiUiObservationReplayScope(string Feature, IReadOnlyList<string> Controls, string Digest)
+{
+    public bool IsValid() => !string.IsNullOrWhiteSpace(Feature) && Feature.Length <= 120 &&
+        Controls is { Count: > 0 and <= 20 } && Controls.All(id => !string.IsNullOrWhiteSpace(id) && id.Length <= 120) &&
+        Controls.Distinct(StringComparer.Ordinal).Count() == Controls.Count && Digest is { Length: 64 } &&
+        Digest.All(character => character is >= '0' and <= '9' or >= 'A' and <= 'F');
 }
 
 /// <summary>Bounded arguments and fingerprint for revalidating a partial retained result.</summary>

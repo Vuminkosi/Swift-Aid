@@ -164,6 +164,36 @@ public static class EllaiAuthorizedConversationContext
                     }
                     continue;
                 }
+                if (observation.ToolName == EllaiToolNames.UiObserve)
+                {
+                    var scope = observation.UiObservationReplayScope;
+                    if (toolContext is null || invokeTool is null || scope is null || !scope.IsValid() ||
+                        toolContext.SessionId != turn.SessionId || toolContext.Actor is null ||
+                        toolContext.Actor.ActorId != actor.ActorId || toolContext.Actor.AccessEpoch != actor.AccessEpoch ||
+                        observation.ReasonCode != EllaiToolReasonCodes.Ok)
+                        return decisions[turn.ClientUtteranceId] = false;
+                    try
+                    {
+                        var current = await invokeTool(toolContext with { RevalidationOnly = true }, new EllaiToolRequest(
+                            EllaiToolNames.UiObserve, new Dictionary<string, string>
+                            {
+                                ["feature"] = scope.Feature, ["controls"] = string.Join(",", scope.Controls), ["view"] = "current"
+                            }), ct).ConfigureAwait(false);
+                        ct.ThrowIfCancellationRequested();
+                        var replay = current.UiObservationReplayScope;
+                        if (!current.Allowed || current.DenialReason is not null || current.ReasonCode != EllaiToolReasonCodes.Ok ||
+                            current.Truncated || !current.Evidence.SequenceEqual(observation.Evidence) || replay is null || !replay.IsValid() ||
+                            replay.Feature != scope.Feature || replay.Digest != scope.Digest ||
+                            !replay.Controls.SequenceEqual(scope.Controls, StringComparer.Ordinal))
+                            return decisions[turn.ClientUtteranceId] = false;
+                    }
+                    catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+                    catch (Exception error) when (error is not OutOfMemoryException)
+                    {
+                        return decisions[turn.ClientUtteranceId] = false;
+                    }
+                    continue;
+                }
                 if (observation.ToolName == EllaiToolNames.State)
                 {
                     if (observation.StaticFeatureVersion == EllaiObservedToolResult.CurrentStaticFeatureVersion &&

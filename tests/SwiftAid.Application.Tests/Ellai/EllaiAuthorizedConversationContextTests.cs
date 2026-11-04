@@ -340,6 +340,51 @@ public sealed class EllaiAuthorizedConversationContextTests
         }
     }
 
+    [Fact]
+    public async Task UiObservationHistoryRequiresTheSameFreshAuthorizedPresentation()
+    {
+        var registry = new EllaiUiRegistry();
+        EllaiReportGuidanceDescriptors.RegisterAll(registry);
+        var store = new InMemoryEllaiUiObservationStore();
+        var posted = new StoredUiObservationReport("session", "view", "stamp", "web", ["report.narrative"],
+            DateTimeOffset.UtcNow, [new("report.narrative", UiObservationState.Ready)],
+            InputStates: [new("report.narrative", "report.original-statement", UiInputPresence.Entered)]);
+        await store.RecordAsync(posted, default);
+        var broker = new EllaiToolBroker(new EllaiPolicyService(), new EllaiConsentService(), uiRegistry: registry,
+            uiDiscovery: new EllaiUiDiscoveryService(), uiObservations: store);
+        var context = new EllaiToolContext("session", "epoch", "public.product-help", null, 4, true,
+            DataClassification: EllaiProcessingClassification.UserProvidedNonSensitive, Actor: Actor(),
+            AllowedTools: new HashSet<string> { EllaiToolNames.UiObserve },
+            ConsentPurpose: EllaiConsentService.PublicProductHelpPurpose);
+        var request = new EllaiToolRequest(EllaiToolNames.UiObserve, new Dictionary<string, string>
+        {
+            ["feature"] = "report", ["controls"] = "report.narrative", ["view"] = "current"
+        });
+        var observed = await broker.InvokeAsync(context, request, default);
+        Assert.NotNull(observed.UiObservationReplayScope);
+        Assert.DoesNotContain("UiObservationReplayScope", System.Text.Json.JsonSerializer.Serialize(observed));
+        var trace = EllaiToolTrace.SerializeFlattened([EllaiObservedToolResult.From(request, observed)], false, []);
+        var turns = new[] { Turn("prior", 1, "What is entered?", "The description is entered.", trace),
+            Turn("current", 2, "What next?", null, null) };
+        async Task<EllaiAuthorizedConversationContext.Result> Replay(EllaiToolContext current) =>
+            await EllaiAuthorizedConversationContext.BuildAsync(turns, "current", Actor(), null, default,
+                toolContext: current, invokeTool: broker.InvokeAsync);
+
+        Assert.Contains((await Replay(context)).Messages, message => message.Content == "The description is entered.");
+        Assert.DoesNotContain((await Replay(context with { AllowedTools = new HashSet<string>() })).Messages,
+            message => message.Content == "The description is entered.");
+        var staleStore = new InMemoryEllaiUiObservationStore();
+        await staleStore.RecordAsync(posted with { ReceivedAtUtc = DateTimeOffset.UtcNow.AddSeconds(-60) }, default);
+        var staleBroker = new EllaiToolBroker(new EllaiPolicyService(), new EllaiConsentService(), uiRegistry: registry,
+            uiDiscovery: new EllaiUiDiscoveryService(), uiObservations: staleStore);
+        var stale = await EllaiAuthorizedConversationContext.BuildAsync(turns, "current", Actor(), null, default,
+            toolContext: context, invokeTool: staleBroker.InvokeAsync);
+        Assert.DoesNotContain(stale.Messages, message => message.Content == "The description is entered.");
+        await store.RecordAsync(posted with { ReceivedAtUtc = DateTimeOffset.UtcNow,
+            InputStates = [new("report.narrative", "report.original-statement", UiInputPresence.NotProvided)] }, default);
+        Assert.DoesNotContain((await Replay(context)).Messages, message => message.Content == "The description is entered.");
+    }
+
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
