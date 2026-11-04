@@ -34,7 +34,7 @@ public sealed class EllaiFrameworkAgent
         Func<string, CancellationToken, ValueTask>? onVerifiedStreamSegment = null,
         Func<CancellationToken, Task<bool>>? revalidateStreamObservations = null,
         string? frameworkSessionJson = null, int maxModelCalls = int.MaxValue,
-        bool enableKnowledgeSpecialist = false, bool enableCaseSpecialist = false)
+        bool enableKnowledgeSpecialist = false, bool enableCaseSpecialist = false, bool enableAnalyticsSpecialist = false)
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentException.ThrowIfNullOrWhiteSpace(instructions);
@@ -172,6 +172,33 @@ public sealed class EllaiFrameworkAgent
             }
             tools.Add(AIFunctionFactory.Create(DelegateCase, name: "ellai_delegate_case",
                 description: "Delegate one bounded question about an authorized case timeline to the case specialist."));
+        }
+        if (enableAnalyticsSpecialist && context.Actor is not null &&
+            context.AllowedTools?.Contains(EllaiToolNames.OwnedCaseCount) == true)
+        {
+            var delegationCount = 0;
+            async Task<string> DelegateAnalytics(string task, CancellationToken token)
+            {
+                token.ThrowIfCancellationRequested();
+                if (Interlocked.Increment(ref delegationCount) != 1)
+                    return "Analytics delegation limit reached.";
+                try
+                {
+                    var result = await new EllaiAnalyticsSpecialist(_client, _agentFactory).RunAsync(task,
+                        instructions, true, context, usage, Current, InvokeGuardedTool, revalidateTool ?? invoke, token,
+                        calls => Interlocked.Add(ref delegatedModelCalls, calls)).ConfigureAwait(false);
+                    if (result.Outcome != EllaiSpecialistOutcome.Completed || result.Decision is null)
+                        return "Analytics specialist could not verify an answer.";
+                    var json = System.Text.Json.JsonSerializer.Serialize(result.Decision);
+                    return json.Length <= 12000 ? json : "Analytics specialist result exceeded its limit.";
+                }
+                catch (EllaiFrameworkFailureException)
+                {
+                    return "Analytics specialist could not complete the request.";
+                }
+            }
+            tools.Add(AIFunctionFactory.Create(DelegateAnalytics, name: "ellai_delegate_analytics",
+                description: "Delegate one authorized owned-case count with an explicit 1 to 365 day window."));
         }
         var guardedClient = new ModelCallGuard(_client, Current, usage, maxModelCalls);
         var functionClient = new FunctionInvokingChatClient(guardedClient)

@@ -14,6 +14,68 @@ namespace SwiftAid.Integration.Tests;
 public sealed class EllaiOwnedCaseCountPostgresTests
 {
     [FrameworkPostgresFact]
+    public async Task AnalyticsDelegationUsesAuthorizedPostgresAggregateAndRejectsRevocation()
+    {
+        await using var fixture = await CaseAuthorityPostgresFixture.CreateAsync(frameworkFixture: true);
+        await using var db = fixture.CreateDbContext();
+        var unit = new PostgresCaseCommandUnitOfWork(db);
+        var query = new DashboardAggregateQuery(new PostgresDashboardAggregateStore(db),
+            new CaseAccessPolicy(new PostgresCurrentAccessGrantStore(db, unit), new PostgresCaseAccessDescriptorStore(db, unit)), unit, TimeProvider.System);
+        var context = new EllaiToolContext("analytics-fixture", "scope", "cases", null, 4, true,
+            "consent/0", EllaiProcessingClassification.UserProvidedNonSensitive, fixture.CreateActor(),
+            new HashSet<string> { EllaiToolNames.OwnedCaseCount }, EllaiConsentPurposes.PublicProductHelp);
+        var broker = new EllaiToolBroker(new EllaiPolicyService(), new EllaiConsentService(), dashboard: query);
+        async Task<EllaiDecision?> RunAsync(bool revoke)
+        {
+            using var model = new DelegatedCountClient();
+            var calls = 0;
+            return await new EllaiFrameworkAgent(model).RunAsync(context, "Synthetic policy",
+                [new ChatMessage(ChatRole.User, "Count my cases from the last 30 days")], 256, _ => Task.FromResult(true),
+                async (child, request, ct) =>
+                {
+                    var result = await broker.InvokeAsync(child, request, ct);
+                    if (++calls == 1 && revoke) await fixture.SetGrantExpiryAsync(DateTimeOffset.UtcNow.AddMinutes(-1));
+                    return result;
+                }, new EllaiFrameworkUsage(context.SessionId, new EllaiUsageLedger(), new InMemoryEllaiUsageStore()), default,
+                enableAnalyticsSpecialist: true);
+        }
+        var allowed = await RunAsync(false);
+        Assert.NotNull(allowed);
+        Assert.Contains("managed case(s)", allowed.DisplayText);
+        Assert.Equal("DashboardAggregate", Assert.Single(Assert.Single(allowed.Claims).Evidence).SourceKind);
+        using (var model = new DelegatedCountClient())
+        {
+            var executor = new EllaiFrameworkExecutor(model, new EllaiPromptBuilder("Synthetic policy", "test"),
+                broker, new EllaiUsageLedger(), new InMemoryEllaiUsageStore(), enableAnalyticsSpecialist: true);
+            var executed = await executor.RunAsync(new EllaiLoopRequest(context, "Count my cases from the last 30 days",
+                new EllaiRoleOverlay("ask", "Be brief."), "analytics", 1024, "cycle", 1), default);
+            Assert.True(executed.Completed, executed.FailureCode);
+            Assert.Contains("managed case(s)", executed.Decision!.DisplayText);
+            Assert.Equal(EllaiToolNames.OwnedCaseCount, Assert.Single(executed.ObservedTools!).ToolName);
+        }
+        Assert.Null(await RunAsync(true));
+    }
+
+    private sealed class DelegatedCountClient : IChatClient
+    {
+        private int _calls;
+        public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
+        {
+            if (++_calls == 1)
+                return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant,
+                    [new FunctionCallContent("delegate", "ellai_delegate_analytics", new Dictionary<string, object?> { ["task"] = "Count my cases from the last 30 days" })])));
+            if (_calls == 2)
+                return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant,
+                    [new FunctionCallContent("count", EllaiToolNames.OwnedCaseCount, new Dictionary<string, object?> { ["window_days"] = "30" })])));
+            return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant, "{}")));
+        }
+        public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+        public void Dispose() { }
+    }
+
+    [FrameworkPostgresFact]
     public async Task FrameworkWithholdsUnchangedCountWhenPostgresMembershipChanges()
     {
         await using var fixture = await CaseAuthorityPostgresFixture.CreateAsync(frameworkFixture: true);

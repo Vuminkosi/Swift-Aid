@@ -211,7 +211,8 @@ builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiTrainingVerifier>();
         SwiftAid.Gateway.Ellai.EllaiReasoningRegistration.AddEllaiReasoningExecutor(
             builder.Services, ellai, builder.Configuration["Ellai:ExecutionEngine"],
             builder.Configuration.GetValue<bool>("Ellai:Specialists:Knowledge:Enabled"),
-            builder.Configuration.GetValue<bool>("Ellai:Specialists:Case:Enabled"));
+            builder.Configuration.GetValue<bool>("Ellai:Specialists:Case:Enabled"),
+            builder.Configuration.GetValue<bool>("Ellai:Specialists:Analytics:Enabled"));
     }
 
     if (ellai.HasUploadAsrRoute)

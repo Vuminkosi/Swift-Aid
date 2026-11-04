@@ -11,6 +11,7 @@ public static class EllaiSpecialistRegistry
 {
     public const string Knowledge = "core.knowledge";
     public const string Case = "core.case";
+    public const string Analytics = "core.analytics";
 
     private static readonly FrozenDictionary<string, EllaiSpecialistProfile> Profiles =
         new[]
@@ -18,7 +19,9 @@ public static class EllaiSpecialistRegistry
             new EllaiSpecialistProfile(Knowledge, 1, "Ellai:Specialists:Knowledge:Enabled",
                 new[] { EllaiToolNames.DocsSearch, EllaiToolNames.DocsGet }.ToFrozenSet(StringComparer.Ordinal)),
             new EllaiSpecialistProfile(Case, 1, "Ellai:Specialists:Case:Enabled",
-                new[] { EllaiToolNames.CaseTimeline }.ToFrozenSet(StringComparer.Ordinal))
+                new[] { EllaiToolNames.CaseTimeline }.ToFrozenSet(StringComparer.Ordinal)),
+            new EllaiSpecialistProfile(Analytics, 1, "Ellai:Specialists:Analytics:Enabled",
+                new[] { EllaiToolNames.OwnedCaseCount }.ToFrozenSet(StringComparer.Ordinal))
         }.ToFrozenDictionary(profile => profile.AgentId, StringComparer.Ordinal);
 
     public static bool TryGet(string agentId, out EllaiSpecialistProfile profile)
