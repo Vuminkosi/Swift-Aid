@@ -15,6 +15,7 @@ public sealed class EllaiFollowUpScheduleOptions
     public int BatchSize { get; set; } = 10;
     public int PollSeconds { get; set; } = 60;
     public int CadenceHours { get; set; } = 4;
+    public long ConfigurationRevision { get; set; } = 1;
 
     public void Validate()
     {
@@ -22,7 +23,7 @@ public sealed class EllaiFollowUpScheduleOptions
             Workspaces.Any(x => string.IsNullOrWhiteSpace(x) || x.Length > 120 || x != x.Trim()) ||
             Workspaces.Distinct(StringComparer.Ordinal).Count() != Workspaces.Length ||
             string.IsNullOrWhiteSpace(PolicyVersion) || PolicyVersion.Length > 120 ||
-            BatchSize is < 1 or > 100 || PollSeconds is < 30 or > 3600 || CadenceHours is not (4 or 8))
+            BatchSize is < 1 or > 100 || PollSeconds is < 30 or > 3600 || CadenceHours is not (4 or 8) || ConfigurationRevision < 1)
             throw new InvalidOperationException("Follow-up scheduling requires bounded, explicit workspace and policy configuration.");
     }
 }
@@ -59,14 +60,23 @@ public sealed class EllaiFollowUpSweep(SwiftAidDbContext db, EllaiFollowUpWork w
         // Stable workspace jitter spreads new schedules across the first five minutes.
         var hash = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes("ops.followup:" + workspaceId));
         var jitter = System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(hash) % 300;
-        await schedule.CreateAsync(workspaceId, "ops.followup", options.CadenceHours, options.PolicyVersion,
-            DateTimeOffset.UtcNow.AddSeconds(jitter), ct);
-        var cadence = await db.Database.SqlQuery<int>($"""
-            SELECT cadence_hours AS "Value" FROM ellai_operational_schedules
+        await schedule.ReconcileConfigurationAsync(workspaceId, "ops.followup", options.CadenceHours, options.PolicyVersion,
+            options.ConfigurationRevision, DateTimeOffset.UtcNow.AddSeconds(jitter), ct);
+        var configured = await db.Database.SqlQuery<int>($"""
+            SELECT count(*)::int AS "Value" FROM ellai_operational_schedules
             WHERE workspace_id = {workspaceId} AND role_id = 'ops.followup'
+                AND cadence_hours = {options.CadenceHours} AND policy_version = {options.PolicyVersion}
+                AND configuration_revision = {options.ConfigurationRevision}
             """).SingleAsync(ct);
-        if (cadence != options.CadenceHours) return "cadence-mismatch";
-        var lease = await schedule.TryClaimAsync(workspaceId, "ops.followup", TimeSpan.FromMinutes(5), ct);
+        if (configured != 1)
+        {
+            var samePolicy = await db.Database.SqlQuery<int>($"""
+                SELECT count(*)::int AS "Value" FROM ellai_operational_schedules
+                WHERE workspace_id = {workspaceId} AND role_id = 'ops.followup' AND policy_version = {options.PolicyVersion}
+                """).SingleAsync(ct);
+            return samePolicy == 1 ? "configuration-mismatch" : "policy-mismatch";
+        }
+        var lease = await schedule.TryClaimAsync(workspaceId, "ops.followup", TimeSpan.FromMinutes(5), ct, options.ConfigurationRevision);
         if (lease is null) return "not-due";
         var finished = false;
         try
