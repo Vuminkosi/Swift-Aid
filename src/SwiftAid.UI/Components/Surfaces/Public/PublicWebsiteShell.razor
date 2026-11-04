@@ -1,7 +1,15 @@
+@using Microsoft.AspNetCore.Components.Authorization
+@using SwiftAid.Contracts.Ellai
+@using SwiftAid.UI.Ellai.Guidance
+@implements IEllaiUiContextProvider
+
+<EllaiSemanticContext Provider="this" />
+
 <div class="public-website-shell">
     <a class="public-website-shell__skip" href="#guest-main">Skip to main content</a>
     <header class="public-website-shell__header">
-        <a class="public-website-shell__brand" href="/" aria-label="SwiftAid home">
+        <a class="public-website-shell__brand" href="/" aria-label="SwiftAid home"
+           data-ellai-control="navigation.home" data-bonboarding-anchor="ellai-navigation-home">
             <img src="_content/SwiftAid.UI/assets/swiftaid-icon.png" alt="" />
             <span>SwiftAid</span>
         </a>
@@ -9,7 +17,13 @@
             <a href="/sessions">Community</a>
             <AuthorizeView>
                 <Authorized>
-                    <a class="public-website-shell__sign-in" href="/dashboard">Workspace</a>
+                    <a class="public-website-shell__sign-in" href="/dashboard" data-ellai-control="navigation.dashboard"
+                       data-bonboarding-anchor="ellai-navigation-dashboard">Workspace</a>
+                    <a class="public-website-shell__settings" href="/account" aria-label="Settings" title="Settings"
+                       data-ellai-control="navigation.account" data-bonboarding-anchor="ellai-navigation-account">
+                        <MudIcon Icon="@Icons.Material.Outlined.Settings" aria-hidden="true" />
+                        <span>Settings</span>
+                    </a>
                 </Authorized>
                 <NotAuthorized>
                     <a class="public-website-shell__sign-in" href="/sign-in">Sign in</a>
@@ -34,6 +48,37 @@
 </div>
 
 @code {
+    private const string PublicNavigationComponentId = "shell.public-navigation";
+    private static readonly UiControlDescriptor[] PublicNavigationControls =
+    [
+        EllaiNavigationManifest.Controls.Single(control => control.ControlId == "navigation.home"),
+        EllaiNavigationManifest.Controls.Single(control => control.ControlId == "navigation.dashboard"),
+        EllaiNavigationManifest.Controls.Single(control => control.ControlId == "navigation.account"),
+    ];
+
+    private bool _isAuthenticated;
+
+    [CascadingParameter]
+    private Task<AuthenticationState>? AuthenticationStateTask { get; set; }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _isAuthenticated = AuthenticationStateTask is not null &&
+            (await AuthenticationStateTask).User.Identity?.IsAuthenticated == true;
+    }
+
     [Parameter]
     public RenderFragment? ChildContent { get; set; }
+
+    public string ComponentId => PublicNavigationComponentId;
+
+    public EllaiUiManifest Describe() => new(ComponentId, "nav-home", null,
+        "Navigate from the public website to Home, the workspace, or account settings.", PublicNavigationControls);
+
+    public EllaiUiState GetState() => new(ComponentId, false, false,
+    [
+        new("navigation.home", UiObservationState.Ready),
+        new("navigation.dashboard", _isAuthenticated ? UiObservationState.Ready : UiObservationState.Unmounted),
+        new("navigation.account", _isAuthenticated ? UiObservationState.Ready : UiObservationState.Unmounted),
+    ]);
 }
