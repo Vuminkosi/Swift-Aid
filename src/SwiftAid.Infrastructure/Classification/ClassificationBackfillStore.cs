@@ -11,6 +11,27 @@ namespace SwiftAid.Infrastructure.Classification;
 /// <summary>Immutable source snapshot and bounded reconciliation; inference uses the existing registry leases.</summary>
 public sealed class ClassificationBackfillStore(SwiftAidDbContext db, IOptions<ClassificationOptions> options, TimeProvider clock)
 {
+    /// <summary>Finds a runnable job only within the configured machine scope.
+    /// Job and result locks still arbitrate concurrent workers when it is processed.</summary>
+    public async Task<Guid?> FindRunnableAsync(CancellationToken ct)
+    {
+        options.Value.Validate();
+        var configuration = options.Value.Profile.Hash;
+        var workerId = options.Value.WorkerId;
+        var organizations = options.Value.Organizations;
+        return await (from job in db.Set<ClassificationBackfillEntity>().AsNoTracking()
+                      join link in db.WorkspaceOrganizations.AsNoTracking()
+                          on new { job.WorkspaceId, job.OrganizationId } equals new { link.WorkspaceId, link.OrganizationId }
+                      join workspace in db.Workspaces.AsNoTracking() on job.WorkspaceId equals workspace.WorkspaceId
+                      join organization in db.Organizations.AsNoTracking() on job.OrganizationId equals organization.OrganizationId
+                      where job.WorkerId == workerId && job.State == "Running" &&
+                            job.ConfigurationHash == configuration && organizations.Contains(job.OrganizationId) &&
+                            link.Status == PersistentResourceStatus.Active && workspace.Status == PersistentResourceStatus.Active &&
+                            organization.Status == PersistentResourceStatus.Active
+                      orderby job.UpdatedAtUtc, job.Id
+                      select (Guid?)job.Id).FirstOrDefaultAsync(ct).ConfigureAwait(false);
+    }
+
     public async Task<ClassificationBackfillStatus> StartAsync(StartClassificationBackfill request, CancellationToken ct)
     {
         options.Value.Validate();

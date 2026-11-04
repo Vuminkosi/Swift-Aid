@@ -15,6 +15,7 @@ class ClassificationSettings(BaseSettings):
     allow_loopback_http: bool = False
     health_file: str | None = None
     backfill_interval_seconds: float = Field(default=1, ge=0.1, le=60)
+    automatic_backfill_enabled: bool = False
 
     @model_validator(mode="after")
     def validate_transport(self) -> "ClassificationSettings":

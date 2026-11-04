@@ -25,6 +25,23 @@ async def process_next(job_id: str, gateway: Any, classifier: Any) -> dict[str, 
     return status
 
 
+async def run_discovered_backfills(settings: Any, gateway: Any, classifier: Any) -> None:
+    """Run one bounded background lane for jobs admitted by the Gateway."""
+    while True:
+        try:
+            response = await gateway.client.get("backfills/runnable")
+            response.raise_for_status()
+            job_id = response.json().get("jobId")
+            if job_id:
+                await process_next(str(job_id), gateway, classifier)
+        except asyncio.CancelledError:
+            raise
+        except (httpx.HTTPError, ConnectionError, OSError, ValueError, KeyError) as error:
+            logger.warning("Backfill discovery deferred: %s", type(error).__name__)
+            await asyncio.sleep(10)
+        await asyncio.sleep(settings.backfill_interval_seconds)
+
+
 async def run_backfill(settings: Any, classifier: Any, job_id: str) -> None:
     async with httpx.AsyncClient(base_url=settings.gateway_url.rstrip("/") + "/api/internal/classification/",
         headers={"Authorization": f"Bearer {settings.worker_token}"}, timeout=30, follow_redirects=False) as client:
