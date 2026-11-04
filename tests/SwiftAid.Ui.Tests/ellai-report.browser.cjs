@@ -45,6 +45,8 @@ const { chromium } = require(process.env.SWIFTAID_PLAYWRIGHT_PACKAGE || 'playwri
             await accepted('report.subject');
             await page.waitForFunction(() => window.fixtureObservations.collect().inputStates?.some(input =>
                 input.inputId === 'report.original-statement' && input.presence === 0));
+            await page.waitForFunction(() => window.fixtureObservations.collect().inputStates?.some(input =>
+                input.inputId === 'report.locality' && input.presence === 2));
             assert.equal(await page.locator('[data-ellai-control="report.narrative"]').getByRole('textbox').count(), 1,
                 'Narrative guidance must highlight its editable control');
             await page.getByRole('button', { name: 'Review report', exact: true }).click();

@@ -6,6 +6,7 @@ using SwiftAid.Contracts.Intake;
 using SwiftAid.Contracts.Ellai;
 using SwiftAid.UI.Components.Public;
 using SwiftAid.UI.Components.Public.GuidedReportStepper;
+using SwiftAid.UI.Components.Geography;
 
 namespace SwiftAid.Ui.Tests;
 
@@ -30,6 +31,46 @@ public sealed partial class GuidedReportDraftPersistenceTests
         Assert.DoesNotContain("SYNTHETIC PRIVATE", System.Text.Json.JsonSerializer.Serialize(state));
         draft.OccurrencePrecision = ReportedTimePrecision.Unknown;
         Assert.DoesNotContain(component.GetState().InputStates, input => input.InputId == "report.occurrence-date");
+    }
+
+    [Fact]
+    public async Task ManualPlaceInputStatesPreserveUnknownAndIdentifyInvalidNames()
+    {
+        var draft = CreateDraft();
+        draft.RegionPresence = PresenceState.Known;
+        draft.Region = "SYNTHETIC PRIVATE region";
+        draft.AreaPresence = PresenceState.Known;
+        draft.Area = new string('x', 201);
+        var component = CreateStepper(draft, _ => Task.CompletedTask);
+        component.Countries = [new("SZ", "Eswatini")];
+        component.CountryCatalogueVersion = "test-v1";
+        component.CountryCatalogueIsCurrent = true;
+        await (Task)Invoke(component, "ContinueFromTypeAsync")!;
+
+        var state = component.GetState();
+        Assert.Contains(state.InputStates, input => input.InputId == "report.region" && input.Presence == UiInputPresence.Entered);
+        Assert.Contains(state.InputStates, input => input.InputId == "report.area" && input.Presence == UiInputPresence.Invalid);
+        Assert.Contains(state.InputStates, input => input.InputId == "report.locality" && input.Presence == UiInputPresence.Unknown);
+        Assert.DoesNotContain("SYNTHETIC PRIVATE", System.Text.Json.JsonSerializer.Serialize(state));
+    }
+
+    [Fact]
+    public async Task RegistryPickerDoesNotReportHiddenManualFields()
+    {
+        var draft = CreateDraft();
+        draft.CountryCode = "SZ";
+        var component = CreateStepper(draft, _ => Task.CompletedTask);
+        component.Countries = [new("SZ", "Eswatini")];
+        component.CountryCatalogueVersion = "test-v1";
+        component.CountryCatalogueIsCurrent = true;
+        component.GeoCountries = [new GeoPlaceCountry("SZ", "Eswatini")];
+        component.PlaceSearchFunc = (_, _, _) => throw new InvalidOperationException("Search must not run when reading state.");
+        component.PlaceChildrenFunc = (_, _) => throw new InvalidOperationException("Search must not run when reading state.");
+        await (Task)Invoke(component, "ContinueFromTypeAsync")!;
+
+        var states = component.GetState().InputStates;
+        Assert.Contains(states, input => input.InputId == "report.place-search" && input.Presence == UiInputPresence.Unknown);
+        Assert.DoesNotContain(states, input => input.InputId is "report.region" or "report.area" or "report.locality");
     }
     [Fact]
     public void ReviewSummaryOmitsPlaceNamesMarkedUnknown()

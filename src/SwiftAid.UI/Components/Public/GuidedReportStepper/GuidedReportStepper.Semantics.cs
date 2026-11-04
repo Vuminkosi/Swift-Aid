@@ -62,6 +62,17 @@ public partial class GuidedReportStepper
                     Add("report.time-location", "report.utc-offset", TextState(Draft.OccurrenceOffset, HasValidOccurrenceOffset()));
                 }
                 Add("report.time-location", "report.occurrence-country", TextState(Draft.CountryCode, CanConfirmCountry));
+                if (ShowRegistryPicker)
+                    Add("report.time-location", "report.place-search", CurrentPlaceSelection is null ? UiInputPresence.Unknown : UiInputPresence.Entered);
+                if (ShowManualPlaceFieldsGrid)
+                {
+                    static UiInputPresence PlaceState(PresenceState presence, string? value) => presence != PresenceState.Known
+                        ? UiInputPresence.Unknown : PublicReportDraft.IsValidPlaceName(presence, value)
+                            ? UiInputPresence.Entered : UiInputPresence.Invalid;
+                    Add("report.time-location", "report.region", PlaceState(Draft.RegionPresence, Draft.Region));
+                    Add("report.time-location", "report.area", PlaceState(Draft.AreaPresence, Draft.Area));
+                    Add("report.time-location", "report.locality", PlaceState(Draft.LocalityPresence, Draft.Locality));
+                }
             }
         }
         else if (_step == 2 && HasProcessingPolicy)
