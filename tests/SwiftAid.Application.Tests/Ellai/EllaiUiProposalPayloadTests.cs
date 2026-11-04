@@ -16,7 +16,7 @@ public sealed class EllaiUiProposalPayloadTests
         {
             Arguments = new Dictionary<string, string> { ["age"] = "26" }
         }]));
-        Assert.Throws<ArgumentException>(() => EllaiUiProposalPayload.Serialize([proposal with { ControlId = "report.original-statement" }]));
+        Assert.Throws<ArgumentException>(() => EllaiUiProposalPayload.Serialize([proposal with { ControlId = "report.subject-kind" }]));
     }
 
     [Theory]
