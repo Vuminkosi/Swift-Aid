@@ -7,6 +7,25 @@ namespace SwiftAid.Ui.Tests;
 public sealed class ReportVoiceAssistantContextTests
 {
     [Fact]
+    public async Task ChangingDraftCancelsSavedRecordingAndRejectsLateTurn()
+    {
+        var context = new EllaiPublicReportDraftContext();
+        var owner = new object();
+        var pending = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        string? capture = null;
+        CancellationToken token = default;
+        context.Register(owner, _ => true, () => null, _ => true, _ => true, _ => true, new object());
+        context.RegisterVoiceController(new object(), _ => Task.FromResult(false), () => Task.CompletedTask,
+            (_, id, ct) => { capture = id; token = ct; return pending.Task; });
+        var processing = context.TranscribeSavedVoiceAsync(_ => Task.FromResult(Array.Empty<byte>()));
+        context.Remove(owner);
+        Assert.True(token.IsCancellationRequested);
+        Assert.Null(context.AdmitVoiceTurn("session", "late", capture));
+        pending.SetResult(true);
+        Assert.False(await processing);
+    }
+
+    [Fact]
     public async Task ConflictingSuggestionsAreNeverAutoApplied()
     {
         var context = new EllaiPublicReportDraftContext();

@@ -21,17 +21,29 @@ public sealed class ReportVoiceGatewayService(
             return false;
         }
 
-        var grant = consent.Grant(sessionId, EllaiConsentDimension.ReasoningText,
-            ReportVoiceExtractionAdmission.ConsentPurpose, ReportVoiceExtractionAdmission.ConsentDataClass,
-            TimeSpan.FromHours(1));
+        var grants = new[]
+        {
+            consent.Grant(sessionId, EllaiConsentDimension.Transcription,
+                ReportVoiceExtractionAdmission.ConsentPurpose, EllaiVoiceTranscriptionService.AudioDataClass,
+                TimeSpan.FromHours(1)),
+            consent.Grant(sessionId, EllaiConsentDimension.ReasoningText,
+                ReportVoiceExtractionAdmission.ConsentPurpose, ReportVoiceExtractionAdmission.ConsentDataClass,
+                TimeSpan.FromHours(1))
+        };
         try
         {
-            await consentStore.RecordAsync(grant, cancellationToken).ConfigureAwait(false);
+            foreach (var grant in grants)
+                await consentStore.RecordAsync(grant, cancellationToken).ConfigureAwait(false);
             return true;
         }
         catch
         {
-            consent.Revoke(grant.GrantId);
+            foreach (var grant in grants)
+            {
+                consent.Revoke(grant.GrantId);
+                try { await consentStore.SetRevokedAsync(sessionId, grant.GrantId, CancellationToken.None).ConfigureAwait(false); }
+                catch (Exception) { }
+            }
             throw;
         }
     }

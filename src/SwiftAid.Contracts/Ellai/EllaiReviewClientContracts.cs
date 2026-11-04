@@ -282,6 +282,10 @@ public interface IEllaiReviewClient
     Task<bool> GrantReportVoiceConsentAsync(string sessionId, CancellationToken cancellationToken) =>
         Task.FromResult(false);
 
+    Task<EllaiVoiceTranscriptionResult?> TranscribeSavedReportVoiceAsync(
+        string sessionId, byte[] audio, CancellationToken cancellationToken) =>
+        Task.FromResult<EllaiVoiceTranscriptionResult?>(null);
+
     Task<ReportVoiceExtractionResponse?> ExtractReportVoiceAsync(
         string sessionId, string transcript, CancellationToken cancellationToken) =>
         Task.FromResult<ReportVoiceExtractionResponse?>(null);

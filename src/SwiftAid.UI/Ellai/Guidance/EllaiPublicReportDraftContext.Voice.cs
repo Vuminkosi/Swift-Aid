@@ -10,6 +10,7 @@ public sealed partial class EllaiPublicReportDraftContext
     private Func<ReportVoiceSuggestion, string, bool>? _autoFillVoice;
     private Func<EllaiVoiceCaptureMode, Task<bool>>? _startVoice;
     private Func<Task>? _stopVoice;
+    private Func<Func<CancellationToken, Task<byte[]>>, string, CancellationToken, Task<bool>>? _savedVoice;
     private readonly HashSet<string> _voiceTurns = new(StringComparer.Ordinal);
     private long _voiceGeneration;
     private bool _voiceEnabled;
@@ -26,9 +27,10 @@ public sealed partial class EllaiPublicReportDraftContext
     public string VoiceStatus { get { lock (_gate) return _voiceStatus; } }
     public IReadOnlyList<ReportVoiceSuggestion> VoiceSuggestions { get { lock (_gate) return _voiceSuggestions; } }
 
-    public void RegisterVoiceController(object controller, Func<EllaiVoiceCaptureMode, Task<bool>> start, Func<Task> stop)
+    public void RegisterVoiceController(object controller, Func<EllaiVoiceCaptureMode, Task<bool>> start, Func<Task> stop,
+        Func<Func<CancellationToken, Task<byte[]>>, string, CancellationToken, Task<bool>>? savedVoice = null)
     {
-        lock (_gate) { _voiceController = controller; _startVoice = start; _stopVoice = stop; }
+        lock (_gate) { _voiceController = controller; _startVoice = start; _stopVoice = stop; _savedVoice = savedVoice; }
         VoiceChanged?.Invoke();
     }
 
@@ -40,6 +42,7 @@ public sealed partial class EllaiPublicReportDraftContext
             _voiceController = null;
             _startVoice = null;
             _stopVoice = null;
+            _savedVoice = null;
             ResetVoiceAssistanceLocked();
         }
         VoiceChanged?.Invoke();
@@ -89,6 +92,41 @@ public sealed partial class EllaiPublicReportDraftContext
         if (stale) return false;
         VoiceChanged?.Invoke();
         return started;
+    }
+
+    public async Task<bool> TranscribeSavedVoiceAsync(Func<CancellationToken, Task<byte[]>> readWave)
+    {
+        Func<Func<CancellationToken, Task<byte[]>>, string, CancellationToken, Task<bool>> run;
+        string captureId;
+        long generation;
+        CancellationToken token;
+        lock (_gate)
+        {
+            if (_owner is null || _savedVoice is null || _voiceRecording) return false;
+            _voiceLifetime?.Cancel();
+            _voiceLifetime?.Dispose();
+            _voiceLifetime = new CancellationTokenSource();
+            token = _voiceLifetime.Token;
+            _voiceEnabled = true;
+            _voiceTurns.Clear();
+            _voiceSuggestions = [];
+            captureId = Guid.NewGuid().ToString("N");
+            _voiceCaptureId = captureId;
+            generation = ++_voiceGeneration;
+            _voiceStatus = "Transcribing the saved voice note...";
+            run = _savedVoice;
+        }
+        VoiceChanged?.Invoke();
+        bool success;
+        try { success = await run(readWave, captureId, token).ConfigureAwait(false); }
+        catch (Exception) { success = false; }
+        lock (_gate)
+        {
+            if (generation != _voiceGeneration) return false;
+            if (!success) _voiceStatus = "Saved voice transcription is unavailable. You can retry or type your report.";
+        }
+        VoiceChanged?.Invoke();
+        return success;
     }
 
     public async Task StopReportVoiceAsync()

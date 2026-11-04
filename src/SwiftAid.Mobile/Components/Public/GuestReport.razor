@@ -167,6 +167,7 @@
                              VoiceElapsed="_audioState.Elapsed"
                              VoiceMessage="@AudioMessage"
                              VoiceSaved="_voiceSaved"
+                             ReadSavedVoiceWaveAsync="@SavedVoiceReader"
                              TemporaryCleanupPending="_audioState.TemporaryCleanupPending"
                              OnRetryTemporaryCleanup="RetryTemporaryCleanupAsync"
                              OnStartRecording="StartRecordingAsync"
@@ -886,6 +887,33 @@
 
     private static bool HasLocalAudio(IntakeSubmission? submission) =>
         submission is not null && submission.OriginalAudioAttachmentIds.Count > 0;
+
+    private Func<CancellationToken, Task<byte[]>>? SavedVoiceReader =>
+#if ANDROID
+        _voiceSaved && _activeDraftId.HasValue && _savedAudioAttachmentId.HasValue ? ReadSavedVoiceWaveAsync : null;
+#else
+        null;
+#endif
+
+#if ANDROID
+    private async Task<byte[]> ReadSavedVoiceWaveAsync(CancellationToken cancellationToken)
+    {
+        if (!_voiceSaved || _activeDraftId is not { } draftId || _savedAudioAttachmentId is not { } attachmentId)
+            throw new InvalidOperationException("The saved voice note is unavailable.");
+        var original = await AudioStore.ReadOriginalAsync(draftId, attachmentId, cancellationToken);
+        try
+        {
+            var wave = await SwiftAid.Mobile.Services.Audio.AndroidSavedReportVoiceDecoder.DecodeAsync(original, cancellationToken);
+            if (cancellationToken.IsCancellationRequested || !_voiceSaved || _activeDraftId != draftId || _savedAudioAttachmentId != attachmentId)
+            {
+                CryptographicOperations.ZeroMemory(wave);
+                throw new OperationCanceledException(cancellationToken);
+            }
+            return wave;
+        }
+        finally { CryptographicOperations.ZeroMemory(original); }
+    }
+#endif
 
     private PublicVoiceCaptureState AudioViewState => _voiceSaved && _audioState.Status is not (AudioCaptureStatus.Recording or AudioCaptureStatus.Playing)
         ? PublicVoiceCaptureState.ReadyToSave

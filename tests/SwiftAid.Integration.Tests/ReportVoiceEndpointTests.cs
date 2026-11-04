@@ -59,6 +59,20 @@ public sealed class ReportVoiceEndpointTests
         Assert.Contains(guest ? "/guest/" : "/ellai/sessions/", socket.AbsolutePath);
     }
 
+    [Theory]
+    [InlineData(true, "/api/v1/ellai/guest/sessions/session/report-voice/saved-recording")]
+    [InlineData(false, "/api/v1/ellai/sessions/session/report-voice/saved-recording")]
+    public async Task SavedRecordingUsesReportRouteAndAntiforgery(bool guest, string expectedPath)
+    {
+        var handler = new FixtureHttpHandler();
+        using var http = new HttpClient(handler) { BaseAddress = new Uri("https://localhost/") };
+        var client = new EllaiReviewHttpClient(http, guest);
+        await client.TranscribeSavedReportVoiceAsync("session", [1, 2], default);
+        Assert.Equal(expectedPath, handler.LastPath);
+        Assert.Equal("fixture-token", handler.LastAntiforgery);
+        Assert.Equal("audio/wav", handler.LastContentType);
+    }
+
     [Fact]
     public async Task HttpRequiresConsentAndRejectsOtherOwnersAndCookieWithoutAntiforgery()
     {
@@ -78,19 +92,36 @@ public sealed class ReportVoiceEndpointTests
         builder.Services.AddSingleton<EllaiUsageLedger>();
         builder.Services.AddSingleton<IEllaiUsageStore, InMemoryEllaiUsageStore>();
         builder.Services.AddSingleton<IEllaiTurnCompletionClient, FixtureCompletion>();
-        builder.Services.AddSingleton(new EllaiOptions { Enabled = true });
+        var options = new EllaiOptions { Enabled = true, ApiKey = "synthetic", AsrModel = "fixture", AsrTranscriptionUrl = "https://asr.invalid/transcribe" };
+        builder.Services.AddSingleton(options);
+        builder.Services.AddSingleton(new MetaAsrUploadAdapter(new HttpClient(new FixtureAsrHandler()), options));
         builder.Services.AddScoped<ReportVoiceExtraction>();
         builder.Services.AddScoped<ReportVoiceExtractionAdmission>();
         builder.Services.AddScoped<ReportVoiceGatewayService>();
+        builder.Services.AddScoped<EllaiVoiceTranscriptionService>();
         await using var app = builder.Build();
         app.UseAuthentication();
         app.UseAuthorization();
         var group = app.MapGroup("/sessions/{sessionId}").RequireAuthorization();
         group.MapPost("/consent", ReportVoiceEndpoints.ConsentAsync);
         group.MapPost("/extract", ReportVoiceEndpoints.ExtractAsync);
+        group.MapPost("/saved", ReportVoiceEndpoints.TranscribeSavedAsync);
         await app.StartAsync();
         using var client = app.GetTestClient();
 
+        static ByteArrayContent Wave()
+        {
+            var bytes = new byte[44];
+            "RIFF"u8.CopyTo(bytes);
+            "WAVE"u8.CopyTo(bytes.AsSpan(8));
+            var content = new ByteArrayContent(bytes);
+            content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("audio/wav");
+            return content;
+        }
+        Assert.Equal(HttpStatusCode.NotFound, (await client.PostAsync("/sessions/other/saved", Wave())).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest,
+            (await client.PostAsync("/sessions/session/saved", new ByteArrayContent([1]))).StatusCode);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, (await client.PostAsync("/sessions/session/saved", Wave())).StatusCode);
         var beforeConsent = await client.PostAsJsonAsync("/sessions/session/extract", new ReportVoiceExtractionRequest("A fever"));
         Assert.Equal("ConsentRequired", (await beforeConsent.Content.ReadFromJsonAsync<ReportVoiceExtractionResponse>())!.Status);
         var foreign = await client.PostAsJsonAsync("/sessions/other/consent", new ReportVoiceConsentRequest(true));
@@ -104,11 +135,29 @@ public sealed class ReportVoiceEndpointTests
 
         Assert.Equal(HttpStatusCode.NoContent,
             (await client.PostAsJsonAsync("/sessions/session/consent", new ReportVoiceConsentRequest(true))).StatusCode);
+        var voice = new EllaiVoiceTranscriptionService(app.Services.GetRequiredService<EllaiConsentService>(),
+            app.Services.GetRequiredService<IEllaiConsentStore>(), app.Services.GetRequiredService<EllaiOptions>(), app.Services);
+        Assert.True(await voice.HasSavedReportConsentAsync("session", default));
+        Assert.False(await voice.HasConsentAsync("session", default));
+        var transcription = await client.PostAsync("/sessions/session/saved", Wave());
+        Assert.Equal(HttpStatusCode.OK, transcription.StatusCode);
+        var transcript = await transcription.Content.ReadFromJsonAsync<EllaiVoiceTranscriptionResult>();
+        Assert.Equal("A fever", transcript!.Transcript);
+        Assert.False(transcript.ServerSubmission);
         var response = await client.PostAsJsonAsync("/sessions/session/extract", new ReportVoiceExtractionRequest("A fever"));
         Assert.Equal("no-store, private", response.Headers.CacheControl!.ToString());
         var result = await response.Content.ReadFromJsonAsync<ReportVoiceExtractionResponse>();
         Assert.Equal("Ready", result!.Status);
         Assert.Equal("fever", Assert.Single(result.Suggestions).Value);
+    }
+
+    private sealed class FixtureAsrHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = JsonContent.Create(new { transcript = "A fever" })
+            });
     }
 
     private sealed class FixtureCompletion : IEllaiTurnCompletionClient
@@ -122,6 +171,7 @@ public sealed class ReportVoiceEndpointTests
         public string? LastPath { get; private set; }
         public string? LastAntiforgery { get; private set; }
         public string? LastQuery { get; private set; }
+        public string? LastContentType { get; private set; }
 
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
@@ -132,6 +182,7 @@ public sealed class ReportVoiceEndpointTests
                 });
             LastPath = request.RequestUri!.AbsolutePath;
             LastQuery = request.RequestUri.Query;
+            LastContentType = request.Content?.Headers.ContentType?.MediaType;
             LastAntiforgery = request.Headers.TryGetValues("X-CSRF-TOKEN", out var values) ? values.Single() : null;
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
             {

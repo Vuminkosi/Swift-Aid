@@ -29,7 +29,7 @@
                          DraftSavedMessage="Your report draft is saved on this device. It has not been sent."
                          OnSubmit="@(SubmitAvailable ? OnSendReport : default)">
         <DetailsLeadContent>
-            <ReportVoiceAssistant />
+            <ReportVoiceAssistant ReadSavedVoiceWaveAsync="ReadSavedVoiceWaveAsync" />
             @if (ShowVoiceCapture)
             {
                 <section class="public-report-voice" aria-labelledby="public-report-voice-title">
@@ -184,6 +184,7 @@
     [Parameter] public TimeSpan VoiceElapsed { get; set; }
     [Parameter] public string? VoiceMessage { get; set; }
     [Parameter] public bool VoiceSaved { get; set; }
+    [Parameter] public Func<CancellationToken, Task<byte[]>>? ReadSavedVoiceWaveAsync { get; set; }
     [Parameter] public bool TemporaryCleanupPending { get; set; }
     [Parameter] public EventCallback OnRetryTemporaryCleanup { get; set; }
     [Parameter] public EventCallback OnStartRecording { get; set; }

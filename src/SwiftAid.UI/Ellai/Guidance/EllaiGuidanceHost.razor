@@ -290,7 +290,7 @@
     protected override void OnInitialized()
     {
         _reportVoiceContext = Services.GetService<EllaiPublicReportDraftContext>();
-        _reportVoiceContext?.RegisterVoiceController(this, StartReportVoiceCaptureAsync, StopReportVoiceCaptureAsync);
+        _reportVoiceContext?.RegisterVoiceController(this, StartReportVoiceCaptureAsync, StopReportVoiceCaptureAsync, TranscribeSavedReportVoiceAsync);
         _validationGuidance = Services.GetService<EllaiValidationGuidance>();
         if (_validationGuidance is not null)
             _validationGuidance.Changed += OnValidationGuidanceChanged;

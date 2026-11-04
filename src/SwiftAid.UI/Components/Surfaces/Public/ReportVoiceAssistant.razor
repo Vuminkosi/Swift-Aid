@@ -28,6 +28,13 @@
                        Disabled="@(!_confirmed || _busy || _context?.VoiceAvailable != true)" OnClick="StartRecordedAsync">
                 Record then transcribe
             </MudButton>
+            @if (ReadSavedVoiceWaveAsync is not null)
+            {
+                <MudButton ButtonType="ButtonType.Button" Variant="Variant.Outlined" Color="Color.Primary"
+                           Disabled="@(!_confirmed || _busy || _context?.VoiceAvailable != true)" OnClick="TranscribeSavedAsync">
+                    Transcribe saved voice note
+                </MudButton>
+            }
         </div>
     }
     <MudText Typo="Typo.caption" role="status" aria-live="polite">
@@ -59,6 +66,8 @@
 </section>
 
 @code {
+    [Parameter] public Func<CancellationToken, Task<byte[]>>? ReadSavedVoiceWaveAsync { get; set; }
+
     private EllaiPublicReportDraftContext? _context;
     private bool _confirmed;
     private bool _busy;
@@ -72,6 +81,14 @@
 
     private Task StartLiveAsync() => StartAsync(EllaiVoiceCaptureMode.Live);
     private Task StartRecordedAsync() => StartAsync(EllaiVoiceCaptureMode.Recorded);
+
+    private async Task TranscribeSavedAsync()
+    {
+        if (!_confirmed || _busy || _context is null || ReadSavedVoiceWaveAsync is null) return;
+        _busy = true;
+        try { await _context.TranscribeSavedVoiceAsync(ReadSavedVoiceWaveAsync); }
+        finally { _busy = false; }
+    }
 
     private async Task ConsentChangedAsync(bool confirmed)
     {

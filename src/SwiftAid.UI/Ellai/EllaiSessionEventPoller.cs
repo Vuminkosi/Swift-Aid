@@ -284,6 +284,40 @@ public sealed class EllaiReviewHttpClient(HttpClient http, bool useGuestRoutes =
         catch (Exception) { return null; }
     }
 
+    public async Task<EllaiVoiceTranscriptionResult?> TranscribeSavedReportVoiceAsync(
+        string sessionId, byte[] audio, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(sessionId) || audio is null || audio.Length == 0 || audio.Length > 32 * 1024 * 1024)
+            return null;
+        try
+        {
+            var route = $"{SessionRoute(sessionId)}/report-voice/saved-recording";
+            HttpResponseMessage response;
+            if (_useGuestRoutes)
+                response = await PostBytesAsync(route, audio, "audio/wav", cancellationToken).ConfigureAwait(false);
+            else
+            {
+                string? token = null;
+                using var tokenResponse = await _http.GetAsync("auth/antiforgery", cancellationToken).ConfigureAwait(false);
+                if (tokenResponse.IsSuccessStatusCode)
+                {
+                    using var document = JsonDocument.Parse(await tokenResponse.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false));
+                    if (document.RootElement.TryGetProperty("requestToken", out var property)) token = property.GetString();
+                }
+                using var request = new HttpRequestMessage(HttpMethod.Post, route) { Content = new ByteArrayContent(audio) };
+                request.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("audio/wav");
+                if (!string.IsNullOrWhiteSpace(token)) request.Headers.TryAddWithoutValidation("X-CSRF-TOKEN", token);
+                response = await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            }
+            using (response)
+                return response.IsSuccessStatusCode
+                    ? await response.Content.ReadFromJsonAsync<EllaiVoiceTranscriptionResult>(Json, cancellationToken).ConfigureAwait(false)
+                    : null;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch (Exception) { return null; }
+    }
+
     private async Task<HttpResponseMessage> PostReportVoiceAsync<T>(string route, T value, CancellationToken ct)
     {
         if (_useGuestRoutes) return await PostAsJsonAsync(route, value, ct).ConfigureAwait(false);

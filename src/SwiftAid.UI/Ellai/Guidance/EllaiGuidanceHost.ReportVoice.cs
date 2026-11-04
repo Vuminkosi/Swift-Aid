@@ -25,6 +25,34 @@ public partial class EllaiGuidanceHost
         return started;
     }
 
+    private async Task<bool> TranscribeSavedReportVoiceAsync(
+        Func<CancellationToken, Task<byte[]>> readWave, string captureId, CancellationToken cancellationToken)
+    {
+        var success = false;
+        await InvokeAsync(async () =>
+        {
+            if (_sessionView is not { Status: "Active" }) await SelectModeAsync(EllaiMode.Ask);
+            if (_sessionView is not { Status: "Active" } session) return;
+            if (!await ReviewClient.GrantReportVoiceConsentAsync(session.SessionId, cancellationToken)) return;
+            byte[]? wave = null;
+            try
+            {
+                wave = await readWave(cancellationToken);
+                cancellationToken.ThrowIfCancellationRequested();
+                var result = await ReviewClient.TranscribeSavedReportVoiceAsync(session.SessionId, wave, cancellationToken);
+                cancellationToken.ThrowIfCancellationRequested();
+                if (string.IsNullOrWhiteSpace(result?.Transcript)) return;
+                QueueReportVoiceTurn(session.SessionId, Guid.NewGuid().ToString("N"), captureId, result.Transcript);
+                success = true;
+            }
+            finally
+            {
+                if (wave is not null) System.Security.Cryptography.CryptographicOperations.ZeroMemory(wave);
+            }
+        });
+        return success;
+    }
+
     private Task StopReportVoiceCaptureAsync() => InvokeAsync(StopVoiceCaptureAsync);
 
     private void QueueReportVoiceTurn(string sessionId, string turnId, string? captureId, string transcript)

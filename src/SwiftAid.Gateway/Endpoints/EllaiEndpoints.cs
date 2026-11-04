@@ -73,6 +73,8 @@ public static class EllaiEndpoints
             .WithMetadata(new RequestSizeLimitAttribute(1024));
         group.MapPost("/sessions/{sessionId}/report-voice/extract", ReportVoiceEndpoints.ExtractAsync)
             .WithMetadata(new RequestSizeLimitAttribute(32768));
+        group.MapPost("/sessions/{sessionId}/report-voice/saved-recording", ReportVoiceEndpoints.TranscribeSavedAsync)
+            .WithMetadata(new RequestSizeLimitAttribute(EllaiVoiceTranscriptionService.MaximumAudioBytes));
         group.MapPost("/sessions", StartAsync)
             .WithMetadata(new RequestSizeLimitAttribute(MaximumRequestBodyBytes))
             .WithName("StartEllaiSession")

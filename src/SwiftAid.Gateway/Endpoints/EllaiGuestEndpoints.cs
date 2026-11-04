@@ -120,6 +120,8 @@ public static class EllaiGuestEndpoints
             .WithMetadata(new RequestSizeLimitAttribute(1024));
         group.MapPost("/sessions/{sessionId}/report-voice/extract", ReportVoiceEndpoints.ExtractAsync)
             .WithMetadata(new RequestSizeLimitAttribute(32768));
+        group.MapPost("/sessions/{sessionId}/report-voice/saved-recording", ReportVoiceEndpoints.TranscribeSavedAsync)
+            .WithMetadata(new RequestSizeLimitAttribute(EllaiVoiceTranscriptionService.MaximumAudioBytes));
 
         group.MapGet("/sessions/{sessionId}/guidance/admission", EllaiGuidanceProposalEndpoint.ReadAsync);
         group.MapPost("/sessions/{sessionId}/guidance/plan", EllaiGuidanceProposalEndpoint.PrepareAsync);

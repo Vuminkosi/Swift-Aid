@@ -236,6 +236,32 @@ public sealed class EllaiReviewGatewayClient(
         catch (Exception) { return false; }
     }
 
+    public async Task<EllaiVoiceTranscriptionResult?> TranscribeSavedReportVoiceAsync(
+        string sessionId, byte[] audio, CancellationToken cancellationToken)
+    {
+        if (audio is null || audio.Length == 0 || audio.Length > EllaiVoiceTranscriptionService.MaximumAudioBytes) return null;
+        try
+        {
+            var state = await _authenticationStateProvider.GetAuthenticationStateAsync().ConfigureAwait(false);
+            var principal = ResolvePrincipal(state.User, sessionId);
+            var sessions = _serviceProvider.GetService<EllaiSessionService>();
+            var voice = _serviceProvider.GetService<EllaiVoiceTranscriptionService>();
+            if (principal is null || sessions is null || voice is null ||
+                await sessions.GetOwnedViewAsync(sessionId, principal, cancellationToken).ConfigureAwait(false) is not { Status: "Active" }) return null;
+            var store = _serviceProvider.GetRequiredService<IEllaiSessionStore>();
+            var before = await store.GetAsync(sessionId, cancellationToken).ConfigureAwait(false);
+            var actor = ActorContext.FromValidatedPrincipal(principal);
+            if (before is null || before.Status != "Active" || before.OwnerActorId != actor.ActorId) return null;
+            using var stream = new MemoryStream(audio, writable: false);
+            var result = await voice.TranscribeSavedReportAsync(sessionId, stream, audio.LongLength, cancellationToken).ConfigureAwait(false);
+            var after = await store.GetAsync(sessionId, cancellationToken).ConfigureAwait(false);
+            return after is { Status: "Active" } && after.OwnerActorId == actor.ActorId && after.ScopeEpoch == before.ScopeEpoch
+                ? result : null;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch (Exception) { return null; }
+    }
+
     public async Task<ReportVoiceExtractionResponse?> ExtractReportVoiceAsync(
         string sessionId, string transcript, CancellationToken cancellationToken)
     {
