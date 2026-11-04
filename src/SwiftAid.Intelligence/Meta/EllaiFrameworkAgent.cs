@@ -154,14 +154,20 @@ public sealed class EllaiFrameworkAgent
                         return "Documentation changed while it was being checked.";
                     }
                     if (result.Outcome != EllaiSpecialistOutcome.Completed || result.Decision is null)
+                    {
+                        Interlocked.Exchange(ref invalidDelegation, 1);
                         return "Knowledge specialist could not verify an answer.";
+                    }
                     var json = System.Text.Json.JsonSerializer.Serialize(result.Decision);
-                    return json.Length <= 12000 ? json : "Knowledge specialist result exceeded its limit.";
+                    if (json.Length <= 12000) return json;
+                    Interlocked.Exchange(ref invalidDelegation, 1);
+                    return "Knowledge specialist result exceeded its limit.";
                 }
                 catch (OperationCanceledException) when (!token.IsCancellationRequested && deadline.IsCancellationRequested)
                 { Interlocked.Exchange(ref invalidDelegation, 1); return "Knowledge specialist timed out."; }
                 catch (EllaiFrameworkFailureException)
                 {
+                    Interlocked.Exchange(ref invalidDelegation, 1);
                     return "Knowledge specialist could not complete the request.";
                 }
             }
@@ -192,14 +198,20 @@ public sealed class EllaiFrameworkAgent
                         return "Case data changed while it was being checked.";
                     }
                     if (result.Outcome != EllaiSpecialistOutcome.Completed || result.Decision is null)
+                    {
+                        Interlocked.Exchange(ref invalidDelegation, 1);
                         return "Case specialist could not verify an answer.";
+                    }
                     var json = System.Text.Json.JsonSerializer.Serialize(result.Decision);
-                    return json.Length <= 12000 ? json : "Case specialist result exceeded its limit.";
+                    if (json.Length <= 12000) return json;
+                    Interlocked.Exchange(ref invalidDelegation, 1);
+                    return "Case specialist result exceeded its limit.";
                 }
                 catch (OperationCanceledException) when (!token.IsCancellationRequested && deadline.IsCancellationRequested)
                 { Interlocked.Exchange(ref invalidDelegation, 1); return "Case specialist timed out."; }
                 catch (EllaiFrameworkFailureException error) when (error.Code != EllaiToolReasonCodes.DeniedByPolicy)
                 {
+                    Interlocked.Exchange(ref invalidDelegation, 1);
                     return "Case specialist could not complete the request.";
                 }
             }
@@ -224,14 +236,20 @@ public sealed class EllaiFrameworkAgent
                         instructions, true, context, usage, Current, InvokeGuardedTool, revalidateTool ?? invoke, deadline.Token,
                         calls => Interlocked.Add(ref delegatedModelCalls, calls)).ConfigureAwait(false);
                     if (result.Outcome != EllaiSpecialistOutcome.Completed || result.Decision is null)
+                    {
+                        Interlocked.Exchange(ref invalidDelegation, 1);
                         return "Analytics specialist could not verify an answer.";
+                    }
                     var json = System.Text.Json.JsonSerializer.Serialize(result.Decision);
-                    return json.Length <= 12000 ? json : "Analytics specialist result exceeded its limit.";
+                    if (json.Length <= 12000) return json;
+                    Interlocked.Exchange(ref invalidDelegation, 1);
+                    return "Analytics specialist result exceeded its limit.";
                 }
                 catch (OperationCanceledException) when (!token.IsCancellationRequested && deadline.IsCancellationRequested)
                 { Interlocked.Exchange(ref invalidDelegation, 1); return "Analytics specialist timed out."; }
                 catch (EllaiFrameworkFailureException)
                 {
+                    Interlocked.Exchange(ref invalidDelegation, 1);
                     return "Analytics specialist could not complete the request.";
                 }
             }
@@ -558,6 +576,13 @@ public sealed class EllaiFrameworkAgent
                     }
                 }
             }
+        }
+        catch (EllaiFrameworkFailureException error) when (
+            error.Code == EllaiToolReasonCodes.DeniedByPolicy &&
+            Volatile.Read(ref invalidDelegation) != 0 && streamedSegments.Count == 0)
+        {
+            LastFailureCode = EllaiToolReasonCodes.DeniedByPolicy;
+            return null;
         }
         finally { LastModelCallCount = guardedClient.CallSequence + Volatile.Read(ref delegatedModelCalls); }
         if (Volatile.Read(ref invalidDelegation) != 0) { LastFailureCode = EllaiToolReasonCodes.DeniedByPolicy; return null; }
