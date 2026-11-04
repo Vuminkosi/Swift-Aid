@@ -21,12 +21,11 @@ public static class HealthOfficerDesignationEndpoints
 
     public static void MapHealthOfficerDesignationEndpoints(this IEndpointRouteBuilder endpoints)
     {
-        var schemes = string.Join(",", IdentityConstants.ApplicationScheme, OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme);
         endpoints.MapPost("/api/v1/health-officer-designations/changes", ChangeAsync)
-            .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = schemes })
+            .RequireAuthorization(new AuthorizeAttribute { Policy = "SwiftAidStaffApi" })
             .WithMetadata(new RequestSizeLimitAttribute(2048));
         endpoints.MapPost("/api/v1/health-officer-designations/lookup", LookupAsync)
-            .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = schemes })
+            .RequireAuthorization(new AuthorizeAttribute { Policy = "SwiftAidStaffApi" })
             .WithMetadata(new RequestSizeLimitAttribute(2048));
     }
 

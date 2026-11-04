@@ -18,10 +18,8 @@ public static class EventSubscriptionEndpoints
     public static void MapEventSubscriptionEndpoints(this IEndpointRouteBuilder endpoints)
     {
         ArgumentNullException.ThrowIfNull(endpoints);
-        var schemes = string.Join(",", IdentityConstants.ApplicationScheme,
-            OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme);
         var routes = endpoints.MapGroup("/api/v1/sessions/{sessionId:guid}/subscription")
-            .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = schemes });
+            .RequireAuthorization(new AuthorizeAttribute { Policy = "SwiftAidStaffApi" });
         routes.AddEndpointFilter(NoStoreAsync);
 
         routes.MapGet("/", GetAsync)
@@ -53,7 +51,7 @@ public static class EventSubscriptionEndpoints
             .Produces<ProblemDetails>(StatusCodes.Status409Conflict);
 
         endpoints.MapGet("/api/v1/my/session-subscriptions", ListMineAsync)
-            .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = schemes })
+            .RequireAuthorization(new AuthorizeAttribute { Policy = "SwiftAidStaffApi" })
             .AddEndpointFilter(NoStoreAsync)
             .WithName("ListOwnEventSubscriptions")
             .Produces<IReadOnlyList<EventSubscription>>(StatusCodes.Status200OK)

@@ -32,8 +32,7 @@ public static class WorkspaceAccessEndpoints
 {
     public static void MapWorkspaceAccessEndpoints(this IEndpointRouteBuilder endpoints)
     {
-        var auth = new AuthorizeAttribute { AuthenticationSchemes = string.Join(",", IdentityConstants.ApplicationScheme,
-            OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme) };
+        var auth = new AuthorizeAttribute { Policy = "SwiftAidStaffApi" };
         endpoints.MapGet("/api/v1/me/workspaces", async (string? workspace, HttpContext context,
             IWorkspaceAccessRequest service, CancellationToken ct) =>
         {

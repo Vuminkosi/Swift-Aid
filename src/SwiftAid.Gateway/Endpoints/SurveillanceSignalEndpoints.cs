@@ -13,8 +13,7 @@ public static class SurveillanceSignalEndpoints
 {
     public static void MapSurveillanceSignalEndpoints(this IEndpointRouteBuilder endpoints)
     {
-        var auth = new AuthorizeAttribute { AuthenticationSchemes = string.Join(",", IdentityConstants.ApplicationScheme,
-            OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme) };
+        var auth = new AuthorizeAttribute { Policy = "SwiftAidStaffApi" };
         endpoints.MapGet("/api/v1/cases/{caseId:guid}/signals", async (Guid caseId, HttpContext context, ISignalReviewService service, CancellationToken ct) =>
         {
             context.Response.Headers.CacheControl = "private, no-store";

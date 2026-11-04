@@ -15,9 +15,8 @@ public static class CorrelationDecisionEndpoints
 {
     public static void MapCorrelationDecisionEndpoints(this IEndpointRouteBuilder endpoints)
     {
-        var schemes = string.Join(",", IdentityConstants.ApplicationScheme, OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme);
         endpoints.MapPost("/api/v1/cases/{caseId:guid}/correlation-candidates/{recommendationId:guid}/decision", ReviewAsync)
-            .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = schemes })
+            .RequireAuthorization(new AuthorizeAttribute { Policy = "SwiftAidStaffApi" })
             .WithMetadata(new RequestSizeLimitAttribute(2048));
     }
 

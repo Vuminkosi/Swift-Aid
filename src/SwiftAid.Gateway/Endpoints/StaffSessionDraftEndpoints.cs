@@ -20,8 +20,7 @@ public static class StaffSessionDraftEndpoints
 
     public static void MapStaffSessionDraftEndpoints(this IEndpointRouteBuilder endpoints)
     {
-        var auth = new AuthorizeAttribute { AuthenticationSchemes = string.Join(",", IdentityConstants.ApplicationScheme,
-            OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme) };
+        var auth = new AuthorizeAttribute { Policy = "SwiftAidStaffApi" };
         var group = endpoints.MapGroup("/api/v1/session-editor").RequireAuthorization(auth);
         group.MapPost("/draft-reservations", ReserveAsync).WithMetadata(new RequestSizeLimitAttribute(4096));
         group.MapPost("/drafts", CreateAsync).WithMetadata(new RequestSizeLimitAttribute(64 * 1024));

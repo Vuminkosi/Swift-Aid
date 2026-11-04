@@ -29,30 +29,25 @@ public static class CommunitySessionEndpoints
     {
         ArgumentNullException.ThrowIfNull(endpoints);
 
-        var schemes = string.Join(
-            ",",
-            IdentityConstants.ApplicationScheme,
-            OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme);
-
         var group = endpoints.MapGroup("/api/v1/sessions")
             .AddEndpointFilter(RequireCurrentAccountAsync);
         endpoints.MapGroup("/api/v1/organizations/{organizationId}/session-materials")
             .AddEndpointFilter(RequireCurrentAccountAsync)
             .MapDelete("/{materialId}/{sourceVersion}/approval", RevokeMaterialApprovalAsync)
-            .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = schemes })
+            .RequireAuthorization(new AuthorizeAttribute { Policy = "SwiftAidStaffApi" })
             .WithName("RevokeOrganizationSessionMaterialApproval")
             .Produces(StatusCodes.Status204NoContent)
             .Produces<ProblemDetails>(StatusCodes.Status401Unauthorized)
             .Produces<ProblemDetails>(StatusCodes.Status404NotFound);
         group.MapGet("/{sessionId:guid}/history", HistoryAsync)
-            .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = schemes })
+            .RequireAuthorization(new AuthorizeAttribute { Policy = "SwiftAidStaffApi" })
             .WithName("GetCommunitySessionHistory")
             .Produces<SessionHistoryPage>(StatusCodes.Status200OK)
             .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
             .Produces<ProblemDetails>(StatusCodes.Status401Unauthorized)
             .Produces<ProblemDetails>(StatusCodes.Status404NotFound);
         group.MapPost("/", CreateDraftAsync)
-            .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = schemes })
+            .RequireAuthorization(new AuthorizeAttribute { Policy = "SwiftAidStaffApi" })
             .WithMetadata(new RequestSizeLimitAttribute(MaximumRequestBodyBytes))
             .WithName("CreateCommunitySessionDraft")
             .Accepts<CreateSessionApiRequest>("application/json")
@@ -63,7 +58,7 @@ public static class CommunitySessionEndpoints
             .Produces<ProblemDetails>(StatusCodes.Status409Conflict)
             .Produces<ProblemDetails>(StatusCodes.Status422UnprocessableEntity);
         group.MapPut("/{sessionId:guid}", UpdateAsync)
-            .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = schemes })
+            .RequireAuthorization(new AuthorizeAttribute { Policy = "SwiftAidStaffApi" })
             .WithMetadata(new RequestSizeLimitAttribute(MaximumRequestBodyBytes))
             .WithName("UpdateCommunitySession")
             .Accepts<UpdateSessionApiRequest>("application/json")
@@ -74,7 +69,7 @@ public static class CommunitySessionEndpoints
             .Produces<ProblemDetails>(StatusCodes.Status409Conflict)
             .Produces<ProblemDetails>(StatusCodes.Status422UnprocessableEntity);
         group.MapPost("/{sessionId:guid}/review", ReviewAsync)
-            .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = schemes })
+            .RequireAuthorization(new AuthorizeAttribute { Policy = "SwiftAidStaffApi" })
             .WithMetadata(new RequestSizeLimitAttribute(MaximumRequestBodyBytes))
             .WithName("ReviewCommunitySession")
             .Accepts<ReviewSessionApiRequest>("application/json")
@@ -85,7 +80,7 @@ public static class CommunitySessionEndpoints
             .Produces<ProblemDetails>(StatusCodes.Status409Conflict)
             .Produces<ProblemDetails>(StatusCodes.Status422UnprocessableEntity);
         group.MapPost("/{sessionId:guid}/schedule", ScheduleAsync)
-            .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = schemes })
+            .RequireAuthorization(new AuthorizeAttribute { Policy = "SwiftAidStaffApi" })
             .WithMetadata(new RequestSizeLimitAttribute(MaximumRequestBodyBytes))
             .WithName("ScheduleCommunitySession")
             .Accepts<ScheduleSessionApiRequest>("application/json")
@@ -96,7 +91,7 @@ public static class CommunitySessionEndpoints
             .Produces<ProblemDetails>(StatusCodes.Status409Conflict)
             .Produces<ProblemDetails>(StatusCodes.Status422UnprocessableEntity);
         group.MapPost("/{sessionId:guid}/cancel", CancelAsync)
-            .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = schemes })
+            .RequireAuthorization(new AuthorizeAttribute { Policy = "SwiftAidStaffApi" })
             .WithMetadata(new RequestSizeLimitAttribute(MaximumRequestBodyBytes))
             .WithName("CancelCommunitySession")
             .Accepts<CancelSessionApiRequest>("application/json")
@@ -107,7 +102,7 @@ public static class CommunitySessionEndpoints
             .Produces<ProblemDetails>(StatusCodes.Status409Conflict)
             .Produces<ProblemDetails>(StatusCodes.Status422UnprocessableEntity);
         group.MapPost("/{sessionId:guid}/complete", CompleteAsync)
-            .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = schemes })
+            .RequireAuthorization(new AuthorizeAttribute { Policy = "SwiftAidStaffApi" })
             .WithMetadata(new RequestSizeLimitAttribute(MaximumRequestBodyBytes))
             .WithName("CompleteCommunitySession")
             .Accepts<CompleteSessionApiRequest>("application/json")

@@ -11,9 +11,8 @@ public static class CaseWorkDiscoveryEndpoints
 {
     public static void MapCaseWorkDiscoveryEndpoints(this IEndpointRouteBuilder endpoints)
     {
-        var schemes = string.Join(",", IdentityConstants.ApplicationScheme, OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme);
         endpoints.MapGet("/api/v1/cases/monitoring/cases", GetAsync)
-            .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = schemes });
+            .RequireAuthorization(new AuthorizeAttribute { Policy = "SwiftAidStaffApi" });
     }
 
     private static async Task<IResult> GetAsync(HttpContext context, CancellationToken cancellationToken)

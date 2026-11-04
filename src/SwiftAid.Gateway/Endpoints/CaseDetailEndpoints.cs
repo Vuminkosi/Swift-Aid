@@ -23,13 +23,8 @@ public static class CaseDetailEndpoints
     {
         ArgumentNullException.ThrowIfNull(endpoints);
 
-        var schemes = string.Join(
-            ",",
-            IdentityConstants.ApplicationScheme,
-            OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme);
-
         endpoints.MapGet("/api/v1/cases/{caseId:guid}/summary", GetSummaryAsync)
-            .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = schemes })
+            .RequireAuthorization(new AuthorizeAttribute { Policy = "SwiftAidStaffApi" })
             .WithName("GetCaseSummary")
             .Produces<CaseDetailSummary>(StatusCodes.Status200OK)
             .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
@@ -66,7 +61,7 @@ public static class CaseDetailEndpoints
             .Produces(StatusCodes.Status503ServiceUnavailable);
 
         endpoints.MapGet("/api/v1/cases/{caseId:guid}/correction", GetCorrectionReadAsync)
-            .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = schemes })
+            .RequireAuthorization(new AuthorizeAttribute { Policy = "SwiftAidStaffApi" })
             .WithName("GetCaseCorrectionRead")
             .Produces<CaseCorrectionReadData>(StatusCodes.Status200OK)
             .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)

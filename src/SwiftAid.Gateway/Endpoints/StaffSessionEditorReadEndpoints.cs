@@ -41,8 +41,7 @@ public static class StaffSessionEditorReadEndpoints
 {
     public static void MapStaffSessionEditorReadEndpoints(this IEndpointRouteBuilder endpoints)
     {
-        var auth = new AuthorizeAttribute { AuthenticationSchemes = string.Join(",", IdentityConstants.ApplicationScheme,
-            OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme) };
+        var auth = new AuthorizeAttribute { Policy = "SwiftAidStaffApi" };
         var group = endpoints.MapGroup("/api/v1/session-editor").RequireAuthorization(auth);
         group.MapGet("/actor", async (HttpContext context, IStaffSessionEditorReadRequest service, IWorkspaceAccessRequest access, CancellationToken ct) =>
         {

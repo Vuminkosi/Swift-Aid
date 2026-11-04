@@ -14,9 +14,8 @@ public static class HealthSourceEndpoints
 {
     public static void MapHealthSourceEndpoints(this IEndpointRouteBuilder endpoints)
     {
-        var schemes = string.Join(",", IdentityConstants.ApplicationScheme, OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme);
         endpoints.MapPost("/api/v1/health-sources/search", SearchAsync)
-            .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = schemes })
+            .RequireAuthorization(new AuthorizeAttribute { Policy = "SwiftAidStaffApi" })
             .WithMetadata(new RequestSizeLimitAttribute(2048));
     }
 

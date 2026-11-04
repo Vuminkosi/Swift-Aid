@@ -14,8 +14,7 @@ public static class CaseTranslationEndpoints
 {
     public static void MapCaseTranslationEndpoints(this IEndpointRouteBuilder endpoints)
     {
-        var auth = new AuthorizeAttribute { AuthenticationSchemes = string.Join(",", IdentityConstants.ApplicationScheme,
-            OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme) };
+        var auth = new AuthorizeAttribute { Policy = "SwiftAidStaffApi" };
         endpoints.MapGet("/api/v1/cases/{caseId:guid}/translations", async (Guid caseId, HttpContext context,
             CaseTranslationService service, CancellationToken ct) =>
         {

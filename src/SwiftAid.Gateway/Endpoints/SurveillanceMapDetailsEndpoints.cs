@@ -40,8 +40,7 @@ public static class SurveillanceMapDetailsEndpoints
 {
     public static void MapSurveillanceMapDetailsEndpoints(this IEndpointRouteBuilder endpoints)
     {
-        var auth = new AuthorizeAttribute { AuthenticationSchemes = string.Join(",", IdentityConstants.ApplicationScheme,
-            OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme) };
+        var auth = new AuthorizeAttribute { Policy = "SwiftAidStaffApi" };
         endpoints.MapGet("/api/v1/surveillance/map-details", async (string? country, string? period, string? workspace, HttpContext context,
             ISurveillanceMapDetailsRequest service, CancellationToken ct) =>
         {

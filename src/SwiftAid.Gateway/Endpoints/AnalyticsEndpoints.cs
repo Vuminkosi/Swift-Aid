@@ -10,8 +10,7 @@ public static class AnalyticsEndpoints
 {
     public static void MapAnalyticsEndpoints(this IEndpointRouteBuilder endpoints)
     {
-        var authorization = new AuthorizeAttribute { AuthenticationSchemes = string.Join(",", IdentityConstants.ApplicationScheme,
-            OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme) };
+        var authorization = new AuthorizeAttribute { Policy = "SwiftAidStaffApi" };
         endpoints.MapGet("/api/v1/analytics/work-summary", async (HttpContext context, int? page, int? pageSize,
             string? period, string? region, string? workType, CancellationToken cancellationToken) =>
         {

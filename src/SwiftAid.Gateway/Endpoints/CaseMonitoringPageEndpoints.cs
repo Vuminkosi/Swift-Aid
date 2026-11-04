@@ -11,9 +11,8 @@ public static class CaseMonitoringPageEndpoints
 {
     public static void MapCaseMonitoringPageEndpoints(this IEndpointRouteBuilder endpoints)
     {
-        var schemes = string.Join(",", IdentityConstants.ApplicationScheme, OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme);
         endpoints.MapGet("/api/v1/cases/{caseId:guid}/monitoring", GetAsync)
-            .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = schemes });
+            .RequireAuthorization(new AuthorizeAttribute { Policy = "SwiftAidStaffApi" });
     }
 
     private static async Task<IResult> GetAsync(HttpContext context, Guid caseId, CancellationToken cancellationToken)

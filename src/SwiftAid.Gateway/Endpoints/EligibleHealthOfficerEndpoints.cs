@@ -12,9 +12,8 @@ public static class EligibleHealthOfficerEndpoints
 {
     public static void MapEligibleHealthOfficerEndpoints(this IEndpointRouteBuilder endpoints)
     {
-        var schemes = string.Join(",", IdentityConstants.ApplicationScheme, OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme);
         endpoints.MapGet("/api/v1/cases/{caseId:guid}/eligible-health-officers", GetAsync)
-            .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = schemes });
+            .RequireAuthorization(new AuthorizeAttribute { Policy = "SwiftAidStaffApi" });
     }
 
     private static async Task<IResult> GetAsync(HttpContext context, Guid caseId, CancellationToken ct)

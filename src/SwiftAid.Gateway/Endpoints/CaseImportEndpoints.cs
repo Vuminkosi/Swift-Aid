@@ -21,10 +21,7 @@ public static class CaseImportEndpoints
 
     public static void MapCaseImportEndpoints(this IEndpointRouteBuilder endpoints)
     {
-        var routes = endpoints.MapGroup("/api/v1/case-imports").RequireAuthorization(new AuthorizeAttribute
-        {
-            AuthenticationSchemes = IdentityConstants.ApplicationScheme + "," + OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme
-        });
+        var routes = endpoints.MapGroup("/api/v1/case-imports").RequireAuthorization(new AuthorizeAttribute { Policy = "SwiftAidStaffApi" });
         routes.MapPost("/{importId:guid}/rows", ImportAsync).WithMetadata(new RequestSizeLimitAttribute(MaximumBatchBytes));
         routes.MapGet("/{importId:guid}", StatusAsync);
         routes.MapPost("/{importId:guid}/context-check", CheckContextAsync)

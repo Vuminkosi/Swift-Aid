@@ -31,13 +31,7 @@ public static class ManagedCaseRegistrationEndpoints
         ArgumentNullException.ThrowIfNull(endpoints);
 
         endpoints.MapPost("/api/v1/cases", RegisterAsync)
-            .RequireAuthorization(new AuthorizeAttribute
-            {
-                AuthenticationSchemes = string.Join(
-                    ",",
-                    IdentityConstants.ApplicationScheme,
-                    OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme)
-            })
+            .RequireAuthorization(new AuthorizeAttribute { Policy = "SwiftAidStaffApi" })
             .WithMetadata(new RequestSizeLimitAttribute(MaximumRequestBodyBytes))
             .WithName("RegisterManagedCase")
             .Accepts<ManagedCaseRegistrationApiRequest>("application/json")

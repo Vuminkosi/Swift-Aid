@@ -11,9 +11,8 @@ public static class SpatialAnalysisEndpoints
 {
     public static void MapSpatialAnalysisEndpoints(this IEndpointRouteBuilder endpoints)
     {
-        var schemes = string.Join(",", IdentityConstants.ApplicationScheme, OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme);
         endpoints.MapGet("/api/v1/cases/spatial/owned-regions", GetAsync)
-            .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = schemes });
+            .RequireAuthorization(new AuthorizeAttribute { Policy = "SwiftAidStaffApi" });
     }
 
     private static async Task<IResult> GetAsync(HttpContext context, CancellationToken ct)

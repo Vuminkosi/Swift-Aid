@@ -10,11 +10,10 @@ public static class CaseCorrelationEndpoints
 {
     public static void MapCaseCorrelationEndpoints(this IEndpointRouteBuilder endpoints)
     {
-        var schemes = string.Join(",", IdentityConstants.ApplicationScheme, OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme);
         endpoints.MapGet("/api/v1/cases/{caseId:guid}/correlation-candidates", GetAsync)
-            .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = schemes });
+            .RequireAuthorization(new AuthorizeAttribute { Policy = "SwiftAidStaffApi" });
         endpoints.MapGet("/api/v1/cases/{caseId:guid}/correlation-candidates/page", GetPageAsync)
-            .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = schemes });
+            .RequireAuthorization(new AuthorizeAttribute { Policy = "SwiftAidStaffApi" });
     }
 
     private static async Task<IResult> GetPageAsync(HttpContext context, Guid caseId, CancellationToken ct)
