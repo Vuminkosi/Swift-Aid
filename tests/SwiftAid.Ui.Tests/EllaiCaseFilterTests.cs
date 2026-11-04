@@ -7,6 +7,26 @@ namespace SwiftAid.Ui.Tests;
 
 public sealed class EllaiCaseFilterTests
 {
+    [Theory]
+    [InlineData("Change her age to 26.", 26)]
+    [InlineData("Correct the patient's age to 0", 0)]
+    public void ReportDraftContextAppliesOnlyAnExplicitAgeInTheSameUtterance(string utterance, int expectedAge)
+    {
+        var context = new EllaiPublicReportDraftContext();
+        var owner = new object();
+        var applied = -1;
+        context.Register(owner, age => { applied = age; return true; });
+
+        Assert.True(context.ApplyAgeCorrection(utterance));
+        Assert.Equal(expectedAge, applied);
+        Assert.False(context.ApplyAgeCorrection("Set her age to twenty six"));
+        Assert.False(context.ApplyAgeCorrection("Change her age to 26 and the symptoms"));
+        context.Remove(new object());
+        Assert.True(context.ApplyAgeCorrection("Change her age to 27"));
+        context.Remove(owner);
+        Assert.False(context.ApplyAgeCorrection("Change her age to 28"));
+    }
+
     private static UiIntentProposal Proposal(string key, string value) => new(UiIntentKind.SetPermittedFilter,
         "case-list", null, "case-list." + key, new Dictionary<string, string> { ["value"] = value });
     private static OperationsCaseQueue Create(Func<OperationsCaseQueue.FilterRequestView, Task> changed)

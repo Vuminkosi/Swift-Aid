@@ -5,6 +5,20 @@ namespace SwiftAid.Application.Tests.Ellai;
 
 public sealed class EllaiUiProposalPayloadTests
 {
+    [Fact]
+    public void ReportAgeCorrectionProposalContainsNoReportValues()
+    {
+        var proposal = new UiIntentProposal(UiIntentKind.UpdatePublicReportDraft, "report", null,
+            "report.age-years", new Dictionary<string, string>());
+        var payload = EllaiUiProposalPayload.Serialize([proposal]);
+        Assert.DoesNotContain("26", payload);
+        Assert.Throws<ArgumentException>(() => EllaiUiProposalPayload.Serialize([proposal with
+        {
+            Arguments = new Dictionary<string, string> { ["age"] = "26" }
+        }]));
+        Assert.Throws<ArgumentException>(() => EllaiUiProposalPayload.Serialize([proposal with { ControlId = "report.original-statement" }]));
+    }
+
     [Theory]
     [InlineData("pause", true)]
     [InlineData("resume", true)]

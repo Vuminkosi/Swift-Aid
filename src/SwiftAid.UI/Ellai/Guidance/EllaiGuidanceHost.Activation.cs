@@ -15,6 +15,7 @@ public partial class EllaiGuidanceHost
     private string? _lastTabSelectionProposalId;
     private string? _lastCaseNavigationProposalId;
     private string? _lastCaseFilterProposalId;
+    private string? _lastReportDraftEditProposalId;
     private string? _lastFeatureNavigationProposalId;
     private readonly EllaiNavigationTrail _navigationTrail = new();
     private string? _guidanceNotice;
@@ -106,6 +107,21 @@ public partial class EllaiGuidanceHost
         if (turn.Outcome != "Completed") return;
         newlyCompleted |= _pendingGuidanceTurn == turn.ClientUtteranceId;
         _pendingGuidanceTurn = null;
+        var draftEdits = turn.UiProposals.Where(item => item.Proposal.Kind == UiIntentKind.UpdatePublicReportDraft).Take(2).ToArray();
+        if (draftEdits.Length > 0)
+        {
+            if (draftEdits.Length == 1 && newlyCompleted && draftEdits[0].ProposalId != _lastReportDraftEditProposalId &&
+                draftEdits[0].Proposal is { FeatureId: "report", ResourceId: null, ControlId: "report.age-years", Arguments.Count: 0 } &&
+                turn.UserText is { } userText)
+            {
+                _lastReportDraftEditProposalId = draftEdits[0].ProposalId;
+                var context = Services.GetService(typeof(EllaiPublicReportDraftContext)) as EllaiPublicReportDraftContext;
+                _guidanceNotice = context?.ApplyAgeCorrection(userText) == true
+                    ? "Updated the reported age in the open report draft. Review it before submitting."
+                    : "I could not update the age. Open the report details and enter it there.";
+            }
+            return;
+        }
         var navigationProposals = turn.UiProposals.Where(item => item.Proposal.Kind == UiIntentKind.NavigateFeature).Take(2).ToArray();
         if (navigationProposals.Length > 0)
         {

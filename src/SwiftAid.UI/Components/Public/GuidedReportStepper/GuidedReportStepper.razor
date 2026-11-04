@@ -3,6 +3,7 @@
 @using Microsoft.AspNetCore.Components.Forms
 @using SwiftAid.Contracts.Geography
 @using SwiftAid.Contracts.Intake
+@inject SwiftAid.UI.Ellai.Guidance.EllaiPublicReportDraftContext? EllaiDraftContext
 @using SwiftAid.UI.Components.Geography
 @using SwiftAid.UI.Components.Public
 @implements IDisposable
@@ -703,6 +704,13 @@
     protected override void OnParametersSet()
     {
         ArgumentNullException.ThrowIfNull(Draft);
+        EllaiDraftContext?.Register(this, age =>
+        {
+            if (Draft.SubjectScope != IntakeSubjectScope.Human) return false;
+            Draft.AgeYearsText = age.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            _editContext.NotifyFieldChanged(new FieldIdentifier(Draft, nameof(Draft.AgeYearsText)));
+            return true;
+        });
         if (ReferenceEquals(Draft, _observedDraft) && CurrentDraftId == _observedDraftId)
         {
             if (Draft.SubjectScope is not null)
@@ -1536,6 +1544,7 @@
 
     public void Dispose()
     {
+        EllaiDraftContext?.Remove(this);
         if (_editContext is not null)
         {
             _editContext.OnFieldChanged -= HandleFieldChanged;
