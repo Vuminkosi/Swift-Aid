@@ -29,10 +29,14 @@ public sealed class TranslationOutboxDispatcher(SwiftAidDbContext db, INatsClien
         await using (var tx = await db.Database.BeginTransactionAsync(ct))
         {
             row = await db.Set<TranslationOutboxEntity>().FromSqlInterpolated($"""
-                SELECT o.* FROM swiftaid_translation.outbox o WHERE o."PublishedAtUtc" IS NULL AND o."Attempts" < 8
+                SELECT o.* FROM swiftaid_translation.outbox o
+                JOIN case_events e ON e.event_id = o."SourceEventId"
+                JOIN managed_cases c ON c.case_id = e.case_id
+                WHERE o."PublishedAtUtc" IS NULL AND o."Attempts" < 8
                 AND o."AvailableAtUtc" <= {now} AND (o."LeaseUntilUtc" IS NULL OR o."LeaseUntilUtc" <= {now})
                 AND EXISTS (SELECT 1 FROM swiftaid_translation.artifacts a WHERE a."Id" = o."ArtifactId" AND a."OrganizationId" = ANY({organizations}))
-                ORDER BY o."AvailableAtUtc" LIMIT 1 FOR UPDATE OF o SKIP LOCKED
+                ORDER BY c.created_at_utc DESC, c.case_id, o."AvailableAtUtc", o."Id"
+                LIMIT 1 FOR UPDATE OF o SKIP LOCKED
                 """).SingleOrDefaultAsync(ct);
             if (row is null) return false;
             var source = await db.CaseEvents.AsNoTracking().SingleAsync(x => x.EventId == row.SourceEventId, ct);
