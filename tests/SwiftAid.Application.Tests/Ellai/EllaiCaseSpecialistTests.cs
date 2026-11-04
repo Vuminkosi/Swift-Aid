@@ -78,6 +78,38 @@ public sealed class EllaiCaseSpecialistTests
         Assert.Equal(2, calls);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task EmptyQueueIsRecheckedAndNeverInventsEvidence(bool becomesNonEmpty)
+    {
+        using var model = new CaseClient(Guid.NewGuid(), queue: true);
+        var context = Context() with { AllowedTools = new HashSet<string> { EllaiToolNames.State } };
+        var calls = 0;
+        var agent = new EllaiFrameworkAgent(model);
+        var decision = await agent.RunAsync(context, "policy", [new ChatMessage(ChatRole.User, "Find my cases")], 512,
+            _ => Task.FromResult(true), (_, request, _) =>
+            {
+                calls++;
+                if (becomesNonEmpty && calls > 1)
+                    return Task.FromResult(new EllaiToolResult(request.ToolName, true, null,
+                        [new EvidenceRef("CaseQueue", Guid.NewGuid().ToString("D"), "2", null, "case")], "A case was found.", 1, false));
+                return Task.FromResult(new EllaiToolResult(request.ToolName, true, null, [],
+                    "Owned cases only; review status is not supplied.\nThe permitted work queue is empty.", 0, false));
+            }, Usage(), default, enableCaseSpecialist: true);
+        if (becomesNonEmpty)
+        {
+            Assert.Null(decision);
+        }
+        else
+        {
+            Assert.NotNull(decision);
+            Assert.Equal("No matching cases were found in your current owned-case queue.", decision.DisplayText);
+            Assert.Empty(decision.Claims);
+        }
+        Assert.True(calls >= 2);
+    }
+
     [Fact]
     public async Task CaseSpecialistRejectsMissingActorOrParentToolAuthority()
     {

@@ -34,7 +34,8 @@ public sealed class EllaiFrameworkAgent
         Func<string, CancellationToken, ValueTask>? onVerifiedStreamSegment = null,
         Func<CancellationToken, Task<bool>>? revalidateStreamObservations = null,
         string? frameworkSessionJson = null, int maxModelCalls = int.MaxValue,
-        bool enableKnowledgeSpecialist = false, bool enableCaseSpecialist = false, bool enableAnalyticsSpecialist = false)
+        bool enableKnowledgeSpecialist = false, bool enableCaseSpecialist = false, bool enableAnalyticsSpecialist = false,
+        bool allowEmptyCaseQueue = false)
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentException.ThrowIfNullOrWhiteSpace(instructions);
@@ -73,6 +74,8 @@ public sealed class EllaiFrameworkAgent
         var evidenceSources = new Dictionary<EvidenceRef, List<string>>();
         EllaiToolResult? countResult = null;
         EllaiToolRequest? countRequest = null;
+        EllaiToolResult? emptyQueueResult = null;
+        EllaiToolRequest? emptyQueueRequest = null;
         var toolCalls = 0;
         var streamSafeToolObservations = true;
         var guard = new EllaiFrameworkToolGuard(Math.Min(context.RemainingCalls, EllaiExecutionLimits.MaxToolCalls),
@@ -98,6 +101,11 @@ public sealed class EllaiFrameworkAgent
                     countResult = result;
                     countRequest = request;
                 }
+                if ((enableCaseSpecialist || allowEmptyCaseQueue) && IsEmptyQueueObservation(request, result))
+                {
+                    emptyQueueResult = result;
+                    emptyQueueRequest = request;
+                }
                 if (result.Allowed)
                     foreach (var reference in result.Evidence.Take(20))
                     {
@@ -113,7 +121,8 @@ public sealed class EllaiFrameworkAgent
             var result = await guard.InvokeAsync(toolContext, request, token).ConfigureAwait(false);
             // Only stop after the guard's post-call authorization has passed.
             // The final count is constructed from a fresh authorized read below.
-            if (request.ToolName == EllaiToolNames.OwnedCaseCount && result.Allowed && toolCalls == 1 &&
+            if ((request.ToolName == EllaiToolNames.OwnedCaseCount && result.Allowed ||
+                 (enableCaseSpecialist || allowEmptyCaseQueue) && IsEmptyQueueObservation(request, result)) && toolCalls == 1 &&
                 FunctionInvokingChatClient.CurrentContext is { FunctionCount: 1 } invocation)
                 invocation.Terminate = true;
             return result;
@@ -277,7 +286,7 @@ public sealed class EllaiFrameworkAgent
                         // the tool call. Keep it buffered until the final fence.
                         // Owned-case counts use a server-built decision after a
                         // fresh aggregate read, so model text is not publishable.
-                        if (onVerifiedStreamSegment is null || countResult is not null || streamingSuppressed) continue;
+                        if (onVerifiedStreamSegment is null || countResult is not null || emptyQueueResult is not null || streamingSuppressed) continue;
                         // Evidence-backed prose may be released early only when
                         // it matches a complete line of every cited observation.
                         // Paraphrases still flow through the committed answer.
@@ -312,7 +321,7 @@ public sealed class EllaiFrameworkAgent
         if (Volatile.Read(ref staleCaseDelegation) != 0) { LastFailureCode = EllaiToolReasonCodes.DeniedByPolicy; return null; }
         EllaiDecision? decision = null;
         if (guard.FailureCode is not null) { LastFailureCode = guard.FailureCode; return null; }
-        while (countResult is null)
+        while (countResult is null && emptyQueueResult is null)
         {
             LastModelCallCount = guardedClient.CallSequence + Volatile.Read(ref delegatedModelCalls);
             if (guard.FailureCode is not null) { LastFailureCode = guard.FailureCode; return null; }
@@ -389,6 +398,33 @@ public sealed class EllaiFrameworkAgent
             await SaveSessionAsync().ConfigureAwait(false);
             return decision;
         }
+        if (emptyQueueResult is not null)
+        {
+            if (streamedSegments.Count != 0 || toolCalls != 1 || emptyQueueRequest is null ||
+                !IsEmptyQueueObservation(emptyQueueRequest, emptyQueueResult) || !await Current(ct).ConfigureAwait(false))
+            {
+                LastFailureCode = EllaiToolReasonCodes.Unavailable;
+                return null;
+            }
+            var fresh = await (revalidateTool ?? invoke)(context, emptyQueueRequest, ct).ConfigureAwait(false);
+            if (!IsEmptyQueueObservation(emptyQueueRequest, fresh) || !await Current(ct).ConfigureAwait(false))
+            {
+                LastFailureCode = EllaiToolReasonCodes.Unavailable;
+                return null;
+            }
+            const string text = "No matching cases were found in your current owned-case queue.";
+            decision = new EllaiDecision(EllaiDecision.CurrentSchemaVersion, DecisionKind.Answer, text, text,
+                [], [], [], null, [], null, null);
+            if (EllaiDecisionValidator.Validate(decision).Count != 0 ||
+                onTextDelta is not null && !await PublishValidatedTextAsync(text, onTextDelta, Current, ct).ConfigureAwait(false) ||
+                !await Current(ct).ConfigureAwait(false))
+            {
+                LastFailureCode = EllaiToolReasonCodes.DeniedByPolicy;
+                return null;
+            }
+            await SaveSessionAsync().ConfigureAwait(false);
+            return decision;
+        }
         if (decision is null) return null;
         if (!streamSafeToolObservations && revalidateStreamObservations is not null &&
             !await revalidateStreamObservations(ct).ConfigureAwait(false))
@@ -458,6 +494,17 @@ public sealed class EllaiFrameworkAgent
 
     private static bool HasCountEvidence(EllaiToolResult result) => result.Evidence.Count == 1 &&
         result.Evidence[0] is { SourceKind: "DashboardAggregate", ResourceId: "owned-cases" };
+
+    internal static bool IsEmptyQueueObservation(EllaiToolRequest request, EllaiToolResult result) =>
+        request.ToolName == EllaiToolNames.State && result.ToolName == request.ToolName && result.Allowed &&
+        result.DenialReason is null && result.ReasonCode == EllaiToolReasonCodes.Ok && !result.Truncated &&
+        result.ItemCount == 0 && result.Evidence.Count == 0 &&
+        EllaiToolContractCatalog.TryValidateArguments(request.ToolName, request.Arguments, out _) &&
+        (!request.Arguments.TryGetValue("limit", out var rawLimit) ||
+            int.TryParse(rawLimit, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var limit) && limit is >= 1 and <= 20) &&
+        EllaiObservedToolResult.From(request, result).CaseListQuery is { } query && query.IsValid() &&
+        result.ResultSummary.StartsWith("Owned cases only; review status is not supplied.", StringComparison.Ordinal) &&
+        result.ResultSummary.EndsWith("\nThe permitted work queue is empty.", StringComparison.Ordinal);
 
     private sealed class ModelCallGuard(IChatClient inner, Func<CancellationToken, Task<bool>> isCurrent,
         EllaiFrameworkUsage usage, int maxModelCalls) : DelegatingChatClient(inner)

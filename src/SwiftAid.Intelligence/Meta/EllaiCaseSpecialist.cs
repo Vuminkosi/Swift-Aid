@@ -53,10 +53,15 @@ public sealed class EllaiCaseSpecialist(IChatClient client, IEllaiFrameworkAgent
                 "topicRefs, resumeSuggestion and stopReason. Each factual claim has claimId, text, kind Observed and " +
                 "evidence copied exactly from the tool result: sourceKind, resourceId, version, fieldPath, evidenceId. " +
                 "Use empty arrays and null for unused fields.",
-                [new ChatMessage(ChatRole.User, task)], 2048, isCurrent, InvokeCaseTool, usage, ct, maxModelCalls: 3).ConfigureAwait(false);
+                [new ChatMessage(ChatRole.User, task)], 2048, isCurrent, InvokeCaseTool, usage, ct,
+                revalidateTool: revalidate ?? invoke, maxModelCalls: 3, allowEmptyCaseQueue: true).ConfigureAwait(false);
         }
         finally { onModelCalls?.Invoke(agent.LastModelCallCount); }
-        if (decision is null || decision.Kind != DecisionKind.Answer || decision.Claims.Count == 0 ||
+        var verifiedEmpty = observations.Count == 1 &&
+            EllaiFrameworkAgent.IsEmptyQueueObservation(observations[0].Request, observations[0].Result) &&
+            decision?.DisplayText == "No matching cases were found in your current owned-case queue." &&
+            decision.SpokenText == decision.DisplayText;
+        if (decision is null || decision.Kind != DecisionKind.Answer || decision.Claims.Count == 0 && !verifiedEmpty ||
             decision.UiIntents.Count != 0 || decision.PlanProposal is not null ||
             decision.Claims.Any(claim => claim.Kind != ClaimKind.Observed || claim.Evidence.Count == 0 ||
                 claim.Evidence.Any(reference => reference.SourceKind != "CaseQueue")))

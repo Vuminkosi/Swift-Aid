@@ -16,6 +16,59 @@ namespace SwiftAid.Integration.Tests;
 public sealed partial class CaseCommandProcessingPostgresTests
 {
     [FrameworkPostgresFact]
+    public async Task EmptyCaseQueueIsRecheckedAndInvalidatedWhenAReadableCaseAppears()
+    {
+        await using var fixture = await CaseAuthorityPostgresFixture.CreateAsync(frameworkFixture: true);
+        await using var db = fixture.CreateDbContext();
+        await db.ManagedCases.Where(row => row.CaseId == fixture.CaseId || row.CaseId == fixture.SiblingCaseId)
+            .ExecuteUpdateAsync(update => update.SetProperty(row => row.AccountableOwnerActorId, fixture.NewOwnerActorId));
+        var unit = new PostgresCaseCommandUnitOfWork(db);
+        var queue = new CaseQueueQuery(new PostgresCaseQueueStore(db),
+            new CaseAccessPolicy(new PostgresCurrentAccessGrantStore(db, unit), new PostgresCaseAccessDescriptorStore(db, unit)), unit);
+        var consent = new EllaiConsentService();
+        consent.Grant("empty-case-agent", EllaiConsentDimension.ReasoningText, EllaiToolBroker.ToolReadPurpose,
+            EllaiProcessingClassification.SyntheticDemo, TimeSpan.FromMinutes(5));
+        var context = new EllaiToolContext("empty-case-agent", "epoch", "cases", null, 4, true,
+            DataClassification: EllaiProcessingClassification.SyntheticDemo, Actor: fixture.CreateActor(),
+            AllowedTools: new HashSet<string> { EllaiToolNames.State });
+        var broker = new EllaiToolBroker(new EllaiPolicyService(), consent, queue: queue);
+        async Task<EllaiCycleOutcome> RunAsync(bool addCase)
+        {
+            using var model = new CaseQueueDelegationClient(fixture.CaseId);
+            var calls = 0;
+            var executor = new EllaiFrameworkExecutor(model, new EllaiPromptBuilder("Synthetic policy", "fixture"),
+                broker, new EllaiUsageLedger(), new InMemoryEllaiUsageStore(), enableCaseSpecialist: true);
+            return await executor.RunAsync(new EllaiLoopRequest(context, "Find my cases in Eswatini",
+                new EllaiRoleOverlay("ask", "Be brief."), "queue", 1024, "cycle", 1), default,
+                invokeToolAsync: async (child, request, ct) =>
+                {
+                    var result = await broker.InvokeAsync(child, request, ct);
+                    if (++calls == 1 && addCase)
+                    {
+                        await using var updateDb = fixture.CreateDbContext();
+                        await updateDb.ManagedCases.Where(row => row.CaseId == fixture.CaseId)
+                            .ExecuteUpdateAsync(update => update.SetProperty(row => row.AccountableOwnerActorId, fixture.ActorId), ct);
+                    }
+                    return result;
+                });
+        }
+        var empty = await RunAsync(false);
+        Assert.True(empty.Completed, empty.FailureCode);
+        Assert.Equal("No matching cases were found in your current owned-case queue.", empty.Decision!.DisplayText);
+        Assert.Empty(empty.Decision.Claims);
+        Assert.Empty(Assert.Single(empty.ObservedTools!).Evidence);
+        var changed = await RunAsync(true);
+        Assert.False(changed.Completed);
+        Assert.Null(changed.Decision);
+        var trace = EllaiToolTrace.SerializeFlattened(empty.ObservedTools, false, []);
+        var previous = new EllaiConversationTurn(context.SessionId, "previous", 1, "Find cases", empty.Decision.DisplayText,
+            "Completed", 1, DateTimeOffset.UtcNow) { ToolTraceJson = trace };
+        var current = new EllaiConversationTurn(context.SessionId, "current", 2, "Continue", null, "Queued", 1, null);
+        var history = await EllaiAuthorizedConversationContext.BuildAsync([previous, current], "current", fixture.CreateActor(), queue, default);
+        Assert.DoesNotContain(history.Messages, item => item.Content == empty.Decision.DisplayText);
+    }
+
+    [FrameworkPostgresFact]
     public async Task CaseSpecialistSearchesAuthorizedPostgresQueueAndRechecksBeforeAnswer()
     {
         await using var fixture = await CaseAuthorityPostgresFixture.CreateAsync(frameworkFixture: true);
