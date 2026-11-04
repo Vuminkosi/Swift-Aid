@@ -43,9 +43,9 @@ public sealed class EllaiAnalyticsSpecialist(IChatClient client, IEllaiFramework
         {
             decision = await agent.RunAsync(context, trustedPolicy +
                 "\nYou are the analytics specialist, not the supervisor. Delegation is unavailable here. " +
-                "Use the authorized owned-case count tool for count questions with an explicitly requested 1 to 365 day window, and any other admitted read tool when relevant to the user's SwiftAid question. " +
+                "Use ellai_case_summary for complete counts, classified totals, common case sectors and reported symptoms. Resolve named places with ellai_locations and relative dates with ellai_now. Set field=observations for common cases or symptoms; omitted dates mean all recorded dates. Use the owned-case count tool only for explicitly owned cases with a 1 to 365 day window. " +
                 "Do not infer a window, calculate counts from samples, infer incidence, or invent evidence. " +
-                "If the count window is missing, ask for it. For other reads, each claim must exactly match a returned source line and cite its evidence; join claim texts with newlines for displayText and spokenText. " +
+                "For each read, each claim must exactly match a returned source line and cite its evidence; join claim texts with newlines for displayText and spokenText. " +
                 "When using a truncated case timeline, include its first line as a claim with the timeline evidence.",
                 [new ChatMessage(ChatRole.User, task)], 1024, isCurrent, Read, usage, ct,
                 revalidateTool: revalidate, revalidateStreamObservations: token =>

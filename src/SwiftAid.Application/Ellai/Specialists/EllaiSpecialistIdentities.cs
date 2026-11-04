@@ -10,7 +10,7 @@ public static class EllaiSpecialistIdentities
     private static readonly FrozenDictionary<string, EllaiSpecialistIdentity> Entries = new[]
     {
         new EllaiSpecialistIdentity("core.case", "Case Intelligence", "Reads authorized case queues, timelines and possible related cases.", "interactive-partial"),
-        new EllaiSpecialistIdentity("core.analytics", "Analytics", "Reads authorized owned-case counts for a requested time window.", "interactive-partial"),
+        new EllaiSpecialistIdentity("core.analytics", "Analytics", "Reads authorized case counts, classification totals and reported symptom frequencies by place and date.", "interactive-partial"),
         new EllaiSpecialistIdentity("core.geospatial", "Geospatial Intelligence", "Finds registered locations without inferring coordinates.", "interactive-partial"),
         new EllaiSpecialistIdentity("core.reporting", "Reporting", "Discovers entitled report controls and observed screen state.", "interactive-partial"),
         new EllaiSpecialistIdentity("core.ui", "UI Intelligence", "Discovers entitled controls and supports validated navigation guidance.", "interactive-partial"),

@@ -43,12 +43,21 @@ public sealed class EllaiExecutionPromptBuilder(EllaiPromptBuilder prompts, Ella
             "\nThe schema describes data shape, not permission. Claims must cite exact evidence objects returned by permitted tools. " +
             "Do not invent evidence references, UI bindings or action authority. Use empty arrays/null for nonapplicable fields." +
             "\n## Tool catalogue\n" + EllaiToolBroker.DescribeCatalogue(request.Context.AllowedTools);
+        if (request.ActivePage == "case-details" && Guid.TryParseExact(request.Context.ResourceId, "D", out var currentCaseId))
+            system += "\nThe client is viewing case " + currentCaseId.ToString("D") +
+                ". For 'this case' or 'explain this case', read ellai_case_timeline(case_id=this identifier) first, then classification tools if relevant. " +
+                "This is an advisory identifier, not authorization. Do not use topic memory to guess the open case. Explain only recorded facts and missing information; never infer a diagnosis.";
         system += "\n## Aggregate questions\nNever infer a case count from a partial list, prior conversation, or model knowledge. " +
+            "For counts, classified totals, common case categories or common reported symptoms in any place, use ellai_case_summary. Resolve the place with ellai_locations and pass its exact country/place_id; use ellai_now for relative date ranges. Set field=observations for common cases or symptoms to include recorded symptom/sign frequencies alongside sectors. Omit dates when no date range is requested and clearly say all recorded dates. Use the complete returned Total, Classified, Unclassified and UnknownClassification values. Never substitute owned-region counts or a bounded queue for this query. " +
             "For a current count of the user's own readable managed cases, use ellai_owned_case_count with the requested time window when available. " +
             "If the window is unclear, ask for it. If that tool is unavailable or the requested aggregate is outside its scope, explain the limitation without inventing a number. " +
             "The count covers cases, not animals, diagnoses, incidence, or a whole population.";
         system += " For the current officer's readable, owned cases by reported administrative region over the last 30 days, " +
             "use ellai_owned_region_counts when available. Do not describe these counts as population incidence or hotspots.";
+        system += " If ellai_locations has no match for a named place, do not repeat the same lookup. " +
+            "Call ellai_case_summary(place_name=the user's exact place name), optionally with a known country. " +
+            "This matches recorded region, area or locality labels exactly, ignoring case; it is not a registry boundary. " +
+            "Explain zero matches and omitted incomplete locations honestly. Never substitute a different town or infer a count.";
         system += "\nFor a time-bounded case search, use ellai_now to anchor relative dates, then pass reported_from (inclusive) and reported_before (exclusive) as UTC YYYY-MM-DD dates. " +
             "For 'past N calendar days', include today as one day and use [today minus (N-1), tomorrow); use disjoint seven-day ranges for week-over-week comparisons. " +
             "This filters the managed-case creation/report timestamp before paging; it is not the event occurrence or symptom-onset date. State that distinction when reporting the range. The supported range is at most 365 days.";

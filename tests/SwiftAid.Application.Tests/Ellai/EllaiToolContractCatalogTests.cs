@@ -73,7 +73,7 @@ public sealed class EllaiToolContractCatalogTests
         var properties = schema.RootElement.GetProperty("properties");
         Assert.Equal(new[] { "case-results", "case-results-original" }, properties.GetProperty("ref")
             .GetProperty("enum").EnumerateArray().Select(value => value.GetString()).ToArray());
-        Assert.Equal(new[] { "country", "workflow", "classification" },
+        Assert.Equal(new[] { "country", "workflow", "observations", "submitter" },
             properties.GetProperty("field").GetProperty("enum").EnumerateArray()
                 .Select(value => value.GetString()).ToArray());
         Assert.Equal(new[] { "Classified", "Unclassified" }, properties.GetProperty("classification_filter")
@@ -140,7 +140,7 @@ public sealed class EllaiToolContractCatalogTests
             new HashSet<string>(StringComparer.Ordinal) { EllaiToolNames.ProductFacts });
 
         Assert.Contains("ellai_productfacts", catalogue, StringComparison.Ordinal);
-        Assert.Contains("Input JSON Schema v1", catalogue, StringComparison.Ordinal);
+        Assert.Contains($"Input JSON Schema v{EllaiToolContractCatalog.CurrentSchemaVersion}", catalogue, StringComparison.Ordinal);
         Assert.Contains("Output JSON Schema", catalogue, StringComparison.Ordinal);
         Assert.DoesNotContain("ellai_state(", catalogue, StringComparison.Ordinal);
         Assert.DoesNotContain("ellai_evidence(", catalogue, StringComparison.Ordinal);

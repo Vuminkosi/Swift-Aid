@@ -11,6 +11,7 @@ namespace SwiftAid.Application.Cases;
 public interface ICaseReportReadQuery
 {
     Task<CaseReportDetails?> GetAsync(ActorContext actor, Guid caseId, CancellationToken ct);
+    Task<CaseReportDetails?> GetSummaryEvidenceAsync(ActorContext actor, Guid caseId, CancellationToken ct) => GetAsync(actor, caseId, ct);
 }
 
 /// <summary>Occurrence location from a currently authorized report, without report evidence.</summary>
@@ -58,7 +59,13 @@ public sealed class CaseReportReadQuery(
         catch (Exception error) when (error is not OutOfMemoryException) { return new(CaseOccurrenceLocationAccess.Unavailable, null, null); }
     }
 
-    public async Task<CaseReportDetails?> GetAsync(ActorContext actor, Guid caseId, CancellationToken ct)
+    public Task<CaseReportDetails?> GetAsync(ActorContext actor, Guid caseId, CancellationToken ct) =>
+        ReadReportAsync(actor, caseId, true, ct);
+
+    public Task<CaseReportDetails?> GetSummaryEvidenceAsync(ActorContext actor, Guid caseId, CancellationToken ct) =>
+        ReadReportAsync(actor, caseId, false, ct);
+
+    private async Task<CaseReportDetails?> ReadReportAsync(ActorContext actor, Guid caseId, bool includeFacilities, CancellationToken ct)
     {
         if (caseId == Guid.Empty) return null;
         ICaseCommandLease lease;
@@ -74,7 +81,7 @@ public sealed class CaseReportReadQuery(
             var aggregate = await persistence.ReplayCaseAsync(lease, ct);
             if (aggregate.CaseId != caseId || aggregate.ReportData is null) return null;
             var result = Project(aggregate);
-            if (result.NearbyFacilities is null && registry is not null)
+            if (includeFacilities && result.NearbyFacilities is null && registry is not null)
                 result = result with { NearbyFacilities = await NearbyMedicalFacilities.FindFromLocalityAsync(result.Location, registry, ct) };
             await lease.CommitAsync(ct);
             return result;

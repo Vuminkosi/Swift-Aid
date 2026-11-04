@@ -77,6 +77,8 @@ public sealed class EllaiFrameworkAgent
         var evidenceSources = new Dictionary<EvidenceRef, List<string>>();
         EllaiToolResult? countResult = null;
         EllaiToolRequest? countRequest = null;
+        EllaiToolResult? reportingResult = null;
+        EllaiToolRequest? reportingRequest = null;
         EllaiToolResult? spatialResult = null;
         EllaiToolRequest? spatialRequest = null;
         EllaiToolResult? healthSourceResult = null;
@@ -108,6 +110,11 @@ public sealed class EllaiFrameworkAgent
                     countResult = result;
                     countRequest = request;
                 }
+                if (request.ToolName == EllaiToolNames.CaseSummary && result.Allowed)
+                {
+                    reportingResult = result;
+                    reportingRequest = request;
+                }
                 if (request.ToolName == EllaiToolNames.OwnedRegionCounts && result.Allowed)
                 {
                     spatialResult = result;
@@ -136,6 +143,9 @@ public sealed class EllaiFrameworkAgent
         async Task<EllaiToolResult> InvokeGuardedTool(EllaiToolContext toolContext, EllaiToolRequest request, CancellationToken token)
         {
             var result = await guard.InvokeAsync(toolContext, request, token).ConfigureAwait(false);
+            if (request.ToolName == EllaiToolNames.CaseSummary && result.Allowed &&
+                FunctionInvokingChatClient.CurrentContext is { } summaryInvocation)
+                summaryInvocation.Terminate = true;
             // Only stop after the guard's post-call authorization has passed.
             // The final count is constructed from a fresh authorized read below.
             if (((request.ToolName == EllaiToolNames.OwnedCaseCount || request.ToolName == EllaiToolNames.OwnedRegionCounts || request.ToolName == EllaiToolNames.ApprovedHealthSources) && result.Allowed ||
@@ -748,12 +758,18 @@ public sealed class EllaiFrameworkAgent
         if (Volatile.Read(ref invalidDelegation) != 0) { LastFailureCode = EllaiToolReasonCodes.DeniedByPolicy; return null; }
         EllaiDecision? decision = null;
         if (guard.FailureCode is not null) { LastFailureCode = guard.FailureCode; return null; }
-        while (countResult is null && spatialResult is null && healthSourceResult is null && emptyQueueResult is null)
+        while (reportingResult is null && (toolCalls != 1 || countResult is null && spatialResult is null && healthSourceResult is null && emptyQueueResult is null))
         {
             LastModelCallCount = guardedClient.CallSequence + Volatile.Read(ref delegatedModelCalls);
             if (guard.FailureCode is not null) { LastFailureCode = guard.FailureCode; return null; }
             if (!await Current(ct).ConfigureAwait(false)) { LastFailureCode = EllaiToolReasonCodes.DeniedByPolicy; return null; }
             decision = EllaiModelTurnParser.Parse(guardedClient.LastText).Turn?.FinalDecision;
+            if (toolCalls > 1 && (countResult is not null || spatialResult is not null || healthSourceResult is not null) &&
+                decision is { Claims.Count: 0 })
+            {
+                LastFailureCode = EllaiToolReasonCodes.Unavailable;
+                return null;
+            }
             if (decision is not null && EllaiDecisionValidator.Validate(decision).Count == 0 &&
                 !decision.Claims.Any(claim => claim?.Evidence is { } refs && refs.Any(reference => reference is null || !evidence.Contains(reference))) &&
                 (decision.PlanProposal is null || !decision.PlanProposal.Actions.Any(action =>
@@ -786,7 +802,34 @@ public sealed class EllaiFrameworkAgent
             }
             finally { LastModelCallCount = guardedClient.CallSequence + Volatile.Read(ref delegatedModelCalls); }
         }
-        if (healthSourceResult is not null)
+        if (reportingResult is not null)
+        {
+            if (streamedSegments.Count != 0 || reportingRequest is null || reportingResult.Truncated ||
+                reportingResult.LocationReplayScope is not { } summaryScope || !summaryScope.IsValid() ||
+                reportingResult.Evidence.Count != 1 || reportingResult.Evidence[0].SourceKind != "CaseReportingSummary" ||
+                !await Current(ct).ConfigureAwait(false))
+            { LastFailureCode = EllaiToolReasonCodes.Unavailable; return null; }
+            var fresh = await (revalidateTool ?? invoke)(context, reportingRequest, ct).ConfigureAwait(false);
+            if (!fresh.Allowed || fresh.Truncated || !fresh.Evidence.SequenceEqual(reportingResult.Evidence) ||
+                EllaiObservedToolResult.ResultFingerprint(fresh) != summaryScope.ResultDigest ||
+                !await Current(ct).ConfigureAwait(false))
+            { LastFailureCode = EllaiToolReasonCodes.Unavailable; return null; }
+            // Publish the complete checked summary atomically. Splitting a large
+            // aggregate into sentences would repeat the full database scan per sentence.
+            var claims = fresh.ResultSummary.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+                .Select((line, index) => new GroundedClaim($"reporting-{index}", line, ClaimKind.Observed, fresh.Evidence)).ToArray();
+            decision = new EllaiDecision(EllaiDecision.CurrentSchemaVersion, DecisionKind.Answer,
+                fresh.ResultSummary, fresh.ResultSummary, claims, [], [], null, [], null, null);
+            if (EllaiDecisionValidator.Validate(decision).Count != 0)
+            { LastFailureCode = EllaiToolReasonCodes.Unavailable; return null; }
+            if (onTextDelta is not null) await onTextDelta(decision.DisplayText, ct).ConfigureAwait(false);
+            ct.ThrowIfCancellationRequested();
+            if (!await Current(ct).ConfigureAwait(false))
+            { LastFailureCode = EllaiToolReasonCodes.DeniedByPolicy; return null; }
+            await SaveSessionAsync().ConfigureAwait(false);
+            return decision;
+        }
+        if (healthSourceResult is not null && toolCalls == 1)
         {
             if (streamedSegments.Count != 0 || toolCalls != 1 || healthSourceRequest is null || healthSourceResult.Truncated ||
                 healthSourceResult.HealthSourceReplayScope is not { } originalScope || !originalScope.IsValid() ||
@@ -820,7 +863,7 @@ public sealed class EllaiFrameworkAgent
             await SaveSessionAsync().ConfigureAwait(false);
             return decision;
         }
-        if (spatialResult is not null)
+        if (spatialResult is not null && toolCalls == 1)
         {
             if (streamedSegments.Count != 0 || toolCalls != 1 || spatialRequest is null ||
                 spatialResult.Truncated || spatialResult.Evidence.Count != 1 ||
@@ -851,7 +894,7 @@ public sealed class EllaiFrameworkAgent
             await SaveSessionAsync().ConfigureAwait(false);
             return decision;
         }
-        if (countResult is not null)
+        if (countResult is not null && toolCalls == 1)
         {
             if (streamedSegments.Count != 0) { LastFailureCode = "InvalidDecision"; return null; }
             if (toolCalls != 1 || !HasCountEvidence(countResult) || countRequest is null ||
@@ -919,7 +962,7 @@ public sealed class EllaiFrameworkAgent
             await SaveSessionAsync().ConfigureAwait(false);
             return decision;
         }
-        if (emptyQueueResult is not null)
+        if (emptyQueueResult is not null && toolCalls == 1)
         {
             if (streamedSegments.Count != 0 || toolCalls != 1 || emptyQueueRequest is null ||
                 !IsEmptyQueueObservation(emptyQueueRequest, emptyQueueResult) || !await Current(ct).ConfigureAwait(false))
@@ -946,7 +989,12 @@ public sealed class EllaiFrameworkAgent
             await SaveSessionAsync().ConfigureAwait(false);
             return decision;
         }
-        if (decision is null) return null;
+        if (decision is null)
+        {
+            if (countResult is not null || spatialResult is not null || healthSourceResult is not null || emptyQueueResult is not null)
+                LastFailureCode ??= EllaiToolReasonCodes.Unavailable;
+            return null;
+        }
         if (!streamSafeToolObservations && (revalidateStreamObservations is null ||
             !await revalidateStreamObservations(ct).ConfigureAwait(false)))
         {

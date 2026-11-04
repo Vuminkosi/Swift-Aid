@@ -85,7 +85,7 @@ public sealed record EllaiToolTrace(int Version, bool HistoryIncluded, IReadOnly
                     (item.ImportDestinationsDigest is null || item.ToolName == EllaiToolNames.ImportDestinations &&
                         item.ImportDestinationsDigest is { Length: 64 } &&
                         item.ImportDestinationsDigest.All(character => character is >= '0' and <= '9' or >= 'A' and <= 'F')) &&
-                    (item.LocationReplayScope is null || item.ToolName == EllaiToolNames.Locations && item.LocationReplayScope.IsValid()) &&
+                    (item.LocationReplayScope is null || item.ToolName is EllaiToolNames.Locations or EllaiToolNames.CaseSummary && item.LocationReplayScope.IsValid()) &&
                     (item.HealthSourceReplayScope is null || item.ToolName == EllaiToolNames.ApprovedHealthSources && item.HealthSourceReplayScope.IsValid()) &&
                     (item.SignalReplayScope is null || item.ToolName == EllaiToolNames.SurveillanceSignals && item.SignalReplayScope.IsValid()) &&
                     (item.PublicSessionsDigest is null || item.ToolName == EllaiToolNames.PublicSessions &&

@@ -17,9 +17,9 @@ public sealed class CaseOccurrenceSearchTests
         public Queue<CaseQueueResult> Pages { get; }
         public List<string?> Cursors { get; } = [];
         public Task<CaseQueueResult> GetMineAsync(ActorContext actor, int? limit, CancellationToken ct) => throw new NotSupportedException();
-        public Task<CaseQueueResult> GetMineAsync(ActorContext actor, int? limit, CaseQueueFilter filter, string? cursor, CancellationToken ct)
+        public Task<CaseQueueResult> GetSearchableAsync(ActorContext actor, int? limit, CaseQueueFilter? filter, string? cursor, CancellationToken ct)
         {
-            Assert.Equal("SZ", filter.CountryCode);
+            Assert.Equal("SZ", filter!.CountryCode);
             Assert.True(filter.NewestReportedFirst);
             Cursors.Add(cursor);
             return Task.FromResult(Pages.Dequeue());
@@ -116,20 +116,25 @@ public sealed class CaseOccurrenceSearchTests
     }
 
     [Fact]
-    public async Task ScanLimitIsReportedAsIncomplete()
+    public async Task FindsLatestMatchingPlaceBeyondFormerScanLimit()
     {
         var pages = new List<CaseQueueResult>();
         var locations = new Locations();
         for (var page = 0; page < 4; page++)
         {
             var rows = Enumerable.Range(page * 50 + 1, 50).Select(Row).ToArray();
-            foreach (var row in rows) locations.Results[row.CaseId] = new(CaseOccurrenceLocationAccess.Allowed, 1, null);
+            foreach (var row in rows) locations.Results[row.CaseId] = new(CaseOccurrenceLocationAccess.Allowed, 1,
+                new("SZ", "Other", "Area", "Locality", "other", "area", "locality"));
             pages.Add(new(CaseQueueAccess.Allowed, rows, $"page-{page}"));
         }
-        var result = await new CaseOccurrenceSearch(new Queue(pages.ToArray()), locations).SearchAsync(Actor(), "SZ", "region-1", 5, default);
+        var latest = Row(201);
+        locations.Results[latest.CaseId] = new(CaseOccurrenceLocationAccess.Allowed, 1,
+            new("SZ", "Manzini", "Area", "Locality", "region-1", "area-1", "locality-1"));
+        pages.Add(new(CaseQueueAccess.Allowed, [latest]));
+        var result = await new CaseOccurrenceSearch(new Queue(pages.ToArray()), locations).SearchAsync(Actor(), "SZ", "region-1", 1, default);
         Assert.Equal(CaseQueueAccess.Allowed, result.Access);
-        Assert.True(result.Truncated);
-        Assert.True(result.UnknownLocations);
-        Assert.Empty(result.Items);
+        Assert.False(result.Truncated);
+        Assert.False(result.UnknownLocations);
+        Assert.Equal(latest.CaseId, Assert.Single(result.Items).Case.CaseId);
     }
 }

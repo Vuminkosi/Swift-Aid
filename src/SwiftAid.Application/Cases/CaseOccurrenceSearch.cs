@@ -6,7 +6,6 @@ namespace SwiftAid.Application.Cases;
 /// <summary>Finds searchable, readable cases using recorded occurrence places, never access-region links.</summary>
 public sealed class CaseOccurrenceSearch(ICaseQueueQuery queue, ICaseOccurrenceLocationQuery locations)
 {
-    public const int MaximumCandidates = 200;
     public const int PageSize = 50;
 
     public async Task<CaseOccurrenceSearchResult> SearchAsync(ActorContext actor, string country, string placeId,
@@ -25,7 +24,6 @@ public sealed class CaseOccurrenceSearch(ICaseQueueQuery queue, ICaseOccurrenceL
         var unknown = false;
         var incomplete = false;
         string? cursor = null;
-        var scanned = 0;
         var filter = new CaseQueueFilter(country, NewestReportedFirst: true,
             ReportedFromUtc: reportedFromUtc, ReportedBeforeUtc: reportedBeforeUtc);
         try
@@ -40,6 +38,7 @@ public sealed class CaseOccurrenceSearch(ICaseQueueQuery queue, ICaseOccurrenceL
                     return new(CaseQueueAccess.Unavailable, [], false, false);
                 foreach (var item in page.Items)
                 {
+                    if (!item.HasReportJournal) { unknown = true; continue; }
                     var location = await locations.GetLocationAsync(actor, item.CaseId, ct).ConfigureAwait(false);
                     ct.ThrowIfCancellationRequested();
                     if (location.Access == CaseOccurrenceLocationAccess.Unavailable)
@@ -67,11 +66,10 @@ public sealed class CaseOccurrenceSearch(ICaseQueueQuery queue, ICaseOccurrenceL
                     matches.Add(new(item, location.ReportRevision.Value));
                     if (matches.Count > limit) return new(CaseQueueAccess.Allowed, matches.Take(limit).ToArray(), true, unknown);
                 }
-                scanned += page.Items.Count;
                 cursor = page.NextCursor;
                 if (cursor is not null && (page.Items.Count == 0 || !seenCursors.Add(cursor)))
                     return new(CaseQueueAccess.Unavailable, [], false, false);
-            } while (cursor is not null && scanned < MaximumCandidates);
+            } while (cursor is not null);
             return new(CaseQueueAccess.Allowed, matches, cursor is not null || incomplete, unknown);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }

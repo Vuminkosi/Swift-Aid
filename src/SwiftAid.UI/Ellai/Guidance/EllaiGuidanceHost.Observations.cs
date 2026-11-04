@@ -199,7 +199,8 @@ public partial class EllaiGuidanceHost
                 new object?[] { requestedControls });
             if (report is null || !IsCurrent()) return;
             report = report with { CurrentNavigationId = string.Equals(path, "/report", StringComparison.OrdinalIgnoreCase) ? EllaiReportUiManifest.NavigationId :
-                EllaiNavigationManifest.ResolveNavigationId(path) };
+                EllaiPageContext.CaseIdFromRelativeUri(path) is not null ? EllaiCaseDetailUiManifest.NavigationId : EllaiNavigationManifest.ResolveNavigationId(path),
+                CurrentCaseId = EllaiPageContext.CaseIdFromRelativeUri(path) };
             report = report with { Platform = OperatingSystem.IsAndroid() ? "android" : OperatingSystem.IsIOS() ? "ios" : "web" };
             if (report.IsValid() && IsCurrent())
             {

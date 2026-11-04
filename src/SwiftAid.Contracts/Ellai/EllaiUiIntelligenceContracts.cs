@@ -89,6 +89,8 @@ public sealed record UiObservationReport(
     string? CurrentNavigationId = null,
     IReadOnlyList<string>? CompletedControlIds = null)
 {
+    /// <summary>Advisory open-case identifier; every record read still requires server authorization.</summary>
+    public Guid? CurrentCaseId { get; init; }
     /// <summary>Value-free component validation identifiers for the active client presentation.</summary>
     public IReadOnlyList<string>? ValidationInputIds { get; init; }
 
@@ -96,6 +98,7 @@ public sealed record UiObservationReport(
     public IReadOnlyList<UiInputState>? InputStates { get; init; }
 
     public bool IsValid() =>
+        (CurrentCaseId is null || CurrentCaseId != Guid.Empty && CurrentNavigationId == EllaiCaseDetailUiManifest.NavigationId) &&
         (InputStates is null || InputStates.Count <= 20 &&
             InputStates.All(input => input is not null && MountedControlIds is not null &&
                 MountedControlIds.Contains(input.ControlId) && !string.IsNullOrWhiteSpace(input.InputId) &&
@@ -108,6 +111,7 @@ public sealed record UiObservationReport(
             CompletedControlIds.All(id => !string.IsNullOrWhiteSpace(id) && id.Length <= 120) &&
             CompletedControlIds.Distinct(StringComparer.Ordinal).Count() == CompletedControlIds.Count) &&
         (CurrentNavigationId is null || CurrentNavigationId == EllaiReportUiManifest.NavigationId ||
+            CurrentNavigationId == EllaiCaseDetailUiManifest.NavigationId ||
             EllaiNavigationManifest.ResolveRoute(CurrentNavigationId) is not null) &&
         !string.IsNullOrWhiteSpace(ViewInstanceId) && ViewInstanceId.Length <= 120 &&
         !string.IsNullOrWhiteSpace(ContextStamp) && ContextStamp.Length <= 120 &&

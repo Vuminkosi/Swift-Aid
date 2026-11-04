@@ -22,6 +22,7 @@ public static class EllaiToolContractCatalog
             ["ref"] = "Exact bounded reference or topic text.",
             ["country"] = "Uppercase ISO 3166-1 alpha-2 country code.",
             ["place_id"] = "Exact selected occurrence-place identifier from the geographic registry; provide the matching country.",
+            ["place_name"] = "Exact reported region, area or locality label when the registry has no match. Case-insensitive, no substring expansion; cannot accompany place_id.",
             ["workflow"] = "Recorded case workflow filter.",
             ["sort"] = "Supported queue ordering.",
             ["group_by"] = "Optional authorized case grouping dimension; for retained evidence, groups only the exact earlier result set. reported-day groups by managed-case creation date in UTC; onset-day groups by reporter-supplied symptom/sign onset date.",
@@ -85,6 +86,7 @@ public static class EllaiToolContractCatalog
             [EllaiToolNames.ClassificationSnapshot] = Contract(EllaiToolNames.ClassificationSnapshot, ("case_id", true)),
             [EllaiToolNames.SurveillanceSignals] = Contract(EllaiToolNames.SurveillanceSignals, ("case_id", true)),
             [EllaiToolNames.OwnedCaseCount] = Contract(EllaiToolNames.OwnedCaseCount, ("window_days", true)),
+            [EllaiToolNames.CaseSummary] = Contract(EllaiToolNames.CaseSummary, ("country", false), ("place_id", false), ("place_name", false), ("reported_from", false), ("reported_before", false), ("field", false)),
             [EllaiToolNames.OwnedRegionCounts] = Contract(EllaiToolNames.OwnedRegionCounts),
             [EllaiToolNames.ApprovedHealthSources] = Contract(EllaiToolNames.ApprovedHealthSources, ("topic", true), ("jurisdiction", true), ("language", true)),
             [EllaiToolNames.CaseTimeline] = Contract(EllaiToolNames.CaseTimeline, ("case_id", true), ("include_related", false)),
@@ -267,6 +269,7 @@ public static class EllaiToolContractCatalog
         (toolName, argumentName) switch
         {
             (EllaiToolNames.State, "projection") => Array.AsReadOnly(new[] { "feature", "queue" }),
+            (EllaiToolNames.CaseSummary, "field") => Array.AsReadOnly(new[] { "observations" }),
             (EllaiToolNames.PublicSessions, "status") => Array.AsReadOnly(new[] { "Scheduled", "Completed", "Cancelled" }),
             (EllaiToolNames.State, "workflow") => Array.AsReadOnly(new[] { "Reported", "UnderReview", "Active", "AwaitingFollowUp", "Resolved" }),
             (EllaiToolNames.State, "sort") => Array.AsReadOnly(new[] { "latest-reported", "latest-updated" }),

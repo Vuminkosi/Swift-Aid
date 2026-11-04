@@ -831,7 +831,7 @@ public sealed class EllaiReviewGatewayClient(
                     .Where(id => !string.IsNullOrWhiteSpace(id))
                     .Select(id => id.Trim())
                     .ToList(),
-                DateTimeOffset.UtcNow, report.ControlStates, report.CurrentNavigationId, report.CompletedControlIds, report.ValidationInputIds, report.InputStates), cancellationToken).ConfigureAwait(false);
+                DateTimeOffset.UtcNow, report.ControlStates, report.CurrentNavigationId, report.CompletedControlIds, report.ValidationInputIds, report.InputStates, report.CurrentCaseId), cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {

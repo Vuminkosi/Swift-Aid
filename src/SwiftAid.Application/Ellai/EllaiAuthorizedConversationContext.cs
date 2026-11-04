@@ -461,7 +461,7 @@ public static class EllaiAuthorizedConversationContext
                     }
                     continue;
                 }
-                if (observation.ToolName == EllaiToolNames.Locations)
+                if (observation.ToolName is EllaiToolNames.Locations or EllaiToolNames.CaseSummary)
                 {
                     var scope = observation.LocationReplayScope;
                     if (scope is null || !scope.IsValid() || observation.ReasonCode != EllaiToolReasonCodes.Ok ||
@@ -473,9 +473,9 @@ public static class EllaiAuthorizedConversationContext
                     {
                         var arguments = locationReplayProtector.Unprotect(toolContext, scope.ProtectedArguments);
                         if (arguments is null) return decisions[decisionKey] = false;
-                        var current = await invokeTool(toolContext, new EllaiToolRequest(EllaiToolNames.Locations, arguments), ct).ConfigureAwait(false);
+                        var current = await invokeTool(toolContext, new EllaiToolRequest(observation.ToolName, arguments), ct).ConfigureAwait(false);
                         ct.ThrowIfCancellationRequested();
-                        if (current.ToolName != EllaiToolNames.Locations || !current.Allowed || current.DenialReason is not null ||
+                        if (current.ToolName != observation.ToolName || !current.Allowed || current.DenialReason is not null ||
                             current.ReasonCode != EllaiToolReasonCodes.Ok || current.Truncated ||
                             !current.Evidence.SequenceEqual(observation.Evidence) ||
                             EllaiObservedToolResult.ResultFingerprint(current) != scope.ResultDigest)

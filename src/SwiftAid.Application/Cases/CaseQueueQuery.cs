@@ -18,7 +18,8 @@ public sealed record CaseQueueCandidate(
     string? Classification = null,
     string? WorkspaceId = null,
     DateTimeOffset? CreatedAtUtc = null,
-    DateTimeOffset? ReportedAtUtc = null);
+    DateTimeOffset? ReportedAtUtc = null,
+    bool HasReportJournal = true);
 
 /// <summary>Keyset position used to resume after a previously authorized row; it is not an access grant.</summary>
 public sealed record CaseQueueContinuation(DateTimeOffset SortTimestampUtc, Guid CaseId);
@@ -195,7 +196,12 @@ public sealed class CaseQueueQuery(
                             ? await _policy.AuthorizeAllAsync(actor, candidate.CaseId,
                                 [CaseOperation.Search, CaseOperation.ReadCase], ct).ConfigureAwait(false)
                             : await _policy.AuthorizeAsync(actor, candidate.CaseId, CaseOperation.ReadCase, ct).ConfigureAwait(false);
-                        if (!decision.IsAllowed) continue;
+                        if (!decision.IsAllowed)
+                        {
+                            if (decision.Code is AccessDecisionCode.GrantSourceUnavailable or AccessDecisionCode.ResourceSourceUnavailable)
+                                return new CaseQueueResult(CaseQueueAccess.Unavailable, []);
+                            continue;
+                        }
 
                         await lease.CommitAsync(ct).ConfigureAwait(false);
                         if (items.Count == take)
@@ -205,7 +211,7 @@ public sealed class CaseQueueQuery(
                             candidate.CaseId, candidate.Workflow, candidate.CountryCode,
                             candidate.AccountableOwnerActorId, candidate.AggregateVersion,
                             candidate.UpdatedAtUtc, candidate.Sector, candidate.Classification,
-                            candidate.WorkspaceId, candidate.CreatedAtUtc));
+                            candidate.WorkspaceId, candidate.CreatedAtUtc, candidate.HasReportJournal));
                         lastReturned = candidate;
                     }
                 }

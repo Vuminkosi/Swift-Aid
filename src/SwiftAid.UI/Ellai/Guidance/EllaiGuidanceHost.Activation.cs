@@ -294,12 +294,24 @@ public partial class EllaiGuidanceHost
         if (newlyCompleted) _ = StartProposedGuidanceAsync();
     }
 
-    private void TrackNavigation(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs args)
+    private async void TrackNavigation(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs args)
     {
+        var previousCase = _latestGuidanceObservation?.CurrentCaseId;
         Interlocked.Increment(ref _uiNavigationEpoch);
         _latestGuidanceObservation = null;
         try { _navigationTrail.Record(Navigation.ToBaseRelativePath(args.Location)); }
         catch (ArgumentException) { _navigationTrail.Record(string.Empty); }
+        var path = Navigation.ToBaseRelativePath(args.Location);
+        var caseId = EllaiPageContext.CaseIdFromRelativeUri(path);
+        if (previousCase is null && caseId is null || _sessionView is not { Status: "Active" } session) return;
+        // Clear the old referent immediately without claiming that the new
+        // page's controls have rendered. The regular observer collects those.
+        var report = new UiObservationReport(Guid.NewGuid().ToString("N"), Guid.NewGuid().ToString("N"), "web", [],
+            CurrentNavigationId: caseId is not null ? EllaiCaseDetailUiManifest.NavigationId : null)
+            { CurrentCaseId = caseId };
+        try { await ReviewClient.ReportUiObservationAsync(session.SessionId, report, _uiObservationLifetime.Token); }
+        catch (OperationCanceledException) { }
+        catch (HttpRequestException) { }
     }
 
     private async Task NavigateFeatureAsync(string turnId, string proposalId, UiIntentProposal proposal)

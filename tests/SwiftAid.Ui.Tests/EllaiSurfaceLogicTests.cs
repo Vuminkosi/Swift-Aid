@@ -144,6 +144,25 @@ public sealed partial class EllaiSurfaceLogicTests
         Assert.Null(GetField<UiObservationReport?>(host, "_latestGuidanceObservation"));
     }
 
+    [Fact]
+    public async Task CaseNavigationSendsOnlyTheNewReferentUntilControlsRender()
+    {
+        var client = new FakeReviewClient { ObservationHandler = () => Task.FromResult(true) };
+        using var host = await CreateHost(client, CreateSession(1), string.Empty);
+        var id = Guid.NewGuid();
+        var navigation = new TabNavigationManager($"case/{id:D}");
+        SetProperty(host, "Navigation", navigation);
+        await InvokeAsync(host, "TrackNavigation", null, new Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs(navigation.Uri, false));
+        Assert.Equal(id, client.LastObservation!.CurrentCaseId);
+        Assert.Empty(client.LastObservation.MountedControlIds);
+        Assert.Null(GetField<UiObservationReport?>(host, "_latestGuidanceObservation"));
+        SetField(host, "_latestGuidanceObservation", client.LastObservation);
+        navigation.NavigateTo("dashboard");
+        await InvokeAsync(host, "TrackNavigation", null, new Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs(navigation.Uri, false));
+        Assert.Null(client.LastObservation.CurrentCaseId);
+        Assert.Empty(client.LastObservation.MountedControlIds);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -2770,10 +2789,15 @@ public sealed partial class EllaiSurfaceLogicTests
         }
 
         public Func<Task<bool>>? ObservationHandler { get; init; }
+        public UiObservationReport? LastObservation { get; private set; }
         public Task<bool> ReportUiObservationAsync(
             string sessionId,
             UiObservationReport report,
-            CancellationToken cancellationToken) => ObservationHandler?.Invoke() ?? Task.FromResult(false);
+            CancellationToken cancellationToken)
+        {
+            LastObservation = report;
+            return ObservationHandler?.Invoke() ?? Task.FromResult(false);
+        }
 
         public Task<IReadOnlyList<EllaiApprovedReceiptDto>?> ListReceiptsAsync(
             string sessionId,

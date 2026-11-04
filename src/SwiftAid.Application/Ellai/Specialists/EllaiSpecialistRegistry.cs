@@ -34,7 +34,7 @@ public static class EllaiSpecialistRegistry
             new EllaiSpecialistProfile(Case, 1, "Ellai:Specialists:Case:Enabled",
                 new[] { EllaiToolNames.CaseTimeline, EllaiToolNames.State }.ToFrozenSet(StringComparer.Ordinal)),
             new EllaiSpecialistProfile(Analytics, 1, "Ellai:Specialists:Analytics:Enabled",
-                new[] { EllaiToolNames.OwnedCaseCount }.ToFrozenSet(StringComparer.Ordinal)),
+                new[] { EllaiToolNames.OwnedCaseCount, EllaiToolNames.CaseSummary, EllaiToolNames.Now, EllaiToolNames.Locations }.ToFrozenSet(StringComparer.Ordinal)),
             new EllaiSpecialistProfile(Ui, 1, "Ellai:Specialists:Ui:Enabled",
                 new[] { EllaiToolNames.UiCatalogue, EllaiToolNames.UiObserve }.ToFrozenSet(StringComparer.Ordinal)),
             new EllaiSpecialistProfile(Geospatial, 1, "Ellai:Specialists:Geospatial:Enabled",

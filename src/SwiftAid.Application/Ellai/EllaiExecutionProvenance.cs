@@ -125,7 +125,7 @@ public sealed record EllaiObservedToolResult(
                 result.Allowed && result.DenialReason is null && result.ReasonCode == EllaiToolReasonCodes.Ok &&
                 !result.Truncated && result.Evidence.Count == 0 && result.ItemCount is >= 0 and <= 20 &&
                 request.Arguments.Count == 0 ? ResultFingerprint(result) : null,
-            request.ToolName == EllaiToolNames.Locations && result.ToolName == request.ToolName && result.Allowed &&
+            request.ToolName is EllaiToolNames.Locations or EllaiToolNames.CaseSummary && result.ToolName == request.ToolName && result.Allowed &&
                 result.DenialReason is null && result.ReasonCode == EllaiToolReasonCodes.Ok && !result.Truncated &&
                 result.LocationReplayScope is { } locationScope && locationScope.IsValid() &&
                 locationScope.ResultDigest == ResultFingerprint(result) ? locationScope : null,

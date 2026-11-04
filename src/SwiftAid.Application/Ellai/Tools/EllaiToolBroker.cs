@@ -56,6 +56,7 @@ public static class EllaiToolNames
     public const string ClassificationSnapshot = "ellai_classification_snapshot";
     public const string SurveillanceSignals = "ellai_surveillance_signals";
     public const string OwnedCaseCount = "ellai_owned_case_count";
+    public const string CaseSummary = "ellai_case_summary";
     public const string OwnedRegionCounts = "ellai_owned_region_counts";
     public const string ApprovedHealthSources = "ellai_approved_health_sources";
     public const string CaseTimeline = "ellai_case_timeline";
@@ -65,7 +66,7 @@ public static class EllaiToolNames
     {
         State, Evidence, Topic, Capabilities, Receipts, ProductFacts, Now,
         DocsSearch, DocsGet, UiCatalogue, UiObserve, IngestionSchema, ValidateObservations, Locations,
-        ImportDestinations, Imports, ImportStatus, ClassificationEvidence, ClassificationSnapshot, SurveillanceSignals, OwnedCaseCount, OwnedRegionCounts, ApprovedHealthSources, CaseTimeline, PublicSessions
+        ImportDestinations, Imports, ImportStatus, ClassificationEvidence, ClassificationSnapshot, SurveillanceSignals, OwnedCaseCount, CaseSummary, OwnedRegionCounts, ApprovedHealthSources, CaseTimeline, PublicSessions
     };
 }
 
@@ -231,6 +232,7 @@ public sealed class EllaiToolBroker
         $"{EllaiToolNames.Imports}(workspace_id, organization_id, country) — the current user's recent imports in one permitted destination; staff only.",
         $"{EllaiToolNames.ImportStatus}(import_id) — the current user's durable import state and saved/rejected/retry counts; no case contents and no submission.",
         $"{EllaiToolNames.ClassificationEvidence}(case_id) — persisted semantic classification evidence for an authorized current case revision; no inference, diagnosis or clinical probability.",
+        $"{EllaiToolNames.CaseSummary}(country?, place_id?, place_name?, reported_from?, reported_before?, field?) — complete counts of searchable readable reports, classified totals and sectors. Set field=observations for frequent verbatim symptoms/signs, once per case. Resolve places with ellai_locations; if absent use place_name for an exact reported label instead of place_id. Omitted dates mean all recorded dates. Never infer diagnoses.",
         $"{EllaiToolNames.OwnedCaseCount}(window_days) — count current-actor owned, readable managed cases created within 1..365 days; rejects incomplete results. This is a case count, not a diagnosis, incidence or animal count.",
         $"{EllaiToolNames.OwnedRegionCounts}() — rank unsuppressed administrative-region counts for the current officer's readable, owned cases created in the last 30 days. Not population incidence or a hotspot map.",
         $"{EllaiToolNames.ApprovedHealthSources}(topic, jurisdiction, language) — list explicitly approved, current source references only; no medical advice or generated health education.",
@@ -475,6 +477,8 @@ public sealed class EllaiToolBroker
             return Bound(await ReadEvidenceAsync(context, request, referenceIndex ?? _referenceIndex, ct).ConfigureAwait(false));
         if (canonical == EllaiToolNames.OwnedCaseCount)
             return Bound(await ReadOwnedCaseCountAsync(context, request, ct).ConfigureAwait(false));
+        if (canonical == EllaiToolNames.CaseSummary)
+            return Bound(await ReadCaseSummaryAsync(context, request, ct).ConfigureAwait(false));
         if (canonical == EllaiToolNames.OwnedRegionCounts)
             return Bound(await ReadOwnedRegionCountsAsync(context, request, ct).ConfigureAwait(false));
         if (canonical == EllaiToolNames.ApprovedHealthSources)
@@ -665,6 +669,68 @@ public sealed class EllaiToolBroker
             string.Join("; ", result.Regions.Take(5).Select(area => $"{area.RegionLabel}: {area.CaseCount} case records"));
         var summary = $"Top {Math.Min(5, result.Regions.Count)} unsuppressed regions for readable cases owned by the current officer, created from {result.WindowStartUtc:O} to {result.WindowEndUtc:O}: {areas}. " + result.Limitations;
         return new EllaiToolResult(request.ToolName, true, null, [evidence], summary, 1, false, EllaiToolReasonCodes.Ok);
+    }
+
+    private async Task<EllaiToolResult> ReadCaseSummaryAsync(EllaiToolContext context, EllaiToolRequest request, CancellationToken ct)
+    {
+        if (context.Actor is null || _queue is null || _caseReports is null || _locationReplayProtector is null)
+            return Deny(request.ToolName, "The authorized reporting summary is unavailable.", EllaiToolReasonCodes.Unavailable);
+        var country = request.Arguments.GetValueOrDefault("country");
+        var placeId = request.Arguments.GetValueOrDefault("place_id");
+        var field = request.Arguments.GetValueOrDefault("field");
+        var placeName = request.Arguments.GetValueOrDefault("place_name");
+        if (country is not null && (country.Length != 2 || country.Any(c => c is < 'A' or > 'Z')) ||
+            placeId is not null && (country is null || placeId.Length is < 1 or > 120 || placeId != placeId.Trim()) ||
+            field is not null and not "observations" ||
+            placeName is not null && (placeId is not null || placeName.Length is < 1 or > 120 ||
+                placeName != placeName.Trim() || placeName.Any(char.IsControl)) ||
+            !TryReportedRange(request.Arguments.GetValueOrDefault("reported_from"),
+                request.Arguments.GetValueOrDefault("reported_before"), out var from, out var before))
+            return Deny(request.ToolName, "Use a country and exact registry place ID, valid date pair, and optional field=observations.", EllaiToolReasonCodes.InvalidArguments);
+        try
+        {
+            var summary = await new CaseReportingSummaryQuery(_queue, _caseReports)
+                .ReadAsync(context.Actor, country, placeId, from, before, field == "observations", ct, placeName).ConfigureAwait(false);
+            var lines = new List<string>
+            {
+                $"{summary.Total} reported case records match your filters within your authorized scope.",
+                from is null ? "Dates: all recorded dates." : $"Report dates: {from:yyyy-MM-dd} inclusive to {before:yyyy-MM-dd} exclusive (UTC creation/report time, not onset).",
+                $"Classified: {summary.Classified}; unclassified: {summary.Unclassified}; unknown: {summary.UnknownClassification}. Classification means recorded status, not confirmed diagnosis.",
+                "Recorded categories: " + (summary.Categories.Count == 0 ? "none." : string.Join("; ", summary.Categories.Select(item => $"{item.Label}: {item.Cases}")) + ".")
+            };
+            if (placeId is not null)
+                lines.Add($"Selected occurrence place in {country}; nonmatching records with incomplete locations: {summary.UnknownLocations}.");
+            if (placeName is not null)
+                lines.Add($"Exact reported place name {JsonSerializer.Serialize(placeName)}; incomplete nonmatching locations: {summary.UnknownLocations}. Name matching does not establish a registry boundary.");
+            if (summary.MissingReportJournals > 0)
+                lines.Add($"Case entries without recorded report journals excluded: {summary.MissingReportJournals}.");
+            if (field == "observations")
+            {
+                lines.Add("Most common reported symptoms/signs (once per case, verbatim; not diagnoses):");
+                var included = 0;
+                foreach (var item in summary.Observations.Take(5))
+                {
+                    var line = $"{JsonSerializer.Serialize(item.Label)}: {item.Cases} case(s).";
+                    var candidate = string.Join("\n", lines.Append(line));
+                    if (candidate.Length > 1800 || candidate.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length > 108) break;
+                    lines.Add(line);
+                    included++;
+                }
+                if (included < summary.Observations.Count) lines.Add("Additional reported phrases omitted from this reply.");
+                if (summary.Observations.Count == 0) lines.Add("No reported symptom/sign phrases were recorded in the matching cases.");
+            }
+            var text = string.Join("\n", lines);
+            var digest = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(text)));
+            var result = new EllaiToolResult(request.ToolName, true, null,
+                [new("CaseReportingSummary", "authorized-cases", "1", null, digest)], text, 1, false);
+            return result with { LocationReplayScope = new EllaiLocationReplayScope(
+                _locationReplayProtector.Protect(context, request.Arguments), EllaiObservedToolResult.ResultFingerprint(result)) };
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        catch (Exception error) when (error is not OutOfMemoryException)
+        {
+            return Deny(request.ToolName, "A complete authorized reporting summary could not be read. No partial count was returned.", EllaiToolReasonCodes.Unavailable);
+        }
     }
 
     private async Task<EllaiToolResult> ReadOwnedCaseCountAsync(EllaiToolContext context, EllaiToolRequest request, CancellationToken ct)

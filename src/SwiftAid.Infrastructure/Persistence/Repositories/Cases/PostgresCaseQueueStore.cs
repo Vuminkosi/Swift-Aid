@@ -121,7 +121,7 @@ public sealed class PostgresCaseQueueStore(SwiftAidDbContext dbContext) : ICaseQ
         return rows.Select(item => new CaseQueueCandidate(item.CaseId, item.Workflow, item.CountryCode,
             item.AccountableOwnerActorId, item.AggregateVersion, item.UpdatedAtUtc,
             item.LastRecordedAtUtc ?? item.UpdatedAtUtc, item.Sector.ToString(), item.Classification.ToString(),
-            item.WorkspaceId, item.CreatedAtUtc)).ToArray();
+            item.WorkspaceId, item.CreatedAtUtc, HasReportJournal: item.LastRecordedAtUtc.HasValue)).ToArray();
     }
 
     public Task<IReadOnlyList<CaseQueueCandidate>> GetAsync(string ownerActorId, string workspaceId,
@@ -195,7 +195,8 @@ public sealed class PostgresCaseQueueStore(SwiftAidDbContext dbContext) : ICaseQ
                 item.UpdatedAtUtc,
                 item.LastRecordedAtUtc ?? item.UpdatedAtUtc,
                 item.Sector.ToString(),
-                item.Classification.ToString(), item.WorkspaceId, item.CreatedAtUtc, item.ReportedAtUtc))
+                item.Classification.ToString(), item.WorkspaceId, item.CreatedAtUtc, item.ReportedAtUtc,
+                item.LastRecordedAtUtc.HasValue))
             .ToArray();
     }
 }

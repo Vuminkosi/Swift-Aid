@@ -36,6 +36,31 @@ public sealed class CaseQueueTests
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     [IntakePostgresFact]
+    public async Task SearchableSummaryCandidatesUseARealPostgresQuery()
+    {
+        await using var db = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
+        await CaseRegistrationBackendTests.SeedRegistrationGrantAsync(db);
+        var caseId = await IntakeDecisionStoreTests.SeedManagedCaseAsync(db);
+        await SeedRegionScopeAsync(db, caseId);
+        var grantId = await db.AccessGrantGroups.Where(item => item.ActorId == "officer-1").Select(item => item.GrantGroupId).SingleAsync();
+        db.AccessGrantOperations.Add(new AccessGrantOperationEntity { GrantGroupId = grantId, Operation = CaseOperation.Search });
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+        var query = CreateQuery(db);
+        var filter = new CaseQueueFilter("ZW", CaseIds: [caseId], ReportedFromUtc: DateTimeOffset.UtcNow.AddDays(-7),
+            ReportedBeforeUtc: DateTimeOffset.UtcNow.AddDays(1));
+        var before = await query.GetSearchableAsync(CreateOfficer("officer-1"), 200, filter, null, default);
+        Assert.Equal(CaseQueueAccess.Allowed, before.Access);
+        Assert.False(Assert.Single(before.Items).HasReportJournal);
+        await SeedEventAsync(db, caseId, 1, "CaseReported", DateTimeOffset.UtcNow);
+        var after = await query.GetSearchableAsync(CreateOfficer("officer-1"), 200, filter, null, default);
+        Assert.True(Assert.Single(after.Items).HasReportJournal);
+        await db.AccessGrantOperations.Where(item => item.GrantGroupId == grantId && item.Operation == CaseOperation.Search).ExecuteDeleteAsync();
+        var revoked = await query.GetSearchableAsync(CreateOfficer("officer-1"), 200, filter, null, default);
+        Assert.Empty(revoked.Items);
+    }
+
+    [IntakePostgresFact]
     public async Task OwnedQueueContinuationReadsEveryCaseWithEqualTimestamps()
     {
         await using var db = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
@@ -123,6 +148,10 @@ public sealed class CaseQueueTests
             await CaseRegistrationBackendTests.SeedRegistrationGrantAsync(db);
             caseId = await IntakeDecisionStoreTests.SeedManagedCaseAsync(db);
             await SeedRegionScopeAsync(db, caseId);
+            var grantId = await db.AccessGrantGroups.Where(item => item.ActorId == "officer-1")
+                .Select(item => item.GrantGroupId).SingleAsync();
+            db.AccessGrantOperations.Add(new AccessGrantOperationEntity { GrantGroupId = grantId, Operation = CaseOperation.Search });
+            await db.SaveChangesAsync();
             var topics = new SwiftAid.Application.Ellai.EllaiTopicService(
                 new SwiftAid.Infrastructure.Persistence.Ellai.PostgresEllaiTopicStore(db));
             await new SwiftAid.Application.Ellai.EllaiCaseResultMemory(topics, CreateQuery(db)).RememberAsync(context,
@@ -288,7 +317,9 @@ public sealed class CaseQueueTests
     {
         var builder = WebApplication.CreateBuilder();
         builder.Services.AddSingleton<ICaseQueueQuery>(new TestQueueQuery(TestQueueQuery.SomeCaseId));
-        builder.Services.AddAuthorization();
+        builder.Services.AddAuthorization(options => options.AddPolicy("SwiftAidStaffApi", policy => policy
+            .AddAuthenticationSchemes(IdentityConstants.ApplicationScheme, OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme)
+            .RequireAuthenticatedUser()));
         using var app = builder.Build();
         app.MapCaseQueueEndpoints();
 
@@ -299,9 +330,7 @@ public sealed class CaseQueueTests
             candidate => candidate.RoutePattern.RawText == "/api/v1/cases/mine");
 
         var authorization = Assert.Single(route.Metadata.GetOrderedMetadata<IAuthorizeData>());
-        Assert.Equal(
-            string.Join(",", IdentityConstants.ApplicationScheme, OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme),
-            authorization.AuthenticationSchemes);
+        Assert.Equal("SwiftAidStaffApi", authorization.Policy);
     }
 
     [Fact]
@@ -436,7 +465,9 @@ public sealed class CaseQueueTests
                 IdentityConstants.ApplicationScheme, _ => { })
             .AddScheme<AuthenticationSchemeOptions, TestAuthenticationHandler>(
                 OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme, _ => { });
-        builder.Services.AddAuthorization();
+        builder.Services.AddAuthorization(options => options.AddPolicy("SwiftAidStaffApi", policy => policy
+            .AddAuthenticationSchemes(IdentityConstants.ApplicationScheme, OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme)
+            .RequireAuthenticatedUser()));
         // No ICaseQueueQuery: the case command pipeline is disabled here.
         using var app = builder.Build();
         app.UseAuthentication();
@@ -633,7 +664,9 @@ internal sealed class TestQueueHost : IAsyncDisposable
                 IdentityConstants.ApplicationScheme, _ => { })
             .AddScheme<AuthenticationSchemeOptions, TestAuthenticationHandler>(
                 OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme, _ => { });
-        builder.Services.AddAuthorization();
+        builder.Services.AddAuthorization(options => options.AddPolicy("SwiftAidStaffApi", policy => policy
+            .AddAuthenticationSchemes(IdentityConstants.ApplicationScheme, OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme)
+            .RequireAuthenticatedUser()));
 
         var service = new TestQueueQuery(TestQueueQuery.SomeCaseId, access, items);
         builder.Services.AddSingleton<ICaseQueueQuery>(service);
@@ -691,5 +724,14 @@ internal sealed class TestQueueQuery(
     {
         LastCursor = cursor;
         return GetMineAsync(actor, limit, ct);
+    }
+
+    public Task<CaseQueueResult> GetMineAsync(ActorContext actor, int? limit, CaseQueueFilter filter,
+        string? cursor, CancellationToken ct)
+    {
+        Assert.NotNull(filter.ReportedFromUtc);
+        Assert.NotNull(filter.ReportedBeforeUtc);
+        Assert.Equal(TimeSpan.FromDays(30), filter.ReportedBeforeUtc - filter.ReportedFromUtc);
+        return GetMineAsync(actor, limit, cursor, ct);
     }
 }

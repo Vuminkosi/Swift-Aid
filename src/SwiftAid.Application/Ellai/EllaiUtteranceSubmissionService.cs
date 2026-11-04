@@ -9,7 +9,8 @@ namespace SwiftAid.Application.Ellai;
 /// Blazor Server adapter use this operation so their fences and policy match.</summary>
 public sealed class EllaiUtteranceSubmissionService(
     IEllaiSessionStore sessionStore,
-    EllaiConsentService consent)
+    EllaiConsentService consent,
+    IEllaiUiObservationStore? observations = null)
 {
     private const string PublicHelpFeatureId = "public.product-help";
     private const int MaximumUtteranceLength = 8_000;
@@ -69,12 +70,22 @@ public sealed class EllaiUtteranceSubmissionService(
             ? new HashSet<string>(EllaiToolNames.All, StringComparer.Ordinal)
             : PublicHelpTools;
 
+        // The same server-stamped observation accompanies typed and voice turns.
+        // It supplies a referent only; tools must authorize every subsequent read.
+        var observation = observations is null ? null :
+            await observations.LatestAsync(current.SessionId, cancellationToken).ConfigureAwait(false);
+        var currentCaseId = HasWorkspaceScope(current.ScopeEpoch) &&
+            observation is { CurrentCaseId: { } id, CurrentNavigationId: EllaiCaseDetailUiManifest.NavigationId } &&
+            id != Guid.Empty && observation.ReceivedAtUtc <= DateTimeOffset.UtcNow &&
+            observation.ReceivedAtUtc >= DateTimeOffset.UtcNow.AddSeconds(-30)
+                ? id.ToString("D") : null;
+        var activePage = currentCaseId is not null ? "case-details" : request!.ActivePage;
         var work = new EllaiUtteranceWork(
             current.SessionId,
             current.ScopeEpoch,
             request!.FinalizedText.Trim(),
             PublicHelpFeatureId,
-            null,
+            currentCaseId,
             current.Mode,
             current.InteractionEpoch + 1,
             Guid.NewGuid().ToString("N"),
@@ -87,7 +98,7 @@ public sealed class EllaiUtteranceSubmissionService(
             EllaiConsentService.PublicProductHelpPurpose,
             request.ClientUtteranceId,
             request.Languages,
-            EllaiPageContext.DisplayName(request.ActivePage) is null ? null : request.ActivePage, interactionMode);
+            EllaiPageContext.DisplayName(activePage) is null ? null : activePage, interactionMode);
         var payload = EllaiUtteranceWorkEnvelope.Serialize(work, request.ClientUtteranceId);
         var safeRequest = request with
         {
@@ -95,7 +106,7 @@ public sealed class EllaiUtteranceSubmissionService(
             TranscriptRef = null,
             InputSource = "typed",
             FeatureId = PublicHelpFeatureId,
-            ResourceId = null,
+            ResourceId = currentCaseId,
         };
 
         var acceptance = await new EllaiSessionService(sessionStore, consent)

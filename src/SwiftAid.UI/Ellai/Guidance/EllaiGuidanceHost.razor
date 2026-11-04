@@ -465,6 +465,7 @@
         _startingVoiceCapture = true;
         try
         {
+            await ReportCurrentUiAsync(reportCancellation);
             var nativePermission = Services.GetService<IEllaiMicrophonePermission>();
             if (nativePermission is not null
                 && !await nativePermission.RequestAsync(CancellationToken.None).ConfigureAwait(false))
