@@ -6,7 +6,7 @@ namespace SwiftAid.Mobile.Services.Presentation;
 
 /// <summary>Projects only fields supported by the existing authorized Mobile case queue.</summary>
 public sealed class MobileCaseWorkspaceClient(ICaseQueueClient caseQueueClient, ICaseReportDetailsClient? reportClient = null,
-    IGuestIntakeTransport? intakeTransport = null) : IProgressiveCaseWorkspaceClient
+    IGuestIntakeTransport? intakeTransport = null) : IProgressiveCaseWorkspaceClient, IIncrementalCaseWorkspaceClient
 {
     private const int QueuePageSize = 100;
     private const string Capability = "case-workspace";
@@ -21,8 +21,13 @@ public sealed class MobileCaseWorkspaceClient(ICaseQueueClient caseQueueClient, 
         CaseWorkspaceQuery query,
         CancellationToken cancellationToken = default) => ListCoreAsync(query, includeReportDetails: false, cancellationToken);
 
+    public Task<UiCapabilityResult<Page<CaseWorkspaceRow>>> ListIncrementallyAsync(
+        CaseWorkspaceQuery query, Func<Page<CaseWorkspaceRow>, Task> onProgress,
+        CancellationToken cancellationToken = default) => ListCoreAsync(query, false, cancellationToken, onProgress);
+
     private async Task<UiCapabilityResult<Page<CaseWorkspaceRow>>> ListCoreAsync(
-        CaseWorkspaceQuery query, bool includeReportDetails, CancellationToken cancellationToken)
+        CaseWorkspaceQuery query, bool includeReportDetails, CancellationToken cancellationToken,
+        Func<Page<CaseWorkspaceRow>, Task>? onProgress = null)
     {
         ArgumentNullException.ThrowIfNull(query);
         cancellationToken.ThrowIfCancellationRequested();
@@ -34,32 +39,15 @@ public sealed class MobileCaseWorkspaceClient(ICaseQueueClient caseQueueClient, 
 
         try
         {
-            var result = await GetCompleteQueueAsync(cancellationToken).ConfigureAwait(false);
+            var countries = await GetCountriesAsync(cancellationToken).ConfigureAwait(false);
+            var result = await GetCompleteQueueAsync(cancellationToken, onProgress is null ? null :
+                items => onProgress(BuildPage(items, query, countries))).ConfigureAwait(false);
             if (result.Access == CaseQueueAccess.Denied)
                 return Denied<Page<CaseWorkspaceRow>>();
             if (result.Access != CaseQueueAccess.Allowed)
                 return Unavailable<Page<CaseWorkspaceRow>>("The authorized case list is unavailable right now.");
 
-            var countries = await GetCountriesAsync(cancellationToken).ConfigureAwait(false);
-            var matching = result.Items
-                .Where(item => Matches(item, query, countries))
-                .OrderBy(item => item.UpdatedAtUtc,
-                    query.Sort == CaseWorkspaceSort.UpdatedNewestFirst
-                        ? Comparer<DateTimeOffset>.Create((left, right) => right.CompareTo(left))
-                        : Comparer<DateTimeOffset>.Default)
-                .ThenBy(item => item.CaseId)
-                .ToArray();
-            var rows = matching
-                .Skip((int)Math.Min((long)(query.Page.PageNumber - 1) * query.Page.PageSize, matching.Length))
-                .Take(query.Page.PageSize)
-                .Select(item => ToRow(item, countries))
-                .ToArray();
-            var page = new Page<CaseWorkspaceRow>(
-                rows,
-                query.Page.PageNumber,
-                query.Page.PageSize,
-                matching.Length,
-                (long)query.Page.PageNumber * query.Page.PageSize < matching.Length);
+            var page = BuildPage(result.Items, query, countries);
             return includeReportDetails ? await EnrichAsync(page, cancellationToken).ConfigureAwait(false) : Success(page);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -70,6 +58,30 @@ public sealed class MobileCaseWorkspaceClient(ICaseQueueClient caseQueueClient, 
         {
             return Unavailable<Page<CaseWorkspaceRow>>("The authorized case list is unavailable right now.");
         }
+    }
+
+    private static Page<CaseWorkspaceRow> BuildPage(IReadOnlyList<CaseQueueItem> items,
+        CaseWorkspaceQuery query, IReadOnlyDictionary<string, string> countries)
+    {
+        var matching = items
+            .Where(item => Matches(item, query, countries))
+            .OrderBy(item => item.UpdatedAtUtc,
+                query.Sort == CaseWorkspaceSort.UpdatedNewestFirst
+                    ? Comparer<DateTimeOffset>.Create((left, right) => right.CompareTo(left))
+                    : Comparer<DateTimeOffset>.Default)
+            .ThenBy(item => item.CaseId)
+            .ToArray();
+        var rows = matching
+            .Skip((int)Math.Min((long)(query.Page.PageNumber - 1) * query.Page.PageSize, matching.Length))
+            .Take(query.Page.PageSize)
+            .Select(item => ToRow(item, countries))
+            .ToArray();
+        return new Page<CaseWorkspaceRow>(
+            rows,
+            query.Page.PageNumber,
+            query.Page.PageSize,
+            matching.Length,
+            (long)query.Page.PageNumber * query.Page.PageSize < matching.Length);
     }
 
     /// <summary>Adds optional report details to an already authorized page.</summary>
@@ -155,17 +167,21 @@ public sealed class MobileCaseWorkspaceClient(ICaseQueueClient caseQueueClient, 
         !string.IsNullOrWhiteSpace(query.RegionKey) ||
         !string.IsNullOrWhiteSpace(query.AssigneeKey);
 
-    private async Task<CaseQueueResult> GetCompleteQueueAsync(CancellationToken cancellationToken)
+    private async Task<CaseQueueResult> GetCompleteQueueAsync(CancellationToken cancellationToken,
+        Func<IReadOnlyList<CaseQueueItem>, Task>? onProgress = null)
     {
         var items = new List<CaseQueueItem>();
         var seenCursors = new HashSet<string>(StringComparer.Ordinal);
         string? cursor = null;
         while (true)
         {
-            var page = await _caseQueueClient.GetMineAsync(QueuePageSize, cursor, cancellationToken).ConfigureAwait(false);
+            using var pageTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            pageTimeout.CancelAfter(TimeSpan.FromSeconds(30));
+            var page = await _caseQueueClient.GetMineAsync(QueuePageSize, cursor, pageTimeout.Token).ConfigureAwait(false);
             if (page.Access != CaseQueueAccess.Allowed)
                 return new CaseQueueResult(page.Access, []);
             items.AddRange(page.Items);
+            if (onProgress is not null) await onProgress(items).ConfigureAwait(false);
             cursor = page.NextCursor;
             if (cursor is null) return new CaseQueueResult(CaseQueueAccess.Allowed, items);
             if (!seenCursors.Add(cursor)) return new CaseQueueResult(CaseQueueAccess.Unavailable, []);

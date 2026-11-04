@@ -10,7 +10,7 @@ namespace SwiftAid.Gateway.Cases;
 public sealed class CaseWorkspaceGatewayClient(
     ICaseQueueClient caseQueueClient,
     IPublicIntakeMetadataClient publicMetadataClient,
-    ICaseReportDetailsClient? reportClient = null) : ICaseWorkspaceClient
+    ICaseReportDetailsClient? reportClient = null) : IIncrementalCaseWorkspaceClient
 {
     private const int QueuePageSize = 100;
     private const string Capability = "case-workspace";
@@ -18,9 +18,17 @@ public sealed class CaseWorkspaceGatewayClient(
     private readonly ICaseQueueClient _caseQueueClient = caseQueueClient ?? throw new ArgumentNullException(nameof(caseQueueClient));
     private readonly IPublicIntakeMetadataClient _publicMetadataClient = publicMetadataClient ?? throw new ArgumentNullException(nameof(publicMetadataClient));
 
-    public async Task<UiCapabilityResult<Page<CaseWorkspaceRow>>> ListAsync(
+    public Task<UiCapabilityResult<Page<CaseWorkspaceRow>>> ListAsync(
         CaseWorkspaceQuery query,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) => ListCoreAsync(query, null, cancellationToken);
+
+    public Task<UiCapabilityResult<Page<CaseWorkspaceRow>>> ListIncrementallyAsync(
+        CaseWorkspaceQuery query, Func<Page<CaseWorkspaceRow>, Task> onProgress,
+        CancellationToken cancellationToken = default) => ListCoreAsync(query, onProgress, cancellationToken);
+
+    private async Task<UiCapabilityResult<Page<CaseWorkspaceRow>>> ListCoreAsync(
+        CaseWorkspaceQuery query, Func<Page<CaseWorkspaceRow>, Task>? onProgress,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(query);
         if (!query.IsValid)
@@ -28,7 +36,15 @@ public sealed class CaseWorkspaceGatewayClient(
             return Invalid<Page<CaseWorkspaceRow>>("Review the case filters and try again.");
         }
 
-        var queue = await GetCompleteQueueAsync(cancellationToken).ConfigureAwait(false);
+        if (HasUnsupportedFilter(query))
+            return Unavailable<Page<CaseWorkspaceRow>>("One or more selected filters are not available for this case list.");
+
+        var countries = await _publicMetadataClient.GetCountriesAsync(cancellationToken).ConfigureAwait(false);
+        var labels = countries.Succeeded && countries.Value is not null
+            ? countries.Value.Countries.ToDictionary(country => country.Code, country => country.Label, StringComparer.OrdinalIgnoreCase)
+            : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var queue = await GetCompleteQueueAsync(cancellationToken, onProgress is null ? null :
+            items => onProgress(BuildPage(items, labels, query))).ConfigureAwait(false);
         if (queue.Access == CaseQueueAccess.Denied)
         {
             return Denied<Page<CaseWorkspaceRow>>();
@@ -39,16 +55,30 @@ public sealed class CaseWorkspaceGatewayClient(
             return Unavailable<Page<CaseWorkspaceRow>>("The case list is not available right now.");
         }
 
-        if (HasUnsupportedFilter(query))
+        var page = BuildPage(queue.Items, labels, query);
+        var pageItems = page.Items.ToArray();
+        if (reportClient is not null)
         {
-            return Unavailable<Page<CaseWorkspaceRow>>("One or more selected filters are not available for this case list.");
+            for (var index = 0; index < pageItems.Length; index++)
+            {
+                var result = await reportClient.GetAsync(pageItems[index].CaseId, cancellationToken);
+                if (result.Code == UiCapabilityResultCode.Denied) return Denied<Page<CaseWorkspaceRow>>();
+                if (result.Succeeded && result.Value is { } report && report.CaseId == pageItems[index].CaseId)
+                    pageItems[index] = pageItems[index] with
+                    {
+                        RegionLabel = report.Location is { } place ? CaseReportDisplay.LocationLabel(place) : pageItems[index].RegionLabel,
+                        LocationHref = report.Location is { } target ? CaseReportDisplay.MapHref(target) : null,
+                        ObservationPreview = CaseReportDisplay.ObservationPreview(report)
+                    };
+            }
         }
+        return Success(page with { Items = pageItems });
+    }
 
-        var countries = await _publicMetadataClient.GetCountriesAsync(cancellationToken).ConfigureAwait(false);
-        var labels = countries.Succeeded && countries.Value is not null
-            ? countries.Value.Countries.ToDictionary(country => country.Code, country => country.Label, StringComparer.OrdinalIgnoreCase)
-            : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        var matching = queue.Items
+    private static Page<CaseWorkspaceRow> BuildPage(IReadOnlyList<CaseQueueItem> items,
+        IReadOnlyDictionary<string, string> labels, CaseWorkspaceQuery query)
+    {
+        var matching = items
             .Select(item => (Item: item, Row: ToRow(item, labels)))
             .Where(pair => Matches(pair.Item, pair.Row, query))
             .OrderBy(pair => pair.Row.UpdatedAtUtc, query.Sort == CaseWorkspaceSort.UpdatedNewestFirst
@@ -61,28 +91,12 @@ public sealed class CaseWorkspaceGatewayClient(
             .Take(query.Page.PageSize)
             .Select(pair => pair.Row)
             .ToArray();
-        if (reportClient is not null)
-        {
-            for (var index = 0; index < pageItems.Length; index++)
-            {
-                var result = await reportClient.GetAsync(pageItems[index].CaseId, cancellationToken);
-                if (result.Succeeded && result.Value is { } report)
-                    pageItems[index] = pageItems[index] with
-                    {
-                        RegionLabel = report.Location is { } place ? CaseReportDisplay.LocationLabel(place) : pageItems[index].RegionLabel,
-                        LocationHref = report.Location is { } target ? CaseReportDisplay.MapHref(target) : null,
-                        ObservationPreview = CaseReportDisplay.ObservationPreview(report)
-                    };
-            }
-        }
-        var page = new Page<CaseWorkspaceRow>(
+        return new Page<CaseWorkspaceRow>(
             pageItems,
             query.Page.PageNumber,
             query.Page.PageSize,
             matching.Length,
             (long)query.Page.PageNumber * query.Page.PageSize < matching.Length);
-
-        return Success(page);
     }
 
     public async Task<UiCapabilityResult<CaseWorkspaceFilterOptions>> GetFilterOptionsAsync(
@@ -136,17 +150,21 @@ public sealed class CaseWorkspaceGatewayClient(
         return Success(filterOptions, "Some filters are not available for this case list.");
     }
 
-    private async Task<CaseQueueResult> GetCompleteQueueAsync(CancellationToken cancellationToken)
+    private async Task<CaseQueueResult> GetCompleteQueueAsync(CancellationToken cancellationToken,
+        Func<IReadOnlyList<CaseQueueItem>, Task>? onProgress = null)
     {
         var items = new List<CaseQueueItem>();
         var seenCursors = new HashSet<string>(StringComparer.Ordinal);
         string? cursor = null;
         while (true)
         {
-            var page = await _caseQueueClient.GetMineAsync(QueuePageSize, cursor, cancellationToken).ConfigureAwait(false);
+            using var pageTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            pageTimeout.CancelAfter(TimeSpan.FromSeconds(30));
+            var page = await _caseQueueClient.GetMineAsync(QueuePageSize, cursor, pageTimeout.Token).ConfigureAwait(false);
             if (page.Access != CaseQueueAccess.Allowed)
                 return new CaseQueueResult(page.Access, []);
             items.AddRange(page.Items);
+            if (onProgress is not null) await onProgress(items).ConfigureAwait(false);
             cursor = page.NextCursor;
             if (cursor is null) return new CaseQueueResult(CaseQueueAccess.Allowed, items);
             if (!seenCursors.Add(cursor)) return new CaseQueueResult(CaseQueueAccess.Unavailable, []);

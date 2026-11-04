@@ -213,11 +213,18 @@
                 }
             </section>
         </MudHidden>
-        @if (PageCount > 1)
+        @if (!IsLoadingMore && PageCount > 1)
         {
             <MudPagination Count="@PageCount" Selected="@Query.PageNumber" SelectedChanged="PageChangedAsync" aria-label="Case list pages" data-ellai-control="case-list.pages" data-bonboarding-anchor="ellai-case-list-pages" />
         }
-        <MudText Typo="Typo.caption" Color="Color.Secondary" Class="operations-case-queue__note">Showing @Items.Count of @TotalCount cases in this list.</MudText>
+        @if (IsLoadingMore)
+        {
+            <MudText Typo="Typo.caption" Color="Color.Secondary" Class="operations-case-queue__note" role="status">Loading more authorized cases. @TotalCount matches found so far; ordering and totals are still updating.</MudText>
+        }
+        else
+        {
+            <MudText Typo="Typo.caption" Color="Color.Secondary" Class="operations-case-queue__note">Showing @Items.Count of @TotalCount cases in this list.</MudText>
+        }
     }
 
     @if (!string.IsNullOrWhiteSpace(_copyStatus))
@@ -246,7 +253,7 @@
         "case-list.clear" => HasActiveFilters,
         "case-list.refresh" => OnRetry.HasDelegate,
         "case-list.table" or "case-list.cards" => State == OperationsSurfaceState.Populated && Items.Count > 0,
-        "case-list.pages" => State == OperationsSurfaceState.Populated && Items.Count > 0 && PageCount > 1,
+        "case-list.pages" => !IsLoadingMore && State == OperationsSurfaceState.Populated && Items.Count > 0 && PageCount > 1,
         _ => true,
     };
 
@@ -314,6 +321,7 @@
     [Parameter] public FilterOptionsView? FilterOptions { get; set; }
     [Parameter] public IReadOnlyList<QueueViewRow> Items { get; set; } = Array.Empty<QueueViewRow>();
     [Parameter] public int TotalCount { get; set; }
+    [Parameter] public bool IsLoadingMore { get; set; }
     [Parameter] public string? StatusMessage { get; set; }
     [Parameter] public EventCallback<FilterRequestView> OnQueryChanged { get; set; }
     [Parameter] public EventCallback OnRetry { get; set; }

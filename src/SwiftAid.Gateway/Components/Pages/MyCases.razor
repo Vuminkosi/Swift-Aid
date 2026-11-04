@@ -5,6 +5,7 @@
 @attribute [Microsoft.AspNetCore.Authorization.Authorize]
 @inject IServiceProvider ServiceProvider
 @inject IJSRuntime JS
+@implements IDisposable
 
 <PageTitle>My cases | SwiftAid</PageTitle>
 <OperationsCaseQueue Title="My cases"
@@ -14,6 +15,7 @@
                      FilterOptions="_filterOptions"
                      Items="_items"
                      TotalCount="_totalCount"
+                     IsLoadingMore="_loadingMore"
                      StatusMessage="@_statusMessage"
                      OnQueryChanged="ChangeQueryAsync"
                      OnRetry="RefreshAsync"
@@ -33,6 +35,8 @@
     private int _totalCount;
     private string? _statusMessage;
     private long _loadGeneration;
+    private bool _loadingMore;
+    private CancellationTokenSource? _activeLoad;
     private static readonly TimeSpan CaseListTimeout = TimeSpan.FromSeconds(15);
 
     private bool _interactiveLoadStarted;
@@ -78,7 +82,9 @@
         _state = OperationsSurfaceState.Loading;
         _statusMessage = null;
         StateHasChanged();
-        using var timeout = new CancellationTokenSource(CaseListTimeout);
+        _activeLoad?.Cancel();
+        using var timeout = new CancellationTokenSource();
+        _activeLoad = timeout;
         var timeoutToken = timeout.Token;
 
         try
@@ -94,7 +100,19 @@
                 return;
             }
 
-            var result = await workspaceClient.ListAsync(_query, timeoutToken);
+            var incremental = workspaceClient as IIncrementalCaseWorkspaceClient;
+            _loadingMore = incremental is not null;
+            if (incremental is null) timeout.CancelAfter(CaseListTimeout);
+            var result = incremental is not null
+                ? await incremental.ListIncrementallyAsync(_query, page => InvokeAsync(() =>
+                {
+                    if (generation != Volatile.Read(ref _loadGeneration)) return;
+                    _items = page.Items.Select(ToViewRow).ToArray();
+                    _totalCount = page.TotalCount;
+                    _state = _items.Count == 0 ? OperationsSurfaceState.Loading : OperationsSurfaceState.Populated;
+                    StateHasChanged();
+                }), timeoutToken)
+                : await workspaceClient.ListAsync(_query, timeoutToken);
             if (generation != Volatile.Read(ref _loadGeneration))
             {
                 return;
@@ -102,16 +120,25 @@
 
             if (result.Succeeded && result.Value is { } page)
             {
+                _loadingMore = false;
                 _items = page.Items.Select(ToViewRow).ToArray();
                 _totalCount = page.TotalCount;
                 _state = _items.Count == 0 ? OperationsSurfaceState.Empty : OperationsSurfaceState.Populated;
                 _statusMessage = result.Message;
+                StateHasChanged();
 
                 try
                 {
                     var options = await workspaceClient.GetFilterOptionsAsync(timeoutToken);
                     if (generation == Volatile.Read(ref _loadGeneration))
                     {
+                        if (options.Code == UiCapabilityResultCode.Denied)
+                        {
+                            _items = Array.Empty<OperationsCaseQueue.QueueViewRow>();
+                            _totalCount = 0;
+                            _state = OperationsSurfaceState.Denied;
+                            _statusMessage = options.Message;
+                        }
                         _filterOptions = options.Succeeded && options.Value is { } availableOptions
                             ? ToViewOptions(availableOptions)
                             : null;
@@ -179,9 +206,18 @@
             // not schedule another render when the awaited task completes.
             if (generation == Volatile.Read(ref _loadGeneration))
             {
+                _loadingMore = false;
+                _activeLoad = null;
                 await InvokeAsync(StateHasChanged);
             }
         }
+    }
+
+    public void Dispose()
+    {
+        Interlocked.Increment(ref _loadGeneration);
+        _activeLoad?.Cancel();
+        _activeLoad = null;
     }
 
     private static OperationsCaseQueue.QueueViewRow ToViewRow(CaseWorkspaceRow row) => new(
