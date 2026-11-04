@@ -299,7 +299,30 @@ public sealed class EllaiMuseChatClientTests
         Assert.False(invoked);
     }
 
-    private sealed class InterleavedToolHandler(bool duplicateId = false) : HttpMessageHandler
+    [Fact]
+    public async Task FrameworkDoesNotInvokeAnyInterleavedBatchWhenOneCallHasDuplicateArguments()
+    {
+        using var http = new HttpClient(new InterleavedToolHandler(duplicateArguments: true));
+        using var client = EllaiMuseChatClientFactory.Create(new EllaiOptions
+        {
+            Enabled = true, ApiUrl = "https://fixture.invalid/v1", ApiKey = "fixture-key", ReasoningModel = "fixture-model"
+        }, http);
+        var agent = new EllaiFrameworkAgent(client);
+        var context = new EllaiToolContext("session", "epoch", "cases", null, 4, true,
+            AllowedTools: new HashSet<string> { EllaiToolNames.Now, EllaiToolNames.State });
+        var invoked = false;
+        var error = await Assert.ThrowsAsync<EllaiFrameworkFailureException>(() => agent.RunAsync(context, "policy",
+            [new ChatMessage(ChatRole.User, "test")], 100, _ => Task.FromResult(true), (_, request, _) =>
+            {
+                invoked = true;
+                return Task.FromResult(new EllaiToolResult(request.ToolName, true, null, [], "Synthetic", 1, false));
+            }, new EllaiFrameworkUsage("session", new EllaiUsageLedger(), new InMemoryEllaiUsageStore()), default,
+            (_, _) => ValueTask.CompletedTask));
+        Assert.Equal(EllaiToolReasonCodes.InvalidArguments, error.Code);
+        Assert.False(invoked);
+    }
+
+    private sealed class InterleavedToolHandler(bool duplicateId = false, bool duplicateArguments = false) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
@@ -314,6 +337,8 @@ public sealed class EllaiMuseChatClientTests
 
                 """;
             if (duplicateId) payload = payload.Replace("call-b", "call-a", StringComparison.Ordinal);
+            if (duplicateArguments) payload = payload.Replace("\"name\":\"capabilities\",\"arguments\":\"}\"",
+                "\"name\":\"state\",\"arguments\":\"\\\"projection\\\":\\\"feature\\\",\\\"projection\\\":\\\"queue\\\"}\"", StringComparison.Ordinal);
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(payload, Encoding.UTF8, "text/event-stream")
