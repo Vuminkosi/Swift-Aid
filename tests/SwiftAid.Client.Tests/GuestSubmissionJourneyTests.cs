@@ -31,6 +31,35 @@ public sealed class GuestSubmissionJourneyTests
     }
 
     [Fact]
+    public async Task LocalAudioIsNotQueuedOrSentWithoutAnUploadPath()
+    {
+        var persistence = new MemorySubmissionPersistence();
+        var transport = new ScriptedTransport();
+        var store = new GuestDraftStore(persistence, transport: transport);
+        var attachmentId = Guid.NewGuid();
+        var submission = ValidSubmission() with { OriginalAudioAttachmentIds = [attachmentId] };
+        var draft = await store.CreateDraftAsync(submission);
+        var record = (await persistence.GetAsync(draft.ClientSubmissionId, default))!;
+        await persistence.SaveAsync(record with
+        {
+            AudioAssets = [new(attachmentId, new string('A', 64), "audio/wav", 6, 900, GuestAudioLocalState.LocalOnly)]
+        }, default);
+
+        Assert.True((await store.GetAsync(draft.ClientSubmissionId))!.HasLocalAudio);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => store.QueueAsync(draft.ClientSubmissionId));
+        var unchanged = (await persistence.GetAsync(draft.ClientSubmissionId, default))!;
+        Assert.Equal(GuestSubmissionLocalState.Draft, unchanged.State);
+        Assert.Contains(attachmentId, unchanged.Submission.OriginalAudioAttachmentIds);
+
+        await persistence.SaveAsync(unchanged with { State = GuestSubmissionLocalState.Queued }, default);
+        var sync = await new GuestSubmissionCoordinator(persistence, transport).SubmitPendingAsync();
+        Assert.Equal(1, sync.NeedsAttention);
+        Assert.Equal(0, transport.CreateSessionCalls);
+        Assert.Equal(0, transport.SubmitCalls);
+        Assert.Contains(attachmentId, (await persistence.GetAsync(draft.ClientSubmissionId, default))!.Submission.OriginalAudioAttachmentIds);
+    }
+
+    [Fact]
     public async Task EditableDraftCanBeRevisedAndExplicitlyCompletedWithoutQueuingRawValues()
     {
         var persistence = new MemorySubmissionPersistence();

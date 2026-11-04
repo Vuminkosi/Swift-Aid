@@ -509,14 +509,21 @@
             : request.PreviousDraftId is { } draftId
                 ? editable is not null
                     ? await SubmissionStore.CompleteEditableDraftAsync(draftId, submission)
-                    : await SubmissionStore.CreateRevisionAsync(draftId, submission)
+                    : await SubmissionStore.CreateRevisionPreservingAudioAsync(draftId, submission)
                 : await SubmissionStore.CreateDraftAsync(submission);
 
+        var savedEditable = request.FormSnapshot is null ? null : await SubmissionStore.GetEditableDraftAsync(saved.ClientSubmissionId);
+        var persisted = request.FormSnapshot is null
+            ? (await SubmissionStore.GetDraftAsync(saved.ClientSubmissionId))?.Submission
+            : savedEditable?.Submission;
+        if (request.FormSnapshot is not null && savedEditable?.FormSnapshot != request.FormSnapshot)
+            throw new InvalidOperationException("The editable draft could not be verified.");
+        if (persisted is null) throw new InvalidOperationException("The saved draft could not be verified.");
         request.ConfirmPersisted(saved.ClientSubmissionId, request.FormSnapshot is not null);
         if (ReferenceEquals(_reportDraft, sourceDraft) && _activeDraftId == sourceDraftId)
         {
             _activeDraftId = saved.ClientSubmissionId;
-            _activeSubmission = submission with { ClientSubmissionId = saved.ClientSubmissionId };
+            _activeSubmission = persisted;
             _activeFormSnapshot = request.FormSnapshot;
             _savedDraftSnapshot = sourceSnapshot;
             _pageMessage = "Your draft was saved on this device. Save again to include any newer edits. It has not been sent.";
@@ -587,7 +594,7 @@
             var saved = _activeDraftId is { } draftId
                 ? editable is not null
                     ? await SubmissionStore.CompleteEditableDraftAsync(draftId, submission)
-                    : await SubmissionStore.CreateRevisionAsync(draftId, submission)
+                    : await SubmissionStore.CreateRevisionPreservingAudioAsync(draftId, submission)
                 : await SubmissionStore.CreateDraftAsync(submission);
             _activeDraftId = saved.ClientSubmissionId;
             _activeSubmission = submission with { ClientSubmissionId = saved.ClientSubmissionId };
@@ -803,7 +810,7 @@
                     OriginalAudioAttachmentIds = attachmentIds.Append(_pendingAudioAttachmentId.Value).ToArray()
                 };
                 var revision = editable is null
-                    ? await SubmissionStore.CreateRevisionAsync(currentDraftId, revisedSubmission)
+                    ? await SubmissionStore.CreateRevisionPreservingAudioAsync(currentDraftId, revisedSubmission)
                     : await SubmissionStore.CreateEditableRevisionAsync(currentDraftId, revisedSubmission, editable.FormSnapshot);
                 _activeDraftId = revision.ClientSubmissionId;
                 _activeSubmission = revisedSubmission with { ClientSubmissionId = revision.ClientSubmissionId };

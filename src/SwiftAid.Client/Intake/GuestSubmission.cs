@@ -47,7 +47,8 @@ public sealed record GuestSubmissionSummary(
     GuestSubmissionLocalState State,
     DateTimeOffset CreatedAtUtc,
     IntakeReceipt? Receipt,
-    bool RequiresEditing = false);
+    bool RequiresEditing = false,
+    bool HasLocalAudio = false);
 
 /// <summary>Editable unsubmitted report details without its receipt proof or session capability.</summary>
 public sealed record GuestDraftDetails(
@@ -124,6 +125,9 @@ public interface IGuestSubmissionStore
         Guid previousSubmissionId,
         IntakeSubmission revisedSubmission,
         CancellationToken cancellationToken = default);
+
+    Task<GuestSubmissionSummary> CreateRevisionPreservingAudioAsync(Guid previousSubmissionId,
+        IntakeSubmission revisedSubmission, CancellationToken cancellationToken = default);
 
     Task<GuestAudioRetakeResult> RetakeAudioAsync(
         Guid submissionId,

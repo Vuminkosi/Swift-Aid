@@ -52,21 +52,25 @@ public sealed class GuestDraftStore(
         Guid previousSubmissionId,
         IntakeSubmission revisedSubmission,
         CancellationToken cancellationToken = default) =>
-        CreateRevisionCoreAsync(previousSubmissionId, revisedSubmission, null, false, cancellationToken);
+        CreateRevisionCoreAsync(previousSubmissionId, revisedSubmission, null, false, false, cancellationToken);
+
+    public Task<GuestSubmissionSummary> CreateRevisionPreservingAudioAsync(Guid previousSubmissionId,
+        IntakeSubmission revisedSubmission, CancellationToken cancellationToken = default) =>
+        CreateRevisionCoreAsync(previousSubmissionId, revisedSubmission, null, false, true, cancellationToken);
 
     public Task<GuestSubmissionSummary> CreateEditableRevisionAsync(Guid previousSubmissionId, IntakeSubmission carrier,
         GuestDraftFormSnapshot snapshot, CancellationToken cancellationToken = default)
     {
         ValidateSnapshot(snapshot);
-        return CreateRevisionCoreAsync(previousSubmissionId, UnconfirmCarrier(carrier), snapshot, true, cancellationToken);
+        return CreateRevisionCoreAsync(previousSubmissionId, UnconfirmCarrier(carrier), snapshot, true, true, cancellationToken);
     }
 
     public Task<GuestSubmissionSummary> CompleteEditableDraftAsync(Guid previousSubmissionId, IntakeSubmission submission,
         CancellationToken cancellationToken = default) =>
-        CreateRevisionCoreAsync(previousSubmissionId, submission, null, true, cancellationToken);
+        CreateRevisionCoreAsync(previousSubmissionId, submission, null, true, true, cancellationToken);
 
     private async Task<GuestSubmissionSummary> CreateRevisionCoreAsync(Guid previousSubmissionId,
-        IntakeSubmission revisedSubmission, GuestDraftFormSnapshot? snapshot, bool allowEditable,
+        IntakeSubmission revisedSubmission, GuestDraftFormSnapshot? snapshot, bool allowEditable, bool preserveAudio,
         CancellationToken cancellationToken)
     {
         if (previousSubmissionId == Guid.Empty) throw new ArgumentException("A previous report is required.", nameof(previousSubmissionId));
@@ -89,7 +93,7 @@ public sealed class GuestDraftStore(
 
             // Preserve existing recordings while allowing an explicitly added attachment.
             // Removing or replacing a recording uses the explicit retake path.
-            if (allowEditable)
+            if (preserveAudio)
             {
                 ArgumentNullException.ThrowIfNull(revisedSubmission.OriginalAudioAttachmentIds);
                 revisedSubmission = revisedSubmission with
@@ -422,6 +426,8 @@ public sealed class GuestDraftStore(
             }
             if (current.FormSnapshot is not null)
                 throw new InvalidOperationException("Open and complete this draft before sending it.");
+            if (current.Submission.OriginalAudioAttachmentIds.Count > 0 || (current.AudioAssets?.Count ?? 0) > 0)
+                throw new InvalidOperationException("Voice upload is not available. The recording remains on this device.");
 
             if (transport is null)
             {
@@ -689,5 +695,6 @@ public sealed class GuestDraftStore(
         item.State,
         item.CreatedAtUtc,
         item.Receipt,
-        item.FormSnapshot is not null);
+        item.FormSnapshot is not null,
+        item.Submission.OriginalAudioAttachmentIds.Count > 0 || (item.AudioAssets?.Count ?? 0) > 0);
 }

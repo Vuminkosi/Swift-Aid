@@ -113,7 +113,7 @@ else
                                      ProcessingPolicyNoticeText="@_processingPolicyNoticeText"
                                      ProcessingPolicyAcknowledgementLabel="@_processingPolicyAcknowledgementLabel"
                                      DraftSavingAvailable="_storageAvailable"
-                                     SubmitAvailable="@CanSend"
+                                     SubmitAvailable="@(CanSend && !_activeHasLocalAudio)"
                                      Draft="_draft"
                                      CurrentDraftId="_activeDraftId"
                                      Receipt="_receivedReceipt"
@@ -161,6 +161,7 @@ else
     private bool _isReport;
     private bool _isTracking;
     private Guid? _activeDraftId;
+    private bool _activeHasLocalAudio;
     private IntakeReceipt? _receivedReceipt;
     private IReadOnlyList<PublicReportHistorySurface.HistoryItem> _history = [];
     private bool _historyLoading;
@@ -352,20 +353,32 @@ else
         {
             var previousEditable = request.PreviousDraftId is { } previousId
                 ? await SubmissionStore.GetEditableDraftAsync(previousId) : null;
+            var previousDraft = request.PreviousDraftId is { } existingId && previousEditable is null
+                ? await SubmissionStore.GetDraftAsync(existingId) : null;
+            if (request.PreviousDraftId is not null && previousEditable is null && previousDraft is null)
+                throw new InvalidOperationException("The saved draft is no longer editable.");
+            var previousSubmission = previousEditable?.Submission ?? previousDraft?.Submission;
+            var submission = previousSubmission is null ? request.Submission : request.Submission with
+            {
+                OriginalAudioAttachmentIds = previousSubmission.OriginalAudioAttachmentIds.ToArray()
+            };
             var result = request.FormSnapshot is { } snapshot
                 ? request.PreviousDraftId is { } previous
-                    ? await SubmissionStore.CreateEditableRevisionAsync(previous, request.Submission, snapshot)
-                    : await SubmissionStore.CreateEditableDraftAsync(request.Submission, snapshot)
+                    ? await SubmissionStore.CreateEditableRevisionAsync(previous, submission, snapshot)
+                    : await SubmissionStore.CreateEditableDraftAsync(submission, snapshot)
                 : request.PreviousDraftId is { } normalPrevious
                     ? previousEditable is not null
-                        ? await SubmissionStore.CompleteEditableDraftAsync(normalPrevious, request.Submission)
-                        : await SubmissionStore.CreateRevisionAsync(normalPrevious, request.Submission)
-                    : await SubmissionStore.CreateDraftAsync(request.Submission);
+                        ? await SubmissionStore.CompleteEditableDraftAsync(normalPrevious, submission)
+                        : await SubmissionStore.CreateRevisionPreservingAudioAsync(normalPrevious, submission)
+                    : await SubmissionStore.CreateDraftAsync(submission);
             request.ConfirmPersisted(result.ClientSubmissionId, request.FormSnapshot is not null);
             if (ReferenceEquals(_draft, sourceDraft) && _activeDraftId == sourceDraftId)
             {
                 _activeDraftId = result.ClientSubmissionId;
-                _feedback = "Your draft was saved on this device. Save again to include any newer edits. It has not been sent.";
+                _activeHasLocalAudio = result.HasLocalAudio;
+                _feedback = result.HasLocalAudio
+                    ? "Your draft and voice note remain on this device. Voice upload is not available yet."
+                    : "Your draft was saved on this device. Save again to include any newer edits. It has not been sent.";
                 _feedbackIsError = false;
             }
             await ReloadHistoryAsync();
@@ -381,17 +394,25 @@ else
 
     private async Task SendReportAsync(IntakeSubmission submission)
     {
-        if (_busy || !CanSend) return;
+        if (_busy || !CanSend || _activeHasLocalAudio) return;
         _receivedReceipt = null;
         _busy = true;
         try
         {
             var previousEditable = _activeDraftId is { } prior
                 ? await SubmissionStore.GetEditableDraftAsync(prior) : null;
+            var previousSummary = _activeDraftId is { } previousId ? await SubmissionStore.GetAsync(previousId) : null;
+            if (previousSummary?.HasLocalAudio == true)
+            {
+                _activeHasLocalAudio = true;
+                _feedback = "This report has a voice note saved on this device. Voice upload is not available yet.";
+                _feedbackIsError = false;
+                return;
+            }
             var saved = _activeDraftId is { } previous
                 ? previousEditable is not null
                     ? await SubmissionStore.CompleteEditableDraftAsync(previous, submission)
-                    : await SubmissionStore.CreateRevisionAsync(previous, submission)
+                    : await SubmissionStore.CreateRevisionPreservingAudioAsync(previous, submission)
                 : await SubmissionStore.CreateDraftAsync(submission);
             _activeDraftId = saved.ClientSubmissionId;
             _draft = PublicReportDraft.FromSubmission(submission with { ClientSubmissionId = saved.ClientSubmissionId });
@@ -430,8 +451,9 @@ else
                     GuestSubmissionLocalState.NeedsAttention => PublicReportHistorySurface.HistoryState.NeedsAttention,
                     _ => PublicReportHistorySurface.HistoryState.Superseded
                 }, item.CreatedAtUtc, item.Receipt,
-                CanSend && !item.RequiresEditing && item.State is (GuestSubmissionLocalState.Draft or GuestSubmissionLocalState.Queued),
-                item.RequiresEditing ? "Open this draft and finish its details before sending." : SendUnavailableMessage)).ToArray();
+                CanSend && !item.RequiresEditing && !item.HasLocalAudio && item.State is (GuestSubmissionLocalState.Draft or GuestSubmissionLocalState.Queued),
+                item.HasLocalAudio ? "This report has a voice note saved on this device. Voice upload is not available yet."
+                    : item.RequiresEditing ? "Open this draft and finish its details before sending." : SendUnavailableMessage)).ToArray();
             _storageAvailable = true;
         }
         catch (Exception)
@@ -450,9 +472,13 @@ else
             var draft = editable is null ? await SubmissionStore.GetDraftAsync(id) : null;
             if (draft is null && editable is null) { _feedback = "This draft is no longer available on this device."; return; }
             var restored = editable is null ? PublicReportDraft.FromSubmission(draft!.Submission) : PublicReportDraft.FromFormSnapshot(editable.FormSnapshot);
+            var summary = await SubmissionStore.GetAsync(id);
+            if (summary is null) { _feedback = "This draft is no longer available on this device."; return; }
             _activeDraftId = id;
+            _activeHasLocalAudio = summary.HasLocalAudio;
             _draft = restored;
-            _feedback = null;
+            _feedback = summary.HasLocalAudio ? "This report has a voice note saved on this device. Voice upload is not available yet." : null;
+            _feedbackIsError = false;
             Navigation.NavigateTo("/report");
         }
         catch (Exception) { _feedback = "This draft could not be opened safely."; _feedbackIsError = true; }

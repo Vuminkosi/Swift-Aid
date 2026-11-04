@@ -33,7 +33,8 @@ public sealed class GuestSubmissionCoordinator(
                 var item = queuedItem;
                 try
                 {
-                    if (item.FormSnapshot is not null || !HasValidPayloadHash(item))
+                    if (item.FormSnapshot is not null || item.Submission.OriginalAudioAttachmentIds.Count > 0 ||
+                        (item.AudioAssets?.Count ?? 0) > 0 || !HasValidPayloadHash(item))
                     {
                         var updatedRecord = item with
                         {

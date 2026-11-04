@@ -10,6 +10,30 @@ namespace SwiftAid.Client.Tests;
 public sealed class GuestDraftAudioRetakePersistenceTests
 {
     [Fact]
+    public async Task TextRevisionPreservesExistingAudioEvenWhenPayloadOmitsIt()
+    {
+        using var root = new TemporaryRoot();
+        var keys = new TestInstallKeyStore();
+        var persistence = new EncryptedGuestSubmissionStore(root.Path, keys);
+        var audio = new EncryptedGuestAudioStore(root.Path, keys, persistence);
+        var drafts = new GuestDraftStore(persistence, audioStore: audio);
+        var attachmentId = Guid.NewGuid();
+        var original = CreateSubmission(attachmentId);
+        var created = await drafts.CreateDraftAsync(original);
+        byte[] bytes = [0x52, 0x49, 0x46, 0x46, 0x01, 0x02];
+        await audio.SaveOriginalAsync(created.ClientSubmissionId, attachmentId, "audio/wav", 900, new MemoryStream(bytes));
+
+        var revision = await drafts.CreateRevisionPreservingAudioAsync(created.ClientSubmissionId,
+            original with { OriginalAudioAttachmentIds = [] });
+        var record = (await persistence.GetAsync(revision.ClientSubmissionId, default))!;
+
+        Assert.True(revision.HasLocalAudio);
+        Assert.Contains(attachmentId, record.Submission.OriginalAudioAttachmentIds);
+        Assert.Contains(record.AudioAssets!, item => item.AttachmentId == attachmentId);
+        Assert.Equal(bytes, await audio.ReadOriginalAsync(revision.ClientSubmissionId, attachmentId));
+    }
+
+    [Fact]
     public async Task EditableRevisionCanAddAudioWithoutDroppingExistingAttachment()
     {
         using var root = new TemporaryRoot();
