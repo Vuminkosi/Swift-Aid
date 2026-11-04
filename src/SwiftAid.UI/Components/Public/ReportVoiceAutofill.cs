@@ -17,40 +17,59 @@ public static class ReportVoiceAutofill
         var statements = fragments.Select(NormalizeStatement).ToArray();
         var matching = fragments.Where(item => string.Equals(NormalizeStatement(item), evidence, StringComparison.Ordinal)).ToArray();
         if (matching.Length != 1 || matching[0].TrimEnd().EndsWith('?')) return false;
-        var statement = evidence;
         const RegexOptions options = RegexOptions.IgnoreCase | RegexOptions.CultureInvariant;
-        if (statements.Any(item => !string.Equals(item, evidence, StringComparison.Ordinal) &&
-            (Regex.IsMatch(item, @"\b(?:actually|correction|instead|rather|wrong)\b", options) ||
-             (item.Contains(suggestion.Value, StringComparison.OrdinalIgnoreCase) &&
-              Regex.IsMatch(item, @"\b(?:not|never|no|maybe|perhaps|uncertain|unknown|isn't|doesn't|don't)\b", options)))))
-            return false;
+        var clauses = statements.SelectMany(SplitClauses).ToArray();
+        var evidenceClauses = SplitClauses(evidence);
         if (suggestion.Field == "age" && draft.SubjectScope == IntakeSubjectScope.Human &&
             string.IsNullOrWhiteSpace(draft.AgeYearsText) && !isModified(nameof(draft.AgeYearsText)))
         {
-            const string pattern = @"^(?:the\s+patient|she|he)\s+(?:is\s+){1,2}(?<age>\d{1,3})\s+years?\s+old$";
-            var match = Regex.Match(statement, pattern, options);
-            return statements.Count(item => Regex.IsMatch(item, pattern, options)) == 1 && match.Success &&
+            const string pattern = @"^(?:the\s+patient(?:\s+patient)?|she|he)\s+(?:is\s+){1,2}(?<age>\d{1,3})\s+years?\s+old$";
+            var matches = evidenceClauses.Select(item => (Clause: item, Match: Regex.Match(item, pattern, options)))
+                .Where(item => item.Match.Success).ToArray();
+            return matches.Length == 1 && clauses.Count(item => Regex.IsMatch(item, pattern, options)) == 1 &&
+                IsSafeContext(matches[0].Clause, suggestion.Value, clauses) &&
                 TryGetAge(suggestion.Value, out var age) &&
-                int.TryParse(match.Groups["age"].Value, out var statedAge) && age == statedAge;
+                int.TryParse(matches[0].Match.Groups["age"].Value, out var statedAge) && age == statedAge;
         }
         if (suggestion.Field == "locality" && string.IsNullOrWhiteSpace(draft.Locality) &&
             draft.LocalityPresence != PresenceState.Known && !isModified(nameof(draft.Locality)))
         {
-            const string pattern = @"^(?:the\s+patient|she|he)\s+lives\s+in\s+(?<place>[\p{L}\p{N}][\p{L}\p{N} '\-]{0,199})$";
-            var match = Regex.Match(statement, pattern, options);
-            return statements.Count(item => Regex.IsMatch(item, pattern, options)) == 1 && match.Success &&
-                string.Equals(match.Groups["place"].Value.Trim(), suggestion.Value.Trim(), StringComparison.Ordinal);
+            const string pattern = @"^(?:the\s+patient(?:\s+patient)?|she|he)\s+(?:lives\s+in\s+){1,2}(?<place>[\p{L}\p{N}][\p{L}\p{N} '\-]{0,199})$";
+            var matches = evidenceClauses.Select(item => (Clause: item, Match: Regex.Match(item, pattern, options)))
+                .Where(item => item.Match.Success).ToArray();
+            return matches.Length == 1 && clauses.Count(item => Regex.IsMatch(item, pattern, options)) == 1 &&
+                IsSafeContext(matches[0].Clause, suggestion.Value, clauses) &&
+                string.Equals(matches[0].Match.Groups["place"].Value.Trim(), suggestion.Value.Trim(), StringComparison.Ordinal);
         }
         if (suggestion.Field == "country" && string.IsNullOrWhiteSpace(draft.CountryCode) &&
             !isModified(nameof(draft.CountryCode)))
         {
             const string pattern = @"^(?:this|it|the\s+incident)\s+(?:happened\s+){1,2}in\s+(?<country>[\p{L}\p{N}][\p{L}\p{N} '\-]{0,199})$";
-            var match = Regex.Match(statement, pattern, options);
-            return statements.Count(item => Regex.IsMatch(item, pattern, options)) == 1 && match.Success &&
-                string.Equals(match.Groups["country"].Value.Trim(), suggestion.Value.Trim(), StringComparison.OrdinalIgnoreCase);
+            var matches = evidenceClauses.Select(item => (Clause: item, Match: Regex.Match(item, pattern, options)))
+                .Where(item => item.Match.Success).ToArray();
+            return matches.Length == 1 && clauses.Count(item => Regex.IsMatch(item, pattern, options)) == 1 &&
+                IsSafeContext(matches[0].Clause, suggestion.Value, clauses) &&
+                string.Equals(matches[0].Match.Groups["country"].Value.Trim(), suggestion.Value.Trim(), StringComparison.OrdinalIgnoreCase);
         }
-        return suggestion.Field == "observation" && draft.GetObservations().Count == 0 &&
-            !isModified(nameof(draft.ObservationsText));
+        return suggestion.Field == "observation" && IsSafeContext(evidence, suggestion.Value, statements) &&
+            draft.GetObservations().Count == 0 && !isModified(nameof(draft.ObservationsText));
+    }
+
+    private static string[] SplitClauses(string statement) =>
+        Regex.Split(statement,
+                @"\s*,\s*|(?<=\s)(?=(?:(?:the\s+patient(?:\s+patient)?|she|he)\s+(?:(?:is\s+){1,2}\d{1,3}\s+years?\s+old\b|(?:lives\s+in\s+){1,2})|(?:this|it|the\s+incident)\s+(?:happened\s+){1,2}in\s+))",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)
+            .Where(item => !string.IsNullOrWhiteSpace(item)).Select(item => item.Trim()).ToArray();
+
+    private static bool IsSafeContext(string selected, string value, IReadOnlyList<string> clauses)
+    {
+        const RegexOptions options = RegexOptions.IgnoreCase | RegexOptions.CultureInvariant;
+        return !clauses.Any(item => !string.Equals(item, selected, StringComparison.Ordinal) &&
+            (Regex.IsMatch(item, @"\b(?:actually|correction|instead|rather|wrong|maybe|perhaps|possibly|probably|uncertain|unknown|whether|if|think|guess|suspect|believe|might)\b", options) ||
+             Regex.IsMatch(item, @"\b(?:do(?:es)?n't|do(?:es)?\s+not)\s+know\b|\bnot\s+sure\b", options) ||
+             Regex.IsMatch(item, @"\b(?:not|never|no)$", options) ||
+             (item.Contains(value, StringComparison.OrdinalIgnoreCase) &&
+              Regex.IsMatch(item, @"\b(?:not|never|no|maybe|perhaps|uncertain|unknown|isn't|doesn't|don't)\b", options))));
     }
 
     public static bool TryGetAge(string value, out int age)
