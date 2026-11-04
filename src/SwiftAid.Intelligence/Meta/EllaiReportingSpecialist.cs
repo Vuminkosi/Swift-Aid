@@ -37,6 +37,7 @@ public sealed class EllaiReportingSpecialist(IChatClient client, IEllaiFramework
                 "whether a report was submitted, or why validation did not pass. Do not invent missing values, diagnoses, " +
                 "controls or actions. Return an Answer with observed claims, each exactly matching one returned source line " +
                 "and citing that line's evidence. Set displayText and spokenText to the claim texts joined by a newline. " +
+                "When using a truncated case timeline, include its first line as a claim with the timeline evidence. " +
                 "Do not propose UI intents or actions; the supervisor and form handle guidance and explicit confirmation.",
                 [new ChatMessage(ChatRole.User, task)], 2048, isCurrent, Read, usage, ct, revalidateTool: revalidate, maxModelCalls: profile.MaxModelCalls).ConfigureAwait(false);
         }
@@ -54,7 +55,8 @@ public sealed class EllaiReportingSpecialist(IChatClient client, IEllaiFramework
             try { fresh = await revalidate(context, request, ct).ConfigureAwait(false); }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
             catch (Exception error) when (error is not OutOfMemoryException) { return new(EllaiSpecialistOutcome.Stale, null); }
-            if (!fresh.Allowed || original.Truncated || fresh.Truncated || fresh.ToolName != original.ToolName ||
+            if (!fresh.Allowed || fresh.Truncated != original.Truncated ||
+                original.Truncated && request.ToolName != EllaiToolNames.CaseTimeline || fresh.ToolName != original.ToolName ||
                 fresh.ItemCount != original.ItemCount || fresh.ResultSummary != original.ResultSummary ||
                 !fresh.Evidence.SequenceEqual(original.Evidence) || fresh.CaseTimelineReplayScope != original.CaseTimelineReplayScope ||
                 (request.ToolName == EllaiToolNames.UiCatalogue && (original.UiCatalogueReplayScope is null || fresh.UiCatalogueReplayScope != original.UiCatalogueReplayScope)) ||

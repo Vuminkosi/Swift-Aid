@@ -44,6 +44,7 @@ public sealed class EllaiWorkflowSpecialist(IChatClient client, IEllaiFrameworkA
                 "A receipt is not proof of an effect unless its recorded status says so. Never approve, submit, " +
                 "execute or invent an action. Return only a grounded Answer in the required final_decision JSON schema. " +
                 "Each claim text must exactly match a returned source line and cite its evidence. For an empty receipt list, use the exact returned message and cite its ReceiptSearch evidence. " +
+                "When using a truncated case timeline, include its first line as a claim with the timeline evidence. " +
                 "Set displayText and spokenText to claim texts joined by a newline, with no other prose.",
                 [new ChatMessage(ChatRole.User, task)], 2048, isCurrent, Read, usage, ct,
                 revalidateTool: revalidate, maxModelCalls: profile.MaxModelCalls).ConfigureAwait(false);
@@ -63,7 +64,8 @@ public sealed class EllaiWorkflowSpecialist(IChatClient client, IEllaiFrameworkA
             try { fresh = await revalidate(context, request, ct).ConfigureAwait(false); }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
             catch (Exception error) when (error is not OutOfMemoryException) { return new(EllaiSpecialistOutcome.Stale, null); }
-            if (!fresh.Allowed || original.Truncated || fresh.Truncated || fresh.ToolName != original.ToolName ||
+            if (!fresh.Allowed || fresh.Truncated != original.Truncated ||
+                original.Truncated && request.ToolName != EllaiToolNames.CaseTimeline || fresh.ToolName != original.ToolName ||
                 fresh.ItemCount != original.ItemCount || fresh.ResultSummary != original.ResultSummary ||
                 !fresh.Evidence.SequenceEqual(original.Evidence) || fresh.CaseTimelineReplayScope != original.CaseTimelineReplayScope ||
                 fresh.UiCatalogueReplayScope != original.UiCatalogueReplayScope || fresh.UiObservationReplayScope != original.UiObservationReplayScope ||

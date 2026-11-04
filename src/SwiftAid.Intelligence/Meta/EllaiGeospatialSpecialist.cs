@@ -47,6 +47,7 @@ public sealed class EllaiGeospatialSpecialist(IChatClient client, IEllaiFramewor
                 "Return only a grounded Answer in the required final_decision JSON schema. " +
                 "For place matches each claim must be exactly a returned place name; for other reads each claim must exactly match a returned source line. Cite the matching evidence. " +
                 "For place-only answers join claim texts by a comma and one space; otherwise join them by a newline. Set displayText and spokenText to that text, with no other prose. " +
+                "When using a truncated case timeline, include its first line as a claim with the timeline evidence. " +
                 "When a search has multiple matches, include a clarifying question asking the user to select a place.",
                 [new ChatMessage(ChatRole.User, task)], 2048, isCurrent, Read, usage, ct,
                 revalidateTool: revalidate, maxModelCalls: profile.MaxModelCalls).ConfigureAwait(false);
@@ -65,7 +66,8 @@ public sealed class EllaiGeospatialSpecialist(IChatClient client, IEllaiFramewor
             try { fresh = await revalidate(context, request, ct).ConfigureAwait(false); }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
             catch (Exception error) when (error is not OutOfMemoryException) { return new(EllaiSpecialistOutcome.Stale, null); }
-            if (!fresh.Allowed || original.Truncated || fresh.Truncated || fresh.ToolName != original.ToolName ||
+            if (!fresh.Allowed || fresh.Truncated != original.Truncated ||
+                original.Truncated && request.ToolName != EllaiToolNames.CaseTimeline || fresh.ToolName != original.ToolName ||
                 fresh.ItemCount != original.ItemCount || fresh.ResultSummary != original.ResultSummary ||
                 !fresh.Evidence.SequenceEqual(original.Evidence) || fresh.CaseTimelineReplayScope != original.CaseTimelineReplayScope ||
                 fresh.UiCatalogueReplayScope != original.UiCatalogueReplayScope || fresh.UiObservationReplayScope != original.UiObservationReplayScope ||
@@ -97,7 +99,8 @@ public sealed class EllaiGeospatialSpecialist(IChatClient client, IEllaiFramewor
                 foreach (var line in EllaiFrameworkAgent.EvidenceLines(request.ToolName, result, reference))
                     grounded.Add((reference, line));
         var placeOnly = decision.Claims.All(claim => claim.Evidence.All(reference => reference.SourceKind == "GeographicRegistry"));
-        if (decision.Claims.Any(claim => claim.Evidence.Any(reference => !grounded.Contains((reference, claim.Text)))) ||
+        if (!EllaiSpecialistGrounding.MentionsTimelineOmissions(decision, observations) ||
+            decision.Claims.Any(claim => claim.Evidence.Any(reference => !grounded.Contains((reference, claim.Text)))) ||
             decision.DisplayText != string.Join(placeOnly ? ", " : "\n", decision.Claims.Select(claim => claim.Text)) ||
             decision.SpokenText != decision.DisplayText ||
             observations.Any(item => item.Request.ToolName == EllaiToolNames.Locations && item.Result.ItemCount > 1) && decision.Questions.Count == 0)
