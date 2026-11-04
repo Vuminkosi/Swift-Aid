@@ -4,8 +4,14 @@ using System.Security.Cryptography.X509Certificates;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
+using SwiftAid.Infrastructure.Classification;
+using SwiftAid.Infrastructure.Persistence.Ellai;
 using SwiftAid.Application.Authorization;
 using SwiftAid.Application.Cases;
+using SwiftAid.Application.Ellai;
 using SwiftAid.Application.Cases.Commands;
 using SwiftAid.Application.Serialization;
 using SwiftAid.Contracts.Commands;
@@ -35,6 +41,80 @@ public sealed class CaseMonitoringPostgresTests
 {
     private static readonly DateTimeOffset FirstDueAtUtc = new(2026, 10, 30, 8, 0, 0, TimeSpan.Zero);
     private static readonly DateTimeOffset SecondDueAtUtc = new(2026, 11, 2, 8, 0, 0, TimeSpan.Zero);
+
+    [IntakePostgresFact]
+    public async Task FollowUpRecommendationIsFencedDeduplicatedAndVisibleInAuthorizedHistory()
+    {
+        // The immutable recommendation is retained; this test requires a disposable database.
+        await using var db = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
+        await SeedMonitoringScopeAsync(db, [CaseOperation.ReadCase, CaseOperation.ManageFollowUp]);
+        using var keyRing = SyntheticMonitoringKeyRing.Create();
+        using var provider = ProtectedPayloadDataProtectionProviderFactory.Create(
+            keyRing.CreateOptions(), new TestHostEnvironment(Environments.Production));
+        var caseId = await SeedMonitoredCaseAsync(db, keyRing.CreateOptions(), provider);
+        var actor = CreateOfficer("officer-1");
+        var followUpId = Guid.NewGuid();
+        var scheduled = await ProcessCommandAsync(db, actor, caseId,
+            new ScheduleFollowUpCommand(Guid.NewGuid(), 2, followUpId, "synthetic", "officer-1",
+                FirstDueAtUtc, "staff scheduled", null, DateTimeOffset.UtcNow), keyRing.CreateOptions(), provider);
+        Assert.Equal(CaseCommandProcessingStatus.Accepted, scheduled.Status);
+        var schedules = new PostgresEllaiOperationalScheduleStore(db);
+        Assert.True(await schedules.CreateAsync("workspace-1", "ops.followup", 4, "policy/1", DateTimeOffset.UtcNow.AddMinutes(-1), default));
+        var lease = await schedules.TryClaimAsync("workspace-1", "ops.followup", TimeSpan.FromMinutes(1), default);
+        Assert.NotNull(lease);
+        var unit = new PostgresCaseCommandUnitOfWork(db);
+        var policy = new CaseAccessPolicy(new PostgresCurrentAccessGrantStore(db, unit), new PostgresCaseAccessDescriptorStore(db, unit));
+        var timelineQuery = new CaseTimelineQuery(new PostgresCaseTimelineStore(db), policy, unit);
+        var broker = new EllaiToolBroker(new EllaiPolicyService(), new EllaiConsentService(), timeline: timelineQuery);
+        var context = new EllaiToolContext("followup-test", "epoch", "public.product-help", null, 4, true,
+            DataClassification: EllaiProcessingClassification.UserProvidedNonSensitive, Actor: actor,
+            AllowedTools: new HashSet<string> { EllaiToolNames.CaseTimeline }, ConsentPurpose: EllaiConsentService.PublicProductHelpPurpose);
+        var request = new EllaiToolRequest(EllaiToolNames.CaseTimeline, new Dictionary<string, string> { ["case_id"] = caseId.ToString("D") });
+        var before = await broker.InvokeAsync(context, request, default);
+        Assert.True(before.Allowed);
+        var settings = Options.Create(new EllaiFollowUpOptions { Enabled = true, Organizations = ["org-zw-1"] });
+        var work = new EllaiFollowUpWork(db, settings);
+        var denied = new EllaiFollowUpWork(db, Options.Create(new EllaiFollowUpOptions { Enabled = true, Organizations = ["other-org"] }));
+        Assert.Equal(EllaiFencedWorkOutcome.NoChange, await denied.RunOneAsync(lease, Guid.NewGuid(), Guid.NewGuid(), default));
+        Assert.Equal(EllaiFencedWorkOutcome.StaleLease, await work.RunOneAsync(lease with { FencingToken = lease.FencingToken + 1 }, Guid.NewGuid(), Guid.NewGuid(), default));
+        var run = Guid.NewGuid();
+        await db.WorkspaceOrganizations.Where(link => link.WorkspaceId == "workspace-1" && link.OrganizationId == "org-zw-1")
+            .ExecuteUpdateAsync(update => update.SetProperty(link => link.Status, PersistentResourceStatus.Revoked));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => work.RunOneAsync(lease, run, Guid.NewGuid(), default));
+        await db.WorkspaceOrganizations.Where(link => link.WorkspaceId == "workspace-1" && link.OrganizationId == "org-zw-1")
+            .ExecuteUpdateAsync(update => update.SetProperty(link => link.Status, PersistentResourceStatus.Active));
+        await using var replicaDb = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
+        var replica = new EllaiFollowUpWork(replicaDb, settings);
+        var outcomes = await Task.WhenAll(work.RunOneAsync(lease, run, Guid.NewGuid(), default),
+            replica.RunOneAsync(lease, run, Guid.NewGuid(), default));
+        Assert.Single(outcomes, outcome => outcome == EllaiFencedWorkOutcome.Committed);
+        Assert.Single(outcomes, outcome => outcome == EllaiFencedWorkOutcome.NoChange);
+        Assert.Equal(EllaiFencedWorkOutcome.NoChange, await work.RunOneAsync(lease, run, Guid.NewGuid(), default));
+        var timeline = await timelineQuery.GetAsync(actor, caseId, 20, default);
+        var activity = Assert.Single(timeline.Timeline!.Entries.SelectMany(entry => entry.AgentActivities));
+        Assert.Equal("ops.followup", activity.RoleId);
+        Assert.Equal("Overdue follow-up review recommended", activity.Label);
+        var after = await broker.InvokeAsync(context, request, default);
+        Assert.True(after.Allowed);
+        Assert.Contains("Overdue follow-up review recommended", after.ResultSummary, StringComparison.Ordinal);
+        Assert.NotEqual(before.CaseTimelineReplayScope, after.CaseTimelineReplayScope);
+        var inaccessible = await broker.InvokeAsync(context with { Actor = CreateOfficer("unknown-" + Guid.NewGuid()) }, request, default);
+        Assert.False(inaccessible.Allowed);
+        Assert.Empty(inaccessible.Evidence);
+        Assert.Equal(FollowUpStatus.Scheduled, (await db.ManagedCaseFollowUps.AsNoTracking().SingleAsync(f => f.FollowUpId == followUpId)).Status);
+        var rescheduled = await ProcessCommandAsync(db, actor, caseId,
+            new RecordFollowUpOutcomeCommand(Guid.NewGuid(), 3, followUpId, FollowUpOutcome.Rescheduled,
+                "staff changed schedule", DateTimeOffset.UtcNow.AddDays(30), "rescheduled", null, DateTimeOffset.UtcNow),
+            keyRing.CreateOptions(), provider);
+        Assert.Equal(CaseCommandProcessingStatus.Accepted, rescheduled.Status);
+        Assert.Equal(EllaiFencedWorkOutcome.NoChange, await work.RunOneAsync(lease, run, Guid.NewGuid(), default));
+        timeline = await new CaseTimelineQuery(new PostgresCaseTimelineStore(db), policy, unit).GetAsync(actor, caseId, 20, default);
+        Assert.Single(timeline.Timeline!.Entries.SelectMany(entry => entry.AgentActivities));
+        await Assert.ThrowsAsync<Npgsql.PostgresException>(() => db.Database.ExecuteSqlInterpolatedAsync(
+            $"UPDATE ellai_follow_up_recommendations SET policy_version = 'changed' WHERE follow_up_id = {followUpId}"));
+        await Assert.ThrowsAsync<Npgsql.PostgresException>(() => db.GetService<IMigrator>().MigrateAsync("20261104110000_EllaiQualityActivity"));
+        Assert.True(await schedules.CompleteAsync(lease, default));
+    }
 
     [IntakePostgresFact]
     public async Task TimelineWorkSummaryReflectsAuthorizedEscalationAndFollowUpState()

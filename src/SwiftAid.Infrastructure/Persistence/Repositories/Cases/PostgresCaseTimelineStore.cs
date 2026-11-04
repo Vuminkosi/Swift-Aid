@@ -128,10 +128,15 @@ public sealed class PostgresCaseTimelineStore(SwiftAidDbContext dbContext) : ICa
         var ids = eventIds.ToArray();
         return await _dbContext.Database.SqlQuery<CaseAgentActivityRow>($"""
             SELECT "SourceEventId", "ActivityId", "RoleId", "Version", "RecordedAtUtc" FROM (
-                SELECT source_event_id AS "SourceEventId", activity_id AS "ActivityId", role_id AS "RoleId",
-                    quality_version AS "Version", recorded_at_utc AS "RecordedAtUtc",
-                    row_number() OVER (PARTITION BY source_event_id ORDER BY recorded_at_utc DESC, activity_id DESC) AS position
-                FROM ellai_case_quality_activity WHERE case_id = {caseId} AND source_event_id = ANY({ids})
+                SELECT *, row_number() OVER (PARTITION BY "SourceEventId"
+                    ORDER BY "RecordedAtUtc" DESC, "ActivityId" DESC) AS position FROM (
+                    SELECT source_event_id AS "SourceEventId", activity_id AS "ActivityId", role_id AS "RoleId",
+                        quality_version AS "Version", recorded_at_utc AS "RecordedAtUtc"
+                    FROM ellai_case_quality_activity WHERE case_id = {caseId} AND source_event_id = ANY({ids})
+                    UNION ALL
+                    SELECT source_event_id, activity_id, 'ops.followup', policy_version, recorded_at_utc
+                    FROM ellai_follow_up_recommendations WHERE case_id = {caseId} AND source_event_id = ANY({ids})
+                ) sources
             ) activity WHERE position <= 21 ORDER BY "SourceEventId", "RecordedAtUtc" DESC, "ActivityId" DESC
             """).ToArrayAsync(ct).ConfigureAwait(false);
     }

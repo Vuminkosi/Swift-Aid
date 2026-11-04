@@ -64,7 +64,7 @@ public sealed class CaseAgentActivityPresentationTests
 {
     [Theory]
     [InlineData("ops.quality", "Data Quality", "Reported-data quality assessed")]
-    [InlineData("ops.followup", "Follow-up", "Follow-up activity recorded")]
+    [InlineData("ops.followup", "Follow-up", "Overdue follow-up review recommended")]
     [InlineData("unknown", "Agent", "Activity recorded")]
     public void ActivityLabelsAreRoleSpecificAndBounded(string roleId, string roleLabel, string activityLabel)
     {

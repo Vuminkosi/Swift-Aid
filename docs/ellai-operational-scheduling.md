@@ -68,3 +68,25 @@ expiry and replacement, stale-fence refusal, renewal deadline, abandon/reclaim,
 four- and eight-hour cursor advancement and rollback refusal. Production role
 grants, deployment, long-running worker behavior and cross-replica deployment
 remain unverified.
+
+
+## Follow-up review work unit
+
+`EllaiFollowUpWork.RunOneAsync` is a disabled-by-default, database-only work
+unit, not yet registered with a hosted scheduler. It requires an `ops.followup`
+lease and an explicit bounded organization scope. It records one immutable
+recommendation to review an overdue, still-open staff-set follow-up schedule.
+The source schedule event, due date, case version, policy, run and work turn are
+recorded; a unique follow-up/schedule-version key prevents repeated records.
+The workspace and organization are rechecked under the fenced transaction, and
+case and follow-up rows are locked while selecting and committing. The activity
+is visible on its source event in the existing authorized timeline, and Ellai's
+history replay digest changes when the activity appears. A later reschedule or
+completion does not erase that historical recommendation. It is not a current
+approval, a notification, an officer assignment, a clinical priority, or a new
+due date. The new migration refuses rollback when recommendations exist.
+
+The work unit still needs a configured 4-hour hosted worker with one ephemeral
+framework session per turn, operational telemetry and a human review workflow.
+Production grants, migration deployment, rendered UI and live worker operation
+are not verified. No user or officer messages are sent by this work unit.

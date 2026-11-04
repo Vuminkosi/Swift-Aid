@@ -60,7 +60,7 @@ public static class CaseAgentActivityPresentation
     public static string ActivityLabel(string? roleId) => roleId switch
     {
         "ops.quality" => "Reported-data quality assessed",
-        "ops.followup" => "Follow-up activity recorded",
+        "ops.followup" => "Overdue follow-up review recommended",
         _ => "Activity recorded"
     };
 }

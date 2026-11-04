@@ -34,7 +34,7 @@ public sealed class EllaiCaseTimelineToolTests
         var id = Guid.NewGuid();
         var result = await Broker(new TimelineQuery(id, true, multiRole: true)).InvokeAsync(Context(), Request(id), default);
         Assert.True(result.Allowed);
-        Assert.Contains("Ellai Follow-up: Follow-up activity recorded", result.ResultSummary, StringComparison.Ordinal);
+        Assert.Contains("Ellai Follow-up: Overdue follow-up review recommended", result.ResultSummary, StringComparison.Ordinal);
         Assert.Contains("Ellai Agent: Activity recorded", result.ResultSummary, StringComparison.Ordinal);
         Assert.DoesNotContain("Data Quality", result.ResultSummary, StringComparison.Ordinal);
     }
