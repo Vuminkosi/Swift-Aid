@@ -95,6 +95,8 @@ public static class IdentityEndpoints
             group.MapPost("/organizations/invitations/redeem", RedeemOrganizationInvitation);
             group.MapPost("/organizations/invitations", IssueOrganizationInvitation);
             group.MapPost("/organizations", CreateOrganization);
+            group.MapPost("/organizations/{organizationId}/owners/{targetActorId}", GrantOrganizationOwner);
+            group.MapDelete("/organizations/{organizationId}/owners/{targetActorId}", RevokeOrganizationOwner);
         }
         else
         {
@@ -2235,6 +2237,41 @@ public static class IdentityEndpoints
                     context,
                     StatusCodes.Status503ServiceUnavailable,
                     "Creating organizations is temporarily unavailable.")
+            };
+        }).ConfigureAwait(false);
+    }
+
+    private static Task<IResult> GrantOrganizationOwner(HttpContext context, IAntiforgery antiforgery,
+        UserManager<SwiftAidUser> userManager, [FromServices] IOrganizationMembershipService membershipService,
+        string organizationId, string targetActorId, CancellationToken cancellationToken) =>
+        ChangeOrganizationOwner(context, antiforgery, userManager, membershipService, organizationId, targetActorId, false, cancellationToken);
+
+    private static Task<IResult> RevokeOrganizationOwner(HttpContext context, IAntiforgery antiforgery,
+        UserManager<SwiftAidUser> userManager, [FromServices] IOrganizationMembershipService membershipService,
+        string organizationId, string targetActorId, CancellationToken cancellationToken) =>
+        ChangeOrganizationOwner(context, antiforgery, userManager, membershipService, organizationId, targetActorId, true, cancellationToken);
+
+    private static async Task<IResult> ChangeOrganizationOwner(HttpContext context, IAntiforgery antiforgery,
+        UserManager<SwiftAidUser> userManager, IOrganizationMembershipService membershipService,
+        string organizationId, string targetActorId, bool revoke, CancellationToken cancellationToken)
+    {
+        try { await antiforgery.ValidateRequestAsync(context).ConfigureAwait(false); }
+        catch (AntiforgeryValidationException) { return PasswordError(context, StatusCodes.Status400BadRequest, "The owner change request is invalid."); }
+        catch (InvalidOperationException) { return PasswordError(context, StatusCodes.Status400BadRequest, "The owner change request is invalid."); }
+
+        return await RequireUserAsync(context, userManager, async user =>
+        {
+            var status = revoke
+                ? await membershipService.RevokeOwnerAsync(user.Id, organizationId, targetActorId, cancellationToken).ConfigureAwait(false)
+                : await membershipService.GrantOwnerAsync(user.Id, organizationId, targetActorId, cancellationToken).ConfigureAwait(false);
+            SetNoStore(context);
+            return status switch
+            {
+                OrganizationOwnerChangeStatus.Changed => Results.NoContent(),
+                OrganizationOwnerChangeStatus.Unchanged => Results.Ok(),
+                OrganizationOwnerChangeStatus.Denied => Results.NotFound(),
+                OrganizationOwnerChangeStatus.Invalid => PasswordError(context, StatusCodes.Status400BadRequest, "The owner change request is invalid."),
+                _ => PasswordError(context, StatusCodes.Status503ServiceUnavailable, "Organization ownership is temporarily unavailable.")
             };
         }).ConfigureAwait(false);
     }
