@@ -10,6 +10,7 @@
     border-radius: var(--ais-radius-panel);
     background: var(--ais-bg-surface);
     box-shadow: none;
+    overflow-wrap: anywhere;
 }
 
 .session-public-list ::deep .session-public-list__card .mud-card-content {
@@ -41,6 +42,7 @@
 
 .session-public-list__invitation-text {
     white-space: pre-wrap;
+    overflow-wrap: anywhere;
     font-family: inherit;
     margin: 4px 0 0;
 }
