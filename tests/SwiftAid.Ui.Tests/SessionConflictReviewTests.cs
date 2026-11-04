@@ -52,10 +52,19 @@ public sealed class SessionConflictReviewTests
         await (Task)type.GetMethod("ManageSessionAsync", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(page, [null])!;
         Assert.Null(type.GetField("_recoveredCreate", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(page));
 
+        var currentEditor = new SessionEditor();
+        typeof(SessionEditor).GetMethod("OnParametersSet", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(currentEditor, null);
+        typeof(SessionEditor).GetField("_title", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(currentEditor, "Unsaved other session");
+        type.GetField("_sessionEditor", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(page, currentEditor);
+        await (Task)type.GetMethod("RetryDeferredCreateAsync", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(page, null)!;
+        Assert.NotNull(type.GetField("_deferredCreate", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(page));
+        Assert.Contains("current session edits", (string)type.GetField("_commandNotice", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(page)!, StringComparison.Ordinal);
+        type.GetField("_sessionEditor", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(page, null);
         await (Task)type.GetMethod("RetryDeferredCreateAsync", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(page, null)!;
         var retained = type.GetField("_deferredCreate", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(page);
         if (matchingSession) Assert.Null(retained);
         else Assert.NotNull(retained);
+        Assert.Equal(matchingSession ? 1L : 0L, type.GetField("_staffEditorOpenRequest", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(page));
     }
 
     [Fact]

@@ -15,6 +15,30 @@ namespace SwiftAid.Ui.Tests;
 
 public sealed class PublicSessionQueryStateTests
 {
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task RecoveredStaffSessionOpensEditorOnlyWithCurrentCapability(bool allowed)
+    {
+        var component = new PublicSessionsSurface();
+        var type = typeof(PublicSessionsSurface);
+        var id = Guid.NewGuid();
+        type.GetProperty(nameof(component.LoadManagementCapabilitiesAsync))!.SetValue(component,
+            (Func<Guid?, long?, Task<SessionManagementPresentation>>)((_, _) => Task.FromResult(SessionManagementPresentation.Unavailable())));
+        type.GetProperty(nameof(component.OnManageSession))!.SetValue(component, EventCallback.Factory.Create<Guid?>(new object(), _ => { }));
+        type.GetProperty(nameof(component.StaffSessionEditorContent))!.SetValue(component,
+            (RenderFragment<SessionManagementPresentation>)(_ => _ => { }));
+        type.GetProperty(nameof(component.StaffEditorCapabilities))!.SetValue(component,
+            allowed ? new SessionManagementPresentation(true, true, id, 1, "Draft", false, true, false, false, false, false)
+                : SessionManagementPresentation.Unavailable());
+        type.GetProperty(nameof(component.StaffEditorOpenRequest))!.SetValue(component, 1L);
+
+        await InvokeAsync(component, "OnParametersSetAsync");
+
+        Assert.Equal(allowed, Field<bool>(component, "_editorRequested"));
+        Assert.Equal(allowed, Property<bool>(component, "HasStaffEditor"));
+    }
+
     [Fact]
     public async Task OpeningAnotherEditorRequiresDiscardConfirmation()
     {

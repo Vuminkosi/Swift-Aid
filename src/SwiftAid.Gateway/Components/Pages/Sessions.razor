@@ -96,6 +96,7 @@
                            LoadManagementCapabilitiesAsync="LoadManagementCapabilitiesAsync"
                            OnManageSession="ManageSessionAsync"
                            HasPendingEditorInput="HasPendingEditorInput"
+                           StaffEditorOpenRequest="_staffEditorOpenRequest"
                            StaffEditorCapabilities="_managementCapabilities">
         <StaffSessionEditorContent Context="capability">
             @if (CanRenderEditor(capability))
@@ -136,6 +137,7 @@
     private bool _disposed;
     private long _capabilityRequestGeneration;
     private long _editorGeneration;
+    private long _staffEditorOpenRequest;
     private string? _serverError;
     private string? _commandNotice;
     private string? _actorId;
@@ -603,6 +605,11 @@
     {
         if (_busy || !_deferredCreateOutcomeUnknown || _deferredCreateSessionId is not { } id ||
             _deferredCreateActor is not { } actor) return;
+        if (HasPendingEditorInput())
+        {
+            _commandNotice = "Finish or discard your current session edits before checking the unconfirmed session.";
+            return;
+        }
         var identityEpoch = Volatile.Read(ref _identityEpoch);
         await LoadStaffSessionAsync(id);
         if (!IsCurrentIdentityEpoch(identityEpoch)) return;
@@ -616,7 +623,8 @@
             string.Equals(session.CreatedByActorId, actor, StringComparison.Ordinal) && CanRenderEditor(_managementCapabilities))
         {
             ClearDeferredCreate();
-            _commandNotice = $"The session was found. Its reference is {id:D}; reopen its staff details to review it.";
+            Interlocked.Increment(ref _staffEditorOpenRequest);
+            _commandNotice = $"The session was found. Its reference is {id:D}; review it in the session editor.";
         }
         else
         {

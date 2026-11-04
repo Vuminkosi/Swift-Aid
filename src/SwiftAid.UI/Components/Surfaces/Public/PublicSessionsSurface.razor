@@ -498,6 +498,7 @@
     [Parameter] public Func<bool>? HasPendingEditorInput { get; set; }
     [Parameter] public RenderFragment<SessionManagementPresentation>? StaffSessionEditorContent { get; set; }
     [Parameter] public SessionManagementPresentation? StaffEditorCapabilities { get; set; }
+    [Parameter] public long StaffEditorOpenRequest { get; set; }
 
     private Guid _selectedSessionId;
     private string _searchText = string.Empty;
@@ -529,6 +530,7 @@
     private SessionManagementPresentation? _selectedCapabilities;
     private SessionManagementPresentation? _editorCapabilities;
     private bool _editorRequested;
+    private long _lastStaffEditorOpenRequest;
     private bool _createCapabilitiesLoaded;
     private bool _selectedCapabilitiesLoaded;
     private Guid? _capabilitySessionId;
@@ -735,6 +737,13 @@
         {
             _activeTabIndex = 1;
             _initialRemindersApplied = true;
+        }
+        if (StaffEditorOpenRequest > 0 && StaffEditorOpenRequest != _lastStaffEditorOpenRequest &&
+            StaffEditorCapabilities is { SessionId: not null } recovered && CanOpenForSnapshot(recovered))
+        {
+            _lastStaffEditorOpenRequest = StaffEditorOpenRequest;
+            _editorRequested = true;
+            _activeTabIndex = SelectedSession is null ? 0 : 2;
         }
         await EnsureSubscriptionForSelectionAsync();
     }
