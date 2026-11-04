@@ -1,15 +1,18 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 using SwiftAid.Application.Ellai;
 
 namespace SwiftAid.Infrastructure.Persistence.Ellai;
 
 /// <summary>PostgreSQL-backed topic-history authority. Record is an upsert
-/// on the stable topic id: concurrent re-tracks converge on one row, and a
-/// unique-violation retry re-reads the winner.</summary>
+/// on the stable topic id. Concurrent stale writes fail rather than replacing
+/// a result that another request has already stored.</summary>
 public sealed class PostgresEllaiTopicStore(SwiftAidDbContext dbContext) : IEllaiTopicStore
 {
     private readonly SwiftAidDbContext _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
+
+    internal bool UsesContext(SwiftAidDbContext dbContext) => ReferenceEquals(_dbContext, dbContext);
 
     public async Task<EllaiTopicEntry> RecordAsync(
         string sessionId, string title, IReadOnlyList<string> aliases,
@@ -26,13 +29,7 @@ public sealed class PostgresEllaiTopicStore(SwiftAidDbContext dbContext) : IElla
             .ConfigureAwait(false);
         if (existing is not null)
         {
-            existing.AliasesJson = JsonSerializer.Serialize(aliases);
-            existing.EntityRef = entityRef;
-            existing.EntityVersion = entityVersion;
-            existing.CheckpointId = checkpointId ?? existing.CheckpointId;
-            existing.UpdatedAtUtc = now;
-            await _dbContext.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
-            return ToEntry(existing);
+            return await UpdateAsync(existing).ConfigureAwait(false);
         }
 
         var entity = new EllaiTopicEntity
@@ -54,15 +51,26 @@ public sealed class PostgresEllaiTopicStore(SwiftAidDbContext dbContext) : IElla
             await _dbContext.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
             return ToEntry(entity);
         }
-        catch (DbUpdateException)
+        catch (DbUpdateException error) when (error.InnerException is PostgresException
+            { SqlState: PostgresErrorCodes.UniqueViolation, ConstraintName: "pk_ellai_topics" })
         {
             _dbContext.Entry(entity).State = EntityState.Detached;
+            throw new DbUpdateConcurrencyException("The topic was created by another operation.", error);
         }
 
-        var winner = await _dbContext.Set<EllaiTopicEntity>().AsNoTracking()
-            .SingleAsync(e => e.TopicId == id, cancellationToken)
-            .ConfigureAwait(false);
-        return ToEntry(winner);
+        async Task<EllaiTopicEntry> UpdateAsync(EllaiTopicEntity row)
+        {
+            if (!string.Equals(row.SessionId, sessionId, StringComparison.Ordinal) ||
+                !string.Equals(row.Title, title, StringComparison.Ordinal))
+                throw new InvalidOperationException("The topic identifier belongs to a different session or title.");
+            row.AliasesJson = JsonSerializer.Serialize(aliases);
+            row.EntityRef = entityRef;
+            row.EntityVersion = entityVersion;
+            row.CheckpointId = checkpointId ?? row.CheckpointId;
+            row.UpdatedAtUtc = now;
+            await _dbContext.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+            return ToEntry(row);
+        }
     }
 
     public async Task<IReadOnlyList<EllaiTopicEntry>> ListAsync(string sessionId, CancellationToken cancellationToken)

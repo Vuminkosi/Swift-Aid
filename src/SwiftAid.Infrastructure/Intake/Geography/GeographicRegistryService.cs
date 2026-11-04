@@ -28,9 +28,24 @@ public sealed class GeographicRegistryService(
         CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(query);
-        var take = Math.Clamp(limit <= 0 ? MaximumResults : limit, 1, MaximumResults);
         await EnsureSeededAsync(cancellationToken).ConfigureAwait(false);
+        return await SearchCoreAsync(query, countryCode, limit, cancellationToken).ConfigureAwait(false);
+    }
 
+    /// <summary>Searches an existing registry without starting a seed import; null means it is empty.</summary>
+    public async Task<GeoSearchResponse?> SearchIfInitializedAsync(
+        string query, string? countryCode, int limit, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(query);
+        if (!await _dbContext.GeographicLocations.AsNoTracking().AnyAsync(cancellationToken).ConfigureAwait(false))
+            return null;
+        return await SearchCoreAsync(query, countryCode, limit, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<GeoSearchResponse> SearchCoreAsync(
+        string query, string? countryCode, int limit, CancellationToken cancellationToken)
+    {
+        var take = Math.Clamp(limit <= 0 ? MaximumResults : limit, 1, MaximumResults);
         var normalized = query.Trim();
         var country = string.IsNullOrWhiteSpace(countryCode) ? null : countryCode.Trim().ToUpperInvariant();
         if (string.IsNullOrWhiteSpace(StripWildcards(normalized)))

@@ -16,8 +16,10 @@ from swiftaid_workers.classification.consumer import GatewayClient, process_mess
 
 
 async def main():
-    notice = json.loads(Path(os.environ["CLASSIFICATION_TEST_NOTICE"]).read_text(encoding="utf-8-sig"))
-    connection = await nats.connect("nats://127.0.0.1:44229")
+    notice_json = os.environ.get("CLASSIFICATION_TEST_NOTICE_JSON")
+    notice = json.loads(notice_json if notice_json is not None else
+                        Path(os.environ["CLASSIFICATION_TEST_NOTICE"]).read_text(encoding="utf-8-sig"))
+    connection = await nats.connect(os.environ.get("CLASSIFICATION_TEST_NATS", "nats://127.0.0.1:44229"))
     js = connection.jetstream()
     try:
         await js.stream_info("SWIFTAID_INGESTION")
@@ -29,13 +31,19 @@ async def main():
         stream="SWIFTAID_INGESTION", config=ConsumerConfig(ack_policy=AckPolicy.EXPLICIT, deliver_policy="new", ack_wait=2))
     classifier = BartClassifier()
     await asyncio.to_thread(classifier.load)
+    headers = {"Authorization": "Bearer " + os.environ["CLASSIFICATION_TEST_TOKEN"]}
+    if host := os.environ.get("CLASSIFICATION_TEST_HOST_HEADER"):
+        headers["Host"] = host
     async with httpx.AsyncClient(base_url=os.environ["CLASSIFICATION_TEST_GATEWAY"] + "/api/internal/classification/",
-        headers={"Authorization": "Bearer " + os.environ["CLASSIFICATION_TEST_TOKEN"]}, timeout=30) as client:
+        headers=headers, timeout=30) as client:
         gateway = GatewayClient(client)
         await js.publish("swiftaid.ingestion.v1.case", json.dumps(notice).encode())
         message = (await subscription.fetch(1, timeout=5))[0]
         started = time.perf_counter()
-        claim = await gateway.claim(message.data)
+        try:
+            claim = await gateway.claim(message.data)
+        except httpx.HTTPStatusError as error:
+            raise RuntimeError(f"fixture-claim-http-{error.response.status_code}: {error.response.text[:256]}") from error
         assert claim["state"] == "Leased", claim["state"]
         prediction = await classifier.classify(claim["lease"])
         assert prediction["predictions"] and prediction["abstentionReason"] is None

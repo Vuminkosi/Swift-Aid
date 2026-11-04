@@ -2000,6 +2000,12 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         .HasColumnType("text")
                         .HasColumnName("entity_version");
 
+                    b.Property<uint>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
                     b.Property<string>("SessionId")
                         .IsRequired()
                         .HasColumnType("text")

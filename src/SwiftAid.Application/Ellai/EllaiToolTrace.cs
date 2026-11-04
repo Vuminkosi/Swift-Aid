@@ -67,7 +67,13 @@ public sealed record EllaiToolTrace(int Version, bool HistoryIncluded, IReadOnly
                         item.Evidence.Count == 1 && item.Evidence[0] is { SourceKind: "Receipt", FieldPath: null } receipt &&
                         receipt.ResourceId == item.ReceiptLookupId && receipt.EvidenceId == item.ReceiptLookupId) &&
                     (item.CountReplayScope is null || item.ToolName == EllaiToolNames.OwnedCaseCount && item.CountReplayScope.IsValid()) &&
-                    (item.UiCatalogueReplayScope is null || item.ToolName == EllaiToolNames.UiCatalogue && item.UiCatalogueReplayScope.IsValid()));
+                    (item.UiCatalogueReplayScope is null || item.ToolName == EllaiToolNames.UiCatalogue && item.UiCatalogueReplayScope.IsValid()) &&
+                    (item.UiObservationReplayScope is null || item.ToolName == EllaiToolNames.UiObserve && item.UiObservationReplayScope.IsValid()) &&
+                    (item.ClassificationReplayScope is null || item.ToolName == EllaiToolNames.ClassificationEvidence && item.ClassificationReplayScope.IsValid()) &&
+                    (item.ImportDestinationsDigest is null || item.ToolName == EllaiToolNames.ImportDestinations &&
+                        item.ImportDestinationsDigest is { Length: 64 } &&
+                        item.ImportDestinationsDigest.All(character => character is >= '0' and <= '9' or >= 'A' and <= 'F')) &&
+                    (item.LocationReplayScope is null || item.ToolName == EllaiToolNames.Locations && item.LocationReplayScope.IsValid()));
             valid = valid && parsed!.Observations!.All(item => item.CaseTimelineReplayScope is null ||
                 item.ToolName == EllaiToolNames.CaseTimeline && item.CaseTimelineReplayScope.IsValid());
             if (valid) trace = parsed;

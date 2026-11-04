@@ -90,7 +90,12 @@ public sealed record EllaiToolContext(
     string DataClassification = EllaiProcessingClassification.UnknownOrigin,
     ActorContext? Actor = null,
     IReadOnlySet<string>? AllowedTools = null,
-    string ConsentPurpose = EllaiToolBroker.ToolReadPurpose);
+    string ConsentPurpose = EllaiToolBroker.ToolReadPurpose)
+{
+    /// <summary>Server-owned absolute deadline for the current tool invocation.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public DateTimeOffset? ToolDeadlineUtc { get; init; }
+}
 
 /// <summary>Tool request with bounded arguments. <see cref="CallId"/> is the
 /// model-assigned call correlation id: it travels untouched through
@@ -130,6 +135,11 @@ public sealed record EllaiToolResult(
 
     [System.Text.Json.Serialization.JsonIgnore]
     public EllaiCaseTimelineReplayScope? CaseTimelineReplayScope { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore]
+    public EllaiUiObservationReplayScope? UiObservationReplayScope { get; init; }
+
+    [System.Text.Json.Serialization.JsonIgnore]
+    public EllaiLocationReplayScope? LocationReplayScope { get; init; }
 }
 
 /// <summary>Authorized typed evidence/app-state tool broker (ELL-T07 groundwork).
@@ -253,6 +263,7 @@ public sealed class EllaiToolBroker
     private readonly SwiftAid.Application.Surveillance.ISignalReviewService? _signals;
     private readonly IDashboardAggregateQuery? _dashboard;
     private readonly ICaseTimelineQuery? _timeline;
+    private readonly IEllaiLocationReplayProtector? _locationReplayProtector;
 
     /// <summary>Consent infrastructure is mandatory for consent-scoped reads.
     /// Ordinary typed messages use their own explicit classification and do
@@ -274,7 +285,7 @@ public sealed class EllaiToolBroker
         SwiftAid.Application.Classification.ICaseClassificationQuery? classification = null,
         SwiftAid.Application.Surveillance.ISignalReviewService? signals = null,
         EllaiUiAuthorityResolver? uiAuthority = null, IEllaiExactReferenceIndex? referenceIndex = null,
-        IDashboardAggregateQuery? dashboard = null, ICaseTimelineQuery? timeline = null)
+        IDashboardAggregateQuery? dashboard = null, ICaseTimelineQuery? timeline = null, IEllaiLocationReplayProtector? locationReplayProtector = null)
     {
         _policy = policy ?? throw new ArgumentNullException(nameof(policy));
         _consent = consent ?? throw new ArgumentNullException(nameof(consent));
@@ -285,6 +296,7 @@ public sealed class EllaiToolBroker
         _referenceIndex = referenceIndex;
         _dashboard = dashboard;
         _timeline = timeline;
+        _locationReplayProtector = locationReplayProtector;
         _uiAuthority = uiAuthority ?? new EllaiUiAuthorityResolver();
         _uiRegistry = uiRegistry;
         _uiDiscovery = uiDiscovery;
@@ -298,8 +310,10 @@ public sealed class EllaiToolBroker
     }
 
     public bool UsesStateQueue(ICaseQueueQuery? queue) => queue is not null && ReferenceEquals(_queue, queue);
+    public bool UsesTopicStore(IEllaiTopicStore? store) => _topics?.UsesStore(store) == true;
     public ICaseQueueQuery? StateQueue => _queue;
     public bool UsesReferenceIndex(IEllaiExactReferenceIndex? index) => index is not null && ReferenceEquals(_referenceIndex, index);
+    public bool UsesGeographicRegistry(IGeographicRegistry? registry) => registry is not null && ReferenceEquals(_geography, registry);
 
     public Task<EllaiToolResult> InvokeAsync(
         EllaiToolContext context, EllaiToolRequest request, CancellationToken ct) =>
@@ -307,7 +321,9 @@ public sealed class EllaiToolBroker
 
     public async Task<EllaiToolResult> InvokeAsync(
         EllaiToolContext context, EllaiToolRequest request, CancellationToken ct, ICaseQueueQuery? stateQueue,
-        IEllaiExactReferenceIndex? referenceIndex = null)
+        IEllaiExactReferenceIndex? referenceIndex = null,
+        Func<EllaiToolContext, IReadOnlyList<CaseQueueItem>, CancellationToken, Task<bool>>? rememberCaseResults = null,
+        IGeographicRegistry? geographicRegistry = null)
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(request);
@@ -384,7 +400,7 @@ public sealed class EllaiToolBroker
 
         if (string.Equals(canonical, EllaiToolNames.State, StringComparison.Ordinal))
         {
-            return Bound(await ReadStateAsync(context, request, stateQueue ?? _queue, ct).ConfigureAwait(false));
+            return Bound(await ReadStateAsync(context, request, stateQueue ?? _queue, ct, rememberCaseResults).ConfigureAwait(false));
         }
 
         if (string.Equals(canonical, EllaiToolNames.Receipts, StringComparison.Ordinal))
@@ -408,7 +424,7 @@ public sealed class EllaiToolBroker
         }
 
         if (canonical == EllaiToolNames.Locations)
-            return Bound(await ReadLocationsAsync(request, ct).ConfigureAwait(false));
+            return Bound(await ReadLocationsAsync(context, request, geographicRegistry ?? _geography, ct).ConfigureAwait(false));
 
         if (canonical is EllaiToolNames.ImportDestinations or EllaiToolNames.Imports or EllaiToolNames.ImportStatus)
             return Bound(await ReadImportsAsync(context, request, ct).ConfigureAwait(false));
@@ -685,7 +701,8 @@ public sealed class EllaiToolBroker
         }
     }
 
-    private async Task<EllaiToolResult> ReadLocationsAsync(EllaiToolRequest request, CancellationToken ct)
+    private async Task<EllaiToolResult> ReadLocationsAsync(EllaiToolContext context, EllaiToolRequest request,
+        IGeographicRegistry? geography, CancellationToken ct)
     {
         if (request.Arguments.Keys.Any(key => key is not ("q" or "country" or "limit")) ||
             !request.Arguments.TryGetValue("q", out var query) || string.IsNullOrWhiteSpace(query))
@@ -696,15 +713,22 @@ public sealed class EllaiToolBroker
         request.Arguments.TryGetValue("country", out var country);
         if (country is not null && (country.Length != 2 || country.Any(character => character is < 'A' or > 'Z')))
             return Deny(request.ToolName, "Use a two-letter uppercase country code.", EllaiToolReasonCodes.InvalidArguments);
-        if (_geography is null) return Deny(request.ToolName, "Location search is unavailable.", EllaiToolReasonCodes.Unavailable);
+        if (geography is null) return Deny(request.ToolName, "Location search is unavailable.", EllaiToolReasonCodes.Unavailable);
         try
         {
-            var matches = await _geography.SearchAsync(query, country, limit, ct).ConfigureAwait(false);
+            var matches = await geography.SearchAsync(query, country, limit, ct).ConfigureAwait(false);
             var items = matches.Results.Take(limit).Select(item => new { item.Id, item.Name, item.CountryCode, item.Ancestors }).ToArray();
-            return new(request.ToolName, true, null,
+            var result = new EllaiToolResult(request.ToolName, true, null,
                 items.Select(item => new EvidenceRef("GeographicRegistry", item.Id, matches.RegistryVersion, "name", item.Id)).ToArray(),
                 JsonSerializer.Serialize(new { matches.RegistryVersion, matches = items, requiresUserSelection = true }),
                 items.Length, matches.TotalCount > items.Length);
+            if (!result.Truncated && _locationReplayProtector is not null)
+            {
+                var token = _locationReplayProtector.Protect(context, request.Arguments);
+                var scope = new EllaiLocationReplayScope(token, EllaiObservedToolResult.ResultFingerprint(result));
+                if (scope.IsValid()) result = result with { LocationReplayScope = scope };
+            }
+            return result;
         }
         catch (Exception exception) when (exception is not OperationCanceledException and not OutOfMemoryException)
         {
@@ -718,7 +742,8 @@ public sealed class EllaiToolBroker
     /// the trusted actor: same handlers, same per-case authorization, no
     /// Ellai-only query path.</summary>
     private async Task<EllaiToolResult> ReadStateAsync(
-        EllaiToolContext context, EllaiToolRequest request, ICaseQueueQuery? queue, CancellationToken ct)
+        EllaiToolContext context, EllaiToolRequest request, ICaseQueueQuery? queue, CancellationToken ct,
+        Func<EllaiToolContext, IReadOnlyList<CaseQueueItem>, CancellationToken, Task<bool>>? rememberCaseResults)
     {
         if (!request.Arguments.TryGetValue("projection", out var projection)
             || string.Equals(projection, "feature", StringComparison.OrdinalIgnoreCase))
@@ -799,8 +824,18 @@ public sealed class EllaiToolBroker
         {
             try
             {
-                await new EllaiCaseResultMemory(_topics, queue, _referenceIndex).RememberAsync(context, items, ct).ConfigureAwait(false);
-                recallNotice = " Result references retained for this session; recall with ellai_topic(ref=case-results).";
+                var retained = rememberCaseResults is null
+                    ? await RememberDirectlyAsync().ConfigureAwait(false)
+                    : await rememberCaseResults(context, items, ct).ConfigureAwait(false);
+                recallNotice = retained
+                    ? " Result references retained for this session; recall with ellai_topic(ref=case-results)."
+                    : " Result references could not be retained; do not claim they were remembered.";
+
+                async Task<bool> RememberDirectlyAsync()
+                {
+                    await new EllaiCaseResultMemory(_topics, queue, _referenceIndex).RememberAsync(context, items, ct).ConfigureAwait(false);
+                    return true;
+                }
             }
             catch (Exception error) when (error is not OperationCanceledException)
             {
@@ -882,6 +917,12 @@ public sealed class EllaiToolBroker
         }
 
         var list = await _receipts.ListBySessionAsync(context.SessionId, ct).ConfigureAwait(false);
+        if (list.Any(receipt => receipt is null ||
+            !string.Equals(receipt.SessionId, context.SessionId, StringComparison.Ordinal)))
+        {
+            return Deny(request.ToolName, "Receipt authority is unavailable for this session.",
+                EllaiToolReasonCodes.Unavailable);
+        }
         var items = list.Take(MaxItems).ToList();
         var lines = items.Select(DescribeReceipt);
         var refs = items.Select(receipt => new EvidenceRef(
@@ -1087,14 +1128,6 @@ public sealed class EllaiToolBroker
         }
 
         var report = await _uiObservations.LatestAsync(context.SessionId, ct).ConfigureAwait(false);
-        if (report is null)
-        {
-            return Allow(request.ToolName,
-                "No client UI observation has been reported for this session.", 0, false);
-        }
-
-        if (view == "current") view = report.ViewInstanceId;
-
         var goalTags = request.Arguments.TryGetValue("context", out var goalContext)
             && !string.IsNullOrWhiteSpace(goalContext)
             ? goalContext.Split(',').Select(t => t.Trim()).Where(t => t.Length > 0).ToList()
@@ -1105,6 +1138,18 @@ public sealed class EllaiToolBroker
             authority.Capabilities);
         var eligible = snapshot.Descriptors.ToDictionary(d => d.ControlId, StringComparer.Ordinal);
         var unknown = requested.Where(id => !eligible.ContainsKey(id)).ToList();
+        var knownGoals = snapshot.Descriptors.SelectMany(descriptor => descriptor.GoalTags).ToHashSet(StringComparer.Ordinal);
+        if (report is null)
+        {
+            var empty = Allow(request.ToolName, "No client UI observation has been reported for this session.", 0, false);
+            var replay = new EllaiUiObservationReplayScope(feature, string.Join(",", requested),
+                goalTags.Count == 0 ? null : string.Join(",", goalTags),
+                Convert.ToHexString(System.Security.Cryptography.SHA256.HashData("no-client-report"u8)));
+            return unknown.Count == 0 && goalTags.All(knownGoals.Contains) && replay.IsValid()
+                ? empty with { UiObservationReplayScope = replay } : empty;
+        }
+
+        if (view == "current") view = report.ViewInstanceId;
         if (unknown.Count > 0)
         {
             return Deny(request.ToolName,
@@ -1133,9 +1178,26 @@ public sealed class EllaiToolBroker
             (string.Equals(report.ViewInstanceId, view.Trim(), StringComparison.Ordinal)
                 ? string.Empty
                 : $" Requested view '{view.Trim()}' differs from the latest report.");
-        return new EllaiToolResult(request.ToolName, true, null, evidence,
+        var result = new EllaiToolResult(request.ToolName, true, null, evidence,
             header + "\n" + string.Join("\n", lines),
             ordered.Count, false, EllaiToolReasonCodes.Ok);
+        // Persist only registry-owned references, never arbitrary model text or
+        // client report contents. A fresh call must resolve the same report.
+        if (string.Equals(report.ViewInstanceId, view.Trim(), StringComparison.Ordinal) && goalTags.All(knownGoals.Contains))
+        {
+            // The receipt time changes on every heartbeat. Freshness is already
+            // reflected in the observed states and validation flags in lines.
+            var content = JsonSerializer.SerializeToUtf8Bytes(new
+            {
+                report.ViewInstanceId, report.ContextStamp, report.Platform,
+                Lines = lines.ToArray(), Evidence = evidence
+            });
+            var replay = new EllaiUiObservationReplayScope(feature, string.Join(",", requested),
+                goalTags.Count == 0 ? null : string.Join(",", goalTags),
+                Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(content)));
+            if (replay.IsValid()) result = result with { UiObservationReplayScope = replay };
+        }
+        return result;
     }
 
     private EllaiToolResult SearchDocs(EllaiToolRequest request)

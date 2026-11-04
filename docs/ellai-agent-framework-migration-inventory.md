@@ -1,6 +1,6 @@
 # Ellai Agent Framework migration inventory
 
-Status: in progress. The uncommitted framework path has source, synthetic,
+Status: in progress. The framework path on this branch has source, synthetic,
 disposable-service and limited live-provider evidence documented below; the
 complete migration and deployed cutover are not accepted. Baseline: `12e6d7a`
 on `interactive-ellai` (3 November 2026).
@@ -9,7 +9,7 @@ on `interactive-ellai` (3 November 2026).
 
 - `src/SwiftAid.Gateway/Ellai/EllaiUtteranceWorker.cs` resolves the scoped
   `IEllaiReasoningExecutor` and supplies its dependencies to `EllaiUtteranceRunner`.
-  The uncommitted source now defaults to `EllaiFrameworkExecutor` when no
+  The source now defaults to `EllaiFrameworkExecutor` when no
   execution engine is specified; `Ellai:ExecutionEngine=framework` also
   selects it explicitly. The Gateway no longer registers a legacy executor;
   `legacy` and other unsupported values fail at startup. Per the current user
@@ -60,6 +60,200 @@ passed; the disposable container was stopped.
 An additional runner-level synthetic case test confirms that removing topic
 tool admission excludes the prior case answer before the case queue is queried;
 the focused history-authorization suite passed 47/47.
+
+On 2026-11-04 at revision `28e8b42d`, the framework case-recall and authorized
+count fixtures were rerun with synthetic records in disposable PostgreSQL and
+Qdrant. A combined three-test run failed 3/3: the live worker logged
+`InvalidDecision` on its first turn; the other two failure details were lost
+to output truncation. The same three cases were then run individually with
+`dotnet test tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj
+--no-build --no-restore -m:1 -nr:false -p:WasmBuildNative=false --filter
+'FullyQualifiedName~<test-name>' --logger 'console;verbosity=normal'` and each
+passed 1/1: `FrameworkWorkerRecallsAuthorizedCaseFromPostgresAndQdrant`,
+`LiveMuseWorkerRecallsAuthorizedCaseFromPostgresAndQdrant`, and
+`LiveMuseExecutorUsesAuthorizedCountForOrdinaryQuestion`. The live recall
+follow-up also exercised the index-failure fallback and expired-grant path.
+Both stores contained zero Ellai sessions or test collections after cleanup.
+The individual successes do not explain the combined failures or establish
+reliable live-provider behavior, deployed Gateway routes or real-record access.
+
+A subsequent fresh-database reproduction captured the combined failures:
+the count fixture hit duplicate `__EFMigrationsHistory` entries, the synthetic
+recall fixture hit an already-existing `workspaces.lock_token` column, and the
+live recall follow-up ended in `TerminalFailure`. The first two resulted from
+test classes migrating the same fresh database concurrently. The shared
+framework test fixtures now acquire a PostgreSQL advisory lock around
+migration, including the direct Ellai PostgreSQL fixture paths. This changes
+test setup only, not production migration behavior.
+
+PASS: two independent `dotnet test` processes concurrently ran
+`ConcurrentFrameworkFixtureMigrationsCompleteWithoutRacing`, each starting
+two migration attempts on one fresh disposable PostgreSQL database; both
+passed 1/1. On another fresh database, the combined synthetic recall and
+membership-change count filter passed 2/2 with disposable Qdrant. The live
+follow-up failure remains unexplained; a separate individual live run passed,
+which does not establish that the intermittent provider decision failure is
+resolved. The captured TRX contained synthetic fixture output only.
+After the fixture fix, the combined authority filter was rerun against an
+already-migrated disposable database: 2 passed and the live recall case failed
+on its first turn with `InvalidDecision`. This confirms the live failure is
+not explained by the fresh-database migration race.
+An instrumented repeat captured one verified provisional segment followed by
+malformed final JSON; the live count case passed. Diagnostics recorded only
+structural metadata, not provider text or case identifiers.
+The framework agent now permits model-only final-decision repair after a
+verified segment, rechecking private observation authority before each repair
+and rejecting a final display or speech text that differs from what was
+published. The framework contract suite passed 114/114, including three new
+repair, changed-answer and revoked-authority cases. A post-commit focused run
+passed 3/3. The live Muse authorized-recall and authorized-count integration
+filter then passed 2/2 against disposable PostgreSQL and Qdrant fixtures
+(`dotnet test tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj
+--no-restore -m:1 -nr:false -p:WasmBuildNative=false`, filtered to those two
+tests, with live provider and fixture environment variables enabled). This
+single successful rerun does not establish provider reliability or deployment
+acceptance. Repair attempts remain subject to cancellation rather than a fixed
+attempt ceiling.
+On the committed repair, the full application suite passed 1,203 with 19
+skipped using `dotnet test tests/SwiftAid.Application.Tests/SwiftAid.Application.Tests.csproj
+--no-build --no-restore -m:1 -nr:false`. The default integration suite passed
+809 with 334 skipped using the corresponding integration project, the same
+flags, `-p:WasmBuildNative=false`, and `OS=Windows_NT`. These local results do
+not turn skipped, deployed, or independent-review checks into passes.
+Subsequent framework contract review found malformed claim text could throw
+while grounding and a null evidence collection on an unknown claim could pass
+validation. Claim validation now requires an identifier, text, a defined kind,
+and a non-null evidence array without null entries. The focused framework,
+decision-contract and parser filter passed 144/144; after adding identifier and
+null-entry cases, the malformed-claim filter passed 5/5, including a post-commit
+rerun. These scripted model tests verify repair of malformed claim shapes; they
+do not prove that all generated factual claims are grounded.
+Buffered private answers now recheck observation authority between text chunks
+and after the last chunk before successful completion. Count answers re-read
+the authorized aggregate and compare both count and membership at those points.
+The framework contract filter passed 125/125; the six new revocation and
+unchanged-authority cases passed again after commit. The Gateway worker and
+count integration filter passed 46 with 5 skipped using `dotnet test
+tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj --no-restore
+-m:1 -nr:false -p:WasmBuildNative=false` with `OS=Windows_NT`. The new tests
+use synthetic callbacks, and these checks do not establish deployed revocation
+behavior. Rechecks add query work per output chunk and are not atomic with
+delivery; load and independent security review remain open.
+The aggregate boundary now also rejects truncated results, mismatched tool
+names and inconsistent success codes at the initial observation and each
+recheck. Nine synthetic cases reproduced the omissions before the fix; the
+framework contract filter passed 134/134 afterwards. A PostgreSQL-backed
+framework-agent and broker test then expired a synthetic grant after the first
+count chunk, observed the next aggregate fall from two to zero, and verified
+that the remaining text and completion were withheld. That test and two
+existing membership and revoked-access cases passed 3/3 against disposable
+PostGIS; the new test also passed 1/1 after commit. The first attempt used an
+incorrect one-case fixture expectation and failed; the fixture contains two
+cases. These checks do not establish deployed Gateway behavior.
+Two additional tests use the actual Gateway outbox worker, framework executor,
+broker and disposable PostgreSQL with a scripted model. The authorized control
+commits the count and its aggregate evidence trace and publishes it to the
+response feed. The revocation case pauses the third aggregate query, expires
+the grant and verifies that no count is delivered or committed. Both passed
+2/2 before and after commit. An initial test incorrectly expected a provisional
+count in the feed; the worker buffers these chunks until durable completion.
+This evidence is local and does not verify deployed Gateway or live-model
+behavior for this worker scenario.
+The same worker fixture subsequently ran with configured live Muse and a
+natural-language 30-day count question. Against synthetic records in disposable
+PostGIS, the live authorized case and the two scripted controls passed 3/3;
+the live authorized case passed again 1/1 after commit. A separate live case
+expired the grant at the worker's third aggregate read and passed 1/1 before
+and after its commit, with no count committed or delivered. These opt-in tests
+used `ELLAI_LIVE=1`, `SWIFTAID_RUN_FRAMEWORK_POSTGRES_FIXTURES=1`, the configured
+provider and `dotnet test tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj
+--no-restore -m:1 -nr:false -p:WasmBuildNative=false` with the corresponding
+worker test filters. They do not establish deployed behavior or reliable tool
+selection for every analytics question.
+Output translation previously introduced another authority gap: the runner
+rechecked the session and prior history after translation, but not the current
+turn's observations. A disposable PostgreSQL test reproduced completion after
+the count grant expired during a synthetic translation. The runner now
+revalidates current-turn provenance after output translation and denies the
+answer if provenance is missing or no longer authorized. The authorized and
+revoked PostgreSQL cases passed 2/2 before and after commit; the focused runner
+and framework contract filter passed 155/155. Translation in this test is a
+synthetic client, not NLLB, and revalidation is not atomic with persistence.
+Translated tool answers whose provenance cannot be replayed fail closed.
+The same authorized and revoked count scenarios were subsequently exercised
+with the real pinned NLLB service via the Gateway language client and a
+disposable loopback relay. The runner cases passed 2/2, with the revoked case
+passing again after commit. Two outbox-worker cases using the real language
+service, scripted framework model and disposable PostGIS also passed 2/2; the
+revoked worker case passed again after commit. The worker committed and
+published the translated authorized answer, while withholding the translated
+answer after synthetic grant expiry. This checks the service contract and
+authorization boundary, not translation quality, live Muse in the same run,
+or deployed Gateway behavior.
+The two worker count cases were then run with live Muse and real NLLB together
+against synthetic disposable PostGIS records. Both passed 2/2: the authorized
+translated count was committed and delivered, and the count was withheld when
+its grant expired after translation. The revoked case passed 1/1 again after
+commit. The opt-in command filtered `LiveMuseAndNllbWorker` in the integration
+project with `ELLAI_LIVE=1`, the dedicated PostgreSQL fixture, the configured
+provider and the local language relay. This is local integration evidence,
+not a translation-quality, production deployment or broad reliability test.
+At `c0d95687`, the complete local application suite passed 1,225 with 19
+skipped and the default integration suite passed 809 with 347 skipped. Commands
+were `dotnet test tests/SwiftAid.Application.Tests/SwiftAid.Application.Tests.csproj
+--no-build --no-restore -m:1 -nr:false` and `dotnet test
+tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj --no-restore
+-m:1 -nr:false -p:WasmBuildNative=false` with `OS=Windows_NT` for integration.
+The preceding application run failed three recall cases because their expected
+index-read count still assumed the old two-fence behavior; the final publication
+fence now causes a third read. After correcting that test expectation, the four
+recall variants passed and the complete application rerun passed. Skips and
+earlier intermittent integration failures remain part of the acceptance limit.
+Subsequent decision-contract tests found that undefined decision kinds, null
+speech, malformed clarifying questions and null topic references could pass the
+final validator. These shapes now require repair; a valid question with choices
+and empty speech remains accepted. The full application suite passed 1,229 with
+19 skipped after the validator change, and the five focused negative and
+positive cases passed before and after commit. These are scripted model checks;
+they do not prove every provider output is semantically grounded.
+Further review found that proposed administrative action obligations and
+evidence were not compared to tool observations, and null actions passed the
+plan shape check. The framework now rejects invalid plans and requires each
+action's obligation and evidence references to have been observed in this
+turn. The focused contract and approval filter passed 23/23, the full
+application suite passed 1,234 with 19 skipped, and the four new framework
+cases passed again after commit. Exact evidence identity does not prove that a
+proposal's rationale is semantically supported or confer approval authority;
+independent security review and live-provider plan behavior remain unverified.
+The existing exact-line misattribution check now also examines action
+rationales. A synthetic test demonstrated that an exact product fact cited
+only to another observed fact was accepted before the change; that case now
+repairs, while the correctly cited control passes. The framework contract
+suite passed 144/144 and six proposal cases passed after commit. This bounded
+check does not establish support for paraphrases or arbitrary rationale text.
+The official chat adapter was also found to collapse duplicate JSON argument
+names before broker validation. A synthetic provider response with conflicting
+`projection` keys invoked the broker before the fix. The framework now checks
+raw non-streamed tool arguments and bounded assembled streaming fragments for
+duplicate keys, rejecting them before invocation. The full application suite
+passed 1,238 with 19 skipped; a post-commit filter covering duplicate arguments,
+split names and interleaved calls passed 4/4. This does not establish live Muse
+behavior for malformed calls or coverage of providers without raw SDK data.
+Follow-up synthetic adapter tests covered Meta, Ollama and serverless routes
+in both framework delivery modes. All six rejected duplicate arguments before
+broker invocation. A separate interleaved two-call stream, with one valid call
+and one duplicate-argument call, rejected the entire batch without invoking
+either tool. The combined post-commit filter passed 7/7. Serverless converts
+its completed response to framework updates; this is not proof of native
+serverless streaming or live provider behavior.
+After the raw-argument safeguard, the live Muse authorized-count worker and
+non-streaming executor checks passed 2/2 against a fresh disposable PostGIS
+fixture using `dotnet test tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj
+--no-restore -m:1 -nr:false -p:WasmBuildNative=false` with the two live-count
+filters, provider configuration and dedicated fixture opt-ins. The worker
+exercise includes a streamed framework call; the executor covers the completed
+response path and a follow-up. This confirms those ordinary live tool calls,
+not live malformed arguments, deployment or general provider reliability.
 
 ## Provider observations and open checks
 
@@ -233,6 +427,19 @@ network ID when available. The rerun passed and this harness fix was committed
 as `f940985`. The Gateway and database were stopped. Native publish reported
 SQLite WASM0001 varargs warnings; this is not deployed or physical-device
 acceptance. The new publish remains in the previously retained fixture directory.
+At `d1c71339`, the current Debug Gateway was started separately with live Muse,
+a freshly migrated disposable PostGIS database and a task-owned NATS server.
+`node tests/SwiftAid.Ui.Tests/ellai-conversation.browser.cjs` passed in
+headless Chromium: two synthetic turns completed, the follow-up recalled the
+word after refresh, reduced-motion and 390-pixel thinking states passed, no
+page errors were reported, and End returned a cancelled durable session.
+The network timing observer reported the first chunk after the completion
+timestamp, so it is not evidence of model-time streaming. The isolated NATS
+notification consumer reported unavailable; notifications were not verified.
+Startup attempts also exposed a missing policy path, an invalid test key-ring
+location and a service-provider validation failure when NATS was disabled;
+the successful run used the canonical policy, restricted key directory and
+dedicated NATS. This is local Debug evidence, not deployed or device acceptance.
 
 Malformed tool-call recovery was exercised through the framework function
 client: an unknown argument was rejected before broker invocation, the
@@ -384,6 +591,83 @@ used the required `swiftaid_intake_test` database. These tests cover existing
 registry and client contracts, including an authorized Ellai classification
 read, but do not demonstrate live NLLB or BART inference through the framework.
 The disposable database container was stopped.
+
+On 2026-11-04 the authorized classification fixture was extended through
+`EllaiFrameworkExecutor` and a scripted framework function call. PASS: the
+focused `Authorized_query_and_ellai_read_persisted_results_without_inference_or_lease_disclosure`
+test passed 1/1 against disposable PostgreSQL with
+`SWIFTAID_RUN_INTAKE_POSTGRES_FIXTURES=1` and `OS=Windows_NT`, using `dotnet
+test tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj
+--no-restore -m:1 -nr:false -p:WasmBuildNative=false --filter
+'FullyQualifiedName~Authorized_query_and_ellai_read_persisted_results_without_inference_or_lease_disclosure'
+--logger 'console;verbosity=minimal'`. The scripted model received the
+persisted result ID through the framework function result, without the source
+narrative or worker lease ID; the fixture also checks foreign and absent actor
+denial at the broker. It uses synthetic persisted classifications, not live
+BART inference, a live model or deployed Gateway.
+An additional opt-in test now runs the pinned BART classifier on a synthetic
+lease in a task-owned container with networking disabled and the existing
+model volume mounted read-only. It persists the real inference through the
+classification registry, then reads it through the authorized framework tool
+and runner without exposing the source text or lease ID. The test passed twice
+before commit and once after commit against disposable PostGIS. It uses a
+scripted reasoning model and invokes classification directly; it does not
+establish JetStream delivery, live Muse interpretation, clinical validity or
+deployed behavior.
+The fixture was extended with live Muse: after real BART inference and
+PostgreSQL persistence, Muse invoked the authorized classification tool and
+received its result ID without the synthetic source text or lease ID. The live
+and scripted cases passed 2/2 together, and the live case passed 1/1 after
+commit. This demonstrates tool selection and delivery for that synthetic
+request; it does not validate the model's interpretation, clinical safety,
+JetStream delivery or deployed Gateway behavior.
+The opt-in classification live fixture now supports the existing worker image
+and a disposable loopback JetStream endpoint. With synthetic records, it passed
+1/1 before and after commit through JetStream delivery, pinned BART inference,
+the test Gateway's durable completion, redelivery and poison quarantine, and
+an authorized framework read of the persisted result. The model volume was
+mounted read-only. Initial attempts failed before inference because the
+container-to-host HTTP request used an invalid host header; the fixture now
+uses the loopback Gateway authority. The framework reasoning model was scripted;
+this does not establish deployed behavior or clinical validity.
+The same isolated JetStream/BART fixture now also runs with live Muse. It
+passed 1/1 before and after commit: the worker handled the synthetic notice,
+persisted real BART inference and its delivery evidence, and Muse requested
+the persisted result through the authorized framework tool. The captured tool
+result omitted the synthetic source narrative. This establishes one local
+integrated route, not model interpretation quality or deployed acceptance.
+The `ClassificationRegistryTests` filter also passed 10/10 against the same
+fixture using `--no-build --no-restore` and the same test-project options.
+
+Follow-up on 2026-11-04 found that the preceding executor test supplied its own
+revalidation callback: the production runner rejected classification results
+because their observations had no replay scope. Classification observations
+now retain only the case ID and a digest of the bounded result. The runner
+reinvokes the authorized broker and rejects missing, denied, changed or invalid
+results before publishing or replaying an answer. Older classification traces
+without this scope remain ineligible for replay. The PostgreSQL integration
+fixture now uses the actual runner: an unchanged result completes, while a
+changed persisted result and a simulated denied broker recheck do not publish
+an answer. The denial case substitutes a foreign actor at the broker; it is not
+an actual database grant-revocation race. These checks do not prove semantic
+support for model claims or eliminate a change after the last authority read.
+PASS: `dotnet test tests/SwiftAid.Application.Tests/SwiftAid.Application.Tests.csproj
+--no-restore -m:1 -nr:false --filter
+'FullyQualifiedName~EllaiAuthorizedConversationContextTests|FullyQualifiedName~EllaiAgentFrameworkContractTests'
+--logger 'console;verbosity=minimal'` passed 164/164, including malformed and
+legacy trace rejection and changed-result checks.
+PASS: `dotnet test tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj
+--no-build --no-restore -m:1 -nr:false -p:WasmBuildNative=false --filter
+'FullyQualifiedName~ClassificationRegistryTests|FullyQualifiedName~EllaiUtteranceWorkerOutcomeTests'
+--logger 'console;verbosity=minimal'` passed 54/54 with `OS=Windows_NT` and the
+disposable intake PostgreSQL fixture enabled.
+
+The worker-outcome fixture had an enforced 10,000-token threshold and failed
+before invoking its model. It now matches the Gateway's advisory threshold and
+uses an oversized response for the terminal-failure case; its focused filter
+passed 3/3. A repeatedly malformed model response can continue repair until
+cancellation under the requested unlimited-repair and advisory-budget policy;
+this remains an operational limitation, not a passing malformed-output test.
 The disposable PostgreSQL/Qdrant framework-worker recall test was extended to
 start a follow-up with a healthy index, then inject a Qdrant transport failure
 after the scripted framework model requested the recall tool. The worker used
@@ -480,11 +764,11 @@ they do not establish PostgreSQL persistence or live client tour execution.
 | 3 | Authorized case records | Framework worker tests retrieved synthetic records from disposable PostgreSQL with the existing Qdrant exact index and rechecked revoked access. Production data and deployed routes remain unverified. |
 | 4 | Verified aggregations | The broker and framework counted authorized disposable PostgreSQL records and rechecked membership; live Muse also exercised a count. General analytics and unsupported counts without a tool call remain open. |
 | 5 | Multi-turn context | Live Muse guest turns recovered owner-scoped PostgreSQL history after a test-host restart and rendered Chromium refresh; a follow-up recalled a synthetic detail. Some tool observations and legacy traces remain intentionally unavailable for replay; complete parity is unverified. |
-| 6 | Voice and text streaming | Framework streaming and synthetic speech through live transcription, Muse and local Kokoro were exercised. Validated text is buffered until the decision is complete; browser/device playback and latency acceptance remain open. |
+| 6 | Voice and text streaming | Live Muse published an evidence-backed provisional segment before durable completion; in a separate headless Chromium run, its nonzero Kokoro audio reached scheduled playback while the turn remained incomplete. Other response paths can remain buffered. Physical-device playback, general latency acceptance and deployed behavior remain open. |
 | 7 | Reject unauthorized calls | Framework and PostgreSQL fixtures exercised denied tools and revoked case access. Independent security review and deployed authorization remain open. |
 | 8 | Invalid or unavailable tools | Synthetic malformed-tool tests and disposable stopped-Qdrant tests fail safely or use the existing PostgreSQL fallback. Other provider and service failure modes remain open. |
 | 9 | Timeout and cancellation | Explicitly classified read-only Gateway tools and the state tool's authorized queue-read phase return at cancellation/deadline even if a read ignores cancellation; late results are withheld and at most eight operations can remain active. State reference writes, unclassified tools and direct executor calls remain cooperative. The underlying operation is not forcibly terminated; deployed validation and independent review remain open. |
-| 10 | Existing integration and regression tests | After the session-reminder registration fix, the default application suite passed 1,156 with 13 skipped and the latest integration suite passed 748 with 304 skipped. Selected opt-in fixtures passed separately; one live 1,024-token follow-up failed twice. Full regression acceptance remains open. |
+| 10 | Existing integration and regression tests | At `f2b46f8` the application suite passed 1,188 with 18 skipped. Five default integration runs produced 806 passed/1 failed/333 skipped, 805 passed/2 failed/333 skipped, then three runs with 807 passed/0 failed/333 skipped. The first failure was a signed-in native WebSocket test that passed in isolation; the second run's failure details were lost to output truncation. Intermittent failures and opt-in skips leave full regression acceptance open. |
 
 The Gateway runs explicitly classified read-only tools in independently owned
 scopes through a process-wide pool of eight. Cancellation or the existing tool deadline stops
@@ -907,10 +1191,10 @@ is changed by the framework migration.
 
 | Area | Current integration and contract | Framework compatibility and acceptance |
 | --- | --- | --- |
-| Qdrant exact Ellai recall | When Ellai is enabled and `Qdrant:Endpoint` is nonempty, `Program.cs` registers `EllaiMemoryIndex` and `EllaiMemoryProjectionWorker`. `EllaiMemoryServiceCollectionExtensions` fixes the base collection to `ellai-memory`; the actual vectorless collection is `ellai-memory-exact`. `EllaiCaseResultMemory` uses `IEllaiExactReferenceIndex` only for the `case-results` reference; `ellai_topic` and `ellai_evidence` reach it through `EllaiToolBroker`. | Reuse those broker and index services. Framework tests must exercise authorized recall, changed owner/scope, revoked record access, expired and stale source versions, and index outage without leaking a candidate or bypassing the PostgreSQL recheck. Synthetic framework tests cover stale, outage and changed scope; live Gateway and PostgreSQL combinations remain **NOT VERIFIED**. |
+| Qdrant exact Ellai recall | When Ellai and `Qdrant:Enabled` are enabled, after provider configuration validation, `Program.cs` registers `EllaiMemoryIndex` and `EllaiMemoryProjectionWorker`. `EllaiMemoryServiceCollectionExtensions` fixes the base collection to `ellai-memory`; the actual vectorless collection is `ellai-memory-exact`. `EllaiCaseResultMemory` uses `IEllaiExactReferenceIndex` only for the `case-results` reference; `ellai_topic` and `ellai_evidence` reach it through `EllaiToolBroker`. | Reuse those broker and index services. Framework tests exercise authorized recall, revoked access, index outage, and PostgreSQL rechecks; the current-branch live and synthetic worker results are recorded below. A deployed Gateway remains **NOT VERIFIED**. |
 | Qdrant vector/semantic | `EllaiMemoryIndex` contains vector upsert/search methods with caller-provided vectors and session/epoch filters, but source search found no production caller of these methods or an Ellai embedding encoder. The active exact path uses no vectors. A vector adapter round trip is not proof of deployed semantic retrieval, RAG, embeddings or semantic cache. | Do not claim or enable semantic retrieval or a second pipeline. Any future encoder remains separately gated. Test existing exact behavior through the framework; verify any future semantic path independently before use. |
 | Qdrant scope and lifecycle | Exact payload contains `memory_id`, `session_id`, `scope_epoch`, `topic_id`, `source_version`, `expires_at` and `encoding=exact/1`; point IDs derive from session, epoch and ID. The index filters and rechecks identity and expiry. `EllaiCaseResultMemory` verifies PostgreSQL topic/version, actor, scope, expiry and current authorized case query; it requests index cancellation after 500 ms and falls back to authoritative topic resolution on failure. That deadline is cooperative: an index implementation ignoring cancellation can delay fallback. Projection reads active PostgreSQL topics, retries failures and upserts every 30 seconds; expired/stale points are ignored rather than proven physically deleted. Qdrant is derived, not case authority. | Preserve these boundaries and 24-hour snapshot behavior. Verify stale, revoked, expiry, outage, cross-session and cross-scope cases with disposable services and actual framework execution; verify restart/reprojection and cleanup separately. Existing vector `SearchAsync` trusts the remote filter and should not be exposed as an authorized tool without independent scope and payload validation. |
-| Qdrant transport and persistence | Requests send the API key in the `api-key` header. Local Compose uses a private Qdrant service and `qdrant-data` volume; plaintext is explicitly configured for Development. Configuration validation checks enabled endpoint/key and transport policy, but the Ellai registration in `Program.cs` is conditioned on a nonempty endpoint, not directly on `Qdrant:Enabled`. | Preserve current configuration semantics; verify production transport and credentials separately. Do not expose credentials, raw case narratives or arbitrary Qdrant access to the model. The registration/enable-flag distinction requires review before cutover. |
+| Qdrant transport and persistence | Requests send the API key in the `api-key` header. Local Compose uses a private Qdrant service and `qdrant-data` volume; plaintext is explicitly configured for Development. Configuration validation checks the enabled endpoint/key and transport policy, and Ellai registration now honors `Qdrant:Enabled`. | Verify production transport and credentials separately. Do not expose credentials, raw case narratives or arbitrary Qdrant access to the model. Deployments using the index must explicitly enable it. |
 | Redis derived cache | `ServiceCollectionExtensions` registers `RedisCacheStore` as `ICacheStore` when enabled and `NotConfiguredCacheStore` otherwise. Source search found no application consumer of `ICacheStore` or `IDistributedCache` beyond the adapter, and no Ellai Redis session/context or result-cache path. The adapter uses caller keys under configured `InstanceName` (default `swiftaid:`), requires an absolute TTL up to the configured maximum, and exposes hit/miss/failure/cancelled states; remove is explicit. It does not itself construct tenant keys or establish authorization. | Preserve the existing adapter without inventing an Ellai cache or a new store. Prefix isolation tests are not proof of per-user/tenant authorization. If an Ellai cache consumer is introduced later, scope/version/invalidation and access checks require a separate design and tests. |
 | Redis coordination and rate limiting | The confirmed Redis consumer outside the generic cache is Facebook web login's HMAC-address bucket (`swiftaid:auth:facebook-web:rate:v2:<digest>`), atomic INCR/EXPIRE with a bounded window; failure returns `Unavailable`. No Redis Ellai session coordination or Ellai rate limiter was found. `EllaiUtteranceQueue` has a per-process gate; the active worker instead uses the PostgreSQL outbox and lease/fencing paths. | Preserve the login limiter and PostgreSQL outbox semantics. Do not claim Redis provides Ellai session recovery, cross-instance locks or rate limits. Check framework worker restart, duplicate delivery and lease fencing against disposable PostgreSQL before cutover. |
 | Redis transport and persistence | Redis configuration validates the connection and TLS except allowlisted Development hosts. Local Compose uses password authentication, loopback publication and `appendonly no` without a Redis volume. Cache misses and failures are distinct, writes require TTL, and logs report failure type rather than values. | Verify isolated cache expiry, remove and outage behavior; a Redis restart must not be presented as durable Ellai session recovery. Production transport, real multi-user cache isolation and end-to-end outage behavior remain **NOT VERIFIED**. |
@@ -1888,7 +2172,60 @@ tests/SwiftAid.Application.Tests/SwiftAid.Application.Tests.csproj --no-restore
 'FullyQualifiedName~EllaiMuseChatClientTests|FullyQualifiedName~FrameworkRejectsProviderToolCallWithoutAName'
 --logger 'console;verbosity=normal'`. This is a synthetic protocol fixture;
 whether live Muse emits split function names remains **NOT VERIFIED**. The
-migration does not add a custom function-call reassembly pipeline.
+migration initially did not correct that adapter behavior.
+
+On 2026-11-04 a narrowly scoped adapter correction was added for Meta and
+Ollama streaming. It observes the official adapter's typed raw updates, binds
+name fragments by provider call index and ID, and replaces only the final name
+when the SDK retained its first fragment. Framework agent construction,
+streaming and function invocation remain framework-managed. Conflicting or
+ambiguous identities fail closed, argument-parse exceptions and other call
+metadata are retained, and an allowed prefix followed by an unregistered
+suffix is rejected before a broker call. The [official adapter source](https://github.com/dotnet/extensions/blob/main/src/Libraries/Microsoft.Extensions.AI.OpenAI/OpenAIChatClient.cs)
+shows the first-name-fragment behavior that the synthetic fixture exposed.
+
+PASS: the `EllaiMuseChatClientTests|EllaiAgentFrameworkContractTests` filter
+passed 132/132 using `dotnet test tests/SwiftAid.Application.Tests/SwiftAid.Application.Tests.csproj
+--no-build --no-restore -m:1 -nr:false --filter
+'FullyQualifiedName~EllaiMuseChatClientTests|FullyQualifiedName~EllaiAgentFrameworkContractTests'
+--logger 'console;verbosity=minimal'`. It covers split names, interleaved
+calls, duplicate IDs, unregistered suffixes, malformed arguments and the
+Ollama-compatible route. The focused synthetic Gateway worker tests passed
+2/2, including a fragmented HTTP stream that reached the real clock broker.
+The broader reasoning-registration and worker-outcome integration filters
+passed 55/55 with `OS=Windows_NT`, `-m:1 -nr:false` and
+`-p:WasmBuildNative=false`.
+The complete application suite passed 1,200, failed 0 and skipped 18.
+The opt-in `LiveFrameworkRunnerStreamsBrokeredToolDecision` passed 1/1 with
+the configured live Muse route and the correction enabled. These tests do not
+establish how often live Muse splits function names, live Ollama compatibility,
+deployed Gateway behavior or an independent security review.
+
+The opt-in `LiveMuseReportsStreamingToolNameFragmentShape` probe was run twice
+against the configured live Muse route using synthetic `fixture_echo` input.
+Both runs passed with one completed, named function call; the second also
+checked the `banana` argument. The first recorded one nonempty name fragment
+of 12 characters. The second run's fragment-count output was truncated by the
+test harness, so its shape is not recorded here. Command: `dotnet test
+tests/SwiftAid.Application.Tests/SwiftAid.Application.Tests.csproj --no-restore
+-m:1 -nr:false --filter 'FullyQualifiedName~LiveMuseReportsStreamingToolNameFragmentShape'
+--logger 'console;verbosity=normal'`, with `ELLAI_LIVE=1` and the existing
+Gateway's Ellai settings copied into the test process without printing them.
+With `ELLAI_LIVE=0`, the probe correctly skipped. These two calls do not prove
+Muse never fragments names or establish production-provider reliability.
+
+At revision `a0c9396`, a separately published Release Gateway using the
+corrected adapter ran on loopback with disposable PostgreSQL and NATS and the
+configured live Muse route. PASS: the opt-in headless Chromium
+`ellai-conversation.browser.cjs` run completed a synthetic location search and
+a follow-up recalling the place, restored the conversation after refresh, and
+cancelled the session with zero page errors. PostgreSQL recorded an
+`ellai_locations` observation with a protected scope in both completed turn
+traces, without the plaintext place name in either trace. The first turn took
+41,272 ms. The test did not capture whether Muse split the name; split-name
+behavior itself remains proven only by the synthetic provider fixtures. The
+fixture's notification consumer reported `NatsJSApiException`, outside this
+check. This is one local prompt, not deployed or latency acceptance evidence.
 
 After the blank-name guard change, `LiveFrameworkRunnerStreamsBrokeredToolDecision`
 passed 1/1 against the configured live Muse route with a synthetic prompt,
@@ -2223,6 +2560,15 @@ their registration. A clean baseline test run was not performed; this evidence
 does not prove the failures occur on baseline. The regression gate remains open.
 An initial rerun without `OS=Windows_NT` failed during the WebAssembly build
 because `emcc` could not be found; no tests ran in that attempt.
+
+Superseding this historical result, commit `9927a43` corrected the optional
+identity dependency in the reminder sender. On branch revision `055c572`, the
+same filter passed 21/21 with `OS=Windows_NT` using `dotnet test
+tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj --no-restore
+-m:1 -nr:false -p:WasmBuildNative=false --filter
+'FullyQualifiedName~CaseCommandProcessorDependencyInjectionTests|FullyQualifiedName~ProtectedPayloadKeyRingSecurityTests'
+--logger 'console;verbosity=quiet'`. This resolves the four recorded failures in
+that filter; it does not close the full integration and regression gate.
 
 After the response-generation fence change, a separate local Gateway process
 using the current Debug build, a freshly migrated disposable PostgreSQL
@@ -2891,3 +3237,1232 @@ The read-lease deadline limits PostgreSQL authority locks, but a cancellation-
 ignoring operation can still occupy an isolation slot and the state path can
 perform a session snapshot write. These limitations must not be reported as
 fully closed by the passing focused checks.
+
+### Evidence-free provisional output verification — 2026-11-03
+
+An evidence-free model segment could previously reach the provisional feed
+before the final decision was validated. The framework adapter now buffers such
+segments and publishes only the validated final decision through the existing
+final-text callback. Evidence-backed segments still require matching claims,
+verbatim observation lines and current authorization before early publication.
+Ordinary evidence-free answers therefore wait for the provider to finish;
+framework streaming and early publication of eligible evidence-backed segments
+remain available.
+
+PASS: the new synthetic regression first failed on the former implementation,
+then passed for both a matching segment and a segment that differed from the
+final answer. PASS: the full Application suite reported 1,177 passed, 17
+skipped and 0 failed using
+`dotnet test tests/SwiftAid.Application.Tests/SwiftAid.Application.Tests.csproj --no-restore -m:1 -nr:false --logger 'console;verbosity=minimal'`.
+PASS: the Gateway worker and registration filter reported 47 passed, 0 failed
+using
+`dotnet test tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj --no-restore -m:1 -nr:false -p:WasmBuildNative=false --filter 'FullyQualifiedName~EllaiUtteranceWorkerOutcomeTests|FullyQualifiedName~EllaiReasoningRegistrationTests' --logger 'console;verbosity=minimal'`.
+The worker fixture held a synthetic model open and checked that no
+evidence-free answer reached the feed before completion.
+
+NOT VERIFIED: the updated live Muse probe, deployed Gateway and voice delivery.
+This change does not prove semantic safety of evidence-backed text, close the
+cross-process publication finding, or make noncooperative tool operations stop.
+In particular, the state tool may persist session references, so detaching an
+arbitrary timed-out operation without a durable write fence is unsafe.
+
+### Concurrent topic insert verification — 2026-11-03
+
+A controlled concurrent PostgreSQL insert reproduced a lost case-result
+snapshot: the caller that lost the insert race returned the competing row
+without applying its own values. An initial correction retried that update,
+but a further audit showed that an older delayed attempt could overwrite a
+newer result. The current implementation reports a concurrency failure for
+the competing insert and preserves the winner. It propagates unrelated
+database update failures and verifies the session and title before modifying
+a row found by its stable identifier.
+
+PASS: `EllaiPostgresTopicTests` reported 4 passed, 0 failed against a
+task-created loopback PostgreSQL 16 container with the topic table and its
+production-named primary key. The deterministic race test failed against the
+previous implementation and passed after the initial correction. The command was
+`dotnet test tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj --no-restore -m:1 -nr:false -p:WasmBuildNative=false --filter FullyQualifiedName~EllaiPostgresTopicTests --logger 'console;verbosity=minimal'`,
+with the existing disposable SQL fixture enabled. The container was removed.
+NOT VERIFIED: the full production schema, deployed service, cancellation during
+a database commit, and independent review. This correction does not resolve the
+noncooperative tool timeout or establish serialized AgentSession restoration.
+
+The same PostgreSQL fixture was subsequently expanded to check that an
+unrelated unique constraint is propagated and that a colliding topic
+identifier cannot alter another session's row. PASS: 6 passed, 0 failed with
+the command above against a fresh PostgreSQL 16 container. Its data directory
+was a task-created tmpfs, and the container was removed after the run.
+
+The updated evidence-free buffering probe was subsequently run with synthetic
+input against the configured live Muse route, together with official-client
+text, framework brokered-tool and streaming-cancellation probes. PASS: 4
+passed, 0 failed, 0 skipped using the Application test project with
+`--no-build --no-restore -m:1 -nr:false` and filter
+`LiveMuseBuffersEvidenceFreeSegmentsUntilDecisionCompletes|LiveOfficialChatClientReturnsSyntheticText|LiveFrameworkAgentInvokesBrokeredTool|LiveMuseStreamingCancellationStopsFrameworkTurn`.
+The configuration came from the running local Gateway, without restarting it.
+These tests ran in the test process against the provider, not through the
+deployed Gateway or a physical voice device.
+
+The entire current `EllaiLiveProbeTests` class was then run with the same
+live configuration and synthetic inputs: PASS, 17 passed, 0 failed, 0 skipped
+in 2 minutes 29 seconds. Command:
+`dotnet test tests/SwiftAid.Application.Tests/SwiftAid.Application.Tests.csproj --no-build --no-restore -m:1 -nr:false --filter FullyQualifiedName~EllaiLiveProbeTests --logger 'console;verbosity=minimal'`.
+This run includes synthetic upload and realtime ASR, framework-native tool
+calls, provider streaming and cancellation. It does not demonstrate stability
+across future provider calls, deployed Gateway execution, microphone capture,
+or mobile-device behavior.
+
+### Static state cancellation boundary — 2026-11-03
+
+The Gateway now runs the state tool's static feature projection through the
+existing bounded read-isolation pool. A missing projection or a sole
+`projection=feature` argument has no case-result snapshot write; if its
+scoped operation ignores cancellation, the caller can stop waiting while the
+scope remains owned by the held operation. At that stage queue projections,
+extra arguments, unknown projections and unclassified tools remained attached;
+the later fenced PostgreSQL queue path is described below.
+
+PASS: the focused selection/cancellation filter reported 20 passed, 0 failed.
+PASS: `EllaiIsolatedToolCallsTests|EllaiUtteranceWorkerOutcomeTests` reported
+64 passed, 2 skipped, 0 failed with
+`dotnet test tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj --no-build --no-restore -m:1 -nr:false -p:WasmBuildNative=false --filter 'FullyQualifiedName~EllaiIsolatedToolCallsTests|FullyQualifiedName~EllaiUtteranceWorkerOutcomeTests' --logger 'console;verbosity=minimal'`.
+The two skips require the disposable PostgreSQL authority fixture. The new
+cancellation tests exercise the worker's selection boundary with held synthetic
+operations; they are not deployed Gateway tests. Queue snapshot writes and
+arbitrary noncooperative work still do not have a complete timeout guarantee.
+
+### Topic update concurrency and EF metadata — 2026-11-03
+
+A second PostgreSQL regression reproduced an older loaded topic overwriting a
+newer save. The topic mapping now uses PostgreSQL's `xmin` as its EF
+row-version token. Stale updates and competing inserts fail visibly; the state
+tool reports that result references could not be retained instead of claiming
+they were saved. PASS: the PostgreSQL topic filter reported 8 passed, 0 failed
+against a task-created PostgreSQL 16 database with the topic table; the
+delayed-update regression failed before the row-version mapping.
+
+The EF model requires a metadata-only migration
+`20261103210000_EllaiTopicConcurrency`: PostgreSQL already supplies the
+system column. PASS: the Infrastructure build, EF pending-model check, and
+generated upgrade and downgrade scripts. The scripts only insert or delete
+the migration-history entry. The installed EF CLI was 10.0.12 and warned that
+the runtime was 10.0.14.
+
+PASS: `DatabaseMigrationDeploymentTests` ran against a task-created
+PostgreSQL 17/PostGIS fixture, upgraded the full schema, rolled the metadata
+migration back, verified that `xmin` remained readable, and reapplied it.
+Command: `dotnet test tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj --no-restore -m:1 -nr:false -p:WasmBuildNative=false --filter FullyQualifiedName~DatabaseMigrationDeploymentTests --logger 'console;verbosity=minimal'`.
+The temporary database was deleted by the fixture and the tmpfs-backed
+container was removed. NOT VERIFIED: deployed Gateway startup.
+
+PASS: a combined worker/isolation and representative SQLite-backed integration
+filter reported 83 passed, 2 skipped, 0 failed:
+`dotnet test tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj --no-build --no-restore -m:1 -nr:false -p:WasmBuildNative=false --filter 'FullyQualifiedName~DemoDataTests|FullyQualifiedName~EmailChangeServiceTests|FullyQualifiedName~GeographicRegistryTests|FullyQualifiedName~EllaiIsolatedToolCallsTests|FullyQualifiedName~EllaiUtteranceWorkerOutcomeTests' --logger 'console;verbosity=minimal'`.
+The skipped tests require the PostgreSQL authority fixture. These checks do not
+exercise SQLite topic persistence.
+
+The row-version token detects changes between reading and updating the topic;
+it does not by itself fence a cancelled attempt whose old case read finishes
+after a newer attempt has already saved. The subsequent PostgreSQL
+outbox-attempt fence is described below.
+
+### Case-result snapshot attempt fence — 2026-11-03
+
+The default PostgreSQL Gateway path now persists case-result snapshots while
+holding the session and claimed-utterance row locks in the same transaction
+as the topic write. It checks owner, scope and interaction epochs, attempt
+number, processing state and unexpired lease, and rechecks the lease after
+the write before committing. A reclaimed, cancelled or expired attempt cannot
+start a new snapshot write through this fence. The worker uses the fence only
+when its broker's topic store is the PostgreSQL store sharing the same scoped
+database context. Other store arrangements retain their existing attached,
+cooperative behavior.
+
+PASS: five focused tests against disposable PostgreSQL 17/PostGIS covered
+the framework worker's successful snapshot and lock behavior, foreign
+owner/scope, expired and reclaimed attempts, session cancellation, and
+rollback when a lease expires before commit. Command:
+`dotnet test tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj --no-restore -m:1 -nr:false -p:WasmBuildNative=false --filter 'FullyQualifiedName~FrameworkWorkerPersistsFencedCaseResultSnapshot|FullyQualifiedName~FrameworkWorkerHoldsSessionFenceDuringCaseSnapshotWrite|FullyQualifiedName~CaseResultSnapshotRejectsReclaimedOrCancelledAttempts|FullyQualifiedName~CaseResultSnapshotHoldsSessionFenceUntilCommit|FullyQualifiedName~CaseResultSnapshotRollsBackWhenLeaseExpiresBeforeCommit' --logger 'console;verbosity=minimal'`.
+The tmpfs-backed fixture container was removed. PASS: Application suite,
+1,177 passed, 17 skipped; worker/isolation/registration filter, 73 passed,
+2 skipped. The latter skips require the PostgreSQL authority fixture.
+
+This fence protects the tested PostgreSQL attempt transitions but does not
+prove transaction behavior during a network partition or guarantee termination
+of a cancellation-ignoring topic write. At this stage queue state operations
+remained attached; the later bounded-worker change is described below.
+
+The snapshot transaction now also applies an absolute server-side
+`transaction_timeout`, defaulting to 35 seconds and respecting a shorter
+existing setting. PostgreSQL without this capability fails the snapshot write
+closed; the configured Compose database is PostgreSQL 17. PASS: six focused
+PostgreSQL 17/PostGIS tests, including a held client operation where a
+two-second injected server deadline released the session lock before the
+client was released and left no snapshot. Command: the five-test filter above
+plus `FullyQualifiedName~SnapshotTransactionDeadlineReleasesSessionLockWhenClientStalls`.
+The tmpfs-backed fixture was removed. This bounds tested database lock
+retention; it does not terminate arbitrary application work or prove behavior
+under a network partition.
+
+### Fenced queue timeout — 2026-11-03
+
+The framework executor now passes the current tool's server-owned absolute
+deadline to the PostgreSQL snapshot fence. The transaction deadline is the
+earlier of that limit and the existing 35-second cap. The Gateway uses a
+separate bounded isolation pool for queue state work only when its scoped
+queue and topic stores match the expected services and the topic store shares
+the fence's PostgreSQL context. A fresh detached scope must pass those checks
+again; otherwise the tool fails closed. Other store arrangements remain
+attached. Separate pools prevent queue calls from consuming all of the slots
+needed by their nested authorized reads.
+
+PASS: 12 focused cases against disposable PostgreSQL 17/PostGIS and the
+in-process Gateway worker. They include a two-second tool deadline with a
+snapshot operation that ignores cancellation: the timed-out turn failed, a
+subsequent turn completed while the old operation remained held, and releasing
+the old operation did not persist a snapshot. The filter also covered
+reclaimed, cancelled, foreign, expired and lock-contending attempts and
+unrecognized request shapes. Command:
+`dotnet test tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj --no-restore -m:1 -nr:false -p:WasmBuildNative=false --filter 'FullyQualifiedName~FrameworkWorkerPersistsFencedCaseResultSnapshot|FullyQualifiedName~FrameworkWorkerHoldsSessionFenceDuringCaseSnapshotWrite|FullyQualifiedName~FrameworkWorkerTimesOutStalledSnapshotAndProcessesNextTurn|FullyQualifiedName~CaseResultSnapshotRejectsReclaimedOrCancelledAttempts|FullyQualifiedName~CaseResultSnapshotHoldsSessionFenceUntilCommit|FullyQualifiedName~CaseResultSnapshotRollsBackWhenLeaseExpiresBeforeCommit|FullyQualifiedName~SnapshotTransactionDeadlineReleasesSessionLockWhenClientStalls|FullyQualifiedName~FencedQueueSelectionRejectsUnrecognizedShapes' --logger 'console;verbosity=minimal'`.
+
+These tests establish the synthetic in-process PostgreSQL path, not deployed
+Gateway acceptance or network-partition behavior. A cancellation-ignoring
+operation can still retain a bounded isolation slot until it returns; custom
+stores without the transactional fence retain cooperative timeout behavior.
+
+Further verification: PASS, the PostgreSQL session class reported 22 passed,
+16 skipped and 0 failed on its final run against the disposable fixture. An
+earlier run reported one failure in
+`FrameworkWorkerRestoresHistoryAfterManyRepeatedToolObservations`; the quiet
+logger did not capture the cause. That test passed in isolation and in the
+full-class rerun. Its 300-tool-call first turn now has a 30-second fixture
+allowance rather than 10 seconds; the cause of the original failure is not
+established.
+
+PASS: the Application suite reported 1,177 passed, 17 skipped, 0 failed.
+The first full default Integration run reported 787 passed, 327 skipped and
+one failed audio-worker case; quiet output did not capture its cause. All
+seven cases in that audio theory passed on immediate rerun. A subsequent full
+Integration run reported 788 passed, 327 skipped and 0 failed. Command:
+`dotnet test tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj --no-build --no-restore -m:1 -nr:false -p:WasmBuildNative=false --logger 'console;verbosity=normal'`.
+The intermittent initial failure remains unexplained; a passing rerun does not
+prove it cannot recur.
+
+### Verification checkout delivery — 2026-11-03
+
+The verified changes were committed on the designated verification checkout's
+active branch without pushing:
+
+- `fa15517`: buffer evidence-free provisional responses. Post-commit focused
+  Application checks passed 7/7.
+- `95a173a`: protect topic snapshots against concurrent overwrites, including
+  the metadata-only row-version migration. Post-commit PostgreSQL topic and
+  full-schema migration checks passed 9/9 on a disposable PostgreSQL 17/PostGIS
+  instance.
+- `894bf78`: fence and bound PostgreSQL queue snapshot execution. Post-commit
+  fence, timeout and request-selection checks passed 12/12 on a separate
+  disposable PostgreSQL 17/PostGIS instance.
+
+Both post-commit database fixtures used tmpfs and were removed. These commits
+are on the verification branch; the separate `interactive-ellai` checkout
+was not changed. The earlier intermittent integration failure, network
+partition behavior, custom-store cooperative timeout, and deployed
+Gateway/device acceptance remain open as described above.
+
+### Provisional delivery read race — 2026-11-03
+
+A deterministic feed regression reproduced disclosure of a provisional
+segment when its outbox attempt was reclaimed between the conversation and
+session reads. The feed and provisional-audio path now ask a delivery fence
+to check owner, scope, interaction epoch and attempt together before delivery.
+The PostgreSQL implementation uses a single query for that check; the
+in-memory implementation checks under its store lock. If a custom outbox
+does not implement the fence, provisional content is withheld. A changed
+owner also causes the feed to omit the previously read conversation.
+
+PASS: the race regression failed before the correction. After commit
+`964ce63`, nine focused tests passed against in-memory and disposable
+PostgreSQL 17/PostGIS fixtures. They cover reclaim during feed and audio reads,
+owner change, a failed durable check, the PostgreSQL interleaving, and two-host
+audio cancellation and reclaim. Command:
+`dotnet test tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj --no-build --no-restore -m:1 -nr:false -p:WasmBuildNative=false --filter 'FullyQualifiedName~PostgresFeedRejectsAttemptReclaimedDuringRead|FullyQualifiedName~ProvisionalPublicationHoldsSessionAndAttemptFence|FullyQualifiedName~GuestCancellationOnAnotherHostHidesLocalResponseAndAudio|FullyQualifiedName~ReclaimedAttemptOnAnotherHostStopsProvisionalAudio|FullyQualifiedName~FeedHidesProvisionalChunk|FullyQualifiedName~FeedOmitsConversationWhenOwnerChangesDuringRead|FullyQualifiedName~AudioHidesProvisionalChunkWhenAttemptIsReclaimedDuringRead|FullyQualifiedName~ProvisionalDeliveryFailsClosedWhenDurableCheckIsUnavailable' --logger 'console;verbosity=minimal'`.
+The PostgreSQL fixture was tmpfs-backed and removed. The pre-commit worker and
+route filter passed 68, skipped 5. The unavailable-store case is a synthetic
+fault, not a process-level network-partition test; an authorization change
+after a successful check can still race bytes already in flight. Deployed
+Gateway, independent security review, and physical voice-device behavior
+remain NOT VERIFIED.
+
+### Import destination revalidation — 2026-11-04
+
+The production runner previously rejected every import-destination observation
+because it had no replay scope. It now stores a digest of the bounded result,
+re-reads the destination list through the authorized broker, and permits the
+turn only while that result is unchanged. Old traces without the digest remain
+ineligible for replay. The trace does not contain workspace names or the list.
+PASS: `EllaiImportToolsPostgresTests` passed 1/1 with the intake PostgreSQL
+fixture: a scripted framework model reached the actual runner, the authorized
+result completed, and a simulated foreign-actor recheck withheld the answer.
+This is not a database grant-revocation race or deployed Gateway test. PASS:
+the application authorization and framework contract filters passed 165/165
+with `dotnet test tests/SwiftAid.Application.Tests/SwiftAid.Application.Tests.csproj
+--no-restore -m:1 -nr:false --filter
+'FullyQualifiedName~EllaiAuthorizedConversationContextTests|FullyQualifiedName~EllaiAgentFrameworkContractTests'
+--logger 'console;verbosity=minimal'`. The remaining location-search replay
+gap was separate; its later remediation is recorded below.
+
+### Protected location-search replay — 2026-11-04
+
+Location observations previously failed the runner's authorization recheck.
+The Gateway now protects the exact bounded search arguments with its data
+protection provider, scoped to the session and actor. The internal token is
+excluded from model-visible tool results. The observation trace stores that
+token and a digest, and the runner decrypts and repeats the search through the
+authorized broker before publication or history replay. Changed, truncated,
+unavailable, legacy or undecryptable observations fail closed; this includes
+empty results. Cross-process replay requires the same durable key ring.
+
+PASS: the `EllaiLocationReplayTests|EllaiReasoningRegistrationTests` filter
+passed 19/19 with `OS=Windows_NT`, the disposable intake PostgreSQL fixture,
+and `dotnet test tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj
+--no-restore -m:1 -nr:false -p:WasmBuildNative=false --filter
+'FullyQualifiedName~EllaiLocationReplayTests|FullyQualifiedName~EllaiReasoningRegistrationTests'
+--logger 'console;verbosity=minimal'`. It covers streaming and non-streaming
+runner paths, empty and populated results, changes, missing/wrong keys, token
+tampering, session and actor separation, a synthetic Gateway worker and a
+changed PostgreSQL registry row. The database mutation is restored in `finally`;
+the database test passed again on the same fixture. PASS: the application
+authorization, framework and ingestion filters passed 172/172. The initial
+PostgreSQL test did not restore its synthetic row; its rerun failed until the
+disposable fixture was recreated and the restoration was added. Durable keys
+across independent deployed processes, browser behavior, real provider output,
+and an independent security review remain NOT VERIFIED.
+
+The location replay key-ring test now creates independent data-protection
+providers over one private disposable directory. PASS: `dotnet test
+tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj --no-restore
+-m:1 -nr:false -p:WasmBuildNative=false --filter
+'FullyQualifiedName~EllaiLocationReplayTests' --logger 'console;verbosity=minimal'`
+passed 10, skipped the opt-in PostgreSQL case, and failed 0 with
+`OS=Windows_NT`. A recreated provider read the original token, a new key was
+selected after rotation, a later provider read both tokens, and revoking the
+old key made only its token unreadable. A different application discriminator
+also failed to read it. The private fixture removed its own key and revocation
+files and directories. These providers ran in one test process; deployed
+cross-process key sharing and production key-ring configuration were not
+verified by that run.
+
+A later run of the same location replay filter passed 10, failed 0 and skipped
+2 in the parent process: the opt-in PostgreSQL case and the child-only test.
+The key-ring parent launched the child-only test in a separate `dotnet test`
+process with the private fixture directory. The child had a different process
+ID and decrypted tokens made before and after rotation. The parent verified
+the child test actually ran, then checked revocation and removed the fixture
+files. Command: `dotnet test tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj
+--no-restore -m:1 -nr:false -p:WasmBuildNative=false --filter
+'FullyQualifiedName~EllaiLocationReplayTests' --logger 'console;verbosity=minimal'`
+with `OS=Windows_NT`. This demonstrates a shared local file key ring across
+test processes, not shared key configuration or behavior in a deployed cluster.
+
+The protected location observation has now also been saved through the actual
+PostgreSQL session/outbox store. A follow-up using a newly created database
+context, store and file-key-ring provider retained the prior answer when the
+scripted registry result matched, and withheld it from the model when that
+result changed. The separate PostgreSQL-registry mutation case is described
+above; this history test uses a scripted registry and model. PASS: with the
+disposable intake PostgreSQL fixture and `OS=Windows_NT`, `dotnet test
+tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj --no-build
+--no-restore -m:1 -nr:false -p:WasmBuildNative=false --filter
+'FullyQualifiedName~EllaiLocationReplayTests' --logger 'console;verbosity=minimal'`
+passed 12, failed 0 and skipped the child-only case in the parent; the key-ring
+parent ran that child in a separate process. An initial history test omitted
+the runner's outbox dependency and failed its history assertion; the corrected
+fixture passed. This does not establish an independently restarted Gateway,
+live model behavior or deployed key-ring configuration.
+
+On 2026-11-04 a Release-published local Gateway at revision `fcfcb93` ran on
+loopback against disposable migrated PostgreSQL and NATS, with the configured
+live Muse route. PASS: `node tests/SwiftAid.Ui.Tests/ellai-conversation.browser.cjs`
+with `SWIFTAID_RUN_LIVE_ELLAI=1`, the local Playwright package and Gateway URL,
+a synthetic Rusape location prompt and a follow-up asking for the prior place.
+Headless Chromium observed two completed turns, the follow-up recalled the
+place, refresh restored the conversation, and the session was cancelled after
+the test. The first response completed in 18,650 ms with zero page errors.
+A read-only PostgreSQL query showed `ellai_locations` and a protected replay
+scope in both completed turn traces; neither trace contained the plaintext
+place name. This is one local live-provider run, not reliability across prompts,
+a restarted Gateway, physical-device or deployed-cluster verification. The
+fixture's notification change consumer reported `NatsJSApiException`, outside
+the exercised Ellai path. The existing running Gateway was not restarted.
+
+An additional local live-Muse run exercised a real process restart between
+turns. PASS: with `SWIFTAID_WAIT_FOR_GATEWAY_RESTART=1`, the same headless
+Chromium conversation test paused after a completed location turn. The
+isolated Release Gateway was stopped and started again against its same
+disposable PostgreSQL, NATS and private test key ring; after the signal, the
+browser refreshed, restored the same guest session, completed a follow-up
+that recalled the place, and cancelled the session. The first turn completed
+in 25,145 ms and the browser reported zero page errors. PostgreSQL showed the
+protected `ellai_locations` observation in both completed traces and no
+plaintext place name in either trace. The local fixture had the same unrelated
+notification-consumer `NatsJSApiException`. This is one synthetic prompt and
+one local process restart, not a deployed-cluster, device or provider
+reliability test; the existing running Gateway was not restarted.
+
+### Grounded audio timing probe — 2026-11-03
+
+PASS: `SWIFTAID_RUN_LIVE_ELLAI=1 SWIFTAID_REQUIRE_AUDIO_BEFORE_COMPLETION=1
+node tests/SwiftAid.Ui.Tests/ellai-grounded-playback.browser.cjs` in headless
+Chromium against the isolated local Gateway, disposable PostgreSQL and NATS,
+the configured live Muse model and local Kokoro. For a synthetic receipt prompt,
+the exact grounded segment was published before durable completion, its audio
+request returned 200, and a nonzero Web Audio buffer reached its scheduled
+playback time while a subsequent feed read still showed the turn incomplete.
+Ten buffers started and ended. This is one observed ordering, not a latency
+guarantee, a physical speaker check, or evidence for other model responses.
+The fixture's notification change consumer reported `NatsJSApiException`;
+notification delivery was outside this check. The isolated Gateway was stopped
+and the three disposable containers removed after the run.
+
+### Evidence-backed live model streaming — 2026-11-03
+
+The framework streaming instructions previously included an example with an
+empty claims array, although early evidence-backed segments require a claim
+with observed evidence. They now describe the actual guard: each segment must
+copy a complete cited result line, have a matching evidence-backed claim and
+match the final display and speech text; without eligible evidence, the model
+is told to omit segments. This changes instructions, not the publication or
+authorization checks.
+
+PASS: `LiveMuseStreamsEvidenceBackedSegmentBeforeCompletion` passed twice
+against the configured live Muse route using the same execution-schema builder
+as the Gateway and a synthetic tool result. Each run observed the exact
+evidence-backed sentence while the provider stream was still open and checked
+that it matched the final decision. The command was `dotnet test
+tests\SwiftAid.Application.Tests\SwiftAid.Application.Tests.csproj --no-restore
+-m:1 -nr:false --filter 'FullyQualifiedName~LiveMuseStreamsEvidenceBackedSegmentBeforeCompletion'
+--logger 'console;verbosity=minimal'`, with `ELLAI_LIVE=1` and provider settings
+supplied to the process. A separate live evidence-free buffering probe passed
+1/1. The framework, runner and authorization filter passed 177/177; the worker
+filter passed 9/9 with a synthetic model and in-memory stores.
+
+Earlier versions of the live probe used a simplified prompt rather than the
+Gateway schema builder. One run passed after the instruction correction; one
+before and two after that correction failed when the provider attempted an
+unregistered tool call during repair after an invalid decision shape. These observations remain recorded;
+two later passes do not prove reliable generation. The new probe uses a
+synthetic tool and a synthetic revalidator, not PostgreSQL, the deployed
+Gateway, a browser, or audible speech. Ordinary evidence-free answers remain
+buffered until validation, and user-visible model-time streaming and independent
+security review remain NOT VERIFIED.
+
+### Provisional line-to-evidence binding — 2026-11-03
+
+The framework previously associated every line of a multi-item tool result
+with every evidence reference in that result. A provisional segment could
+therefore quote one item while citing another. The regression first reproduced
+publication of an ambiguous line. Provisional matching now binds product-fact
+lines to their exact fact ID, source and revision, and case lines to their
+canonical case ID. Product facts can stream their complete text without the
+source-label prefix. Other multi-evidence formats remain buffered until the
+final decision because no safe per-line mapping has been established. Existing
+authorization rechecks remain in place.
+
+PASS: the framework and authorized-context application filter passed 163/163,
+including matching and mismatched case and product-fact references and the
+ambiguous-line regression. The PostgreSQL/Qdrant framework-worker recall and
+revocation fixture passed 1/1 with a synthetic model; the disposable stores
+were removed. This change strengthens provisional publication only. It does
+not establish semantic support for all final claims, live Gateway model-time
+delivery, or an independent security review.
+
+### Live Gateway evidence-backed feed — 2026-11-03
+
+PASS: `GuestHttpReceivesLiveMuseEvidenceSegmentBeforeTurnCompletes` exercised
+the current framework worker through an in-process Gateway, live Muse, and a
+disposable PostgreSQL database. The HTTP response feed exposed the exact
+approved receipt fact as a non-final segment while the durable turn was still
+incomplete; the turn then completed with the same text. The final test also
+checked the persisted trace for the matching product-fact evidence. The test
+uses a synthetic guest session and public product data.
+
+The first run passed without the added persisted-trace assertion. An intermediate
+build failed with CS0136 due to a test-local variable name; after renaming it,
+the expanded test passed 1/1. Command: `dotnet test
+tests\SwiftAid.Integration.Tests\SwiftAid.Integration.Tests.csproj --no-restore
+-m:1 -nr:false -p:WasmBuildNative=false --filter
+'FullyQualifiedName~GuestHttpReceivesLiveMuseEvidenceSegmentBeforeTurnCompletes'
+--logger 'console;verbosity=minimal'`, with live Muse and the dedicated
+framework PostgreSQL fixture enabled. The temporary database was removed.
+This demonstrates the tested feed path, not a deployed Gateway, browser
+playback, physical device, or reliable generation for every request.
+
+### Live speech for an early grounded segment — 2026-11-03
+
+PASS: `GuestHttpSpeaksLiveMuseEvidenceSegment` exercised the in-process Gateway
+with live Muse, the real product-facts broker, disposable PostgreSQL and the
+existing local Kokoro service through a task-owned loopback relay. It requested
+audio for the exact evidence-backed segment while the durable turn was still
+incomplete, then received nonzero PCM from the `af_heart` voice. The final turn
+and persisted evidence were also checked. The focused speech test passed 1/1;
+the combined text and speech filter passed 2/2. Both used synthetic guest data
+and public product information. Provider and speech credentials were supplied
+only to the test process.
+
+The test does not measure whether the first PCM byte or audible playback began
+before model completion. Browser playback, microphone capture, deployed Gateway
+and physical-device behavior remain NOT VERIFIED. The loopback relay does not
+change or restart the existing speech service.
+
+### Rendered live grounded playback — 2026-11-03
+
+PASS: the source at `922375a` was published to a separate loopback Gateway and
+run with live Muse, disposable PostgreSQL/NATS and the existing local Kokoro
+service through a task-owned relay. `node
+tests\SwiftAid.Ui.Tests\ellai-sentence-playback.browser.cjs` passed in
+headless Chromium: voice-on multi-sentence playback, voice-off behavior, five
+HTTP 200 audio responses and seven nonzero Web Audio buffers were observed.
+
+The new `ellai-grounded-playback.browser.cjs` passed twice. Its strengthened
+run observed the receipt fact in the feed while the turn was incomplete,
+received HTTP 200 for that exact response sequence's audio, and associated
+nonzero Web Audio buffers with that sequence; all observed buffers ended. The
+first run used a general playback counter before sequence instrumentation was
+added. Both runs used synthetic guest input and public product information.
+The isolated NATS notification consumer reported unavailable; notifications
+were not tested. This check does not establish that playback started before
+model completion, audible quality, microphone capture, physical-device or
+deployed Gateway behavior.
+
+The isolated Gateway, containers and relay were stopped. The candidate
+publish directory remains under the user temporary directory; an earlier
+automatic execution policy rejected recursive removal of task temporary
+directories, so they are retained.
+
+### Exact final-claim misattribution — 2026-11-03
+
+The final decision validator accepted an exact case or product-fact line when
+the claim cited only a different observed item. It now detects this bounded,
+unambiguous mismatch using the reference-bound lines already used for
+provisional output and requests a tool-free decision repair. If provisional
+speech was already published, the existing rule stops instead of replacing it.
+Correctly cited exact lines continue to pass.
+
+The two wrong-reference regressions failed before the fix; the matching cases
+passed. After the fix, the framework contract suite passed 107/107. The live
+Muse in-process Gateway feed test passed 1/1 with correctly cited public fact
+text and a disposable PostgreSQL database, which was removed. This check only
+recognizes exact known lines: it does not prove semantic support for paraphrases,
+claims omitted from the claim array, or unrelated assertions. Those remain
+NOT VERIFIED, as do deployed behavior and independent security review.
+
+### Gateway recovery on the verified branch — 2026-11-03
+
+PASS: on commit `4a09962`, the following focused integration run passed 3/3
+in 57 seconds, with no skips:
+
+```powershell
+dotnet test tests\SwiftAid.Integration.Tests\SwiftAid.Integration.Tests.csproj --no-build --no-restore -m:1 -nr:false -p:WasmBuildNative=false --filter 'FullyQualifiedName~GuestHttpFrameworkUsesLiveMuseAndDurableMultiTurnHistory|FullyQualifiedName~GuestHttpLiveMuseRecoversConversationAfterTestHostRestart|FullyQualifiedName~GuestHttpConversationRecoversAfterTestHostRestartWithPostgres' --logger 'console;verbosity=minimal'
+```
+
+The run enabled `ELLAI_LIVE` and the framework PostgreSQL fixture, supplied
+the existing Gateway's Ellai provider configuration privately to the test
+process, and used synthetic conversation data. Two tests exercised live Muse;
+the third used a deterministic model. They crossed an in-process Gateway and
+real PostgreSQL boundary, including multi-turn context, a brokered tool,
+streamed responses, and conversation recovery across test-host restart. The
+PostGIS 17 fixture was a task-owned container using tmpfs; it was removed after
+the run. No running application service or shared database was restarted.
+
+NOT VERIFIED: the deployed Gateway process, browser or device behavior,
+production data-protection configuration, and actual network partition or
+instantaneous revocation behavior. This run does not establish those gates.
+
+### Authorized framework case recall — current branch verification
+
+PASS: on commit `ce343af`, the following focused integration run passed 2/2
+in 1 minute 2 seconds, with no skips:
+
+```powershell
+dotnet test tests\SwiftAid.Integration.Tests\SwiftAid.Integration.Tests.csproj --no-build --no-restore -m:1 -nr:false -p:WasmBuildNative=false --filter 'FullyQualifiedName~FrameworkWorkerRecallsAuthorizedCaseFromPostgresAndQdrant|FullyQualifiedName~LiveMuseWorkerRecallsAuthorizedCaseFromPostgresAndQdrant' --logger 'console;verbosity=minimal'
+```
+
+The fixture enabled live Muse and dedicated framework PostgreSQL and Qdrant
+fixtures. One test used a synthetic model and one used Muse. Both used synthetic
+case data, a real framework worker, real PostgreSQL authorization, and a real
+derived Qdrant index; their scenarios cover authorized recall, index failure,
+and grant expiry. The synthetic-model fixture additionally exercises a held
+index read and revocation before final publication. Provider settings were
+supplied privately to the test process.
+
+NOT VERIFIED: a deployed Gateway, browser or device journey, and a real
+network partition. These are worker-boundary tests and do not demonstrate
+instantaneous revocation of bytes already delivered.
+
+### Authorized analytics — current branch verification
+
+PASS: on commit `ce343af`, the following focused integration run passed 2/2
+in 15 seconds, with no skips:
+
+```powershell
+dotnet test tests\SwiftAid.Integration.Tests\SwiftAid.Integration.Tests.csproj --no-build --no-restore -m:1 -nr:false -p:WasmBuildNative=false --filter 'FullyQualifiedName~LiveMuseExecutorUsesAuthorizedCountForOrdinaryQuestion|FullyQualifiedName~LiveMuseUsesAuthorizedPostgresCountAndCitesObservedEvidence' --logger 'console;verbosity=minimal'
+```
+
+Both tests used live Muse, a synthetic case fixture and disposable PostgreSQL.
+They exercised the authorized managed-case count through framework function
+calling and checked the resulting evidence. The executor test also checked a
+follow-up with the same date window and omission of prior context after grant
+expiry. This proves the tested owned-case count; arbitrary aggregations and
+deployed Gateway behavior remain NOT VERIFIED.
+
+### Qdrant registration enablement — 2026-11-03
+
+The Gateway previously registered the Ellai Qdrant index and projection worker
+whenever an endpoint was present, even with `Qdrant:Enabled=false`. Because the
+provider validator skips endpoint and credential checks while disabled, this
+could also initiate connections using configuration that had not passed those
+checks. Gateway registration now follows the enable flag, after infrastructure
+option validation. The local Compose file explicitly sets the flag to preserve
+its intended Qdrant integration. Other deployments that want this integration
+must set `Qdrant:Enabled=true` and provide valid endpoint and credentials.
+
+PASS: `dotnet test tests\SwiftAid.Integration.Tests\SwiftAid.Integration.Tests.csproj --no-restore -m:1 -nr:false -p:WasmBuildNative=false --filter 'FullyQualifiedName~EllaiMemoryRegistrationTests|FullyQualifiedName~ProviderConfigurationTests' --logger 'console;verbosity=minimal'` passed 25/25. The focused cases check enabled and disabled registration and reject invalid enabled configuration; they do not launch the deployed Gateway. Deployment and production transport remain NOT VERIFIED.
+
+PASS: the default integration regression suite on commit `7c4d013` passed 795,
+failed 0, and skipped 328 in 33 seconds using `dotnet test
+tests\SwiftAid.Integration.Tests\SwiftAid.Integration.Tests.csproj --no-build
+--no-restore -m:1 -nr:false -p:WasmBuildNative=false --logger
+'console;verbosity=minimal'`. Skipped opt-in database, live-provider, and browser
+fixtures are not counted as verified by this run.
+
+### Current rendered guest conversation — 2026-11-03
+
+PASS: the current source at `f922c62` was published with `dotnet publish
+src\SwiftAid.Gateway\SwiftAid.Gateway.csproj --no-restore -m:1 -nr:false
+-p:WasmBuildNative=false -o <task-candidate> --verbosity quiet`. A separate
+loopback Gateway used live Muse, synthetic prompts, a newly migrated disposable
+PostGIS 17 database and a task-owned NATS server. The command `node
+tests\SwiftAid.Ui.Tests\ellai-conversation.browser.cjs` passed twice in
+headless Chromium, with `SWIFTAID_RUN_LIVE_ELLAI=1` and the candidate URL. The
+second run additionally set a synthetic word prompt and a follow-up, and
+verified that the word was recalled. Both runs checked the rendered answer,
+refresh restoration, the 390-pixel thinking indicator and reduced motion; no
+page errors were observed. The fixture used a temporary module shim to the
+locally installed Playwright Core package.
+
+The first candidate startup lacked its case-processing configuration; a later
+startup lacked a valid isolated NATS configuration; and a temporary key-ring
+directory failed filesystem security validation. These failed starts preceded
+the working isolated setup. The running candidate logged an unavailable NATS
+notification consumer; this browser check does not validate notifications. An
+end-session request was observed as HTTP 499 during browser teardown, so this
+run does not establish completed cancellation. A response-feed timing sample
+arrived after the script recorded completion, showing that its asynchronous
+measurement is not reliable evidence of model-time streaming. Physical voice,
+production data protection and deployed behavior remain NOT VERIFIED.
+
+The candidate process and both task-owned containers were stopped. The
+candidate publish and task-owned temporary key and module directories were
+retained; automated cleanup of the latter directories was rejected by the
+execution policy.
+
+### Rendered end-session acknowledgement — 2026-11-03
+
+The browser conversation test now waits for the end-session POST response
+and reads the durable session before closing the browser. This prevents the
+test's own teardown from interrupting the request and avoids reporting PASS
+before cancellation is confirmed.
+
+PASS: `node tests\SwiftAid.Ui.Tests\ellai-conversation.browser.cjs` passed
+twice against the previously published `f922c62` loopback Gateway, live Muse,
+a newly migrated disposable PostgreSQL database and task-owned NATS. One run
+included a second turn that recalled a synthetic word; both observed HTTP 200
+for End and read the session back with status `Cancelled`. The second run
+also exercised the final test output after the assertion. The local NATS
+notification consumer reported unavailable; notifications, cancellation while
+the model is still running, actual devices and deployed behavior were not
+verified by these browser runs. The test-owned Gateway and containers stopped;
+the previously retained candidate and key/module directories remain.
+
+### Rendered cancellation during processing — 2026-11-03
+
+PASS: `node tests\SwiftAid.Ui.Tests\ellai-cancel-rendered.browser.cjs`, with
+`SWIFTAID_RUN_LIVE_ELLAI=1` and the isolated loopback Gateway URL, exercised
+the rendered guest End control after a synthetic turn reached `Processing`.
+The test observed HTTP 200, a durable `Cancelled` session and turn, no stored
+assistant answer and no visible answer chunks. It used headless Chromium, the
+previously published `f922c62` Gateway, live Muse configuration, a newly
+migrated disposable PostGIS database and task-owned NATS. `Processing` alone
+does not prove that the provider had received the request before cancellation.
+
+The first test attempt failed while the harness read the session-start
+response body; it was corrected to use the client's persisted session ID and
+the rerun passed. The fixture's NATS notification consumer was unavailable.
+The Gateway and disposable containers were stopped. The previously retained
+candidate and key/module directories remain; physical-device and deployed
+behavior are NOT VERIFIED by this test.
+
+### Final evidence recheck without provisional streaming — 2026-11-03
+
+The utterance runner installed the current-tool-observation authorization
+callback only when a provisional stream callback was present. The framework
+agent also uses that callback before returning a buffered final answer. Thus a
+turn without provisional publication could omit that last observation check,
+even though the ordinary session and historical-context fences still ran. The
+runner now installs the observation check regardless of streaming; provisional
+publication remains conditional on its existing policy and language checks.
+
+The expanded `StreamObservationAuthorizationRechecksCaseAccess` regression
+first failed for `provisionalStreaming=false` because the callback was null;
+the enabled case passed. After the fix, `dotnet test
+tests\SwiftAid.Application.Tests\SwiftAid.Application.Tests.csproj --no-restore
+-m:1 -nr:false --filter 'FullyQualifiedName~EllaiAuthorizedConversationContextTests|FullyQualifiedName~EllaiUtteranceRunnerTests|FullyQualifiedName~EllaiAgentFrameworkContractTests' --logger 'console;verbosity=minimal'`
+passed 174/174. The two runner cases check an authorized case and then an
+expired authorization using a synthetic queue. The existing framework test
+also rejects a buffered final answer when its recheck denies access.
+
+PASS: `dotnet test tests\SwiftAid.Integration.Tests\SwiftAid.Integration.Tests.csproj
+--no-restore -m:1 -nr:false -p:WasmBuildNative=false --filter
+'FullyQualifiedName~FrameworkWorkerRecallsAuthorizedCaseFromPostgresAndQdrant'
+--logger 'console;verbosity=minimal'` passed 1/1 using a synthetic model and
+disposable PostgreSQL and Qdrant, including its existing revocation-before-final
+scenario. That worker fixture uses its normal provisional callback; the later
+runner-level no-provisional PostgreSQL run is described below. Independent
+security review remains NOT VERIFIED. Both disposable containers were removed.
+
+The PostgreSQL/Qdrant fixture now also invokes the actual utterance runner and
+framework executor without provisional or final-text callbacks. With an
+authorized synthetic case, it completes and observes the case; when the case
+grant expires after the tool result and before the final answer, it returns
+`DeniedByPolicy` with no display text. PASS: the same focused
+`FrameworkWorkerRecallsAuthorizedCaseFromPostgresAndQdrant` command above
+passed 1/1 with a synthetic model and disposable stores. This exercises real
+PostgreSQL authorization in the runner; it does not claim a no-provisional
+worker publication or deployed Gateway test.
+
+The initial attempt to put this scenario through the worker timed out because
+the synthetic model supported only streaming. After the fixture gained a
+non-streaming response, that attempt returned `TerminalFailure`: the worker
+also requires the public response-publication policy for completion. The
+runner-level scenario above isolates the final evidence check and passed.
+
+### Missing final evidence revalidator — 2026-11-03
+
+`EllaiFrameworkAgent` previously treated an absent observation revalidator as
+permission to return a buffered final decision after a non-public or otherwise
+non-replay-safe tool result. It now denies that final decision unless the
+callback is present and succeeds. The separate authorized count path still
+performs its own fresh aggregate recheck. The Gateway runner supplies the
+observation callback; direct callers using private tools must supply one too.
+When the executor cannot retain a complete bounded observation trace, the
+callback cannot establish current authorization and the answer fails closed.
+
+The new missing-callback regression first failed (one failed, one passed),
+then passed after the change. The framework, runner and authorization filter
+passed 175/175; synthetic direct-caller tests now explicitly supply their
+revalidation callbacks, and incomplete-provenance cases expect denial. The
+default integration suite passed 795, failed 0 and skipped 328 using `dotnet
+test tests\SwiftAid.Integration.Tests\SwiftAid.Integration.Tests.csproj
+--no-restore -m:1 -nr:false -p:WasmBuildNative=false --logger
+'console;verbosity=quiet'`.
+
+With disposable PostgreSQL and Qdrant, the authorized worker and direct
+PostgreSQL authority fixtures passed 2/2; a separate Qdrant-backed direct
+recall fixture passed 1/1. Direct fixtures re-invoke their broker and compare
+the observed summary and evidence. The in-process Gateway live Muse guest
+conversation with product-facts tool use passed 1/1. These runs used synthetic
+records; the stores were removed. Deployed Gateway and independent security
+review remain NOT VERIFIED.
+
+### Live UI observation revalidation — 2026-11-03
+
+The final evidence fence rejected even an unchanged authorized
+`ellai_ui_observe` result because UI observations had no replay provenance.
+The broker now records bounded registry-owned feature, control and goal
+references plus a fingerprint of the relevant client report. The final and
+history authorization check re-invokes the broker under the current actor and
+scope, and requires the same fingerprint. View IDs and context stamps are
+hashed rather than written into the trace; the internal replay scope is not
+serialized into the model-facing tool result. An unchanged missing-report
+result can also be rechecked, but becomes invalid when a report arrives.
+Changed controls or reports, expiry into a stale state, removed tool admission,
+older traces without the new scope, mismatched requested views and unrecognized
+goal text fail closed rather than being assumed current.
+
+The unchanged-report regression first failed before this change. PASS: the
+application UI, framework and authorization filter passed 180/180; the focused
+unchanged/changed/missing-report tests passed 2/2 after additional privacy and
+state-change assertions. PASS: the framework worker and guidance projection
+filter passed 9/9 with a synthetic model and in-memory stores, including a
+real `ellai_ui_observe` call and a restored follow-up. This does not verify
+a deployed browser, physical device, or independent security review.
+
+### Full application regression after final evidence guard — 2026-11-03
+
+The first full application run after the agent-level final revalidation change
+failed three direct-agent case-recall fixture variants: they did not supply the
+newly required revalidator. The fixture now re-invokes the broker and compares
+the fresh result and evidence, and verifies that an allowed lookup reaches the
+index twice. Its four scope, stale-index and outage variants passed 4/4.
+
+PASS: `dotnet test tests\SwiftAid.Application.Tests\SwiftAid.Application.Tests.csproj
+--no-restore -m:1 -nr:false --logger 'console;verbosity=quiet'` passed 1,181,
+failed 0 and skipped 17. The first full run had 1,178 passed, 3 failed and
+17 skipped; the skipped live-provider tests are not evidence from this run.
+
+On commit `c500af6`, the separately enabled synthetic live-provider run
+`dotnet test tests\SwiftAid.Application.Tests\SwiftAid.Application.Tests.csproj
+--no-build --no-restore -m:1 -nr:false --filter 'FullyQualifiedName~EllaiLiveProbeTests'
+--logger 'console;verbosity=minimal'` passed 16, failed 1 and skipped 0.
+`LiveFrameworkPreservesAuthorizedCapabilityObservationForFollowup` failed
+with `ProviderOutputLimit` after the bounded retry at its 1,024-token starting
+limit. The exact failing test passed 1/1 when rerun unchanged, in 31 seconds.
+The initial failure remains evidence of live model variability, not a passing
+full run. The probes used synthetic data and process-local provider settings;
+they do not prove deployed Gateway or device behavior.
+
+### Truncation and UI-report race checks — 2026-11-03
+
+PASS: the focused `TruncatedNonStreaming` and
+`TruncatedStreamingToolCallIsNotExecutedOrPublished` application filter passed
+4/4 on the current branch. The synthetic tests cover bounded retry, usage
+accounting, authorization before retry and rejection of a truncated streamed
+tool call. They do not resolve the live provider's intermittent output-limit
+failure or prove that arbitrary prompts fit the provider's context.
+
+The framework worker fixture now changes a synthetic client UI report after
+the `ellai_ui_observe` result is delivered to the model but before the model
+returns its final answer. PASS: `dotnet test
+tests\SwiftAid.Integration.Tests\SwiftAid.Integration.Tests.csproj --no-restore
+-m:1 -nr:false -p:WasmBuildNative=false --filter
+'FullyQualifiedName~WorkerRunsFrameworkExecutorAndPersistsAndStreamsAnswer'
+--logger 'console;verbosity=minimal'` passed 9/9. The changed-report turn
+ended in `TerminalFailure` without publishing or storing the synthetic answer;
+the unchanged-report case continued to pass. This uses an in-memory store and
+synthetic model, not a deployed client or independent security review.
+
+### UI observation heartbeat compatibility — 2026-11-03
+
+The client reports its current UI every 10 seconds, or every second during a
+generated tour. Including the server receipt timestamp in the observation
+fingerprint caused an identical fresh report to invalidate an in-flight answer.
+The fingerprint now excludes that timestamp while retaining the view and
+context fingerprints, platform, observed states, evidence and validation
+flags. Freshness remains part of the rechecked states and flags: a report that
+ages into `Stale`, or an actual state or view change, does not match. Existing
+traces made with the prior fingerprint fail closed and are omitted from replay.
+
+The unchanged-refresh regression failed before the fix. PASS: the focused
+application UI, framework and authorization filter passed 180/180. PASS: the
+framework worker filter passed 9/9 with a synthetic model and in-memory stores;
+it now refreshes the identical report before the answer and separately changes
+the report before an answer. A deployed browser and independent security review
+remain NOT VERIFIED.
+
+### Current default regression runs — 2026-11-04
+
+At `f2b46f8`, `dotnet test tests/SwiftAid.Application.Tests/SwiftAid.Application.Tests.csproj
+--no-restore -m:1 -nr:false --logger 'console;verbosity=quiet'` passed 1,188,
+failed 0 and skipped 18. Three integration runs used `OS=Windows_NT`,
+`ELLAI_LIVE=0`, disabled intake/framework/SQL-authority PostgreSQL opt-ins,
+and `dotnet test tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj
+--no-restore -m:1 -nr:false -p:WasmBuildNative=false` (the latter two used
+`--no-build`). The first returned 806 passed, 1 failed and 333 skipped; its
+failure was the signed-in `PcmAndSilenceStreamBeforeEofThroughExistingAuthenticationHandlers`
+case. The second returned 805 passed, 2 failed and 333 skipped, but output
+truncation lost those failure names and errors. The third returned 807 passed,
+0 failed and 333 skipped, confirmed in its TRX counters. An isolated rerun
+of both native WebSocket cases passed 2/2. The cause of the first failure was
+not captured; the test uses a one-second HTTP timeout, but load is only a
+possible explanation. A fourth run with the same options and TRX capture also
+passed 807, failed 0 and skipped 333. A fifth captured run had the same
+807/0/333 result. These inconsistent results and skipped fixtures do not
+establish a stable full regression pass.
+
+### Malformed framework tool-call arguments — 2026-11-04
+
+The framework guard checked tool names but did not check `FunctionCallContent.Exception`.
+Synthetic streaming and non-streaming regressions demonstrated that a call
+with a parse exception reached the broker before the fix, including a no-arg
+tool. The guard now rejects such a call as `InvalidArguments` before framework
+tool invocation; it does not expose the exception text. In a mixed batch it
+rejects the batch before either call is invoked. The SDK describes this
+exception as a mapping error in its [function-call content contract](https://github.com/dotnet/extensions/blob/main/src/Libraries/Microsoft.Extensions.AI.Abstractions/Contents/FunctionCallContent.cs).
+
+PASS: the framework contract and official Muse adapter filters passed 126/126
+using `dotnet test tests/SwiftAid.Application.Tests/SwiftAid.Application.Tests.csproj
+--no-restore -m:1 -nr:false --filter
+'FullyQualifiedName~EllaiAgentFrameworkContractTests|FullyQualifiedName~EllaiMuseChatClientTests'
+--logger 'console;verbosity=minimal'`. These include malformed streaming and
+non-streaming HTTP responses through the official adapter and mixed synthetic
+calls delivered in separate streaming updates. PASS: the focused worker outcome
+filter passed 4/4 with `OS=Windows_NT` and `dotnet test
+tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj --no-restore
+-m:1 -nr:false -p:WasmBuildNative=false --filter
+'FullyQualifiedName~WorkerRejectsMalformedToolArgumentsWithoutPublishingAnAnswer|FullyQualifiedName~WorkerAcknowledgesOnlyWithDurableExplicitOutcome'
+--logger 'console;verbosity=minimal'`; the worker recorded terminal failure with
+no answer or tool trace. This does not verify malformed output from live Muse;
+the separate split-function-name adapter correction is described above.
+The complete default application suite also passed 1,194, failed 0 and skipped
+18 after this change using the application test command above without a filter.
+
+### Gateway startup with NATS disabled — 2026-11-04
+
+The Development Gateway previously failed service-provider validation when
+`Nats:Enabled=false`: three outbox dispatchers required an `INatsClient` that
+is registered only when NATS is enabled. The ingestion worker already exits
+without resolving these dispatchers when NATS is disabled. The Gateway now
+registers them only when their transport is enabled.
+
+PASS: `dotnet build src/SwiftAid.Gateway/SwiftAid.Gateway.csproj --no-restore
+-m:1 -nr:false -p:WasmBuildNative=false` completed with zero warnings and
+errors. PASS: the `IngestionDispatcherRegistrationTests` integration filter
+passed 2/2, including a post-commit `--no-build --no-restore` run. PASS: a
+current Debug Gateway started with NATS disabled against a disposable PostgreSQL
+database after applying 63 migrations. The rendered
+`tests/SwiftAid.Ui.Tests/ellai-conversation.browser.cjs` live-provider test
+completed two synthetic turns, recalled the test word, restored the conversation
+after refresh, and passed its mobile, reduced-motion, cancellation, and page-error
+checks. This does not verify NATS delivery, deployed environments, or Android.
+
+### Current integration regression rerun — 2026-11-04
+
+At `94b72574`, a Windows local run of `dotnet test
+tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj --no-build
+--no-restore -m:1 -nr:false -p:WasmBuildNative=false --logger
+'trx;LogFileName=ellai-migration-current-20261104.trx' --logger
+'console;verbosity=quiet'` passed 811, failed 0 and skipped 350. The run set
+`OS=Windows_NT`, `ELLAI_LIVE=0`, and disabled the framework, intake, and
+SQL-authority PostgreSQL fixture opt-ins. The TRX file is retained under the
+integration project's `TestResults` directory. The previously intermittent
+native WebSocket test passed in this run, but the earlier failure details were
+not captured; this rerun does not establish its root cause or close the skipped
+integration and deployment gates.
+
+With a new disposable PostGIS 17 container and the framework PostgreSQL fixture
+enabled, the current `EllaiPostgresTests`, `EllaiOwnedCaseCountPostgresTests`,
+and `EllaiPrivilegedRouteAuthorizationTests` filters passed 62, failed 0 and
+skipped 29. The command was `dotnet test
+tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj --no-build
+--no-restore -m:1 -nr:false -p:WasmBuildNative=false --filter
+'FullyQualifiedName~EllaiPostgresTests|FullyQualifiedName~EllaiOwnedCaseCountPostgresTests|FullyQualifiedName~EllaiPrivilegedRouteAuthorizationTests'
+--logger 'trx;LogFileName=ellai-framework-postgres-current-20261104.trx'
+--logger 'console;verbosity=quiet'`. `ELLAI_LIVE=0` and SQL-authority fixtures
+were disabled; the framework fixture used its required named loopback database
+and a deliberately unavailable Redis endpoint. The TRX is retained under the
+integration project's `TestResults` directory, and the disposable database
+container was removed. The skipped tests and deployed behavior remain unverified
+by this run.
+
+### Spoken decision size boundary — 2026-11-04
+
+The decision validator limited spoken text to 120 whitespace-separated words
+but accepted a 2,001-character single word. A boundary test reproduced the
+acceptance before the fix (1 passed, 1 failed). The validator now also caps
+spoken text at 2,000 characters, matching the existing display limit while
+preserving empty speech and the 120-word limit. The framework contract test
+confirms an oversized synthetic provider decision is repaired before completion.
+
+PASS: the `EllaiContractTests|EllaiAgentFrameworkContractTests` application
+filter passed 155/155 with `dotnet test
+tests/SwiftAid.Application.Tests/SwiftAid.Application.Tests.csproj --no-restore
+-m:1 -nr:false`. After commit `80fd5406`, the full application suite passed
+1,246, failed 0 and skipped 19 with `--no-build --no-restore -m:1 -nr:false`;
+the two focused boundary and repair filters passed 7/7. These synthetic tests
+do not establish deployed Gateway or live speech synthesis behavior.
+
+### Provisional segments and mixed final payloads — 2026-11-04
+
+The framework instructs the model to emit provisional verified segments only
+for a plain answer without UI actions or questions. Its final reconciliation
+previously checked answer kind and matching text but accepted an accompanying
+UI proposal, question, or administrative plan. Three synthetic streaming
+regressions reproduced this; three controls without provisional output passed.
+The final reconciliation now rejects those mixed completions. An already sent
+verified segment cannot be retracted; the invalid final decision and its extra
+payload are withheld. Normal decisions without provisional output retain their
+existing behavior.
+
+PASS: `EllaiAgentFrameworkContractTests` passed 151/151 with `dotnet test
+tests/SwiftAid.Application.Tests/SwiftAid.Application.Tests.csproj --no-restore
+-m:1 -nr:false --filter FullyQualifiedName~EllaiAgentFrameworkContractTests`.
+The Gateway `EllaiUtteranceWorkerOutcomeTests` filter passed 46/46 with
+`dotnet test tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj
+--no-restore -m:1 -nr:false -p:WasmBuildNative=false` and `OS=Windows_NT`,
+including the ordinary guidance-proposal persistence control. After commit
+`bed64800`, the six new cases passed again with `--no-build --no-restore`.
+Live-provider, deployed Gateway and independent security review remain unverified
+for this boundary.
+
+### Live capability follow-up rerun — 2026-11-04
+
+At `188b6e35`, the exact synthetic live-provider test that previously hit
+`ProviderOutputLimit` passed 1/1 with the configured Muse route. The command
+was `dotnet test tests/SwiftAid.Application.Tests/SwiftAid.Application.Tests.csproj
+--no-build --no-restore -m:1 -nr:false --filter
+FullyQualifiedName~LiveFrameworkPreservesAuthorizedCapabilityObservationForFollowup
+--logger 'trx;LogFileName=ellai-live-followup-current-20261104.trx' --logger
+'console;verbosity=normal'`, with `ELLAI_LIVE=1` and existing provider settings
+supplied only to the test process. The TRX is retained under the application
+test project's `TestResults` directory. This single pass does not explain or
+resolve the earlier intermittent output-limit failure or verify deployment.
+
+### Notification JetStream consumer fixture — 2026-11-04
+
+The isolated browser Gateway runs above used a fresh JetStream server without
+the repository's notification-stream bootstrap; their notification consumer
+logged `NatsJSApiException`. A new disposable-service integration test confirms
+that creating a consumer on a missing stream raises that exception type. On a
+provisioned notification stream, the actual Gateway bridge created its
+consumer, acknowledged a synthetic published notification and removed the
+consumer on shutdown. This is consistent with the missing-bootstrap explanation,
+but the earlier redacted log did not retain the server error code, so its exact
+cause is not established. The test does not cover authenticated SSE delivery.
+
+PASS: with `OS=Windows_NT` and `SWIFTAID_RUN_LOCAL_PROVIDER_FIXTURES=1`,
+`dotnet test tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj
+--no-restore -m:1 -nr:false -p:WasmBuildNative=false --filter
+FullyQualifiedName~NotificationBridgeConsumesFromProvisionedStreamAndRemovesItsConsumer`
+passed 1/1; the post-commit `--no-build --no-restore` rerun also passed 1/1.
+The fixture's disposable MinIO, Redis and NATS containers were removed. Deployed
+stream provisioning and delivery remain unverified.
+
+### Strict decision and provisional-segment JSON — 2026-11-04
+
+The model-turn parser accepted duplicate properties, including case variants,
+and silently ignored undeclared fields in final decisions. Five synthetic
+regressions reproduced those cases. The final parser now rejects duplicate
+properties recursively and disallows unmapped decision members; the existing
+repair path handles invalid responses. One old parser fixture was corrected to
+remove an undeclared claim field. Separately, three synthetic tests showed that
+duplicate or undeclared segment fields could be published before final parsing.
+The provisional segment parser now rejects those shapes before publication.
+
+PASS: the combined `EllaiModelTurnParserTests|EllaiAgentFrameworkContractTests`
+filter passed 181/181 with `dotnet test
+tests/SwiftAid.Application.Tests/SwiftAid.Application.Tests.csproj --no-restore
+-m:1 -nr:false`. The full application suite passed 1,262, failed 0 and skipped
+19 after commits `98999d88` and `5aef1439`, using `--no-build --no-restore
+-m:1 -nr:false`. After the final-parser change and before the segment-parser
+change, two live Muse probes covering a brokered streamed decision and a
+capability follow-up passed 2/2 with `ELLAI_LIVE=1`. The latest segment-parser
+change has synthetic verification only; deployed behavior and malformed live
+provider output remain unverified.
+
+### Current rendered Gateway with provisioned JetStream — 2026-11-04
+
+At `88ea7f2e`, a current Debug Gateway started on loopback against a fresh
+disposable PostGIS database (63 migrations applied) and disposable JetStream.
+The notification stream was created before startup. The configured live Muse
+route and `node tests/SwiftAid.Ui.Tests/ellai-conversation.browser.cjs` with
+`SWIFTAID_RUN_LIVE_ELLAI=1` completed two synthetic turns, recalled the test
+word, restored the conversation after refresh, showed the mobile and reduced
+motion states, and cancelled the session with zero page errors. The first
+response completed in 24,134 ms; this timing alone does not establish useful
+model-time streaming. A JetStream consumer listing confirmed that the Gateway
+created a notification consumer on the provisioned stream. No notification
+delivery was exercised in this browser run.
+
+PASS: the current Gateway build used `dotnet build
+src/SwiftAid.Gateway/SwiftAid.Gateway.csproj --no-restore -m:1 -nr:false
+-p:WasmBuildNative=false`, with zero warnings and errors. The disposable
+database and NATS containers were removed; the task-owned Gateway process was
+stopped. The consumer was still listed immediately after process termination,
+before its disposable NATS server was removed. The reused task-created local
+test key directory remains. This is local synthetic browser evidence, not
+deployment, physical-device, notification-delivery or provider-reliability proof.
+
+### Current live authorized recall and count — 2026-11-04
+
+At `f09d61b0`, three live Muse worker tests passed together against fresh,
+disposable PostGIS 17 and Qdrant 1.19 containers with synthetic records:
+`LiveMuseWorkerRecallsAuthorizedCaseFromPostgresAndQdrant`,
+`LiveMuseWorkerCommitsAuthorizedPostgresCount`, and
+`LiveMuseWorkerWithholdsCountAfterPostgresGrantExpires`. The recall case
+completed three turns including the index-failure fallback and expired-grant
+path; the count cases covered authorized publication and revocation during
+processing. This checks the current framework worker and broker, not a
+deployed Gateway or real records.
+
+PASS: with `OS=Windows_NT`, `ELLAI_LIVE=1`, `ELLAI_LIVE_QDRANT=1`, the
+dedicated framework PostgreSQL fixture and configured provider settings,
+`dotnet test tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj
+--no-restore -m:1 -nr:false -p:WasmBuildNative=false` with the three test-name
+filters passed 3/3. The TRX `ellai-live-authority-current-20261104.trx` remains
+under the integration test project's `TestResults`; both containers were
+removed. A single successful live run does not establish provider reliability
+or support for general analytics questions.
+
+### Current live grounded streaming — 2026-11-04
+
+At `7eef9a38`, `LiveMuseStreamsEvidenceBackedSegmentBeforeCompletion` passed
+1/1 with the configured live Muse route. The framework invoked a synthetic
+tool and published its exact evidence-backed segment while the provider stream
+was still open; the final display text matched. The command was `dotnet test
+tests/SwiftAid.Application.Tests/SwiftAid.Application.Tests.csproj --no-build
+--no-restore -m:1 -nr:false --filter
+FullyQualifiedName~LiveMuseStreamsEvidenceBackedSegmentBeforeCompletion
+--logger 'trx;LogFileName=ellai-live-grounded-current-20261104.trx' --logger
+'console;verbosity=normal'`, with `ELLAI_LIVE=1` and provider settings in the
+test process. The TRX is retained in the application test project's
+`TestResults`. This is one direct-agent run with synthetic tool evidence, not
+browser playback, deployed behavior, or a provider reliability guarantee.
+
+### Current live synthetic voice pipeline — 2026-11-04
+
+At `181297a2`, `SyntheticSpeechFlowsThroughLiveTranscriptionMuseAndSpeech`
+passed 1/1. The test generated synthetic English speech with the existing local
+Kokoro service, sent the resulting audio to the configured live transcription
+adapter, processed the recognized turn through the framework worker and live
+Muse, and obtained nonzero synthesized response PCM. Session persistence was
+in memory. A temporary loopback relay connected the test to the existing speech
+service and was removed; the shared speech service was not restarted.
+
+PASS: with `OS=Windows_NT`, `ELLAI_LIVE=1`, `SWIFTAID_TEST_LIVE_ASR=1`,
+`SWIFTAID_TEST_LIVE_SPEECH=1` and provider settings in the test process,
+`dotnet test tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj
+--no-build --no-restore -m:1 -nr:false -p:WasmBuildNative=false --filter
+FullyQualifiedName~SyntheticSpeechFlowsThroughLiveTranscriptionMuseAndSpeech
+--logger 'trx;LogFileName=ellai-live-voice-current-20261104.trx' --logger
+'console;verbosity=normal'` passed. The TRX is retained under the integration
+test project's `TestResults`. Microphone capture, browser or physical playback,
+durable sessions and deployed behavior are not verified by this run.
+
+### Current PostgreSQL queue cancellation boundaries — 2026-11-04
+
+At `31b0ad6c`, the current framework-worker stalled-snapshot, database
+transaction-deadline, reclaimed/cancelled attempt and queue-selection tests
+passed 8/8 against a fresh disposable PostGIS 17 database. The stalled snapshot
+test observed a failed timed-out turn and a following turn completing before
+the held operation was released; the transaction test checked database lock
+release at the injected deadline. The command was `dotnet test
+tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj --no-build
+--no-restore -m:1 -nr:false -p:WasmBuildNative=false --filter
+'FullyQualifiedName~FrameworkWorkerTimesOutStalledSnapshotAndProcessesNextTurn|FullyQualifiedName~SnapshotTransactionDeadlineReleasesSessionLockWhenClientStalls|FullyQualifiedName~FencedQueueSelectionRejectsUnrecognizedShapes|FullyQualifiedName~CaseResultSnapshotRejectsReclaimedOrCancelledAttempts'
+--logger 'trx;LogFileName=ellai-timeout-current-20261104.trx' --logger
+'console;verbosity=normal'`, with `OS=Windows_NT` and the dedicated framework
+PostgreSQL fixture enabled. The TRX is retained under the integration test
+project's `TestResults`, and the disposable database container was removed.
+Custom stores and location seeding still rely on cooperative cancellation;
+these tests do not establish a hard stop for those paths or deployed behavior.
+
+### Initialized location-read cancellation — 2026-11-04
+
+The default geographic registry can seed data on first use, so its complete
+search cannot safely be detached. The concrete registry now exposes a read-only
+search that returns null when no rows exist. The Gateway uses that path in a
+separately scoped, bounded isolation slot only when the broker uses the same
+registered concrete registry. An empty registry falls back to the original
+attached seeding search, and custom registries keep their existing behavior.
+Detached reads can continue until they finish, but cannot perform the seed import.
+
+PASS: `GeographicRegistryTests|EllaiLocationReplayTests|EllaiIsolatedToolCallsTests`
+passed 51, failed 0 and skipped 5 with `dotnet test
+tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj --no-restore
+-m:1 -nr:false -p:WasmBuildNative=false` and `OS=Windows_NT`. A later filter
+passed 43, failed 0 and skipped 2 after the final worker wiring change. The
+fault-injection tests hold an initialized SQLite registry read that ignores
+cancellation; the actual framework worker terminates its timed-out turn before
+the read is released. First-use seeding and custom-registry replay controls pass.
+Four focused tests passed after commit `e0e866af` with `--no-build --no-restore`.
+
+PASS: with the dedicated disposable intake PostGIS 17 fixture, the new isolated
+search observed a changed registry row and the existing replay recheck withheld
+an answer after a registry change; together with the worker timeout and seeding
+controls the filter passed 4/4. The disposable container was removed. Initial
+seeding and custom registry implementations still rely on cooperative cancellation;
+network-partition and deployed Gateway behavior remain unverified.
+
+### Current rendered location search and replay — 2026-11-04
+
+At `76956360`, the current Debug Gateway and live Muse completed a synthetic
+two-turn location conversation in headless Chromium against freshly migrated
+PostGIS 17 with NATS disabled. The first turn searched for Rusape, the browser
+refreshed, and the follow-up recalled the place. Both turns completed, session
+cancellation succeeded and the browser reported zero page errors. A read-only
+database query confirmed `ellai_locations` and a protected replay scope in both
+turn traces. This exercised location reads on the current Gateway against a
+freshly migrated database; the run did not instrument which read seeded the
+registry or inject a noncooperative database call.
+
+The synthetic place name was also present, case-insensitively, in public
+registry `ResourceId` and `EvidenceId` values in both traces. Protecting replay
+arguments therefore does not hide all location information in a trace. Earlier
+statements in this inventory that a plaintext place name was not observed should
+not be read as proof that location-identifying registry IDs are absent.
+
+PASS: `node tests/SwiftAid.Ui.Tests/ellai-conversation.browser.cjs` with
+`SWIFTAID_RUN_LIVE_ELLAI=1`, the local Playwright package, the isolated Gateway
+URL and synthetic search/follow-up prompts. The task-owned Gateway and database
+container were stopped; the task-created local test key directory remains.
+This run does not verify deployed behavior, physical devices, provider
+reliability or privacy of registry identifiers beyond the observed scope.
+
+### Receipt-list session boundary — 2026-11-04
+
+The broker checked session identity on single-receipt lookup but trusted every
+row returned by `ListBySessionAsync`. The production PostgreSQL store already
+filters by session; a synthetic misbehaving store nevertheless demonstrated
+that a foreign row could reach the list result. The broker now rejects the
+whole list as unavailable if any row is null or belongs to another session,
+checking before the 20-item presentation limit. A framework-tool test verifies
+that a foreign receipt and recipient do not appear in the model-visible result.
+
+PASS: the receipt, framework-tool and authorized-history application filter
+passed 72/72 with `dotnet test tests/SwiftAid.Application.Tests/SwiftAid.Application.Tests.csproj
+--no-restore -m:1 -nr:false`. The two mis-scoped-list regressions failed before
+the fix, including a foreign row beyond the presentation limit. After commit
+`10ed7f7e`, the full application suite passed 1,265, failed 0 and skipped 19
+with `--no-build --no-restore -m:1 -nr:false`. The failing-store cases are
+synthetic; deployed behavior and an independent security review remain unverified.
+
+### Current live translated aggregate — 2026-11-04
+
+At `f14f12af`, the framework worker's authorized and revoked count tests passed
+2/2 using live Muse, the existing local NLLB service, and synthetic records in
+a fresh disposable PostGIS 17 database. The authorized translated answer was
+committed and delivered; the answer was withheld when the grant expired after
+translation. This is a local service-contract and authorization check, not a
+translation-quality or deployed Gateway assessment.
+
+PASS: with `OS=Windows_NT`, `ELLAI_LIVE=1`, the dedicated framework PostgreSQL
+fixture and a loopback language-service relay, `dotnet test
+tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj --no-restore
+-m:1 -nr:false -p:WasmBuildNative=false` filtered to
+`LiveMuseAndNllbWorkerCommitsAuthorizedPostgresCount` and
+`LiveMuseAndNllbWorkerWithholdsCountAfterGrantExpires` passed 2/2. The TRX
+`ellai-live-translation-current-20261104.trx` remains under the integration
+test project's `TestResults`. The task-owned database and relay were removed;
+the existing language service was not restarted. Provider settings and the
+relay key were supplied only to the test process.
+
+### Cancellation of stalled provider streams — 2026-11-04
+
+Synthetic streaming and non-streaming providers that ignored cancellation both
+held the framework turn open before their responses were released. Streaming
+provider iteration now runs behind a bounded process-wide pool of eight slots.
+Cancellation stops the caller without awaiting a stuck iterator; the iterator
+retains its slot and owns its disposal until it exits. An acknowledged channel
+preserves update ordering and backpressure, and late updates never reach the
+framework. When usage is unavailable at cancellation, existing estimated-usage
+accounting applies; usage reported only after the caller returns is not recorded
+as actual usage by this path. Eight permanently stuck streams can exhaust the
+pool, and cancellation does not prove the remote provider stopped or billing
+ceased. Non-streaming calls remain cooperative: an attempted isolation changed
+reported-usage accounting when cancellation raced a completed response, so it
+was not retained.
+
+PASS: the focused application framework, usage and isolation filters passed
+166/166 with `dotnet test tests/SwiftAid.Application.Tests/SwiftAid.Application.Tests.csproj
+--no-restore -m:1 -nr:false`. Tests cover held stream cancellation, no late
+output, recorded usage, bounded-slot retention, later slot reuse and sanitized
+disposal failure. The Gateway worker/lease/retry filter passed 14/14 with
+`dotnet test tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj
+--no-restore -m:1 -nr:false -p:WasmBuildNative=false` and `OS=Windows_NT`;
+the four lease cases passed again after commit `27dd7b98`. Three live Muse probes
+covering cancellation, grounded streaming and brokered streaming passed 3/3
+before the commit, using `ELLAI_LIVE=1`; their TRX is retained under the
+application test project's `TestResults`. The post-commit application suite
+passed 1,268, failed 0 and skipped 19 with `--no-build --no-restore -m:1
+-nr:false`. Deployed behavior, non-streaming hard cancellation and independent
+security review remain unverified.

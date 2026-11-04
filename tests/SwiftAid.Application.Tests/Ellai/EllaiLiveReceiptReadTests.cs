@@ -1,4 +1,6 @@
 using SwiftAid.Application.Ellai;
+using SwiftAid.Intelligence.Meta;
+using Microsoft.Extensions.AI;
 
 namespace SwiftAid.Application.Tests.Ellai;
 
@@ -81,6 +83,55 @@ public sealed class EllaiLiveReceiptReadTests
             CancellationToken.None);
         Assert.True(list.Allowed);
         Assert.Equal(0, list.ItemCount);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(20)]
+    public async Task MisScopedReceiptListFailsClosedBeforeReturningAnyRows(int foreignIndex)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var receipts = Enumerable.Range(0, 21).Select(index => new EllaiReceipt(
+            $"receipt-{index}", index == foreignIndex ? "session-2" : "session-1", $"action-{index}",
+            $"key-{index}", EllaiReceiptStatus.Accepted, now, now.AddMinutes(5), null)).ToArray();
+        var result = await GrantedBroker(new MisScopedReceiptStore(receipts)).InvokeAsync(
+            Context, new EllaiToolRequest(EllaiToolNames.Receipts, Args()), CancellationToken.None);
+
+        Assert.False(result.Allowed);
+        Assert.Equal(EllaiToolReasonCodes.Unavailable, result.ReasonCode);
+        Assert.Empty(result.Evidence);
+        Assert.Equal(0, result.ItemCount);
+        Assert.DoesNotContain("receipt-", result.ResultSummary, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task FrameworkToolDoesNotExposeMisScopedReceiptToModel()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var foreign = new EllaiReceipt("foreign-receipt", "session-2", "foreign-action", "foreign-key",
+            EllaiReceiptStatus.Accepted, now, now.AddMinutes(5), null, ApprovedRecipient: "foreign-recipient");
+        var broker = GrantedBroker(new MisScopedReceiptStore([foreign]));
+        var tool = new EllaiFrameworkTool(EllaiToolNames.Receipts,
+            (request, ct) => broker.InvokeAsync(Context, request, ct));
+
+        var serialized = Assert.IsType<string>(await tool.InvokeAsync(new AIFunctionArguments()));
+        Assert.DoesNotContain("foreign-", serialized, StringComparison.Ordinal);
+        using var response = System.Text.Json.JsonDocument.Parse(serialized);
+        Assert.False(response.RootElement.GetProperty("allowed").GetBoolean());
+        Assert.Equal(EllaiToolReasonCodes.Unavailable, response.RootElement.GetProperty("reasonCode").GetString());
+    }
+
+    private sealed class MisScopedReceiptStore(IReadOnlyList<EllaiReceipt> receipts) : IEllaiApprovalStore
+    {
+        public Task<IReadOnlyList<EllaiReceipt>> ListBySessionAsync(string sessionId, CancellationToken cancellationToken) =>
+            Task.FromResult(receipts);
+        public Task<EllaiReceipt?> GetAsync(string receiptId, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<EllaiReceipt> RecordAsync(string sessionId, string actionId, string idempotencyKey,
+            string planHash, int planVersion, string? approvedRecipient, DateTimeOffset? approvedDueAtUtc,
+            DateTimeOffset now, TimeSpan approvalLifetime, string policyHash, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+        public Task<EllaiReceipt?> MarkStatusAsync(string receiptId, EllaiReceiptStatus status, DateTimeOffset now,
+            CancellationToken cancellationToken) => throw new NotSupportedException();
     }
 
     [Fact]

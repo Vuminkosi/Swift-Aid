@@ -29,7 +29,11 @@ public sealed record EllaiObservedToolResult(
     string? ClockVersion = null, EllaiCountReplayScope? CountReplayScope = null,
     EllaiUiCatalogueReplayScope? UiCatalogueReplayScope = null, string? CapabilityVersion = null,
     string? ReceiptListDigest = null, string? ReceiptLookupId = null,
-    EllaiCaseTimelineReplayScope? CaseTimelineReplayScope = null)
+    EllaiCaseTimelineReplayScope? CaseTimelineReplayScope = null,
+    EllaiUiObservationReplayScope? UiObservationReplayScope = null,
+    EllaiClassificationReplayScope? ClassificationReplayScope = null,
+    string? ImportDestinationsDigest = null,
+    EllaiLocationReplayScope? LocationReplayScope = null)
 {
     public const string CurrentStaticFeatureVersion = "state-feature/1";
     public const string CurrentClockVersion = "server-clock/1";
@@ -90,7 +94,23 @@ public sealed record EllaiObservedToolResult(
                     ? ReceiptListFingerprint(result) : null,
             receiptLookupId,
             request.ToolName == EllaiToolNames.CaseTimeline && result.Allowed && !result.Truncated
-                ? result.CaseTimelineReplayScope : null);
+                ? result.CaseTimelineReplayScope : null,
+            request.ToolName == EllaiToolNames.UiObserve && result.Allowed && !result.Truncated
+                ? result.UiObservationReplayScope : null,
+            request.ToolName == EllaiToolNames.ClassificationEvidence && result.ToolName == request.ToolName &&
+                result.Allowed && result.DenialReason is null && result.ReasonCode == EllaiToolReasonCodes.Ok &&
+                !result.Truncated && result.Evidence.Count == 0 && result.ItemCount == 1 &&
+                request.Arguments.Count == 1 && request.Arguments.TryGetValue("case_id", out var rawCaseId) &&
+                Guid.TryParse(rawCaseId, out var caseId) && caseId != Guid.Empty
+                    ? new EllaiClassificationReplayScope(caseId, ResultFingerprint(result)) : null,
+            request.ToolName == EllaiToolNames.ImportDestinations && result.ToolName == request.ToolName &&
+                result.Allowed && result.DenialReason is null && result.ReasonCode == EllaiToolReasonCodes.Ok &&
+                !result.Truncated && result.Evidence.Count == 0 && result.ItemCount is >= 0 and <= 20 &&
+                request.Arguments.Count == 0 ? ResultFingerprint(result) : null,
+            request.ToolName == EllaiToolNames.Locations && result.ToolName == request.ToolName && result.Allowed &&
+                result.DenialReason is null && result.ReasonCode == EllaiToolReasonCodes.Ok && !result.Truncated &&
+                result.LocationReplayScope is { } locationScope && locationScope.IsValid() &&
+                locationScope.ResultDigest == ResultFingerprint(result) ? locationScope : null);
     }
 
     public static bool IsCanonicalReceiptId(string? value) => value is { Length: 37 } &&
@@ -98,7 +118,9 @@ public sealed record EllaiObservedToolResult(
         Guid.TryParseExact(value.AsSpan(5), "N", out var id) && id != Guid.Empty &&
         value == "rcpt-" + id.ToString("N");
 
-    public static string ReceiptListFingerprint(EllaiToolResult result)
+    public static string ReceiptListFingerprint(EllaiToolResult result) => ResultFingerprint(result);
+
+    public static string ResultFingerprint(EllaiToolResult result)
     {
         var content = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(new { result.ResultSummary, result.ItemCount, result.Evidence });
         return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(content));
@@ -117,6 +139,29 @@ public sealed record EllaiCaseTimelineReplayScope(string CaseId, string Digest)
         var content = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(new { result.ResultSummary, result.ItemCount, result.Evidence });
         return new(caseId, Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(content)));
     }
+}
+
+/// <summary>Authorized classification case and result fingerprint, without retaining result text.</summary>
+public sealed record EllaiClassificationReplayScope(Guid CaseId, string ResultDigest)
+{
+    public bool IsValid() => CaseId != Guid.Empty && ResultDigest is { Length: 64 } &&
+        ResultDigest.All(character => character is >= '0' and <= '9' or >= 'A' and <= 'F');
+}
+
+/// <summary>Protected search arguments and a fingerprint of the complete bounded registry result.</summary>
+public sealed record EllaiLocationReplayScope(string ProtectedArguments, string ResultDigest)
+{
+    public bool IsValid() => !string.IsNullOrWhiteSpace(ProtectedArguments) && ProtectedArguments.Length <= 4096 &&
+        ResultDigest is { Length: 64 } && ResultDigest.All(character => character is >= '0' and <= '9' or >= 'A' and <= 'F');
+}
+
+/// <summary>Registry-owned observation references and a fingerprint of the client report.</summary>
+public sealed record EllaiUiObservationReplayScope(string Feature, string Controls, string? GoalTags, string ResultDigest)
+{
+    public bool IsValid() => !string.IsNullOrWhiteSpace(Feature) && Feature.Length <= 120 &&
+        !string.IsNullOrWhiteSpace(Controls) && Controls.Length <= 120 &&
+        (GoalTags is null || !string.IsNullOrWhiteSpace(GoalTags) && GoalTags.Length <= 120) &&
+        ResultDigest is { Length: 64 } && ResultDigest.All(character => character is >= '0' and <= '9' or >= 'A' and <= 'F');
 }
 
 /// <summary>Only the resolved feature, limit and fingerprint needed to recheck catalogue discovery.</summary>

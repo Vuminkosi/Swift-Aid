@@ -2,7 +2,9 @@ using Microsoft.EntityFrameworkCore;
 using Npgsql;
 using System.Security.Claims;
 using SwiftAid.Application.Authorization;
+using SwiftAid.Application.Cases;
 using SwiftAid.Application.Ellai;
+using SwiftAid.Contracts.Cases;
 using SwiftAid.Contracts.Ellai;
 using SwiftAid.Infrastructure.Persistence;
 using SwiftAid.Infrastructure.Persistence.Ellai;
@@ -21,6 +23,7 @@ using StackExchange.Redis;
 using System.Net;
 using System.Data.Common;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.AspNetCore.Http;
 
 namespace SwiftAid.Integration.Tests;
 
@@ -72,6 +75,16 @@ public sealed class FrameworkPostgresLiveMuseFactAttribute : FactAttribute
 public sealed class EllaiPostgresTests : IAsyncLifetime
 {
     [FrameworkPostgresFact]
+    public async Task ConcurrentFrameworkFixtureMigrationsCompleteWithoutRacing()
+    {
+        await using var first = CreateFrameworkDbContext();
+        await using var second = CreateFrameworkDbContext();
+        await Task.WhenAll(CaseAuthorityPostgresFixture.MigrateFrameworkDatabaseAsync(first),
+            CaseAuthorityPostgresFixture.MigrateFrameworkDatabaseAsync(second));
+        Assert.Empty(await first.Database.GetPendingMigrationsAsync());
+    }
+
+    [FrameworkPostgresFact]
     public Task FrameworkHistoryRetainsTwelveShortOwnedTurns() => VerifyLongFrameworkHistoryAsync(false);
 
     [FrameworkPostgresLiveMuseFact]
@@ -87,7 +100,7 @@ public sealed class EllaiPostgresTests : IAsyncLifetime
             EllaiMode.Ask, 1, "cycle-current", Actor, true, "consent/0", EllaiProcessingClassification.UserProvidedNonSensitive,
             EllaiProcessingClassification.UserProvidedNonSensitive, new HashSet<string>(), EllaiConsentPurposes.PublicProductHelp, "current");
         await using var db = CreateFrameworkDbContext();
-        await db.Database.MigrateAsync();
+        await CaseAuthorityPostgresFixture.MigrateFrameworkDatabaseAsync(db);
         var store = new PostgresEllaiSessionStore(db);
         await store.CreateAsync(new(id, EllaiMode.Ask, "Active", 1, 1, 1, 1, 12, 12,
             Actor.ActorId, "scope-test", null, null, now), default);
@@ -140,7 +153,7 @@ public sealed class EllaiPostgresTests : IAsyncLifetime
         var id = $"framework-cycle-threshold-{Guid.NewGuid():N}";
         _frameworkSessionIds.Add(id);
         await using var db = CreateFrameworkDbContext();
-        await db.Database.MigrateAsync();
+        await CaseAuthorityPostgresFixture.MigrateFrameworkDatabaseAsync(db);
         var store = new PostgresEllaiSessionStore(db);
         var session = new EllaiSessionRecord(id, EllaiMode.Ask, "Active", 1, 1, 1, 1, 12, 12,
             Actor.ActorId, "scope-test", null, null, DateTimeOffset.UtcNow);
@@ -177,7 +190,7 @@ public sealed class EllaiPostgresTests : IAsyncLifetime
             EllaiMode.Ask, 1, "cycle-current", Actor, true, "consent/0", EllaiProcessingClassification.UserProvidedNonSensitive,
             EllaiProcessingClassification.UserProvidedNonSensitive, new HashSet<string>(), EllaiConsentPurposes.PublicProductHelp, "current");
         await using var db = CreateFrameworkDbContext();
-        await db.Database.MigrateAsync();
+        await CaseAuthorityPostgresFixture.MigrateFrameworkDatabaseAsync(db);
         var store = new PostgresEllaiSessionStore(db);
         await store.CreateAsync(new(id, EllaiMode.Ask, "Active", 1, 1, 1, 1, 105, 12,
             Actor.ActorId, "scope-test", null, null, now), default);
@@ -224,7 +237,7 @@ public sealed class EllaiPostgresTests : IAsyncLifetime
         _frameworkSessionIds.Add(id);
         var now = DateTimeOffset.UtcNow;
         await using var db = CreateFrameworkDbContext();
-        await db.Database.MigrateAsync();
+        await CaseAuthorityPostgresFixture.MigrateFrameworkDatabaseAsync(db);
         var store = new PostgresEllaiSessionStore(db);
         await store.CreateAsync(new(id, EllaiMode.Ask, "Active", 1, 1, 1, 1, 0, 12,
             Actor.ActorId, "scope-test", null, null, now), default);
@@ -267,7 +280,7 @@ public sealed class EllaiPostgresTests : IAsyncLifetime
             EllaiMode.Ask, 1, "cycle-current", Actor, true, "consent/0", EllaiProcessingClassification.UserProvidedNonSensitive,
             EllaiProcessingClassification.UserProvidedNonSensitive, new HashSet<string>(), EllaiConsentPurposes.PublicProductHelp, "current");
         await using var db = CreateFrameworkDbContext();
-        await db.Database.MigrateAsync();
+        await CaseAuthorityPostgresFixture.MigrateFrameworkDatabaseAsync(db);
         var store = new PostgresEllaiSessionStore(db);
         await store.CreateAsync(new(id, EllaiMode.Ask, "Active", 1, 1, 1, 1, 0, 200,
             Actor.ActorId, "scope-test", null, null, now), default);
@@ -332,7 +345,7 @@ public sealed class EllaiPostgresTests : IAsyncLifetime
         var id = $"framework-receipt-history-{Guid.NewGuid():N}";
         var now = DateTimeOffset.UtcNow;
         await using var db = CreateFrameworkDbContext();
-        await db.Database.MigrateAsync();
+        await CaseAuthorityPostgresFixture.MigrateFrameworkDatabaseAsync(db);
         _frameworkSessionIds.Add(id);
         await new PostgresEllaiSessionStore(db).CreateAsync(new(id, EllaiMode.Ask, "Active", 1, 1, 1, 1,
             0, 12, Actor.ActorId, "scope-test", null, null, now), default);
@@ -390,7 +403,7 @@ public sealed class EllaiPostgresTests : IAsyncLifetime
             EllaiProcessingClassification.UserProvidedNonSensitive, new HashSet<string>(), EllaiConsentPurposes.PublicProductHelp, "turn");
         await using (var db = CreateFrameworkDbContext())
         {
-            await db.Database.MigrateAsync();
+            await CaseAuthorityPostgresFixture.MigrateFrameworkDatabaseAsync(db);
             _frameworkSessionIds.Add(id);
             var store = new PostgresEllaiSessionStore(db);
             await store.CreateAsync(session, default);
@@ -468,13 +481,393 @@ public sealed class EllaiPostgresTests : IAsyncLifetime
     }
 
     [FrameworkPostgresFact]
+    public async Task FrameworkWorkerPersistsFencedCaseResultSnapshot()
+    {
+        var id = $"framework-worker-snapshot-{Guid.NewGuid():N}";
+        _frameworkSessionIds.Add(id);
+        var now = DateTimeOffset.UtcNow;
+        var work = new EllaiUtteranceWork(id, "scope-test", "Show my queue", "cases", null,
+            EllaiMode.Ask, 1, "cycle", Actor, true, "consent/0", EllaiProcessingClassification.UserProvidedNonSensitive,
+            EllaiProcessingClassification.UserProvidedNonSensitive, new HashSet<string> { EllaiToolNames.State },
+            EllaiConsentPurposes.PublicProductHelp, "turn");
+        await using (var setup = CreateFrameworkDbContext())
+        {
+            await CaseAuthorityPostgresFixture.MigrateFrameworkDatabaseAsync(setup);
+            var store = new PostgresEllaiSessionStore(setup);
+            var session = new EllaiSessionRecord(id, EllaiMode.Ask, "Active", 1, 1, 1, 1,
+                0, 12, Actor.ActorId, "scope-test", null, null, now);
+            await store.CreateAsync(session, default);
+            Assert.NotNull(await store.TryAcceptUtteranceAsync(session with { SessionVersion = 2, CyclesUsed = 1 },
+                1, "turn", default, EllaiUtteranceWorkEnvelope.Serialize(work, "turn")));
+        }
+
+        using var model = new StateQueueClient();
+        await RunFrameworkWorkerAsync(id, "turn", model, null, stateQueue: true);
+        await using var check = CreateFrameworkDbContext();
+        var topics = new EllaiTopicService(new PostgresEllaiTopicStore(check));
+        var topic = Assert.Single(await new PostgresEllaiTopicStore(check).ListAsync(id, default));
+        Assert.Equal(EllaiCaseResultMemory.TopicTitle, topic.Title);
+        var recall = await new EllaiCaseResultMemory(topics, new EmptyStateQueue()).RecallAsync(
+            new EllaiToolContext(id, "scope-test", "cases", null, 4, true, Actor: Actor), default);
+        Assert.True(recall.Allowed);
+        Assert.Equal(0, recall.ItemCount);
+        Assert.Contains("empty", recall.ResultSummary, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private sealed class EmptyStateQueue : ICaseQueueQuery
+    {
+        public Task<CaseQueueResult> GetMineAsync(ActorContext actor, int? limit, CancellationToken ct) =>
+            Task.FromResult(new CaseQueueResult(CaseQueueAccess.Allowed, []));
+
+        public Task<CaseQueueResult> GetMineAsync(ActorContext actor, int? limit, CaseQueueFilter filter, CancellationToken ct) =>
+            GetMineAsync(actor, limit, ct);
+    }
+
+    private sealed class StateQueueClient : IChatClient
+    {
+        private int _calls;
+        public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
+        public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            await Task.Yield();
+            cancellationToken.ThrowIfCancellationRequested();
+            if (++_calls == 1)
+                yield return new ChatResponseUpdate(ChatRole.Assistant,
+                    [new FunctionCallContent("queue", EllaiToolNames.State,
+                        new Dictionary<string, object?> { ["projection"] = "queue" })]);
+            else
+                yield return new ChatResponseUpdate(ChatRole.Assistant,
+                    """{"final_decision":{"schemaVersion":2,"kind":"Answer","displayText":"Done.","spokenText":"Done.","claims":[],"questions":[],"uiIntents":[],"planProposal":null,"topicRefs":[],"resumeSuggestion":null,"stopReason":null}}""");
+        }
+
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+        public void Dispose() { }
+    }
+
+    [FrameworkPostgresFact]
+    public async Task FrameworkWorkerHoldsSessionFenceDuringCaseSnapshotWrite()
+    {
+        var id = $"framework-worker-snapshot-lock-{Guid.NewGuid():N}";
+        _frameworkSessionIds.Add(id);
+        var now = DateTimeOffset.UtcNow;
+        var work = new EllaiUtteranceWork(id, "scope-test", "Show my queue", "cases", null,
+            EllaiMode.Ask, 1, "cycle", Actor, true, "consent/0", EllaiProcessingClassification.UserProvidedNonSensitive,
+            EllaiProcessingClassification.UserProvidedNonSensitive, new HashSet<string> { EllaiToolNames.State },
+            EllaiConsentPurposes.PublicProductHelp, "turn");
+        await using (var setup = CreateFrameworkDbContext())
+        {
+            await CaseAuthorityPostgresFixture.MigrateFrameworkDatabaseAsync(setup);
+            var store = new PostgresEllaiSessionStore(setup);
+            var session = new EllaiSessionRecord(id, EllaiMode.Ask, "Active", 1, 1, 1, 1,
+                0, 12, Actor.ActorId, "scope-test", null, null, now);
+            await store.CreateAsync(session, default);
+            Assert.NotNull(await store.TryAcceptUtteranceAsync(session with { SessionVersion = 2, CyclesUsed = 1 },
+                1, "turn", default, EllaiUtteranceWorkEnvelope.Serialize(work, "turn")));
+        }
+
+        var hold = new HoldTopicInsert();
+        using var model = new StateQueueClient();
+        var running = RunFrameworkWorkerAsync(id, "turn", model, null, TimeSpan.FromSeconds(20),
+            stateQueue: true, interceptor: hold);
+        try
+        {
+            await hold.Entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            await using var cancelDb = CreateFrameworkDbContext();
+            var canceller = new PostgresEllaiSessionStore(cancelDb);
+            var session = (await canceller.GetAsync(id, default))!;
+            var cancel = canceller.TryUpdateAsync(session with
+                { SessionVersion = session.SessionVersion + 1, InteractionEpoch = session.InteractionEpoch + 1 },
+                session.SessionVersion, default);
+            await Task.Delay(200);
+            Assert.False(cancel.IsCompleted);
+            hold.Release.TrySetResult();
+            Assert.NotNull(await cancel.WaitAsync(TimeSpan.FromSeconds(5)));
+            await running.WaitAsync(TimeSpan.FromSeconds(20));
+        }
+        finally
+        {
+            hold.Release.TrySetResult();
+            try { await running; }
+            catch (Exception) { /* Preserve the original assertion while ensuring the worker stops. */ }
+        }
+    }
+
+    [FrameworkPostgresFact]
+    public async Task FrameworkWorkerTimesOutStalledSnapshotAndProcessesNextTurn()
+    {
+        var id = $"framework-worker-snapshot-timeout-{Guid.NewGuid():N}";
+        _frameworkSessionIds.Add(id);
+        var now = DateTimeOffset.UtcNow;
+        var work = new EllaiUtteranceWork(id, "scope-test", "Show my queue", "cases", null,
+            EllaiMode.Ask, 1, "cycle", Actor, true, "consent/0", EllaiProcessingClassification.UserProvidedNonSensitive,
+            EllaiProcessingClassification.UserProvidedNonSensitive, new HashSet<string> { EllaiToolNames.State },
+            EllaiConsentPurposes.PublicProductHelp, "turn");
+        await using (var setup = CreateFrameworkDbContext())
+        {
+            await CaseAuthorityPostgresFixture.MigrateFrameworkDatabaseAsync(setup);
+            var store = new PostgresEllaiSessionStore(setup);
+            var session = new EllaiSessionRecord(id, EllaiMode.Ask, "Active", 1, 1, 1, 1,
+                0, 12, Actor.ActorId, "scope-test", null, null, now);
+            await store.CreateAsync(session, default);
+            Assert.NotNull(await store.TryAcceptUtteranceAsync(session with { SessionVersion = 2, CyclesUsed = 1 },
+                1, "turn", default, EllaiUtteranceWorkEnvelope.Serialize(work, "turn")));
+        }
+
+        var hold = new HoldTopicInsert(ignoreCancellation: true);
+        using var model = new StateQueueClient();
+        var running = RunFrameworkWorkerAsync(id, "turn", model, null, TimeSpan.FromSeconds(12),
+            stateQueue: true, interceptor: hold, toolTimeout: TimeSpan.FromSeconds(2));
+        try
+        {
+            await hold.Entered.Task.WaitAsync(TimeSpan.FromSeconds(8));
+            await running.WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.False(hold.Exited.Task.IsCompleted);
+
+            await using (var nextDb = CreateFrameworkDbContext())
+            {
+                var store = new PostgresEllaiSessionStore(nextDb);
+                var first = Assert.Single(await store.ReadConversationAsync(id, Actor.ActorId, default));
+                Assert.NotEqual("Completed", first.Outcome);
+                Assert.Null(first.AssistantText);
+                var session = (await store.GetAsync(id, default))!;
+                var next = work with { ClientUtteranceId = "next", CycleId = "next-cycle",
+                    Utterance = "Hello", AllowedTools = new HashSet<string>() };
+                Assert.NotNull(await store.TryAcceptUtteranceAsync(
+                    session with { SessionVersion = session.SessionVersion + 1, CyclesUsed = session.CyclesUsed + 1 },
+                    session.SessionVersion, "next", default, EllaiUtteranceWorkEnvelope.Serialize(next, "next")));
+            }
+            using var recovery = new RecoveryClient();
+            await RunFrameworkWorkerAsync(id, "next", recovery, null, TimeSpan.FromSeconds(10));
+            Assert.False(hold.Exited.Task.IsCompleted);
+        }
+        finally
+        {
+            hold.Release.TrySetResult();
+            try { await running; } catch (Exception) { }
+            if (hold.Entered.Task.IsCompleted) await hold.Exited.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+        await using var check = CreateFrameworkDbContext();
+        Assert.Empty(await new PostgresEllaiTopicStore(check).ListAsync(id, default));
+        var turns = await new PostgresEllaiSessionStore(check).ReadConversationAsync(id, Actor.ActorId, default);
+        Assert.Equal("Completed", turns.Single(turn => turn.ClientUtteranceId == "next").Outcome);
+    }
+
+    [FrameworkPostgresFact]
+    public async Task CaseResultSnapshotRejectsReclaimedOrCancelledAttempts()
+    {
+        var id = $"framework-snapshot-fence-{Guid.NewGuid():N}";
+        _frameworkSessionIds.Add(id);
+        var now = DateTimeOffset.UtcNow;
+        await using (var setup = CreateFrameworkDbContext())
+        {
+            await CaseAuthorityPostgresFixture.MigrateFrameworkDatabaseAsync(setup);
+            var store = new PostgresEllaiSessionStore(setup);
+            await store.CreateAsync(new(id, EllaiMode.Ask, "Active", 1, 1, 1, 1,
+                0, 12, Actor.ActorId, "scope-test", null, null, now), default);
+            setup.Set<EllaiUtteranceEntity>().Add(new()
+            {
+                SessionId = id, ClientUtteranceId = "turn", Sequence = 1, UserText = "synthetic",
+                Outcome = "Queued", AttemptCount = 0, AcceptedAtUtc = now, WorkPayloadJson = "{}"
+            });
+            await setup.SaveChangesAsync();
+        }
+        await using var firstDb = CreateFrameworkDbContext();
+        await using var secondDb = CreateFrameworkDbContext();
+        var first = new PostgresEllaiSessionStore(firstDb);
+        var second = new PostgresEllaiSessionStore(secondDb);
+        Assert.True(first.CanFenceTopicStore(new PostgresEllaiTopicStore(firstDb)));
+        Assert.False(first.CanFenceTopicStore(new PostgresEllaiTopicStore(secondDb)));
+        Assert.False(first.CanFenceTopicStore(new InMemoryEllaiTopicStore()));
+        Assert.NotNull(await first.ClaimNextAsync(now, now.AddMinutes(2), default));
+        Assert.False(await first.StoreCaseResultsIfCurrentAsync(id, "turn", 1, "other-actor",
+            "scope-test", 1, "foreign", default));
+        Assert.False(await first.StoreCaseResultsIfCurrentAsync(id, "turn", 1, Actor.ActorId,
+            "other-scope", 1, "foreign", default));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => first.StoreCaseResultsIfCurrentAsync(
+            id, "turn", 1, Actor.ActorId, "scope-test", 1, "expired-deadline", default, DateTimeOffset.UtcNow.AddSeconds(-1)));
+        Assert.True(await first.StoreCaseResultsIfCurrentAsync(id, "turn", 1, Actor.ActorId,
+            "scope-test", 1, "first", default));
+        await secondDb.Set<EllaiUtteranceEntity>().Where(row => row.SessionId == id)
+            .ExecuteUpdateAsync(update => update.SetProperty(row => row.LeaseExpiresAtUtc, now.AddSeconds(-1)));
+        Assert.False(await first.StoreCaseResultsIfCurrentAsync(id, "turn", 1, Actor.ActorId,
+            "scope-test", 1, "expired", default));
+        Assert.NotNull(await second.ClaimNextAsync(now, now.AddMinutes(2), default));
+        Assert.False(await first.StoreCaseResultsIfCurrentAsync(id, "turn", 1, Actor.ActorId,
+            "scope-test", 1, "stale", default));
+        Assert.True(await second.StoreCaseResultsIfCurrentAsync(id, "turn", 2, Actor.ActorId,
+            "scope-test", 1, "current", default));
+        var session = (await first.GetAsync(id, default))!;
+        Assert.NotNull(await first.TryUpdateAsync(session with
+            { SessionVersion = session.SessionVersion + 1, InteractionEpoch = session.InteractionEpoch + 1 },
+            session.SessionVersion, default));
+        Assert.False(await second.StoreCaseResultsIfCurrentAsync(id, "turn", 2, Actor.ActorId,
+            "scope-test", 1, "cancelled", default));
+        await using var check = CreateFrameworkDbContext();
+        var saved = Assert.Single(await new PostgresEllaiTopicStore(check).ListAsync(id, default));
+        Assert.Equal("current", saved.EntityRef);
+    }
+
+    [FrameworkPostgresFact]
+    public async Task CaseResultSnapshotHoldsSessionFenceUntilCommit()
+    {
+        var id = $"framework-snapshot-lock-{Guid.NewGuid():N}";
+        _frameworkSessionIds.Add(id);
+        var now = DateTimeOffset.UtcNow;
+        await using (var setup = CreateFrameworkDbContext())
+        {
+            await CaseAuthorityPostgresFixture.MigrateFrameworkDatabaseAsync(setup);
+            var store = new PostgresEllaiSessionStore(setup);
+            await store.CreateAsync(new(id, EllaiMode.Ask, "Active", 1, 1, 1, 1,
+                0, 12, Actor.ActorId, "scope-test", null, null, now), default);
+            setup.Set<EllaiUtteranceEntity>().Add(new()
+            {
+                SessionId = id, ClientUtteranceId = "turn", Sequence = 1, UserText = "synthetic",
+                Outcome = "Queued", AttemptCount = 0, AcceptedAtUtc = now, WorkPayloadJson = "{}"
+            });
+            await setup.SaveChangesAsync();
+        }
+        var hold = new HoldTopicInsert();
+        await using var writerDb = CreateFrameworkDbContext(hold);
+        await using var otherDb = CreateFrameworkDbContext();
+        var writer = new PostgresEllaiSessionStore(writerDb);
+        var other = new PostgresEllaiSessionStore(otherDb);
+        Assert.NotNull(await writer.ClaimNextAsync(now, now.AddMinutes(2), default));
+        var session = (await other.GetAsync(id, default))!;
+        var write = writer.StoreCaseResultsIfCurrentAsync(id, "turn", 1, Actor.ActorId,
+            "scope-test", 1, "snapshot", default);
+        try
+        {
+            await hold.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            var cancel = other.TryUpdateAsync(session with
+                { SessionVersion = session.SessionVersion + 1, InteractionEpoch = session.InteractionEpoch + 1 },
+                session.SessionVersion, default);
+            await Task.Delay(200);
+            Assert.False(cancel.IsCompleted);
+            hold.Release.TrySetResult();
+            Assert.True(await write.WaitAsync(TimeSpan.FromSeconds(5)));
+            Assert.NotNull(await cancel.WaitAsync(TimeSpan.FromSeconds(5)));
+            Assert.False(await writer.StoreCaseResultsIfCurrentAsync(id, "turn", 1, Actor.ActorId,
+                "scope-test", 1, "late", default));
+        }
+        finally { hold.Release.TrySetResult(); }
+    }
+
+    private sealed class HoldTopicInsert(bool ignoreCancellation = false) : DbCommandInterceptor
+    {
+        public TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Exited { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public override async ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command, CommandEventData eventData, InterceptionResult<DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            if (command.CommandText.Contains("INSERT INTO", StringComparison.OrdinalIgnoreCase) &&
+                command.CommandText.Contains("ellai_topics", StringComparison.Ordinal))
+            {
+                Entered.TrySetResult();
+                try
+                {
+                    if (ignoreCancellation) await Release.Task;
+                    else await Release.Task.WaitAsync(cancellationToken);
+                }
+                finally { Exited.TrySetResult(); }
+            }
+            return result;
+        }
+    }
+
+    [FrameworkPostgresFact]
+    public async Task CaseResultSnapshotRollsBackWhenLeaseExpiresBeforeCommit()
+    {
+        var id = $"framework-snapshot-expiry-{Guid.NewGuid():N}";
+        _frameworkSessionIds.Add(id);
+        var now = DateTimeOffset.UtcNow;
+        await using (var setup = CreateFrameworkDbContext())
+        {
+            await CaseAuthorityPostgresFixture.MigrateFrameworkDatabaseAsync(setup);
+            await new PostgresEllaiSessionStore(setup).CreateAsync(new(id, EllaiMode.Ask, "Active", 1, 1, 1, 1,
+                0, 12, Actor.ActorId, "scope-test", null, null, now), default);
+            setup.Set<EllaiUtteranceEntity>().Add(new()
+            {
+                SessionId = id, ClientUtteranceId = "turn", Sequence = 1, UserText = "synthetic",
+                Outcome = "Queued", AttemptCount = 0, AcceptedAtUtc = now, WorkPayloadJson = "{}"
+            });
+            await setup.SaveChangesAsync();
+        }
+        var hold = new HoldTopicInsert();
+        await using var writerDb = CreateFrameworkDbContext(hold);
+        var writer = new PostgresEllaiSessionStore(writerDb);
+        var leaseStart = DateTimeOffset.UtcNow;
+        Assert.NotNull(await writer.ClaimNextAsync(leaseStart, leaseStart.AddSeconds(2), default));
+        var write = writer.StoreCaseResultsIfCurrentAsync(id, "turn", 1, Actor.ActorId,
+            "scope-test", 1, "snapshot", default);
+        try
+        {
+            await hold.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await Task.Delay(TimeSpan.FromSeconds(2.1));
+        }
+        finally { hold.Release.TrySetResult(); }
+        Assert.False(await write.WaitAsync(TimeSpan.FromSeconds(5)));
+        await using var check = CreateFrameworkDbContext();
+        Assert.Empty(await new PostgresEllaiTopicStore(check).ListAsync(id, default));
+    }
+
+    [FrameworkPostgresFact]
+    public async Task SnapshotTransactionDeadlineReleasesSessionLockWhenClientStalls()
+    {
+        var id = $"framework-snapshot-deadline-{Guid.NewGuid():N}";
+        _frameworkSessionIds.Add(id);
+        var now = DateTimeOffset.UtcNow;
+        await using (var setup = CreateFrameworkDbContext())
+        {
+            await CaseAuthorityPostgresFixture.MigrateFrameworkDatabaseAsync(setup);
+            await new PostgresEllaiSessionStore(setup).CreateAsync(new(id, EllaiMode.Ask, "Active", 1, 1, 1, 1,
+                0, 12, Actor.ActorId, "scope-test", null, null, now), default);
+            setup.Set<EllaiUtteranceEntity>().Add(new()
+            {
+                SessionId = id, ClientUtteranceId = "turn", Sequence = 1, UserText = "synthetic",
+                Outcome = "Queued", AttemptCount = 0, AcceptedAtUtc = now, WorkPayloadJson = "{}"
+            });
+            await setup.SaveChangesAsync();
+        }
+        var hold = new HoldTopicInsert();
+        await using var writerDb = CreateFrameworkDbContext(hold);
+        await using var otherDb = CreateFrameworkDbContext();
+        var writer = new PostgresEllaiSessionStore(writerDb, TimeSpan.FromSeconds(2));
+        var other = new PostgresEllaiSessionStore(otherDb);
+        Assert.NotNull(await writer.ClaimNextAsync(now, now.AddMinutes(2), default));
+        var session = (await other.GetAsync(id, default))!;
+        var write = writer.StoreCaseResultsIfCurrentAsync(id, "turn", 1, Actor.ActorId,
+            "scope-test", 1, "snapshot", default);
+        try
+        {
+            await hold.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            var change = other.TryUpdateAsync(session with
+                { SessionVersion = session.SessionVersion + 1, InteractionEpoch = session.InteractionEpoch + 1 },
+                session.SessionVersion, default);
+            await Task.Delay(200);
+            Assert.False(change.IsCompleted);
+            Assert.NotNull(await change.WaitAsync(TimeSpan.FromSeconds(8)));
+            Assert.False(write.IsCompleted);
+        }
+        finally { hold.Release.TrySetResult(); }
+        await Assert.ThrowsAnyAsync<Exception>(() => write.WaitAsync(TimeSpan.FromSeconds(5)));
+        await using var check = CreateFrameworkDbContext();
+        Assert.Empty(await new PostgresEllaiTopicStore(check).ListAsync(id, default));
+    }
+
+    [FrameworkPostgresFact]
     public async Task PostgresLeaseRenewalProtectsCurrentAttemptAndRejectsReclaimedAttempt()
     {
         var id = $"framework-lease-{Guid.NewGuid():N}";
         var now = DateTimeOffset.UtcNow;
         await using (var db = CreateFrameworkDbContext())
         {
-            await db.Database.MigrateAsync();
+            await CaseAuthorityPostgresFixture.MigrateFrameworkDatabaseAsync(db);
             _frameworkSessionIds.Add(id);
             await new PostgresEllaiSessionStore(db).CreateAsync(new(id, EllaiMode.Ask, "Active", 1, 1, 1, 1,
                 0, 12, Actor.ActorId, "scope-test", null, null, now), default);
@@ -502,13 +895,72 @@ public sealed class EllaiPostgresTests : IAsyncLifetime
     }
 
     [FrameworkPostgresFact]
+    public async Task PostgresFeedRejectsAttemptReclaimedDuringRead()
+    {
+        var id = $"framework-feed-race-{Guid.NewGuid():N}";
+        _frameworkSessionIds.Add(id);
+        var now = DateTimeOffset.UtcNow;
+        await using (var setup = CreateFrameworkDbContext())
+        {
+            await CaseAuthorityPostgresFixture.MigrateFrameworkDatabaseAsync(setup);
+            var store = new PostgresEllaiSessionStore(setup);
+            await store.CreateAsync(new(id, EllaiMode.Ask, "Active", 1, 1, 1, 1,
+                0, 12, Actor.ActorId, "scope-test", null, null, now), default);
+            setup.Set<EllaiUtteranceEntity>().Add(new()
+            {
+                SessionId = id, ClientUtteranceId = "turn", Sequence = 1, UserText = "synthetic",
+                Outcome = "Queued", AttemptCount = 0, AcceptedAtUtc = now, WorkPayloadJson = "{}"
+            });
+            await setup.SaveChangesAsync();
+        }
+
+        await using var feedDb = CreateFrameworkDbContext();
+        await using var reclaimDb = CreateFrameworkDbContext();
+        var feedStore = new PostgresEllaiSessionStore(feedDb);
+        var reclaimStore = new PostgresEllaiSessionStore(reclaimDb);
+        Assert.NotNull(await feedStore.ClaimNextAsync(now, now.AddMinutes(1), default));
+        var responses = new EllaiSessionResponseStore();
+        var generation = responses.CaptureGeneration(id);
+        Assert.True(responses.PublishProvisional(id, generation, "turn", 1, "scope-test", 1, 1, "private segment"));
+        var outbox = new ReclaimAfterReadOutbox(feedStore, async () =>
+            Assert.NotNull(await reclaimStore.ClaimNextAsync(now.AddMinutes(2), now.AddMinutes(3), default)));
+        var result = await EllaiConversationFeed.ReadAsync(new DefaultHttpContext { User = Principal },
+            id, 0, null, outbox, responses, feedStore, default);
+        var page = (EllaiSessionResponsePageDto)((IValueHttpResult)result).Value!;
+        Assert.DoesNotContain(page.Responses, item => item.Text == "private segment");
+    }
+
+    private sealed class ReclaimAfterReadOutbox(PostgresEllaiSessionStore inner, Func<Task> afterRead)
+        : IEllaiUtteranceOutboxStore, IEllaiProvisionalDeliveryFence
+    {
+        public async Task<IReadOnlyList<EllaiConversationTurn>> ReadConversationAsync(string sessionId, string ownerActorId, CancellationToken ct)
+        {
+            var result = await inner.ReadConversationAsync(sessionId, ownerActorId, ct);
+            await afterRead();
+            return result;
+        }
+        public Task<bool> CanDeliverProvisionalAsync(string sessionId, string utteranceId, int attempt, string actorId,
+            string scopeEpoch, long interactionEpoch, CancellationToken ct) =>
+            inner.CanDeliverProvisionalAsync(sessionId, utteranceId, attempt, actorId, scopeEpoch, interactionEpoch, ct);
+        public Task<EllaiConversationTurn?> ReadLatestGuidanceTurnAsync(string sessionId, string ownerActorId, CancellationToken ct) =>
+            inner.ReadLatestGuidanceTurnAsync(sessionId, ownerActorId, ct);
+        public Task<EllaiUtteranceOutboxItem?> ClaimNextAsync(DateTimeOffset nowUtc, DateTimeOffset leaseExpiresAtUtc, CancellationToken ct) =>
+            inner.ClaimNextAsync(nowUtc, leaseExpiresAtUtc, ct);
+        public Task<EllaiUtteranceResolution?> CompleteAsync(string sessionId, string clientUtteranceId, int attemptCount,
+            DateTimeOffset completedAtUtc, CancellationToken ct, EllaiUtteranceResolution? resolution = null) =>
+            inner.CompleteAsync(sessionId, clientUtteranceId, attemptCount, completedAtUtc, ct, resolution);
+        public Task FailAsync(string sessionId, string clientUtteranceId, int attemptCount, DateTimeOffset retryAtUtc,
+            bool terminal, CancellationToken ct) => inner.FailAsync(sessionId, clientUtteranceId, attemptCount, retryAtUtc, terminal, ct);
+    }
+
+    [FrameworkPostgresFact]
     public async Task ProvisionalPublicationHoldsSessionAndAttemptFence()
     {
         var id = $"framework-publication-{Guid.NewGuid():N}";
         var now = DateTimeOffset.UtcNow;
         await using (var db = CreateFrameworkDbContext())
         {
-            await db.Database.MigrateAsync();
+            await CaseAuthorityPostgresFixture.MigrateFrameworkDatabaseAsync(db);
             _frameworkSessionIds.Add(id);
             await new PostgresEllaiSessionStore(db).CreateAsync(new(id, EllaiMode.Ask, "Active", 1, 1, 1, 1,
                 0, 12, Actor.ActorId, "scope-test", null, null, now), default);
@@ -527,6 +979,9 @@ public sealed class EllaiPostgresTests : IAsyncLifetime
         var currentTurn = Assert.Single(await publisher.ReadConversationAsync(id, Actor.ActorId, default));
         Assert.Equal(1, currentTurn.AttemptCount);
         Assert.True(currentTurn.LeaseExpiresAtUtc > now);
+        Assert.True(await publisher.CanDeliverProvisionalAsync(id, "turn", 1, Actor.ActorId, "scope-test", 1, default));
+        Assert.False(await publisher.CanDeliverProvisionalAsync(id, "turn", 1, "another-actor", "scope-test", 1, default));
+        Assert.False(await publisher.CanDeliverProvisionalAsync(id, "turn", 1, Actor.ActorId, "another-scope", 1, default));
         Assert.False(await publisher.PublishIfCurrentAsync(id, "turn", 1, "another-actor", "scope-test", 1,
             () => throw new InvalidOperationException("foreign publication"), default));
         Assert.False(await publisher.PublishIfCurrentAsync(id, "turn", 1, Actor.ActorId, "another-scope", 1,
@@ -546,14 +1001,20 @@ public sealed class EllaiPostgresTests : IAsyncLifetime
             release.Set();
             Assert.True(await publication);
             Assert.NotNull(await cancel);
+            Assert.False(await publisher.CanDeliverProvisionalAsync(id, "turn", 1, Actor.ActorId, "scope-test", 1, default));
             Assert.False(await publisher.PublishIfCurrentAsync(id, "turn", 1, Actor.ActorId, "scope-test", 1,
                 () => throw new InvalidOperationException("stale publication"), default));
             await cancelDb.Set<EllaiUtteranceEntity>().Where(turn => turn.SessionId == id && turn.ClientUtteranceId == "turn")
                 .ExecuteUpdateAsync(update => update.SetProperty(turn => turn.AttemptCount, 2));
             Assert.False(await publisher.PublishIfCurrentAsync(id, "turn", 1, Actor.ActorId, "scope-test", 2,
                 () => throw new InvalidOperationException("reclaimed publication"), default));
+            Assert.False(await publisher.CanDeliverProvisionalAsync(id, "turn", 1, Actor.ActorId, "scope-test", 2, default));
+            Assert.True(await publisher.CanDeliverProvisionalAsync(id, "turn", 2, Actor.ActorId, "scope-test", 2, default));
             Assert.True(await publisher.PublishIfCurrentAsync(id, "turn", 2, Actor.ActorId, "scope-test", 2,
                 () => true, default));
+            Assert.NotNull(await publisher.CompleteAsync(id, "turn", 2, DateTimeOffset.UtcNow, default,
+                EllaiUtteranceResolution.Completed("synthetic", 2)));
+            Assert.True(await publisher.CanDeliverProvisionalAsync(id, "turn", 2, Actor.ActorId, "scope-test", 2, default));
         }
         finally { release.Set(); }
     }
@@ -604,14 +1065,14 @@ public sealed class EllaiPostgresTests : IAsyncLifetime
             EllaiConsentPurposes.PublicProductHelp, "turn-1");
         await using (var db = CreateFrameworkDbContext())
         {
-            await db.Database.MigrateAsync();
+            await CaseAuthorityPostgresFixture.MigrateFrameworkDatabaseAsync(db);
             var store = new PostgresEllaiSessionStore(db);
             await store.CreateAsync(session, default);
             Assert.NotNull(await store.TryAcceptUtteranceAsync(session with { SessionVersion = 2, CyclesUsed = 1 }, 1,
                 first.ClientUtteranceId, default, EllaiUtteranceWorkEnvelope.Serialize(first, first.ClientUtteranceId)));
         }
         using var model = new LongRecoveryClient();
-        await RunFrameworkWorkerAsync(id, "turn-1", model, null);
+        await RunFrameworkWorkerAsync(id, "turn-1", model, null, TimeSpan.FromSeconds(30));
         Assert.Equal(300, model.ToolResults);
         await using (var db = CreateFrameworkDbContext())
         {
@@ -774,7 +1235,7 @@ public sealed class EllaiPostgresTests : IAsyncLifetime
             EllaiProcessingClassification.UserProvidedNonSensitive, new HashSet<string>(), EllaiConsentPurposes.PublicProductHelp, "turn-1");
         await using (var db = CreateFrameworkDbContext())
         {
-            await db.Database.MigrateAsync();
+            await CaseAuthorityPostgresFixture.MigrateFrameworkDatabaseAsync(db);
             var store = new PostgresEllaiSessionStore(db);
             await store.CreateAsync(session, default);
             Assert.NotNull(await store.TryAcceptUtteranceAsync(session with { SessionVersion = 2, CyclesUsed = 1 }, 1,
@@ -818,12 +1279,13 @@ public sealed class EllaiPostgresTests : IAsyncLifetime
     }
 
     private static async Task RunFrameworkWorkerAsync(string sessionId, string turnId, IChatClient model, ICacheStore? cache,
-        TimeSpan? executionTimeout = null)
+        TimeSpan? executionTimeout = null, bool stateQueue = false, DbCommandInterceptor? interceptor = null,
+        TimeSpan? toolTimeout = null, TimeSpan? snapshotTransactionLimit = null)
     {
         var consent = new EllaiConsentService();
         var services = new ServiceCollection();
-        services.AddScoped(_ => CreateFrameworkDbContext());
-        services.AddScoped<PostgresEllaiSessionStore>();
+        services.AddScoped(_ => CreateFrameworkDbContext(interceptor));
+        services.AddScoped(sp => new PostgresEllaiSessionStore(sp.GetRequiredService<SwiftAidDbContext>(), snapshotTransactionLimit));
         services.AddScoped<IEllaiSessionStore>(sp => sp.GetRequiredService<PostgresEllaiSessionStore>());
         services.AddScoped<IEllaiUtteranceOutboxStore>(sp => sp.GetRequiredService<PostgresEllaiSessionStore>());
         services.AddScoped<IEllaiUsageStore, PostgresEllaiUsageStore>();
@@ -832,13 +1294,26 @@ public sealed class EllaiPostgresTests : IAsyncLifetime
         services.AddEllaiUsageAccounting(new EllaiOptions { SpendingCapDollars = 70m,
             PricingInputPer1KTokens = 0.001m, PricingOutputPer1KTokens = 0.002m });
         services.AddSingleton(new EllaiSessionResponseStore());
-        services.AddScoped(_ => new EllaiToolBroker(new EllaiPolicyService(), consent));
+        if (stateQueue)
+        {
+            services.AddScoped<ICaseQueueQuery>(_ => new EmptyStateQueue());
+            services.AddScoped<IEllaiTopicStore, PostgresEllaiTopicStore>();
+            services.AddScoped<EllaiTopicService>();
+            services.AddScoped(sp => new EllaiToolBroker(new EllaiPolicyService(), consent,
+                queue: sp.GetRequiredService<ICaseQueueQuery>(), topics: sp.GetRequiredService<EllaiTopicService>()));
+        }
+        else
+            services.AddScoped(_ => new EllaiToolBroker(new EllaiPolicyService(), consent));
         services.AddScoped(_ => new EllaiPromptBuilder("Synthetic test policy", "fixture"));
         services.AddEllaiReasoningExecutor(new EllaiOptions
         {
             Enabled = true, ApiKey = "synthetic", ApiUrl = "https://fixture.invalid", ReasoningModel = "fixture"
         }, "framework");
         services.AddKeyedSingleton<IChatClient>(EllaiReasoningRegistration.FrameworkClientKey, model);
+        if (toolTimeout is not null)
+            services.AddScoped<IEllaiReasoningExecutor>(sp => new EllaiFrameworkExecutor(
+                model, sp.GetRequiredService<EllaiPromptBuilder>(), sp.GetRequiredService<EllaiToolBroker>(),
+                sp.GetRequiredService<EllaiUsageLedger>(), sp.GetRequiredService<IEllaiUsageStore>(), toolTimeout));
         await using var provider = services.BuildServiceProvider();
         using var worker = new EllaiUtteranceWorker(provider, NullLogger<EllaiUtteranceWorker>.Instance);
         await worker.StartAsync(default);
@@ -1152,6 +1627,7 @@ public sealed class EllaiPostgresTests : IAsyncLifetime
     {
         foreach (var id in sessionIds)
         {
+            await db.Set<EllaiTopicEntity>().Where(e => e.SessionId == id).ExecuteDeleteAsync();
             await db.Set<EllaiUsageSampleEntity>().Where(e => e.SessionId == id).ExecuteDeleteAsync();
             await db.Set<EllaiConsentGrantEntity>().Where(e => e.SessionId == id).ExecuteDeleteAsync();
             await db.Set<EllaiUtteranceEntity>().Where(e => e.SessionId == id).ExecuteDeleteAsync();

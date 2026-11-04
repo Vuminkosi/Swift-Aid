@@ -100,7 +100,7 @@ internal sealed class CaseAuthorityPostgresFixture : IAsyncDisposable
         if (frameworkFixture)
         {
             await using var db = fixture.CreateDbContext();
-            await db.Database.MigrateAsync();
+            await MigrateFrameworkDatabaseAsync(db);
         }
         await fixture.SeedAsync(
                 makeCurrentActorOwner,
@@ -116,6 +116,22 @@ internal sealed class CaseAuthorityPostgresFixture : IAsyncDisposable
                 shareExpiresAtUtc)
             .ConfigureAwait(false);
         return fixture;
+    }
+
+    // Separate test classes and test processes share this named disposable
+    // database. EF's migration history alone does not serialize their startup.
+    internal static async Task MigrateFrameworkDatabaseAsync(SwiftAidDbContext db)
+    {
+        await using var connection = new NpgsqlConnection(db.Database.GetConnectionString());
+        await connection.OpenAsync();
+        await using var acquire = new NpgsqlCommand("SELECT pg_advisory_lock(721664529874)", connection) { CommandTimeout = 60 };
+        await acquire.ExecuteNonQueryAsync();
+        try { await db.Database.MigrateAsync(); }
+        finally
+        {
+            await using var release = new NpgsqlCommand("SELECT pg_advisory_unlock(721664529874)", connection);
+            await release.ExecuteNonQueryAsync();
+        }
     }
 
     public ActorContext CreateActor(long? accessEpoch = null) => ActorContext.FromValidatedPrincipal(

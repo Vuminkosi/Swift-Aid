@@ -5,6 +5,8 @@ namespace SwiftAid.Infrastructure.Persistence.Ellai;
 /// history never forks and restarts see the same ledger.</summary>
 public sealed class EllaiTopicEntity
 {
+    /// <summary>PostgreSQL row version used to reject stale topic updates.</summary>
+    public uint RowVersion { get; set; }
     public string TopicId { get; set; } = "";
     public string SessionId { get; set; } = "";
     public string Title { get; set; } = "";

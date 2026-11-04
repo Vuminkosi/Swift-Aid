@@ -228,6 +228,33 @@ public sealed class EllaiUtteranceRunnerTests
         Assert.Single(completions.Threads);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task TranslatedToolAnswerWithoutProvenanceFailsClosed(bool empty)
+    {
+        var consent = new EllaiConsentService();
+        consent.Grant("session-1", EllaiConsentDimension.ReasoningText, EllaiToolBroker.ToolReadPurpose,
+            EllaiProcessingClassification.SyntheticDemo, TimeSpan.FromHours(1));
+        var outcome = await EllaiUtteranceRunner.RunOneAsync(Work() with { Languages = new("eng", "sna") },
+            new(new IncompleteProvenanceExecutor(empty), null, null, consent, Languages: new TranslationFixture()), 256, default);
+        Assert.False(outcome.Completed);
+        Assert.Null(outcome.DisplayText);
+        Assert.Equal(EllaiToolReasonCodes.DeniedByPolicy, outcome.FailureCode);
+    }
+
+    private sealed class IncompleteProvenanceExecutor(bool empty) : IEllaiReasoningExecutor
+    {
+        public Task<EllaiCycleOutcome> RunAsync(EllaiLoopRequest request, CancellationToken ct,
+            Func<int, CancellationToken, Task<bool>>? reauthorizeAsync = null,
+            EllaiActivityStatusCoordinator? activity = null, EllaiSessionEventJournal? journal = null,
+            Func<CancellationToken, Task<bool>>? isExecutionCurrentAsync = null,
+            Func<string, CancellationToken, ValueTask>? onTextDelta = null, Action<SwiftAid.Application.Ellai.EllaiActivityEvent>? onActivity = null,
+            Func<EllaiToolContext, EllaiToolRequest, CancellationToken, Task<EllaiToolResult>>? invokeToolAsync = null) =>
+            Task.FromResult(new EllaiCycleOutcome(true, EllaiModelTurnParser.Parse(DecisionTurn).Turn!.FinalDecision,
+                null, 1, 1, false) { ObservedTools = empty ? [] : null });
+    }
+
     private sealed class TranslationFixture : IEllaiLanguageClient
     {
         public bool IsConfigured => true;

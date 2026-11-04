@@ -13,6 +13,7 @@ using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using OpenIddict.Validation.AspNetCore;
 using SwiftAid.Application.Authorization;
@@ -84,6 +85,17 @@ public sealed class EllaiPrivilegedRouteAuthorizationTests
             if (Environment.GetEnvironmentVariable("ELLAI_LIVE") != "1" ||
                 Environment.GetEnvironmentVariable("SWIFTAID_RUN_FRAMEWORK_POSTGRES_FIXTURES") != "1")
                 Skip = "Requires the configured live Muse route and dedicated disposable PostgreSQL fixture.";
+        }
+    }
+
+    private sealed class LiveFrameworkHttpSpeechFactAttribute : FactAttribute
+    {
+        public LiveFrameworkHttpSpeechFactAttribute()
+        {
+            if (Environment.GetEnvironmentVariable("ELLAI_LIVE") != "1" ||
+                Environment.GetEnvironmentVariable("SWIFTAID_RUN_FRAMEWORK_POSTGRES_FIXTURES") != "1" ||
+                Environment.GetEnvironmentVariable("SWIFTAID_TEST_LIVE_SPEECH") != "1")
+                Skip = "Requires live Muse, a dedicated PostgreSQL fixture and a loopback speech service.";
         }
     }
 
@@ -183,6 +195,138 @@ public sealed class EllaiPrivilegedRouteAuthorizationTests
             }
         }
     }
+    [LiveFrameworkHttpFact]
+    public Task GuestHttpReceivesLiveMuseEvidenceSegmentBeforeTurnCompletes() => RunLiveEvidenceSegmentAsync(false);
+
+    [LiveFrameworkHttpSpeechFact]
+    public Task GuestHttpSpeaksLiveMuseEvidenceSegment() => RunLiveEvidenceSegmentAsync(true);
+
+    private static async Task RunLiveEvidenceSegmentAsync(bool liveSpeech)
+    {
+        await using var fixture = await CaseAuthorityPostgresFixture.CreateAsync(frameworkFixture: true);
+        string? sessionId = null;
+        using var speechHttp = new HttpClient();
+        IEllaiSpeechSynthesisClient? speech = null;
+        if (liveSpeech)
+        {
+            var endpoint = Environment.GetEnvironmentVariable("SWIFTAID_TEST_SPEECH_ENDPOINT");
+            if (!Uri.TryCreate(endpoint, UriKind.Absolute, out var uri) || !uri.IsLoopback)
+                throw new InvalidOperationException("Live speech fixture requires a loopback endpoint.");
+            var settings = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["EllaiTts:Endpoint"] = endpoint,
+                ["EllaiTts:InternalKey"] = Environment.GetEnvironmentVariable("SWIFTAID_TEST_SPEECH_KEY")
+            }).Build();
+            speech = new EllaiSpeechSynthesisClient(speechHttp, settings);
+            Assert.True(speech.IsConfigured);
+        }
+        try
+        {
+            await using var host = await StartApplicationAsync(frameworkWorker: true, frameworkFixture: fixture, liveModel: true,
+                fixtureSpeech: speech, advisoryThresholds: true);
+            if (liveSpeech) await host.Services.GetRequiredService<EllaiPreparedResponseAudio>().StartAsync(default);
+            using var http = host.GetTestClient();
+            var cookies = new Dictionary<string, string>(StringComparer.Ordinal);
+            void Merge(HttpResponseMessage response)
+            {
+                if (!response.Headers.TryGetValues("Set-Cookie", out var values)) return;
+                foreach (var value in values)
+                {
+                    var pair = value.Split(';', 2)[0];
+                    var index = pair.IndexOf('=');
+                    if (index > 0) cookies[pair[..index]] = pair[(index + 1)..];
+                }
+            }
+            async Task<HttpResponseMessage> PostAsync<T>(string path, T body, string token)
+            {
+                using var request = new HttpRequestMessage(HttpMethod.Post, path) { Content = JsonContent.Create(body) };
+                request.Headers.TryAddWithoutValidation("Cookie", string.Join("; ", cookies.Select(item => $"{item.Key}={item.Value}")));
+                request.Headers.TryAddWithoutValidation("X-CSRF-TOKEN", token);
+                return await http.SendAsync(request);
+            }
+            using var antiforgery = await http.GetAsync("/api/v1/ellai/guest/antiforgery");
+            Merge(antiforgery);
+            var token = (await antiforgery.Content.ReadFromJsonAsync<EllaiGuestAntiforgeryToken>())!.RequestToken;
+            using var started = await PostAsync("/api/v1/ellai/guest/sessions",
+                new StartSessionRequest(EllaiMode.Ask, "live-grounded-stream", null, null, null, null), token);
+            Assert.Equal(System.Net.HttpStatusCode.OK, started.StatusCode);
+            Merge(started);
+            var session = (await started.Content.ReadFromJsonAsync<EllaiSessionView>())!;
+            sessionId = session.SessionId;
+            var fact = Assert.Single(new EllaiProductFactCatalog().Find("receipt"));
+            const string turnId = "live-grounded-turn";
+            using var submitted = await PostAsync($"/api/v1/ellai/guest/sessions/{sessionId}/utterances",
+                new SubmitUtteranceRequest(turnId, sessionId, session.SessionVersion,
+                    "Use ellai_productfacts with topic receipt. Copy the complete receipt fact exactly, cite its matching evidence, and stream that exact fact.",
+                    null, "typed", 1), token);
+            Assert.Equal(System.Net.HttpStatusCode.OK, submitted.StatusCode);
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+            var sawEarly = false;
+            Task<byte[]>? earlyAudio = null;
+            async Task<byte[]> ReadAudioAsync(long sequence)
+            {
+                using var request = new HttpRequestMessage(HttpMethod.Get,
+                    $"/api/v1/ellai/guest/sessions/{sessionId}/responses/{sequence}/audio");
+                request.Headers.TryAddWithoutValidation("Cookie", string.Join("; ", cookies.Select(item => $"{item.Key}={item.Value}")));
+                using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token);
+                response.EnsureSuccessStatusCode();
+                Assert.Equal("application/vnd.swiftaid.pcm", response.Content.Headers.ContentType?.MediaType);
+                Assert.Equal("af_heart", Assert.Single(response.Headers.GetValues("X-SwiftAid-Voice-Id")));
+                return await response.Content.ReadAsByteArrayAsync(timeout.Token);
+            }
+            EllaiConversationTurnDto? completed = null;
+            while (!timeout.IsCancellationRequested)
+            {
+                using var request = new HttpRequestMessage(HttpMethod.Get,
+                    $"/api/v1/ellai/guest/sessions/{sessionId}/responses?cursor=0&includeProgress=true");
+                request.Headers.TryAddWithoutValidation("Cookie", string.Join("; ", cookies.Select(item => $"{item.Key}={item.Value}")));
+                using var response = await http.SendAsync(request, timeout.Token);
+                response.EnsureSuccessStatusCode();
+                var page = (await response.Content.ReadFromJsonAsync<EllaiSessionResponsePageDto>(cancellationToken: timeout.Token))!;
+                var turn = page.Conversation?.SingleOrDefault(item => item.ClientUtteranceId == turnId);
+                if (turn is { CompletedAtUtc: null } && page.Responses.FirstOrDefault(item => item.ClientUtteranceId == turnId &&
+                    !item.IsFinal && item.Progress is null && item.Text == fact.Text) is { } early)
+                {
+                    sawEarly = true;
+                    if (liveSpeech) earlyAudio ??= ReadAudioAsync(early.Sequence);
+                }
+                if (turn?.CompletedAtUtc is not null) { completed = turn; break; }
+                await Task.Delay(25, timeout.Token);
+            }
+            Assert.NotNull(completed);
+            Assert.Equal("Completed", completed.Outcome);
+            Assert.Equal(fact.Text, completed.AssistantText);
+            Assert.True(sawEarly, "The exact fact was not observed in the feed before durable completion.");
+            if (liveSpeech)
+            {
+                Assert.NotNull(earlyAudio);
+                var pcm = await earlyAudio;
+                Assert.True(pcm.Length > 100);
+                Assert.Contains(pcm, value => value != 0);
+            }
+            await using var verify = fixture.CreateDbContext();
+            var store = new PostgresEllaiSessionStore(verify);
+            var saved = (await store.GetAsync(sessionId, timeout.Token))!;
+            var savedTurn = (await store.ReadConversationAsync(sessionId, saved.OwnerActorId!, timeout.Token))
+                .Single(item => item.ClientUtteranceId == turnId);
+            Assert.True(EllaiToolTrace.TryRead(savedTurn.ToolTraceJson!, out var trace));
+            Assert.Contains(trace!.Observations, item => item.ToolName == EllaiToolNames.ProductFacts &&
+                item.Evidence.Any(reference => reference.SourceKind == "ProductFact" && reference.ResourceId == fact.FactId));
+        }
+        finally
+        {
+            if (sessionId is not null)
+            {
+                await using var db = fixture.CreateDbContext();
+                await db.Set<EllaiUsageSampleEntity>().Where(item => item.SessionId == sessionId).ExecuteDeleteAsync();
+                await db.Set<EllaiConsentGrantEntity>().Where(item => item.SessionId == sessionId).ExecuteDeleteAsync();
+                await db.Set<EllaiUtteranceEntity>().Where(item => item.SessionId == sessionId).ExecuteDeleteAsync();
+                await db.Set<EllaiCheckpointEntity>().Where(item => item.SessionId == sessionId).ExecuteDeleteAsync();
+                await db.Set<EllaiSessionEntity>().Where(item => item.SessionId == sessionId).ExecuteDeleteAsync();
+            }
+        }
+    }
+
     [FrameworkPostgresFact]
     public Task GuestHttpConversationRecoversAfterTestHostRestartWithPostgres() =>
         RunGuestHttpConversationRecoveryAsync(liveModel: false);

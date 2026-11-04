@@ -16,6 +16,7 @@ public sealed class EllaiTopicEntityConfiguration : IEntityTypeConfiguration<Ell
         });
 
         builder.HasKey(entity => entity.TopicId).HasName("pk_ellai_topics");
+        builder.Property(entity => entity.RowVersion).IsRowVersion();
         builder.HasIndex(entity => entity.SessionId).HasDatabaseName("ix_ellai_topics_session");
         builder.Property(entity => entity.TopicId).HasColumnName("topic_id").HasColumnType("text");
         builder.Property(entity => entity.SessionId).HasColumnName("session_id").HasColumnType("text");

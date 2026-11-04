@@ -48,13 +48,28 @@ public static class EllaiConversationFeed
         {
             EllaiPipelineMetrics.Record("publication_to_feed", (DateTimeOffset.UtcNow - response.CreatedAtUtc).TotalMilliseconds);
         }
+        var deliverable = new List<EllaiSessionResponseDto>();
+        if (current is not null && current.OwnerActorId == actor.ActorId)
+        {
+            foreach (var response in page.Responses)
+            {
+                if (!responses.TryGetProvisionalState(sessionId, response.Sequence, out var provisional)) continue;
+                if (provisional &&
+                    (!responses.TryGetProvisionalFence(sessionId, response.Sequence, out var attempt, out var scope, out var epoch) ||
+                     outbox is not IEllaiProvisionalDeliveryFence fence ||
+                     !await fence.CanDeliverProvisionalAsync(sessionId, response.ClientUtteranceId!, attempt, actor.ActorId,
+                         scope, epoch, cancellationToken).ConfigureAwait(false))) continue;
+                if (responses.CanDeliver(sessionId, response, current.ScopeEpoch, current.InteractionEpoch, conversation, DateTimeOffset.UtcNow))
+                    deliverable.Add(response);
+            }
+        }
         http.Response.Headers.CacheControl = "no-store, private";
         return Results.Json(page with
         {
             StreamId = responses.StreamId,
-            Responses = current is null ? [] : page.Responses.Where(response => responses.CanDeliver(
-                sessionId, response, current.ScopeEpoch, current.InteractionEpoch, conversation, DateTimeOffset.UtcNow)).ToArray(),
-            Conversation = conversation.Select(EllaiConversationProjection.ToClient).ToArray(),
+            Responses = deliverable,
+            Conversation = current is not null && current.OwnerActorId == actor.ActorId
+                ? conversation.Select(EllaiConversationProjection.ToClient).ToArray() : [],
         });
     }
 

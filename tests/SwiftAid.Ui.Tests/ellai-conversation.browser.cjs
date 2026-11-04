@@ -1,5 +1,5 @@
 const assert = require("node:assert/strict");
-const { chromium } = require("playwright");
+const { chromium } = require(process.env.SWIFTAID_PLAYWRIGHT_PACKAGE || "playwright");
 
 // Opt-in: uses the configured local Gateway/provider with synthetic text only.
 // This is a real browser/API/persistence check, not a provider mock or hardware voice test.
@@ -66,6 +66,18 @@ async function main() {
         const originalSession = await page.evaluate(() => localStorage.getItem("swiftaid.ellai.session"));
         assert.ok(originalSession);
         if (sessionId) assert.equal(originalSession, sessionId);
+        if (process.env.SWIFTAID_WAIT_FOR_GATEWAY_RESTART === "1") {
+            console.log(JSON.stringify({ checkpoint: "ready-for-isolated-gateway-restart", sessionId: originalSession }));
+            await new Promise((resolve, reject) => {
+                const cleanup = () => { clearTimeout(timeout); process.stdin.pause(); process.stdin.removeListener("data", onData); process.stdin.removeListener("end", onEnd); };
+                const onData = () => { cleanup(); resolve(); };
+                const onEnd = () => { cleanup(); reject(new Error("Gateway restart signal closed.")); };
+                const timeout = setTimeout(() => { cleanup(); reject(new Error("Gateway restart was not signalled within 60 seconds.")); }, 60000);
+                process.stdin.once("data", onData);
+                process.stdin.once("end", onEnd);
+                process.stdin.resume();
+            });
+        }
         latestPage = null;
         await page.reload();
         await input.waitFor();
@@ -93,12 +105,25 @@ async function main() {
             console.log(JSON.stringify({ followupOutcome: followup.outcome,
                 syntheticDetailRecalled: process.env.SWIFTAID_EXPECT_SECOND_TEXT ? true : null }));
         }
+        // Wait for the server before closing the browser: click completion alone
+        // does not mean the asynchronous cancellation request has finished.
+        const cancellation = page.waitForResponse(response =>
+            response.request().method() === "POST" &&
+            new URL(response.url()).pathname === `/api/v1/ellai/guest/sessions/${originalSession}/cancel`);
+        await page.getByRole("button", { name: "End Ellai session", exact: true }).click();
+        const cancelled = await cancellation;
+        assert.equal(cancelled.status(), 200, `Cancellation HTTP status: ${cancelled.status()}`);
+        const durableSession = await page.evaluate(async id => {
+            const response = await fetch(`/api/v1/ellai/guest/sessions/${id}`);
+            if (!response.ok) throw new Error(`Session read failed: ${response.status}`);
+            return response.json();
+        }, originalSession);
+        assert.equal(durableSession.status, "Cancelled");
         console.log(JSON.stringify({ result: "PASS", sessionId: originalSession,
             firstChunkMs: firstChunkAt ? firstChunkAt - started : null, completedMs,
             outcome: turn.outcome, restoredAfterRefresh: true, thinkingAnimation: true,
-            reducedMotion: true, mobileStatusVisible: true, pageErrors: errors.length }));
-        // End only this synthetic test conversation through the regular user control.
-        await page.getByRole("button", { name: "End Ellai session", exact: true }).click();
+            reducedMotion: true, mobileStatusVisible: true, pageErrors: errors.length,
+            cancellationStatus: durableSession.status }));
     } finally {
         await context.close();
         await browser.close();

@@ -489,6 +489,11 @@ public static class EllaiGuestEndpoints
             var conversation = await outbox.ReadConversationAsync(sessionId, actor.ActorId, http.RequestAborted).ConfigureAwait(false);
             if (!responses.CanDeliver(sessionId, response, current.ScopeEpoch, current.InteractionEpoch, conversation, DateTimeOffset.UtcNow))
                 return Results.NotFound();
+            if (!responses.TryGetProvisionalFence(sessionId, sequence, out var attempt, out var scopeEpoch, out var interactionEpoch) ||
+                outbox is not IEllaiProvisionalDeliveryFence deliveryFence ||
+                !await deliveryFence.CanDeliverProvisionalAsync(sessionId, response.ClientUtteranceId!, attempt, actor.ActorId,
+                    scopeEpoch, interactionEpoch, http.RequestAborted).ConfigureAwait(false))
+                return Results.NotFound();
             var sessionFence = http.Items[AudioSessionFenceKey] as Func<CancellationToken, Task<bool>>;
             http.Items[AudioSessionFenceKey] = (Func<CancellationToken, Task<bool>>)(async ct =>
             {
@@ -496,7 +501,9 @@ public static class EllaiGuestEndpoints
                 var latest = await sessions.GetAsync(sessionId, ct).ConfigureAwait(false);
                 if (latest is null || latest.Status != "Active" || latest.OwnerActorId != actor.ActorId) return false;
                 var turns = await outbox.ReadConversationAsync(sessionId, actor.ActorId, ct).ConfigureAwait(false);
-                return responses.CanDeliver(sessionId, response, latest.ScopeEpoch, latest.InteractionEpoch, turns, DateTimeOffset.UtcNow);
+                return responses.CanDeliver(sessionId, response, latest.ScopeEpoch, latest.InteractionEpoch, turns, DateTimeOffset.UtcNow) &&
+                    await deliveryFence.CanDeliverProvisionalAsync(sessionId, response.ClientUtteranceId!, attempt, actor.ActorId,
+                        scopeEpoch, interactionEpoch, ct).ConfigureAwait(false);
             });
         }
 

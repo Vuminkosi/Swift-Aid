@@ -21,10 +21,18 @@ public sealed class EllaiCaseResultMemory(EllaiTopicService topics, ICaseQueueQu
     {
         ct.ThrowIfCancellationRequested();
         if (context.Actor is null) return;
+        await topics.TrackAsync(context.SessionId, TopicTitle, [Reference],
+            SerializeSnapshot(context, items), "case-results/1", cancellationToken: ct).ConfigureAwait(false);
+    }
+
+    public static string SerializeSnapshot(EllaiToolContext context, IReadOnlyList<CaseQueueItem> items)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(items);
+        if (context.Actor is null) throw new ArgumentException("An actor is required.", nameof(context));
         var snapshot = new Snapshot(context.Actor.ActorId, context.ScopeEpoch, DateTimeOffset.UtcNow.AddHours(24),
             items.Take(20).Select(item => new CaseReference(item.CaseId, item.AggregateVersion)).ToArray());
-        await topics.TrackAsync(context.SessionId, TopicTitle, [Reference],
-            JsonSerializer.Serialize(snapshot), "case-results/1", cancellationToken: ct).ConfigureAwait(false);
+        return JsonSerializer.Serialize(snapshot);
     }
 
     public async Task<EllaiToolResult> RecallAsync(

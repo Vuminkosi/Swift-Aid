@@ -112,7 +112,7 @@ public sealed class EllaiFrameworkAgent
                         evidence.Add(reference);
                         if (!evidenceSources.TryGetValue(reference, out var sources))
                             evidenceSources[reference] = sources = [];
-                        sources.Add(result.ResultSummary);
+                        sources.AddRange(EvidenceLines(request.ToolName, result, reference));
                     }
                 return result;
             });
@@ -239,9 +239,13 @@ public sealed class EllaiFrameworkAgent
         if (onVerifiedStreamSegment is not null)
             instructions += "\nFor a plain Answer with no UI action or question, put stream_segments first in the final JSON envelope. " +
                 "Each entry is an object with text and claims, where claims use the same GroundedClaim schema and exact evidence as final_decision. " +
-                "Each text is a complete independently supported sentence. The final_decision displayText and spokenText must both equal " +
+                "Each text must exactly match a complete line bound to each cited reference, " +
+                "or the complete product-fact text after that fact's source prefix. " +
+                "Each segment must have a nonempty claims array; each claim text must equal the segment text and cite observed evidence. " +
+                "If no evidence-backed segment is available, omit stream_segments and return the final_decision normally. " +
+                "The final_decision displayText and spokenText must both equal " +
                 "the segment texts joined by one space. For other decision kinds omit stream_segments. " +
-                "Example shape: {\"stream_segments\":[{\"text\":\"Hello.\",\"claims\":[]}],\"final_decision\":{...}}.";
+                "Do not invent evidence or include a segment without its supporting claim.";
         AIAgent agent = _agentFactory.Create(functionClient, new ChatClientAgentOptions
         {
             Name = "Ellai",
@@ -302,13 +306,20 @@ public sealed class EllaiFrameworkAgent
                         // Owned-case counts use a server-built decision after a
                         // fresh aggregate read, so model text is not publishable.
                         if (onVerifiedStreamSegment is null || countResult is not null || emptyQueueResult is not null || streamingSuppressed) continue;
+                        // A structurally valid sentence without observed evidence can
+                        // still contain unsupported or unsafe model output. Wait for
+                        // the complete decision and its normal publication checks.
+                        if (evidence.Count == 0)
+                        {
+                            streamingSuppressed = true;
+                            continue;
+                        }
                         // Evidence-backed prose may be released early only when
-                        // it matches a complete line of every cited observation.
+                        // it matches a line bound to every cited reference.
                         // Paraphrases still flow through the committed answer.
                         if (evidence.Count != 0 && parsedSegment.Claims.Any(claim =>
                             claim.Evidence.Any(reference => !evidenceSources.TryGetValue(reference, out var sources) ||
-                                !sources.Any(source => source.Split('\n').Any(line =>
-                                    string.Equals(line.Trim(), segment, StringComparison.Ordinal))))))
+                                !sources.Any(source => string.Equals(source, segment, StringComparison.Ordinal)))))
                         {
                             if (streamedSegments.Count != 0) throw new EllaiFrameworkFailureException("InvalidDecision");
                             streamingSuppressed = true;
@@ -343,19 +354,33 @@ public sealed class EllaiFrameworkAgent
             if (!await Current(ct).ConfigureAwait(false)) { LastFailureCode = EllaiToolReasonCodes.DeniedByPolicy; return null; }
             decision = EllaiModelTurnParser.Parse(guardedClient.LastText).Turn?.FinalDecision;
             if (decision is not null && EllaiDecisionValidator.Validate(decision).Count == 0 &&
-                !decision.Claims.Any(claim => claim?.Evidence is { } refs && refs.Any(reference => reference is null || !evidence.Contains(reference))))
+                !decision.Claims.Any(claim => claim?.Evidence is { } refs && refs.Any(reference => reference is null || !evidence.Contains(reference))) &&
+                (decision.PlanProposal is null || !decision.PlanProposal.Actions.Any(action =>
+                    !evidence.Contains(action.Obligation) || action.Evidence.Any(reference => !evidence.Contains(reference)))) &&
+                !HasKnownMisattribution(decision, evidenceSources))
                 break;
             decision = null;
-            // Published speech cannot be retracted or replaced by a repaired
-            // answer. End this turn rather than generating a different one.
-            if (streamedSegments.Count != 0) { LastFailureCode = "InvalidDecision"; return null; }
+            // A repair may reuse private observations only while their authority
+            // remains current. Published segments are checked against the final
+            // display and speech text before completion below.
+            if (streamedSegments.Count != 0 && !streamSafeToolObservations &&
+                (revalidateStreamObservations is null || !await revalidateStreamObservations(ct).ConfigureAwait(false)))
+            {
+                LastFailureCode = EllaiToolReasonCodes.DeniedByPolicy;
+                return null;
+            }
+            ct.ThrowIfCancellationRequested();
+            if (!await Current(ct).ConfigureAwait(false)) { LastFailureCode = EllaiToolReasonCodes.DeniedByPolicy; return null; }
             // A correction is a model-only framework run in the same session;
             // no tool or new data access is granted during output repair.
             guardedClient.RepairMode = true;
             LastRepairUsed = true;
             try
             {
-                await agent.RunAsync("The previous decision was invalid. Return only a valid final_decision JSON object using the required schema and observed evidence.",
+                var repairInstruction = streamedSegments.Count == 0
+                    ? "The previous decision was invalid. Return only a valid final_decision JSON object using the required schema and observed evidence."
+                    : "The previous decision was invalid. Return only a valid final_decision JSON object using the required schema and observed evidence. Previously emitted stream segments are immutable: displayText and spokenText must both exactly equal those segment texts joined by one space. Do not add or change any text.";
+                await agent.RunAsync(repairInstruction,
                     session, cancellationToken: ct).ConfigureAwait(false);
             }
             finally { LastModelCallCount = guardedClient.CallSequence + Volatile.Read(ref delegatedModelCalls); }
@@ -400,12 +425,27 @@ public sealed class EllaiFrameworkAgent
                 LastFailureCode = EllaiToolReasonCodes.DeniedByPolicy;
                 return null;
             }
-            if (onTextDelta is not null && !await PublishValidatedTextAsync(decision.DisplayText, onTextDelta, Current, ct).ConfigureAwait(false))
+            var firstCountChunk = true;
+            async Task<bool> CountPublicationCurrent(CancellationToken token)
+            {
+                if (!await Current(token).ConfigureAwait(false)) return false;
+                if (firstCountChunk)
+                {
+                    firstCountChunk = false;
+                    return true;
+                }
+                var currentCount = await (revalidateTool ?? invoke)(context, countRequest, token).ConfigureAwait(false);
+                return currentCount.Allowed && HasCountEvidence(currentCount) &&
+                    currentCount.CountReplayScope == originalScope &&
+                    TryCount(currentCount.ResultSummary, out var value) && value == freshCount &&
+                    await Current(token).ConfigureAwait(false);
+            }
+            if (onTextDelta is not null && !await PublishValidatedTextAsync(decision.DisplayText, onTextDelta, CountPublicationCurrent, ct).ConfigureAwait(false))
             {
                 LastFailureCode = EllaiToolReasonCodes.DeniedByPolicy;
                 return null;
             }
-            if (!await Current(ct).ConfigureAwait(false))
+            if (!(onTextDelta is null ? await Current(ct).ConfigureAwait(false) : await CountPublicationCurrent(ct).ConfigureAwait(false)))
             {
                 LastFailureCode = EllaiToolReasonCodes.DeniedByPolicy;
                 return null;
@@ -441,14 +481,15 @@ public sealed class EllaiFrameworkAgent
             return decision;
         }
         if (decision is null) return null;
-        if (!streamSafeToolObservations && revalidateStreamObservations is not null &&
-            !await revalidateStreamObservations(ct).ConfigureAwait(false))
+        if (!streamSafeToolObservations && (revalidateStreamObservations is null ||
+            !await revalidateStreamObservations(ct).ConfigureAwait(false)))
         {
             LastFailureCode = EllaiToolReasonCodes.DeniedByPolicy;
             return null;
         }
         if (streamedSegments.Count != 0 &&
             (decision.Kind != DecisionKind.Answer ||
+             decision.UiIntents.Count != 0 || decision.Questions.Count != 0 || decision.PlanProposal is not null ||
              !string.Equals(string.Join(" ", streamedSegments), decision.DisplayText.Trim(), StringComparison.Ordinal) ||
              !string.Equals(string.Join(" ", streamedSegments), decision.SpokenText?.Trim(), StringComparison.Ordinal)))
         {
@@ -460,18 +501,75 @@ public sealed class EllaiFrameworkAgent
             LastFailureCode = EllaiToolReasonCodes.DeniedByPolicy;
             return null;
         }
-        if (onTextDelta is not null && streamedSegments.Count == 0 && !await PublishValidatedTextAsync(decision.DisplayText, onTextDelta, Current, ct).ConfigureAwait(false))
+        async Task<bool> PublicationCurrent(CancellationToken token)
+        {
+            if (!await Current(token).ConfigureAwait(false)) return false;
+            if (!streamSafeToolObservations && (revalidateStreamObservations is null ||
+                !await revalidateStreamObservations(token).ConfigureAwait(false))) return false;
+            return streamSafeToolObservations || await Current(token).ConfigureAwait(false);
+        }
+        if (onTextDelta is not null && streamedSegments.Count == 0 && !await PublishValidatedTextAsync(decision.DisplayText, onTextDelta, PublicationCurrent, ct).ConfigureAwait(false))
         {
             LastFailureCode = EllaiToolReasonCodes.DeniedByPolicy;
             return null;
         }
-        if (!await Current(ct).ConfigureAwait(false))
+        if (!await PublicationCurrent(ct).ConfigureAwait(false))
         {
             LastFailureCode = EllaiToolReasonCodes.DeniedByPolicy;
             return null;
         }
         await SaveSessionAsync().ConfigureAwait(false);
         return decision;
+    }
+
+    private static IEnumerable<string> EvidenceLines(string toolName, EllaiToolResult result, EvidenceRef reference)
+    {
+        var lines = result.ResultSummary.Split('\n').Select(line => line.Trim()).Where(line => line.Length != 0);
+        if (toolName == EllaiToolNames.ProductFacts && reference.SourceKind == "ProductFact" &&
+            reference.ResourceId == reference.EvidenceId && !string.IsNullOrWhiteSpace(reference.FieldPath))
+        {
+            var prefix = $"[{reference.ResourceId}; source {reference.FieldPath}; revision {reference.Version}] ";
+            foreach (var line in lines.Where(line => line.StartsWith(prefix, StringComparison.Ordinal)))
+            {
+                yield return line;
+                var fact = line[prefix.Length..].Trim();
+                if (fact.Length != 0) yield return fact;
+            }
+            yield break;
+        }
+        if (result.Evidence.Count == 1)
+        {
+            foreach (var line in lines) yield return line;
+            yield break;
+        }
+        if (reference.SourceKind == "CaseQueue" &&
+            toolName is EllaiToolNames.State or EllaiToolNames.Topic or EllaiToolNames.Evidence &&
+            Guid.TryParseExact(reference.ResourceId, "D", out var caseId) &&
+            reference.ResourceId == caseId.ToString("D"))
+        {
+            var prefix = $"case {reference.ResourceId}";
+            foreach (var line in lines.Where(line => line.StartsWith(prefix + ";", StringComparison.Ordinal) ||
+                line.StartsWith(prefix + " ·", StringComparison.Ordinal)))
+                yield return line;
+        }
+    }
+
+    private static bool HasKnownMisattribution(EllaiDecision decision, IReadOnlyDictionary<EvidenceRef, List<string>> sources)
+    {
+        bool Misattributed(string value, IReadOnlyList<EvidenceRef> evidence)
+        {
+            var text = value.Trim();
+            bool Matches(EvidenceRef reference, IReadOnlyList<string> lines) =>
+                (reference.SourceKind == "ProductFact" || reference.SourceKind == "CaseQueue" &&
+                    (text.StartsWith($"case {reference.ResourceId};", StringComparison.Ordinal) ||
+                     text.StartsWith($"case {reference.ResourceId} ·", StringComparison.Ordinal))) &&
+                lines.Contains(text, StringComparer.Ordinal);
+            return sources.Any(item => Matches(item.Key, item.Value)) &&
+                !evidence.Any(reference => sources.TryGetValue(reference, out var lines) && Matches(reference, lines));
+        }
+        return decision.Claims.Any(claim => Misattributed(claim.Text, claim.Evidence)) ||
+            decision.PlanProposal is { } plan &&
+            plan.Actions.Any(action => Misattributed(action.FactualRationale, action.Evidence));
     }
 
     private static async Task<bool> PublishValidatedTextAsync(string text,
@@ -507,7 +605,9 @@ public sealed class EllaiFrameworkAgent
             System.Globalization.CultureInfo.InvariantCulture, out count) && count >= 0;
     }
 
-    private static bool HasCountEvidence(EllaiToolResult result) => result.Evidence.Count == 1 &&
+    private static bool HasCountEvidence(EllaiToolResult result) => result.Allowed && !result.Truncated &&
+        result.ToolName == EllaiToolNames.OwnedCaseCount && result.ReasonCode == EllaiToolReasonCodes.Ok &&
+        result.Evidence.Count == 1 &&
         result.Evidence[0] is { SourceKind: "DashboardAggregate", ResourceId: "owned-cases" };
 
     internal static bool IsEmptyQueueObservation(EllaiToolRequest request, EllaiToolResult result) =>
@@ -605,13 +705,12 @@ public sealed class EllaiFrameworkAgent
             var outputLimitReached = false;
             try
             {
-                await using var stream = CreateStreamSafe(boundedMessages, options, cancellationToken);
-                while (await MoveNextSafeAsync(stream, cancellationToken).ConfigureAwait(false))
+                await foreach (var update in EllaiProviderCallIsolation.Instance.StreamAsync(
+                    token => CreateStreamSafe(boundedMessages, options, token), cancellationToken).ConfigureAwait(false))
                 {
                     // A provider may return an update after ignoring cancellation.
                     // Never pass that late update to framework tool invocation.
                     cancellationToken.ThrowIfCancellationRequested();
-                    var update = stream.Current;
                     outputLimitReached |= IsOutputLimit(update.FinishReason);
                     foreach (var reported in update.Contents.OfType<UsageContent>().Select(content => content.Details))
                     {
@@ -639,22 +738,15 @@ public sealed class EllaiFrameworkAgent
 
         private static void ValidateToolCalls(IEnumerable<AIContent> contents, ChatOptions? options)
         {
+            var calls = contents.OfType<FunctionCallContent>().ToArray();
+            if (calls.Any(call => call.Exception is not null ||
+                call.RawRepresentation is OpenAI.Chat.ChatToolCall raw &&
+                EllaiMuseChatClientFactory.HasDuplicateArguments(raw.FunctionArguments.ToMemory())))
+                throw new EllaiFrameworkFailureException(EllaiToolReasonCodes.InvalidArguments);
             var allowed = options?.Tools?.OfType<AIFunctionDeclaration>()
                 .Select(tool => tool.Name).ToHashSet(StringComparer.Ordinal) ?? new HashSet<string>(StringComparer.Ordinal);
-            if (contents.OfType<FunctionCallContent>().Any(call => string.IsNullOrWhiteSpace(call.Name) || !allowed.Contains(call.Name)))
+            if (calls.Any(call => string.IsNullOrWhiteSpace(call.Name) || !allowed.Contains(call.Name)))
                 throw new EllaiFrameworkFailureException(EllaiToolReasonCodes.UnregisteredTool);
-        }
-
-        private static async ValueTask<bool> MoveNextSafeAsync(IAsyncEnumerator<ChatResponseUpdate> stream, CancellationToken ct)
-        {
-            try { return await stream.MoveNextAsync().ConfigureAwait(false); }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
-            catch (Exception error) when (ct.IsCancellationRequested && error is not OutOfMemoryException)
-            {
-                throw new OperationCanceledException(ct);
-            }
-            catch (System.ClientModel.ClientResultException error) { throw ProviderFailure(error); }
-            catch (Exception error) when (error is not OutOfMemoryException) { throw new EllaiFrameworkFailureException("ProviderUnavailable"); }
         }
 
         private IAsyncEnumerator<ChatResponseUpdate> CreateStreamSafe(IReadOnlyList<ChatMessage> messages,
@@ -674,7 +766,17 @@ public sealed class EllaiFrameworkAgent
             : IAsyncEnumerator<ChatResponseUpdate>
         {
             public ChatResponseUpdate Current => inner.Current;
-            public ValueTask<bool> MoveNextAsync() => inner.MoveNextAsync();
+            public async ValueTask<bool> MoveNextAsync()
+            {
+                try { return await inner.MoveNextAsync().ConfigureAwait(false); }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+                catch (Exception error) when (ct.IsCancellationRequested && error is not OutOfMemoryException)
+                {
+                    throw new OperationCanceledException(ct);
+                }
+                catch (System.ClientModel.ClientResultException error) { throw ProviderFailure(error); }
+                catch (Exception error) when (error is not OutOfMemoryException) { throw new EllaiFrameworkFailureException("ProviderUnavailable"); }
+            }
 
             public async ValueTask DisposeAsync()
             {

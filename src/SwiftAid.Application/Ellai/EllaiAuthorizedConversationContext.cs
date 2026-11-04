@@ -19,7 +19,8 @@ public static class EllaiAuthorizedConversationContext
         ActorContext actor, ICaseQueueQuery? queue, CancellationToken ct, EllaiTechnicalDocs? docs = null,
         ICaseImportStore? imports = null, ICaseImportWorkspaceReader? importWorkspaces = null,
         IDashboardAggregateQuery? dashboard = null, EllaiToolContext? toolContext = null,
-        Func<EllaiToolContext, EllaiToolRequest, CancellationToken, Task<EllaiToolResult>>? invokeTool = null)
+        Func<EllaiToolContext, EllaiToolRequest, CancellationToken, Task<EllaiToolResult>>? invokeTool = null,
+        IEllaiLocationReplayProtector? locationReplayProtector = null)
     {
         var selected = EllaiConversationContext.SelectTurns(conversation, currentUtteranceId);
         var decisions = new Dictionary<string, bool>(StringComparer.Ordinal);
@@ -32,6 +33,7 @@ public static class EllaiAuthorizedConversationContext
         var importChecks = new Dictionary<(Guid Id, string Version), bool>();
         var countChecks = new Dictionary<EllaiCountReplayScope, bool>();
         var catalogueChecks = new Dictionary<EllaiUiCatalogueReplayScope, bool>();
+        var uiObservationChecks = new Dictionary<EllaiUiObservationReplayScope, bool>();
         var receiptListChecks = new Dictionary<(string? ReceiptId, string Digest), (bool Allowed, IReadOnlyList<EvidenceRef> Evidence)>();
 
         async Task<bool> MayReplayAsync(EllaiConversationTurn turn)
@@ -163,6 +165,37 @@ public static class EllaiAuthorizedConversationContext
                     }
                     continue;
                 }
+                if (observation.ToolName == EllaiToolNames.UiObserve)
+                {
+                    var scope = observation.UiObservationReplayScope;
+                    if (toolContext is null || invokeTool is null || scope is null || !scope.IsValid() ||
+                        toolContext.SessionId != turn.SessionId || toolContext.Actor is null ||
+                        toolContext.Actor.ActorId != actor.ActorId || toolContext.Actor.AccessEpoch != actor.AccessEpoch ||
+                        observation.ReasonCode != EllaiToolReasonCodes.Ok)
+                        return decisions[turn.ClientUtteranceId] = false;
+                    try
+                    {
+                        if (!uiObservationChecks.TryGetValue(scope, out var allowed))
+                        {
+                            var arguments = new Dictionary<string, string>
+                            {
+                                ["feature"] = scope.Feature, ["controls"] = scope.Controls, ["view"] = "current"
+                            };
+                            if (scope.GoalTags is not null) arguments["context"] = scope.GoalTags;
+                            var current = await invokeTool(toolContext, new EllaiToolRequest(EllaiToolNames.UiObserve, arguments), ct).ConfigureAwait(false);
+                            ct.ThrowIfCancellationRequested();
+                            allowed = current.Allowed && !current.Truncated && current.UiObservationReplayScope == scope;
+                            uiObservationChecks[scope] = allowed;
+                        }
+                        if (!allowed) return decisions[turn.ClientUtteranceId] = false;
+                    }
+                    catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+                    catch (Exception error) when (error is not OutOfMemoryException)
+                    {
+                        return decisions[turn.ClientUtteranceId] = false;
+                    }
+                    continue;
+                }
                 if (observation.ToolName == EllaiToolNames.State)
                 {
                     if (observation.StaticFeatureVersion == EllaiObservedToolResult.CurrentStaticFeatureVersion &&
@@ -207,6 +240,86 @@ public static class EllaiAuthorizedConversationContext
                                 item.WorkspaceId != scope.WorkspaceId || item.CountryCode != scope.CountryCode ||
                                 observation.Evidence[index] != new EvidenceRef("ImportJob", item.ImportId.ToString("D"),
                                     item.UpdatedAtUtc.ToString("O", CultureInfo.InvariantCulture), "status", item.ImportId.ToString("D"))).Any())
+                            return decisions[turn.ClientUtteranceId] = false;
+                    }
+                    catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+                    catch (Exception error) when (error is not OutOfMemoryException)
+                    {
+                        return decisions[turn.ClientUtteranceId] = false;
+                    }
+                    continue;
+                }
+                if (observation.ToolName == EllaiToolNames.Locations)
+                {
+                    var scope = observation.LocationReplayScope;
+                    if (scope is null || !scope.IsValid() || observation.ReasonCode != EllaiToolReasonCodes.Ok ||
+                        toolContext is null || invokeTool is null || locationReplayProtector is null ||
+                        toolContext.SessionId != turn.SessionId || toolContext.Actor is null ||
+                        toolContext.Actor.ActorId != actor.ActorId || toolContext.Actor.AccessEpoch != actor.AccessEpoch)
+                        return decisions[turn.ClientUtteranceId] = false;
+                    try
+                    {
+                        var arguments = locationReplayProtector.Unprotect(toolContext, scope.ProtectedArguments);
+                        if (arguments is null) return decisions[turn.ClientUtteranceId] = false;
+                        var current = await invokeTool(toolContext, new EllaiToolRequest(EllaiToolNames.Locations, arguments), ct).ConfigureAwait(false);
+                        ct.ThrowIfCancellationRequested();
+                        if (current.ToolName != EllaiToolNames.Locations || !current.Allowed || current.DenialReason is not null ||
+                            current.ReasonCode != EllaiToolReasonCodes.Ok || current.Truncated ||
+                            !current.Evidence.SequenceEqual(observation.Evidence) ||
+                            EllaiObservedToolResult.ResultFingerprint(current) != scope.ResultDigest)
+                            return decisions[turn.ClientUtteranceId] = false;
+                    }
+                    catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+                    catch (Exception error) when (error is not OutOfMemoryException)
+                    {
+                        return decisions[turn.ClientUtteranceId] = false;
+                    }
+                    continue;
+                }
+                if (observation.ToolName == EllaiToolNames.ImportDestinations)
+                {
+                    var digest = observation.ImportDestinationsDigest;
+                    if (digest is null || observation.ReasonCode != EllaiToolReasonCodes.Ok ||
+                        observation.Evidence.Count != 0 || toolContext is null || invokeTool is null ||
+                        toolContext.SessionId != turn.SessionId || toolContext.Actor is null ||
+                        toolContext.Actor.ActorId != actor.ActorId || toolContext.Actor.AccessEpoch != actor.AccessEpoch)
+                        return decisions[turn.ClientUtteranceId] = false;
+                    try
+                    {
+                        var current = await invokeTool(toolContext, new EllaiToolRequest(EllaiToolNames.ImportDestinations,
+                            new Dictionary<string, string>()), ct).ConfigureAwait(false);
+                        ct.ThrowIfCancellationRequested();
+                        if (current.ToolName != EllaiToolNames.ImportDestinations || !current.Allowed ||
+                            current.DenialReason is not null || current.ReasonCode != EllaiToolReasonCodes.Ok ||
+                            current.Truncated || current.Evidence.Count != 0 || current.ItemCount is < 0 or > 20 ||
+                            EllaiObservedToolResult.ResultFingerprint(current) != digest)
+                            return decisions[turn.ClientUtteranceId] = false;
+                    }
+                    catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+                    catch (Exception error) when (error is not OutOfMemoryException)
+                    {
+                        return decisions[turn.ClientUtteranceId] = false;
+                    }
+                    continue;
+                }
+                if (observation.ToolName == EllaiToolNames.ClassificationEvidence)
+                {
+                    var scope = observation.ClassificationReplayScope;
+                    if (scope is null || !scope.IsValid() || observation.ReasonCode != EllaiToolReasonCodes.Ok ||
+                        observation.Evidence.Count != 0 || toolContext is null || invokeTool is null ||
+                        toolContext.SessionId != turn.SessionId || toolContext.Actor is null ||
+                        toolContext.Actor.ActorId != actor.ActorId || toolContext.Actor.AccessEpoch != actor.AccessEpoch)
+                        return decisions[turn.ClientUtteranceId] = false;
+                    try
+                    {
+                        var request = new EllaiToolRequest(EllaiToolNames.ClassificationEvidence,
+                            new Dictionary<string, string> { ["case_id"] = scope.CaseId.ToString("D") });
+                        var current = await invokeTool(toolContext, request, ct).ConfigureAwait(false);
+                        ct.ThrowIfCancellationRequested();
+                        if (current.ToolName != EllaiToolNames.ClassificationEvidence || !current.Allowed ||
+                            current.DenialReason is not null || current.ReasonCode != EllaiToolReasonCodes.Ok ||
+                            current.Truncated || current.Evidence.Count != 0 || current.ItemCount != 1 ||
+                            EllaiObservedToolResult.ResultFingerprint(current) != scope.ResultDigest)
                             return decisions[turn.ClientUtteranceId] = false;
                     }
                     catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }

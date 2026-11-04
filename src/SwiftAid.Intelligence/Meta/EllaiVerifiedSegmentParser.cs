@@ -12,6 +12,7 @@ internal sealed class EllaiVerifiedSegmentParser
     internal sealed record Segment(string Text, IReadOnlyList<GroundedClaim> Claims);
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web)
     {
+        UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
         Converters = { new JsonStringEnumConverter(allowIntegerValues: false) }
     };
     private readonly StringBuilder _text = new();
@@ -43,6 +44,7 @@ internal sealed class EllaiVerifiedSegmentParser
                 {
                     if (position++ < _processed) continue;
                     _processed++;
+                    if (HasDuplicateProperties(document.RootElement)) { _rejected = true; break; }
                     var item = document.RootElement.Deserialize<Segment>(Json);
                     if (item is null || item.Text is null || item.Claims is null) { _rejected = true; break; }
                     // A segment based on observed evidence must identify its
@@ -76,5 +78,21 @@ internal sealed class EllaiVerifiedSegmentParser
         }
         catch (JsonException) { _rejected = true; }
         return results;
+    }
+
+    private static bool HasDuplicateProperties(JsonElement element)
+    {
+        if (element.ValueKind == JsonValueKind.Object)
+        {
+            var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var property in element.EnumerateObject())
+                if (!names.Add(property.Name) || HasDuplicateProperties(property.Value)) return true;
+        }
+        else if (element.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in element.EnumerateArray())
+                if (HasDuplicateProperties(item)) return true;
+        }
+        return false;
     }
 }

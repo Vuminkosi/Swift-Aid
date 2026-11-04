@@ -123,6 +123,7 @@ builder.Services.AddEllaiPersistence();
 builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiSessionService>();
 builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiUtteranceSubmissionService>();
 builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiPolicyService>();
+builder.Services.AddScoped<SwiftAid.Application.Ellai.IEllaiLocationReplayProtector, SwiftAid.Gateway.Ellai.EllaiLocationReplayProtector>();
 builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiToolBroker>();
 builder.Services.AddScoped(_ => new SwiftAid.Application.Ellai.EllaiTechnicalDocs(
     SwiftAid.Application.Ellai.EllaiTechnicalDocs.TryResolvePath(
@@ -225,16 +226,7 @@ builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiTrainingVerifier>();
         builder.Services.AddScoped<SwiftAid.Intelligence.Meta.MetaAsrRealtimeAdapter>();
     }
 
-    var qdrantEndpoint = builder.Configuration["Qdrant:Endpoint"];
-    var qdrantKey = builder.Configuration["Qdrant:ApiKey"];
-    if (!string.IsNullOrWhiteSpace(qdrantEndpoint))
-    {
-        var endpoint = qdrantEndpoint;
-        var key = qdrantKey ?? string.Empty;
-        SwiftAid.Infrastructure.Memory.EllaiMemoryServiceCollectionExtensions.AddEllaiReferenceIndex(
-            builder.Services, endpoint, key);
-        builder.Services.AddHostedService<SwiftAid.Gateway.Ellai.EllaiMemoryProjectionWorker>();
-    }
+    SwiftAid.Gateway.Ellai.EllaiMemoryRegistration.AddIfEnabled(builder.Services, builder.Configuration);
 }
 builder.Services.AddScoped<INotificationApiService, NotificationApiService>();
 builder.Services.AddScoped<INotificationFeedClient, InteractiveServerNotificationFeedClient>();
@@ -269,14 +261,13 @@ builder.Services.AddHostedService<SwiftAid.Gateway.Ellai.EllaiFollowUpScheduleWo
 builder.Services.Configure<SwiftAid.Infrastructure.Classification.TranslationOptions>(builder.Configuration.GetSection("ExperimentalMultilingualIntelligence"));
 builder.Services.AddScoped<SwiftAid.Infrastructure.Classification.TranslationRegistry>();
 builder.Services.AddScoped<SwiftAid.Infrastructure.Classification.CaseTranslationService>();
-builder.Services.AddScoped<SwiftAid.Infrastructure.Classification.TranslationOutboxDispatcher>();
 builder.Services.AddHostedService<SwiftAid.Gateway.Ellai.EllaiTranslationWorker>();
 builder.Services.AddScoped<SwiftAid.Infrastructure.Classification.ClassificationBackfillStore>();
-builder.Services.AddScoped<SwiftAid.Infrastructure.Classification.ClassificationOutboxDispatcher>();
 builder.Services.AddScoped<SwiftAid.Application.Classification.ICaseClassificationQuery, SwiftAid.Infrastructure.Classification.PostgresCaseClassificationQuery>();
 builder.Services.Configure<SwiftAid.Infrastructure.Surveillance.SurveillanceOptions>(builder.Configuration.GetSection("Surveillance"));
 builder.Services.AddScoped<SwiftAid.Infrastructure.Surveillance.SurveillanceProcessor>();
-builder.Services.AddScoped<SwiftAid.Infrastructure.Surveillance.SurveillanceOutboxDispatcher>();
+SwiftAid.Gateway.Ingestion.IngestionDispatcherRegistration.AddIngestionDispatchers(
+    builder.Services, builder.Configuration.GetValue<bool>("Nats:Enabled"));
 builder.Services.AddScoped<SwiftAid.Application.Surveillance.ISignalReviewService, SwiftAid.Infrastructure.Surveillance.PostgresSignalReviewService>();
 builder.Services.AddHostedService<SwiftAid.Gateway.Surveillance.SurveillanceWorker>();
 

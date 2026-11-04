@@ -198,8 +198,13 @@ public sealed class EllaiVoiceTranscriptionServiceTests
             if (liveAsr) Assert.Contains("hello", turn.UserText, StringComparison.OrdinalIgnoreCase);
             else Assert.Equal("recognized fallback words", turn.UserText);
             if (!liveModel) Assert.Contains("recognized fallback words", model.Messages);
-            var chunk = responses.ReadSince(sessionId, 0).Responses.First(
-                item => !item.IsFinal && item.Progress is null && !string.IsNullOrWhiteSpace(item.Text));
+            EllaiSessionResponseDto? chunk;
+            do
+            {
+                chunk = responses.ReadSince(sessionId, 0).Responses.FirstOrDefault(
+                    item => !item.IsFinal && item.Progress is null && !string.IsNullOrWhiteSpace(item.Text));
+                if (chunk is null) await Task.Delay(25, timeout.Token);
+            } while (chunk is null);
             using var pcm = await prepared.OpenAsync(sessionId, chunk.Sequence, timeout.Token);
             var bytes = await pcm.Content.ReadAsByteArrayAsync(timeout.Token);
             if (liveSpeech)

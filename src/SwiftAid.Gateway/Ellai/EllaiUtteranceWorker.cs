@@ -16,6 +16,7 @@ public sealed class EllaiUtteranceWorker(
     private static readonly TimeSpan IdlePollDelay = TimeSpan.FromSeconds(1);
     private static readonly EllaiIsolatedToolCalls ToolCalls = new();
     private static readonly EllaiIsolatedToolCalls ReferenceCalls = new();
+    private static readonly EllaiIsolatedToolCalls StateCalls = new();
 
     private readonly IServiceProvider _services =
         services ?? throw new ArgumentNullException(nameof(services));
@@ -292,6 +293,11 @@ public sealed class EllaiUtteranceWorker(
 
         var scopedBroker = scopedServices.GetService<EllaiToolBroker>();
         var registeredQueue = scopedServices.GetService<SwiftAid.Application.Cases.ICaseQueueQuery>();
+        var registeredTopics = scopedServices.GetService<IEllaiTopicStore>();
+        var scopedSessions = scopedServices.GetRequiredService<IEllaiSessionStore>();
+        var canFenceQueue = scopedBroker?.UsesStateQueue(registeredQueue) == true &&
+            scopedBroker.UsesTopicStore(registeredTopics) &&
+            scopedSessions is IEllaiCaseResultSnapshotFence scopedFence && scopedFence.CanFenceTopicStore(registeredTopics);
         var authorizationQueue = scopedBroker?.UsesStateQueue(registeredQueue) == true
             ? new EllaiIsolatedCaseQueueQuery(_services, ToolCalls)
             : scopedBroker?.StateQueue;
@@ -308,13 +314,14 @@ public sealed class EllaiUtteranceWorker(
             scopedServices.GetRequiredService<IEllaiUtteranceOutboxStore>(), progress.Observe,
             scopedBroker is null ? null : (context, request, ct) =>
             {
+                var detachQueue = canFenceQueue && IsFencedQueueRequest(request);
                 async Task<EllaiToolResult> InvokeInScopeAsync(CancellationToken toolCt)
                 {
                     // Independent reads must not share the worker's EF DbContext.
                     await using var toolScope = _services.CreateAsyncScope();
                     var toolServices = toolScope.ServiceProvider;
-                    var current = await toolServices.GetRequiredService<IEllaiSessionStore>()
-                        .GetAsync(work.SessionId, toolCt).ConfigureAwait(false);
+                    var sessionStore = toolServices.GetRequiredService<IEllaiSessionStore>();
+                    var current = await sessionStore.GetAsync(work.SessionId, toolCt).ConfigureAwait(false);
                     toolCt.ThrowIfCancellationRequested();
                     if (current is null || current.Status != "Active" || current.InteractionEpoch != work.ControllerEpoch
                         || current.OwnerActorId != work.Actor.ActorId || current.ScopeEpoch != work.ScopeEpoch)
@@ -327,33 +334,73 @@ public sealed class EllaiUtteranceWorker(
                     var index = request.ToolName is EllaiToolNames.Topic or EllaiToolNames.Evidence &&
                         broker.UsesReferenceIndex(toolServices.GetService<IEllaiExactReferenceIndex>())
                         ? new EllaiIsolatedExactReferenceIndex(_services, ReferenceCalls) : null;
-                    return await broker.InvokeAsync(context, request, toolCt, queue, index).ConfigureAwait(false);
+                    var registry = request.ToolName == EllaiToolNames.Locations
+                        ? toolServices.GetService<SwiftAid.Application.Intake.IGeographicRegistry>() : null;
+                    var geography = request.ToolName == EllaiToolNames.Locations &&
+                        registry is SwiftAid.Infrastructure.Intake.Geography.GeographicRegistryService &&
+                        broker.UsesGeographicRegistry(registry)
+                        ? new EllaiIsolatedGeographicRegistry(_services, ToolCalls, registry) : null;
+                    var topicStore = toolServices.GetService<IEllaiTopicStore>();
+                    Func<EllaiToolContext, IReadOnlyList<SwiftAid.Contracts.Cases.CaseQueueItem>, CancellationToken, Task<bool>>?
+                        remember = sessionStore is IEllaiCaseResultSnapshotFence fence &&
+                            broker.UsesTopicStore(topicStore) && fence.CanFenceTopicStore(topicStore)
+                            ? (toolContext, items, token) =>
+                            {
+                                if (toolContext.SessionId != work.SessionId || toolContext.ScopeEpoch != work.ScopeEpoch ||
+                                    toolContext.Actor?.ActorId != work.Actor.ActorId)
+                                    return Task.FromResult(false);
+                                return fence.StoreCaseResultsIfCurrentAsync(work.SessionId, item.ClientUtteranceId,
+                                    item.AttemptCount, work.Actor.ActorId, work.ScopeEpoch, work.ControllerEpoch,
+                                    EllaiCaseResultMemory.SerializeSnapshot(toolContext, items), token, toolContext.ToolDeadlineUtc);
+                            }
+                            : null;
+                    // A new scope must satisfy the same safety checks before a
+                    // detached operation can perform the queue or snapshot work.
+                    if (detachQueue && (queue is null || remember is null))
+                        return new EllaiToolResult(request.ToolName, false, "The queue is unavailable.", [],
+                            string.Empty, 0, false, EllaiToolReasonCodes.Unavailable);
+                    return await broker.InvokeAsync(context, request, toolCt, queue, index, remember, geography).ConfigureAwait(false);
                 }
 
-                // State queries can persist case-result references. Never detach a
-                // potentially mutating or unclassified tool after cancellation.
-                return CanDetachReadOnlyTool(request.ToolName)
-                    ? ToolCalls.RunAsync(InvokeInScopeAsync, ct)
-                    : InvokeInScopeAsync(ct);
+                return detachQueue
+                    ? StateCalls.RunAsync(InvokeInScopeAsync, ct)
+                    : InvokeToolWithIsolation(request, InvokeInScopeAsync, ToolCalls, ct);
             }, scopedServices.GetService<IEllaiLanguageClient>(),
             authorizationQueue,
             scopedServices.GetService<EllaiTechnicalDocs>(),
             scopedServices.GetService<SwiftAid.Application.Intake.Imports.ICaseImportStore>(),
             scopedServices.GetService<SwiftAid.Application.Intake.Imports.ICaseImportWorkspaceReader>(),
             scopedServices.GetService<SwiftAid.Application.Cases.IDashboardAggregateQuery>(),
-            CreateTextDeltaCollector(work, item, responseStore, responseGeneration, answerChunks));
+            CreateTextDeltaCollector(work, item, responseStore, responseGeneration, answerChunks),
+            scopedServices.GetService<IEllaiLocationReplayProtector>());
         return await EllaiUtteranceRunner.RunOneAsync(
             work, dependencies, MaxTokensPerTurn, stoppingToken).ConfigureAwait(false);
     }
 
-    internal static bool CanDetachReadOnlyTool(string name) => name is
-        EllaiToolNames.Topic or EllaiToolNames.Evidence or EllaiToolNames.ClassificationEvidence or
-        EllaiToolNames.OwnedCaseCount or EllaiToolNames.Receipts or EllaiToolNames.ImportDestinations or
-        EllaiToolNames.Imports or EllaiToolNames.ImportStatus or
-        EllaiToolNames.UiCatalogue or EllaiToolNames.UiObserve or
-        EllaiToolNames.Now or EllaiToolNames.Capabilities or
-        EllaiToolNames.ProductFacts or EllaiToolNames.DocsSearch or EllaiToolNames.DocsGet or
-        EllaiToolNames.IngestionSchema or EllaiToolNames.ValidateObservations;
+    internal static Task<T> InvokeToolWithIsolation<T>(EllaiToolRequest request,
+        Func<CancellationToken, Task<T>> invoke, EllaiIsolatedToolCalls calls, CancellationToken ct) =>
+        CanDetachReadOnlyTool(request) ? calls.RunAsync(invoke, ct) : invoke(ct);
+
+    internal static bool IsFencedQueueRequest(EllaiToolRequest request) =>
+        request.ToolName == EllaiToolNames.State &&
+        request.Arguments.TryGetValue("projection", out var projection) &&
+        string.Equals(projection, "queue", StringComparison.OrdinalIgnoreCase) &&
+        request.Arguments.Keys.All(key => key is "projection" or "limit" or "country" or "workflow" or "sort");
+
+    internal static bool CanDetachReadOnlyTool(EllaiToolRequest request) =>
+        // The static feature projection has no session-memory write. Queue
+        // projections may persist case references and must remain attached.
+        request.ToolName == EllaiToolNames.State
+            ? request.Arguments.Count == 0 ||
+                (request.Arguments.Count == 1 && request.Arguments.TryGetValue("projection", out var projection) &&
+                    string.Equals(projection, "feature", StringComparison.OrdinalIgnoreCase))
+            : request.ToolName is EllaiToolNames.Topic or EllaiToolNames.Evidence or EllaiToolNames.ClassificationEvidence or
+                EllaiToolNames.OwnedCaseCount or EllaiToolNames.Receipts or EllaiToolNames.ImportDestinations or
+                EllaiToolNames.Imports or EllaiToolNames.ImportStatus or
+                EllaiToolNames.UiCatalogue or EllaiToolNames.UiObserve or
+                EllaiToolNames.Now or EllaiToolNames.Capabilities or
+                EllaiToolNames.ProductFacts or EllaiToolNames.DocsSearch or EllaiToolNames.DocsGet or
+                EllaiToolNames.IngestionSchema or EllaiToolNames.ValidateObservations;
 
     private Func<string, CancellationToken, ValueTask>? CreateTextDeltaCollector(
         EllaiUtteranceWork work, EllaiUtteranceOutboxItem item, EllaiSessionResponseStore responseStore,

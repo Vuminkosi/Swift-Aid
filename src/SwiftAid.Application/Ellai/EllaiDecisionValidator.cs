@@ -11,6 +11,8 @@ public static class EllaiDecisionValidator
 
     public const int MaxSpokenWords = 120;
 
+    public const int MaxSpokenChars = MaxDisplayChars;
+
     public const int MaxUiIntents = 3;
 
     public const int MaxPlanActions = 3;
@@ -26,14 +28,20 @@ public static class EllaiDecisionValidator
             return errors;
         }
 
+        if (!Enum.IsDefined(decision.Kind))
+        {
+            errors.Add("Decision kind is unsupported.");
+        }
+
         if (string.IsNullOrWhiteSpace(decision.DisplayText) || decision.DisplayText.Length > MaxDisplayChars)
         {
             errors.Add("DisplayText must be 1..2000 characters.");
         }
 
-        if (CountWords(decision.SpokenText) > MaxSpokenWords)
+        if (decision.SpokenText is null || decision.SpokenText.Length > MaxSpokenChars ||
+            CountWords(decision.SpokenText) > MaxSpokenWords)
         {
-            errors.Add("SpokenText exceeds 120 words.");
+            errors.Add("SpokenText must be a string of at most 2000 characters and 120 words.");
         }
 
         if (decision.UiIntents is null)
@@ -62,9 +70,11 @@ public static class EllaiDecisionValidator
                 errors.Add("At most 3 clarifying questions per decision.");
             }
 
-            if (decision.Questions.Any(question => question is null))
+            if (decision.Questions.Any(question => question is null || string.IsNullOrWhiteSpace(question.QuestionId) ||
+                string.IsNullOrWhiteSpace(question.Text) || question.Text.Length > 1000 || question.ChoiceIds is null ||
+                question.ChoiceIds.Count > 10 || question.ChoiceIds.Any(string.IsNullOrWhiteSpace)))
             {
-                errors.Add("Questions entries must be objects.");
+                errors.Add("Questions must have an identifier, bounded text and a valid choice array.");
             }
         }
 
@@ -76,10 +86,23 @@ public static class EllaiDecisionValidator
         {
             errors.Add("At most 3 administrative actions per plan.");
         }
+        if (decision.PlanProposal is { } plan &&
+            (string.IsNullOrWhiteSpace(plan.Objective) || plan.Actions is { Count: 0 } ||
+             plan.Actions is not null && plan.Actions.Any(action => action is null ||
+                string.IsNullOrWhiteSpace(action.ProposalLabel) || !Enum.IsDefined(action.Kind) ||
+                action.Obligation is null || string.IsNullOrWhiteSpace(action.FactualRationale) ||
+                action.Evidence is null || action.Evidence.Count == 0 || action.Evidence.Any(reference => reference is null))))
+        {
+            errors.Add("Plan proposals require an objective and valid evidence-backed actions.");
+        }
 
         if (decision.TopicRefs is null)
         {
             errors.Add("TopicRefs must be an array.");
+        }
+        else if (decision.TopicRefs.Any(string.IsNullOrWhiteSpace))
+        {
+            errors.Add("TopicRefs entries must be nonempty strings.");
         }
 
         if (decision.Kind == DecisionKind.NeedInput && decision.Questions is { Count: 0 })
@@ -104,6 +127,19 @@ public static class EllaiDecisionValidator
                 {
                     errors.Add("Claims entries must be objects.");
                     continue;
+                }
+
+                if (string.IsNullOrWhiteSpace(claim.ClaimId) || string.IsNullOrWhiteSpace(claim.Text))
+                {
+                    errors.Add("Claims require an identifier and text.");
+                }
+                if (!Enum.IsDefined(claim.Kind))
+                {
+                    errors.Add("Claims require a supported kind.");
+                }
+                if (claim.Evidence is null || claim.Evidence.Any(reference => reference is null))
+                {
+                    errors.Add("Claim evidence must be an array of references.");
                 }
 
                 if (claim.Kind is not ClaimKind.Unknown

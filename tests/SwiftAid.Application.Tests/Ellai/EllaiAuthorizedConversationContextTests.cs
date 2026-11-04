@@ -263,8 +263,10 @@ public sealed class EllaiAuthorizedConversationContextTests
         }
     }
 
-    [Fact]
-    public async Task StreamObservationAuthorizationRechecksCaseAccess()
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task StreamObservationAuthorizationRechecksCaseAccess(bool provisionalStreaming)
     {
         var executor = new CapturingExecutor();
         var queue = new BatchQueue();
@@ -279,7 +281,7 @@ public sealed class EllaiAuthorizedConversationContextTests
             ConsentPurpose: EllaiConsentService.PublicProductHelpPurpose, ClientUtteranceId: "current");
         await EllaiUtteranceRunner.RunOneAsync(work,
             new(executor, null, null, new EllaiConsentService(), CaseQueue: queue,
-                OnVerifiedStreamSegment: (_, _) => ValueTask.CompletedTask), 256, default);
+                OnVerifiedStreamSegment: provisionalStreaming ? (_, _) => ValueTask.CompletedTask : null), 256, default);
         var check = Assert.IsType<Func<IReadOnlyList<EllaiObservedToolResult>, CancellationToken, Task<bool>>>(
             executor.Request!.RevalidateStreamObservations);
         Assert.True(await check([observation], default));
@@ -326,6 +328,75 @@ public sealed class EllaiAuthorizedConversationContextTests
         var replay = await EllaiAuthorizedConversationContext.BuildAsync(turns, "current", Actor(), null, default,
             toolContext: context, invokeTool: broker.InvokeAsync);
         Assert.Equal(expected, replay.Messages.Any(message => message.Content == "report guidance"));
+    }
+
+    [Fact]
+    public async Task UiObservationRequiresSameCurrentClientReport()
+    {
+        var registry = new EllaiUiRegistry();
+        EllaiReportGuidanceDescriptors.RegisterAll(registry);
+        var reports = new InMemoryEllaiUiObservationStore();
+        var receivedAt = DateTimeOffset.UtcNow.AddSeconds(-2);
+        await reports.RecordAsync(new("session", "view-1", "context-1", "web", ["report.entry"],
+            receivedAt, [new("report.entry", UiObservationState.Ready)]), default);
+        var broker = new EllaiToolBroker(new EllaiPolicyService(), new EllaiConsentService(),
+            uiRegistry: registry, uiDiscovery: new EllaiUiDiscoveryService(), uiObservations: reports);
+        var context = new EllaiToolContext("session", "epoch", "public.product-help", null, 4, true,
+            DataClassification: EllaiProcessingClassification.UserProvidedNonSensitive, Actor: Actor(),
+            AllowedTools: new HashSet<string> { EllaiToolNames.UiObserve },
+            ConsentPurpose: EllaiConsentService.PublicProductHelpPurpose);
+        var request = new EllaiToolRequest(EllaiToolNames.UiObserve,
+            new Dictionary<string, string> { ["controls"] = "report.entry", ["view"] = "current" });
+        var observed = await broker.InvokeAsync(context, request, default);
+        Assert.True(observed.Allowed);
+        Assert.DoesNotContain("UiObservationReplayScope", System.Text.Json.JsonSerializer.Serialize(observed));
+        var trace = EllaiToolTrace.SerializeFlattened([EllaiObservedToolResult.From(request, observed)], false, []);
+        Assert.NotNull(trace);
+        Assert.DoesNotContain("view-1", trace);
+        Assert.DoesNotContain("context-1", trace);
+        var turns = new[] { Turn("prior", 1, "show report", "control ready", trace), Turn("current", 2, "next", null, null) };
+        async Task<bool> Retained() => (await EllaiAuthorizedConversationContext.BuildAsync(turns, "current", Actor(), null, default,
+            toolContext: context, invokeTool: broker.InvokeAsync)).Messages.Any(message => message.Content == "control ready");
+        Assert.True(await Retained());
+        await reports.RecordAsync(new("session", "view-1", "context-1", "web", ["report.entry"],
+            DateTimeOffset.UtcNow, [new("report.entry", UiObservationState.Ready)]), default);
+        Assert.True(await Retained());
+        var withoutTool = await EllaiAuthorizedConversationContext.BuildAsync(turns, "current", Actor(), null, default,
+            toolContext: context with { AllowedTools = new HashSet<string>() }, invokeTool: broker.InvokeAsync);
+        Assert.DoesNotContain(withoutTool.Messages, message => message.Content == "control ready");
+        await reports.RecordAsync(new("session", "view-1", "context-1", "web", ["report.entry"],
+            receivedAt, [new("report.entry", UiObservationState.Hidden)]), default);
+        Assert.False(await Retained());
+        await reports.RecordAsync(new("session", "view-2", "context-2", "web", [], DateTimeOffset.UtcNow), default);
+        Assert.False(await Retained());
+        await reports.RecordAsync(new("session", "view-1", "context-1", "web", ["report.entry"],
+            DateTimeOffset.UtcNow.AddMinutes(-1), [new("report.entry", UiObservationState.Ready)]), default);
+        Assert.False(await Retained());
+    }
+
+    [Fact]
+    public async Task EmptyUiObservationRemainsReplayableOnlyUntilAReportArrives()
+    {
+        var registry = new EllaiUiRegistry();
+        EllaiReportGuidanceDescriptors.RegisterAll(registry);
+        var reports = new InMemoryEllaiUiObservationStore();
+        var broker = new EllaiToolBroker(new EllaiPolicyService(), new EllaiConsentService(),
+            uiRegistry: registry, uiDiscovery: new EllaiUiDiscoveryService(), uiObservations: reports);
+        var context = new EllaiToolContext("session", "epoch", "public.product-help", null, 4, true,
+            DataClassification: EllaiProcessingClassification.UserProvidedNonSensitive, Actor: Actor(),
+            AllowedTools: new HashSet<string> { EllaiToolNames.UiObserve },
+            ConsentPurpose: EllaiConsentService.PublicProductHelpPurpose);
+        var request = new EllaiToolRequest(EllaiToolNames.UiObserve,
+            new Dictionary<string, string> { ["controls"] = "report.entry", ["view"] = "current" });
+        var observed = await broker.InvokeAsync(context, request, default);
+        var trace = EllaiToolTrace.SerializeFlattened([EllaiObservedToolResult.From(request, observed)], false, []);
+        var turns = new[] { Turn("prior", 1, "show report", "no report", trace), Turn("current", 2, "next", null, null) };
+        async Task<bool> Retained() => (await EllaiAuthorizedConversationContext.BuildAsync(turns, "current", Actor(), null, default,
+            toolContext: context, invokeTool: broker.InvokeAsync)).Messages.Any(message => message.Content == "no report");
+        Assert.True(await Retained());
+        await reports.RecordAsync(new("session", "view-1", "context-1", "web", ["report.entry"],
+            DateTimeOffset.UtcNow, [new("report.entry", UiObservationState.Ready)]), default);
+        Assert.False(await Retained());
     }
 
     [Theory]
@@ -449,6 +520,67 @@ public sealed class EllaiAuthorizedConversationContextTests
                 ? DashboardAggregateAccess.Denied : DashboardAggregateAccess.Allowed, [row], DateTimeOffset.UtcNow,
                 state == "truncated"));
         }
+    }
+
+    [Fact]
+    public async Task ImportDestinationHistoryRequiresTheSameAuthorizedResult()
+    {
+        var request = new EllaiToolRequest(EllaiToolNames.ImportDestinations, new Dictionary<string, string>());
+        var result = new EllaiToolResult(EllaiToolNames.ImportDestinations, true, null, [], "private workspace", 1, false);
+        var observation = EllaiObservedToolResult.From(request, result);
+        Assert.NotNull(observation.ImportDestinationsDigest);
+        var trace = EllaiToolTrace.SerializeFlattened([observation], false, []);
+        Assert.NotNull(trace);
+        Assert.DoesNotContain("private workspace", trace);
+        Assert.Null(EllaiToolTrace.SerializeFlattened([observation with { ToolName = EllaiToolNames.Now }], false, []));
+        Assert.Null(EllaiToolTrace.SerializeFlattened([observation with { ImportDestinationsDigest = "invalid" }], false, []));
+        Assert.Null(EllaiObservedToolResult.From(request, result with { Truncated = true }).ImportDestinationsDigest);
+        var turns = new[] { Turn("prior", 1, "destinations?", "answer", trace), Turn("current", 2, "follow up", null, null) };
+        var context = new EllaiToolContext("session", "epoch", "cases", null, 4, true,
+            Actor: Actor(), AllowedTools: new HashSet<string> { EllaiToolNames.ImportDestinations });
+        async Task<bool> Retained(EllaiToolContext currentContext, EllaiToolResult current) =>
+            (await EllaiAuthorizedConversationContext.BuildAsync(turns, "current", Actor(), null, default,
+                toolContext: currentContext, invokeTool: (_, _, _) => Task.FromResult(current))).RetainedTurnIds.Contains("prior");
+        Assert.True(await Retained(context, result));
+        Assert.False(await Retained(context, result with { ResultSummary = "changed" }));
+        Assert.False(await Retained(context, result with { Allowed = false }));
+        Assert.False(await Retained(context with { AllowedTools = new HashSet<string>() }, result));
+        var oldTrace = EllaiToolTrace.SerializeFlattened([observation with { ImportDestinationsDigest = null }], false, []);
+        var oldTurns = new[] { Turn("prior", 1, "destinations?", "answer", oldTrace), Turn("current", 2, "follow up", null, null) };
+        Assert.Empty((await EllaiAuthorizedConversationContext.BuildAsync(oldTurns, "current", Actor(), null, default,
+            toolContext: context, invokeTool: (_, _, _) => Task.FromResult(result))).RetainedTurnIds);
+    }
+
+    [Fact]
+    public async Task ClassificationHistoryRequiresTheSameAuthorizedResult()
+    {
+        var caseId = Guid.NewGuid();
+        var request = new EllaiToolRequest(EllaiToolNames.ClassificationEvidence,
+            new Dictionary<string, string> { ["case_id"] = caseId.ToString("D") });
+        var result = new EllaiToolResult(EllaiToolNames.ClassificationEvidence, true, null, [], "private result", 1, false);
+        var observation = EllaiObservedToolResult.From(request, result);
+        Assert.Equal(caseId, observation.ClassificationReplayScope!.CaseId);
+        var trace = EllaiToolTrace.SerializeFlattened([observation], false, []);
+        Assert.NotNull(trace);
+        Assert.DoesNotContain("private result", trace);
+        Assert.Null(EllaiToolTrace.SerializeFlattened([observation with { ToolName = EllaiToolNames.Now }], false, []));
+        Assert.Null(EllaiToolTrace.SerializeFlattened([observation with
+            { ClassificationReplayScope = new EllaiClassificationReplayScope(caseId, "bad") }], false, []));
+        Assert.Null(EllaiObservedToolResult.From(request, result with { Truncated = true }).ClassificationReplayScope);
+        var turns = new[] { Turn("prior", 1, "classification?", "answer", trace), Turn("current", 2, "follow up", null, null) };
+        var context = new EllaiToolContext("session", "epoch", "cases", null, 4, true,
+            Actor: Actor(), AllowedTools: new HashSet<string> { EllaiToolNames.ClassificationEvidence });
+        async Task<bool> Retained(EllaiToolContext currentContext, EllaiToolResult current) =>
+            (await EllaiAuthorizedConversationContext.BuildAsync(turns, "current", Actor(), null, default,
+                toolContext: currentContext, invokeTool: (_, _, _) => Task.FromResult(current))).RetainedTurnIds.Contains("prior");
+        Assert.True(await Retained(context, result));
+        Assert.False(await Retained(context, result with { ResultSummary = "changed" }));
+        Assert.False(await Retained(context, result with { Allowed = false }));
+        Assert.False(await Retained(context with { AllowedTools = new HashSet<string>() }, result));
+        var oldTrace = EllaiToolTrace.SerializeFlattened([observation with { ClassificationReplayScope = null }], false, []);
+        var oldTurns = new[] { Turn("prior", 1, "classification?", "answer", oldTrace), Turn("current", 2, "follow up", null, null) };
+        Assert.Empty((await EllaiAuthorizedConversationContext.BuildAsync(oldTurns, "current", Actor(), null, default,
+            toolContext: context, invokeTool: (_, _, _) => Task.FromResult(result))).RetainedTurnIds);
     }
 
     [Fact]

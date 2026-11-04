@@ -139,7 +139,67 @@ public sealed class EllaiIsolatedToolCallsTests
     [InlineData(EllaiToolNames.UiObserve, true)]
     [InlineData(EllaiToolNames.Locations, false)]
     public void OnlyExplicitReadOnlyToolsCanOutliveTurn(string name, bool expected) =>
-        Assert.Equal(expected, EllaiUtteranceWorker.CanDetachReadOnlyTool(name));
+        Assert.Equal(expected, EllaiUtteranceWorker.CanDetachReadOnlyTool(
+            new EllaiToolRequest(name, name == EllaiToolNames.State
+                ? new Dictionary<string, string> { ["projection"] = "queue" }
+                : new Dictionary<string, string>())));
+
+    [Theory]
+    [InlineData(null, false, true)]
+    [InlineData("feature", false, true)]
+    [InlineData("FEATURE", false, true)]
+    [InlineData("feature", true, false)]
+    [InlineData(null, true, false)]
+    [InlineData("queue", false, false)]
+    [InlineData("unknown", false, false)]
+    public async Task StateIsolationDetachesOnlyStaticFeatureReads(string? projection, bool extraArgument, bool readOnly)
+    {
+        var arguments = new Dictionary<string, string>();
+        if (projection is not null) arguments["projection"] = projection;
+        if (extraArgument) arguments["other"] = "value";
+        var request = new EllaiToolRequest(EllaiToolNames.State, arguments);
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var finished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var cancellation = new CancellationTokenSource();
+        var run = EllaiUtteranceWorker.InvokeToolWithIsolation(request, async _ =>
+        {
+            started.TrySetResult();
+            await release.Task;
+            finished.TrySetResult();
+            return 42;
+        }, new EllaiIsolatedToolCalls(1), cancellation.Token);
+
+        try
+        {
+            await started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            cancellation.Cancel();
+            if (readOnly)
+                await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run.WaitAsync(TimeSpan.FromSeconds(5)));
+            else
+                Assert.False(run.IsCompleted);
+        }
+        finally
+        {
+            release.TrySetResult();
+        }
+        if (!readOnly) Assert.Equal(42, await run.WaitAsync(TimeSpan.FromSeconds(5)));
+        await finished.Task.WaitAsync(TimeSpan.FromSeconds(5));
+    }
+
+    [Theory]
+    [InlineData("queue", false, true)]
+    [InlineData("QUEUE", false, true)]
+    [InlineData("queue", true, false)]
+    [InlineData("feature", false, false)]
+    [InlineData(null, false, false)]
+    public void FencedQueueSelectionRejectsUnrecognizedShapes(string? projection, bool extraArgument, bool expected)
+    {
+        var arguments = new Dictionary<string, string>();
+        if (projection is not null) arguments["projection"] = projection;
+        if (extraArgument) arguments["unexpected"] = "value";
+        Assert.Equal(expected, EllaiUtteranceWorker.IsFencedQueueRequest(new(EllaiToolNames.State, arguments)));
+    }
 
     [Fact]
     public async Task CancelledCallerDoesNotDisposeRunningOperationsScope()

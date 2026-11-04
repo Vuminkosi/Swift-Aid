@@ -39,7 +39,8 @@ public sealed record EllaiUtteranceServices(
     SwiftAid.Application.Intake.Imports.ICaseImportStore? Imports = null,
     SwiftAid.Application.Intake.Imports.ICaseImportWorkspaceReader? ImportWorkspaces = null,
     SwiftAid.Application.Cases.IDashboardAggregateQuery? Dashboard = null,
-    Func<string, CancellationToken, ValueTask>? OnVerifiedStreamSegment = null);
+    Func<string, CancellationToken, ValueTask>? OnVerifiedStreamSegment = null,
+    IEllaiLocationReplayProtector? LocationReplayProtector = null);
 
 /// <summary>Background execution of one accepted utterance with ledger,
 /// activity and journal wiring. Ordinary typed messages need no separate
@@ -130,7 +131,7 @@ public static class EllaiUtteranceRunner
         var authorizedHistory = services.Loop is IEllaiHistoryAuthorizationRequired
             ? await EllaiAuthorizedConversationContext.BuildAsync(conversation, work.ClientUtteranceId,
                 work.Actor, services.CaseQueue, ct, services.TechnicalDocs, services.Imports, services.ImportWorkspaces,
-                services.Dashboard, context, services.InvokeToolAsync).ConfigureAwait(false) : null;
+                services.Dashboard, context, services.InvokeToolAsync, services.LocationReplayProtector).ConfigureAwait(false) : null;
         var history = authorizedHistory?.Messages ?? EllaiConversationContext.Build(conversation, work.ClientUtteranceId);
         var checkpointTurnId = authorizedHistory is null ? null : conversation
             .LastOrDefault(turn => turn.Outcome == "Completed" &&
@@ -156,7 +157,7 @@ public static class EllaiUtteranceRunner
             {
                 var currentHistory = await EllaiAuthorizedConversationContext.BuildAsync(conversation, work.ClientUtteranceId,
                     work.Actor, services.CaseQueue, fenceCt, services.TechnicalDocs, services.Imports, services.ImportWorkspaces,
-                    services.Dashboard, context, services.InvokeToolAsync).ConfigureAwait(false);
+                    services.Dashboard, context, services.InvokeToolAsync, services.LocationReplayProtector).ConfigureAwait(false);
                 fenceCt.ThrowIfCancellationRequested();
                 var currentlyAuthorizedIds = currentHistory.RetainedTurnIds.ToHashSet(StringComparer.Ordinal);
                 if (authorizedHistory.RetainedTurnIds.Any(id => !currentlyAuthorizedIds.Contains(id)))
@@ -189,8 +190,7 @@ public static class EllaiUtteranceRunner
                     DateTimeOffset.UtcNow));
         }
 
-        if (services.OnVerifiedStreamSegment is not null)
-            request = request with { RevalidateStreamObservations = async (observations, segmentCt) =>
+        request = request with { RevalidateStreamObservations = async (observations, segmentCt) =>
             {
                 var trace = EllaiToolTrace.SerializeFlattened(observations, false, []);
                 if (trace is null) return false;
@@ -200,9 +200,10 @@ public static class EllaiUtteranceRunner
                     "Current", null, "Processing", 1, null);
                 var checkedEvidence = await EllaiAuthorizedConversationContext.BuildAsync([previous, currentTurn],
                     currentTurn.ClientUtteranceId, work.Actor, services.CaseQueue, segmentCt, services.TechnicalDocs,
-                    services.Imports, services.ImportWorkspaces, services.Dashboard, context, services.InvokeToolAsync).ConfigureAwait(false);
+                    services.Imports, services.ImportWorkspaces, services.Dashboard, context, services.InvokeToolAsync,
+                    services.LocationReplayProtector).ConfigureAwait(false);
                 return checkedEvidence.RetainedTurnIds.Contains(previous.ClientUtteranceId, StringComparer.Ordinal);
-            }, OnVerifiedStreamSegment = languages.OutputLanguage != "eng" ? null : async (text, segmentCt) =>
+            }, OnVerifiedStreamSegment = services.OnVerifiedStreamSegment is null || languages.OutputLanguage != "eng" ? null : async (text, segmentCt) =>
             {
                 if (await IsExecutionCurrentAsync(segmentCt).ConfigureAwait(false))
                     await services.OnVerifiedStreamSegment(text, segmentCt).ConfigureAwait(false);
@@ -254,6 +255,14 @@ public static class EllaiUtteranceRunner
             catch (Exception error) when (error is EllaiLanguageProviderException or InvalidDataException or ArgumentException)
             {
                 return new(true, false, "The reply could not be translated.", FailureCode: "TranslationUnavailable");
+            }
+            // Translation can outlive the authority that allowed this turn's
+            // tool observations. Do not return its result unless the complete
+            // current-turn provenance is still authorized.
+            if (outcome.ToolCallsUsed > 0 && (outcome.ObservedTools is not { Count: > 0 } ||
+                !await request.RevalidateStreamObservations!(outcome.ObservedTools, ct).ConfigureAwait(false)))
+            {
+                return new(true, false, "The session or its permissions changed.", FailureCode: EllaiToolReasonCodes.DeniedByPolicy);
             }
         }
         // In particular, the legacy loop can finish after an in-flight provider

@@ -52,6 +52,113 @@ public sealed class EllaiUtteranceWorkerOutcomeTests
     }
 
     [Fact]
+    public async Task FeedHidesProvisionalChunkWhenAttemptIsReclaimedDuringRead()
+    {
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim(ClaimTypes.NameIdentifier, "feed-race-owner"), new Claim(ActorContext.AccessEpochClaimType, "1")], "test"));
+        var actor = ActorContext.FromValidatedPrincipal(principal);
+        var now = DateTimeOffset.UtcNow;
+        var session = new EllaiSessionRecord("feed-race-session", EllaiMode.Ask, "Active", 1, 1, 1, 1,
+            0, 12, actor.ActorId, "scope", null, null, now);
+        var store = new InMemoryEllaiSessionStore();
+        await store.CreateAsync(session, default);
+        await store.TryAcceptUtteranceAsync(session with { SessionVersion = 2 }, 1, "turn", default, "{}");
+        Assert.NotNull(await store.ClaimNextAsync(now, now.AddMinutes(1), default));
+        var responses = new EllaiSessionResponseStore();
+        var generation = responses.CaptureGeneration(session.SessionId);
+        Assert.True(responses.PublishProvisional(session.SessionId, generation, "turn", 1, "scope", 1, 1, "private segment"));
+        var outbox = new CompletionObservedOutbox(store)
+        {
+            AfterRead = async () => Assert.NotNull(await store.ClaimNextAsync(now.AddMinutes(2), now.AddMinutes(3), default))
+        };
+        var http = new DefaultHttpContext { User = principal };
+
+        var page = (EllaiSessionResponsePageDto)((IValueHttpResult)await EllaiConversationFeed.ReadAsync(
+            http, session.SessionId, 0, null, outbox, responses, store, default)).Value!;
+        Assert.DoesNotContain(page.Responses, item => item.Text == "private segment");
+    }
+
+    [Fact]
+    public async Task FeedOmitsConversationWhenOwnerChangesDuringRead()
+    {
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim(ClaimTypes.NameIdentifier, "old-owner"), new Claim(ActorContext.AccessEpochClaimType, "1")], "test"));
+        var actor = ActorContext.FromValidatedPrincipal(principal);
+        var session = new EllaiSessionRecord("feed-owner-race", EllaiMode.Ask, "Active", 1, 1, 1, 1,
+            0, 12, actor.ActorId, "scope", null, null, DateTimeOffset.UtcNow);
+        var store = new InMemoryEllaiSessionStore();
+        await store.CreateAsync(session, default);
+        await store.TryAcceptUtteranceAsync(session with { SessionVersion = 2 }, 1, "turn", default, "{}");
+        var outbox = new CompletionObservedOutbox(store)
+        {
+            AfterRead = async () => Assert.NotNull(await store.TryUpdateAsync(
+                session with { SessionVersion = 3, OwnerActorId = "new-owner" }, 2, default))
+        };
+        var page = (EllaiSessionResponsePageDto)((IValueHttpResult)await EllaiConversationFeed.ReadAsync(
+            new DefaultHttpContext { User = principal }, session.SessionId, 0, null,
+            outbox, new EllaiSessionResponseStore(), store, default)).Value!;
+        Assert.Empty(page.Conversation!);
+    }
+
+    [Fact]
+    public async Task AudioHidesProvisionalChunkWhenAttemptIsReclaimedDuringRead()
+    {
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim(ClaimTypes.NameIdentifier, "audio-race-owner"), new Claim(ActorContext.AccessEpochClaimType, "1")], "test"));
+        var actor = ActorContext.FromValidatedPrincipal(principal);
+        var now = DateTimeOffset.UtcNow;
+        var session = new EllaiSessionRecord("audio-race-session", EllaiMode.Ask, "Active", 1, 1, 1, 1,
+            0, 12, actor.ActorId, "scope", null, null, now);
+        var store = new InMemoryEllaiSessionStore();
+        await store.CreateAsync(session, default);
+        await store.TryAcceptUtteranceAsync(session with { SessionVersion = 2 }, 1, "turn", default, "{}");
+        Assert.NotNull(await store.ClaimNextAsync(now, now.AddMinutes(1), default));
+        var responses = new EllaiSessionResponseStore();
+        var generation = responses.CaptureGeneration(session.SessionId);
+        Assert.True(responses.PublishProvisional(session.SessionId, generation, "turn", 1, "scope", 1, 1, "private segment"));
+        var outbox = new CompletionObservedOutbox(store)
+        {
+            AfterRead = async () => Assert.NotNull(await store.ClaimNextAsync(now.AddMinutes(2), now.AddMinutes(3), default))
+        };
+        await using var services = new ServiceCollection().AddSingleton<IEllaiSessionStore>(store)
+            .AddSingleton<IEllaiUtteranceOutboxStore>(outbox).BuildServiceProvider();
+        var http = new DefaultHttpContext { User = principal, RequestServices = services };
+        using var prepared = new EllaiPreparedResponseAudio(new NarrationSpeech(), NullLogger<EllaiPreparedResponseAudio>.Instance);
+
+        var audio = await EllaiGuestEndpoints.StreamResponseAudioAsync(session.SessionId, 1, http,
+            responses, prepared, new(), new());
+        Assert.Equal(StatusCodes.Status404NotFound, ((IStatusCodeHttpResult)audio).StatusCode);
+    }
+
+    [Fact]
+    public async Task ProvisionalDeliveryFailsClosedWhenDurableCheckIsUnavailable()
+    {
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim(ClaimTypes.NameIdentifier, "outage-owner"), new Claim(ActorContext.AccessEpochClaimType, "1")], "test"));
+        var actor = ActorContext.FromValidatedPrincipal(principal);
+        var now = DateTimeOffset.UtcNow;
+        var session = new EllaiSessionRecord("outage-session", EllaiMode.Ask, "Active", 1, 1, 1, 1,
+            0, 12, actor.ActorId, "scope", null, null, now);
+        var store = new InMemoryEllaiSessionStore();
+        await store.CreateAsync(session, default);
+        await store.TryAcceptUtteranceAsync(session with { SessionVersion = 2 }, 1, "turn", default, "{}");
+        Assert.NotNull(await store.ClaimNextAsync(now, now.AddMinutes(1), default));
+        var responses = new EllaiSessionResponseStore();
+        var generation = responses.CaptureGeneration(session.SessionId);
+        Assert.True(responses.PublishProvisional(session.SessionId, generation, "turn", 1, "scope", 1, 1, "private segment"));
+        var outbox = new CompletionObservedOutbox(store) { FailDelivery = true };
+        await using var services = new ServiceCollection().AddSingleton<IEllaiSessionStore>(store)
+            .AddSingleton<IEllaiUtteranceOutboxStore>(outbox).BuildServiceProvider();
+        var http = new DefaultHttpContext { User = principal, RequestServices = services };
+        using var prepared = new EllaiPreparedResponseAudio(new NarrationSpeech(), NullLogger<EllaiPreparedResponseAudio>.Instance);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            EllaiConversationFeed.ReadAsync(http, session.SessionId, 0, null, outbox, responses, store, default));
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            EllaiGuestEndpoints.StreamResponseAudioAsync(session.SessionId, 1, http, responses, prepared, new(), new()));
+    }
+
+    [Fact]
     public async Task FrameworkGuidanceProposalSurvivesWorkerCommitAndOwnerProjection()
     {
         var store = new InMemoryEllaiSessionStore();
@@ -174,10 +281,11 @@ public sealed class EllaiUtteranceWorkerOutcomeTests
     }
 
     [Theory]
-    [InlineData(false, false)]
-    [InlineData(true, false)]
-    [InlineData(true, true)]
-    public async Task FrameworkWorkerRenewsLeaseOrCancelsIfRenewalFails(bool rejectRenewal, bool noncooperative)
+    [InlineData(false, false, false)]
+    [InlineData(true, false, false)]
+    [InlineData(true, true, false)]
+    [InlineData(true, false, true)]
+    public async Task FrameworkWorkerRenewsLeaseOrCancelsIfRenewalFails(bool rejectRenewal, bool noncooperative, bool heldProvider)
     {
         var store = new InMemoryEllaiSessionStore();
         var outbox = new CompletionObservedOutbox(store) { RejectRenewal = rejectRenewal };
@@ -193,7 +301,7 @@ public sealed class EllaiUtteranceWorkerOutcomeTests
         await store.TryAcceptUtteranceAsync(session with { SessionVersion = 2, CyclesUsed = 1 }, 1, work.ClientUtteranceId,
             default, EllaiUtteranceWorkEnvelope.Serialize(work, work.ClientUtteranceId));
         var consent = new EllaiConsentService();
-        using var model = new HeldFrameworkStream("Synthetic answer.");
+        using var model = new HeldFrameworkStream("Synthetic answer.", ignoreCancellation: heldProvider);
         var framework = new EllaiFrameworkExecutor(model, new EllaiPromptBuilder("Synthetic policy", "fixture"),
             new EllaiToolBroker(new EllaiPolicyService(), consent), new EllaiUsageLedger(), new InMemoryEllaiUsageStore());
         var uncooperative = new CancellationIgnoringExecutor();
@@ -227,6 +335,7 @@ public sealed class EllaiUtteranceWorkerOutcomeTests
                 turn = Assert.Single(await store.ReadConversationAsync(session.SessionId, actor.ActorId, timeout.Token));
             } while (turn.Outcome == "Processing");
             Assert.Equal("RetryableFailure", turn.Outcome);
+            if (heldProvider) Assert.False(model.Release.Task.IsCompleted);
             Assert.DoesNotContain(responses.ReadSince(session.SessionId, 0).Responses,
                 item => item.Progress is null && !string.IsNullOrWhiteSpace(item.Text));
         }
@@ -409,10 +518,12 @@ public sealed class EllaiUtteranceWorkerOutcomeTests
         }
     }
 
-    private sealed class CompletionObservedOutbox(IEllaiUtteranceOutboxStore inner) : IEllaiUtteranceOutboxStore, IEllaiUtteranceLeaseRenewal
+    private sealed class CompletionObservedOutbox(IEllaiUtteranceOutboxStore inner) : IEllaiUtteranceOutboxStore, IEllaiUtteranceLeaseRenewal, IEllaiProvisionalDeliveryFence
     {
         public bool HoldCompletion { get; init; }
         public Func<string, Task>? AfterCompletion { get; init; }
+        public Func<Task>? AfterRead { get; init; }
+        public bool FailDelivery { get; init; }
         private volatile bool _rejectRenewal;
         public bool RejectRenewal { get => _rejectRenewal; set => _rejectRenewal = value; }
         private int _renewalCount;
@@ -427,8 +538,18 @@ public sealed class EllaiUtteranceWorkerOutcomeTests
         public TaskCompletionSource<EllaiUtteranceResolution?> Completion { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public Task<EllaiConversationTurn?> ReadLatestGuidanceTurnAsync(string sessionId, string ownerActorId, CancellationToken ct) =>
             inner.ReadLatestGuidanceTurnAsync(sessionId, ownerActorId, ct);
-        public Task<IReadOnlyList<EllaiConversationTurn>> ReadConversationAsync(string sessionId, string ownerActorId, CancellationToken ct) =>
-            inner.ReadConversationAsync(sessionId, ownerActorId, ct);
+        public async Task<IReadOnlyList<EllaiConversationTurn>> ReadConversationAsync(string sessionId, string ownerActorId, CancellationToken ct)
+        {
+            var result = await inner.ReadConversationAsync(sessionId, ownerActorId, ct);
+            if (AfterRead is not null) await AfterRead();
+            return result;
+        }
+        public Task<bool> CanDeliverProvisionalAsync(string sessionId, string utteranceId, int attempt, string actorId,
+            string scopeEpoch, long interactionEpoch, CancellationToken ct) =>
+            FailDelivery ? Task.FromException<bool>(new InvalidOperationException("Synthetic durable read failure")) :
+            inner is IEllaiProvisionalDeliveryFence fence
+                ? fence.CanDeliverProvisionalAsync(sessionId, utteranceId, attempt, actorId, scopeEpoch, interactionEpoch, ct)
+                : Task.FromResult(false);
         public Task<IReadOnlyList<EllaiConversationTurn>> ReadConversationForExecutionAsync(string sessionId, string ownerActorId,
             string clientUtteranceId, CancellationToken ct) =>
             inner.ReadConversationForExecutionAsync(sessionId, ownerActorId, clientUtteranceId, ct);
@@ -465,7 +586,7 @@ public sealed class EllaiUtteranceWorkerOutcomeTests
     }
 
     [Fact]
-    public async Task FrameworkWorkerPublishesVerifiedSegmentBeforeModelFinishes()
+    public async Task FrameworkWorkerBuffersEvidenceFreeSegmentUntilModelFinishes()
     {
         var store = new InMemoryEllaiSessionStore();
         var responses = new EllaiSessionResponseStore();
@@ -492,8 +613,8 @@ public sealed class EllaiUtteranceWorkerOutcomeTests
         {
             await model.FirstPart.Task.WaitAsync(TimeSpan.FromSeconds(5));
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-            while (!responses.ReadSince(session.SessionId, 0).Responses.Any(item => item.Text == "Synthetic answer." && !item.IsFinal))
-                await Task.Delay(10, timeout.Token);
+            Assert.DoesNotContain(responses.ReadSince(session.SessionId, 0).Responses,
+                item => item.Text == "Synthetic answer.");
             Assert.Equal("Processing", Assert.Single(await store.ReadConversationAsync(session.SessionId, actor.ActorId, timeout.Token)).Outcome);
             model.Release.TrySetResult();
             EllaiConversationTurn turn;
@@ -508,7 +629,7 @@ public sealed class EllaiUtteranceWorkerOutcomeTests
         finally { model.Release.TrySetResult(); await worker.StopAsync(CancellationToken.None); }
     }
 
-    private sealed class HeldFrameworkStream(string answer, bool segmented = false) : IChatClient
+    private sealed class HeldFrameworkStream(string answer, bool segmented = false, bool ignoreCancellation = false) : IChatClient
     {
         public TaskCompletionSource FirstPart { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -522,14 +643,14 @@ public sealed class EllaiUtteranceWorkerOutcomeTests
             {
                 yield return new ChatResponseUpdate(ChatRole.Assistant, "{\"stream_segments\":[{\"text\":\"Synthetic answer.\",\"claims\":[]}]");
                 FirstPart.TrySetResult();
-                await Release.Task.WaitAsync(cancellationToken);
+                if (ignoreCancellation) await Release.Task; else await Release.Task.WaitAsync(cancellationToken);
                 yield return new ChatResponseUpdate(ChatRole.Assistant, "," + response.TrimStart()[1..]);
                 yield break;
             }
             var split = response.IndexOf(answer, StringComparison.Ordinal) + answer.Length;
             yield return new ChatResponseUpdate(ChatRole.Assistant, response[..split]);
             FirstPart.TrySetResult();
-            await Release.Task.WaitAsync(cancellationToken);
+            if (ignoreCancellation) await Release.Task; else await Release.Task.WaitAsync(cancellationToken);
             yield return new ChatResponseUpdate(ChatRole.Assistant, response[split..]);
         }
         public object? GetService(Type serviceType, object? serviceKey = null) => null;
@@ -598,15 +719,154 @@ public sealed class EllaiUtteranceWorkerOutcomeTests
         public void Dispose() { }
     }
 
+    [Fact]
+    public async Task WorkerExecutesSplitProviderToolNameThroughFramework()
+    {
+        var store = new InMemoryEllaiSessionStore();
+        var responses = new EllaiSessionResponseStore();
+        var actor = ActorContext.FromValidatedPrincipal(new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim(ClaimTypes.NameIdentifier, "split-worker"), new Claim(ActorContext.AccessEpochClaimType, "1")], "test")));
+        var session = new EllaiSessionRecord("split-session", EllaiMode.Ask, "Active", 1, 1, 1, 1,
+            0, 12, actor.ActorId, "scope", null, null, DateTimeOffset.UtcNow);
+        await store.CreateAsync(session, default);
+        var work = new EllaiUtteranceWork(session.SessionId, "scope", "What time is it?", "public.product-help", null,
+            EllaiMode.Ask, 1, "cycle", actor, true, "consent/0", EllaiProcessingClassification.UserProvidedNonSensitive,
+            EllaiProcessingClassification.UserProvidedNonSensitive, new HashSet<string> { EllaiToolNames.Now },
+            EllaiConsentPurposes.PublicProductHelp, "turn");
+        await store.TryAcceptUtteranceAsync(session with { SessionVersion = 2, CyclesUsed = 1 }, 1, work.ClientUtteranceId,
+            default, EllaiUtteranceWorkEnvelope.Serialize(work, work.ClientUtteranceId));
+        var consent = new EllaiConsentService();
+        using var handler = new SplitToolHttpHandler();
+        using var http = new HttpClient(handler);
+        using var model = EllaiMuseChatClientFactory.Create(new EllaiOptions
+        {
+            Enabled = true, ApiUrl = "https://fixture.invalid/v1", ApiKey = "fixture-key", ReasoningModel = "fixture-model"
+        }, http);
+        var executor = new EllaiFrameworkExecutor(model, new EllaiPromptBuilder("Synthetic policy", "fixture"),
+            new EllaiToolBroker(new EllaiPolicyService(), consent), new EllaiUsageLedger(), new InMemoryEllaiUsageStore());
+        await using var services = new ServiceCollection().AddSingleton<IEllaiSessionStore>(store)
+            .AddSingleton<IEllaiUtteranceOutboxStore>(store).AddSingleton(responses).AddSingleton(consent)
+            .AddSingleton<IEllaiReasoningExecutor>(executor).BuildServiceProvider();
+        using var worker = new EllaiUtteranceWorker(services, NullLogger<EllaiUtteranceWorker>.Instance);
+        await worker.StartAsync(default);
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            EllaiConversationTurn turn;
+            do
+            {
+                await Task.Delay(10, timeout.Token);
+                turn = Assert.Single(await store.ReadConversationAsync(session.SessionId, actor.ActorId, timeout.Token));
+            } while (turn.CompletedAtUtc is null);
+            Assert.Equal("Completed", turn.Outcome);
+            Assert.Equal("Synthetic answer.", turn.AssistantText);
+            Assert.Equal(2, handler.Calls);
+            Assert.True(EllaiToolTrace.TryRead(turn.ToolTraceJson!, out var trace));
+            Assert.Contains(trace!.Observations, item => item.ToolName == EllaiToolNames.Now &&
+                item.ClockVersion == EllaiObservedToolResult.CurrentClockVersion);
+        }
+        finally { await worker.StopAsync(default); }
+    }
+
+    private sealed class SplitToolHttpHandler : HttpMessageHandler
+    {
+        public int Calls { get; private set; }
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var payload = ++Calls == 1 ? """
+                data: {"id":"fixture","object":"chat.completion.chunk","created":1,"model":"fixture-model","choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call-1","type":"function","function":{"name":"ellai_","arguments":"{"}}]},"finish_reason":null}]}
+
+                data: {"id":"fixture","object":"chat.completion.chunk","created":1,"model":"fixture-model","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"name":"now","arguments":"}"}}]},"finish_reason":null}]}
+
+                data: {"id":"fixture","object":"chat.completion.chunk","created":1,"model":"fixture-model","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}
+
+                data: [DONE]
+
+                """ : "data: " + System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    id = "fixture", @object = "chat.completion.chunk", created = 1, model = "fixture-model",
+                    choices = new[] { new { index = 0, delta = new { role = "assistant", content = Answer }, finish_reason = "stop" } }
+                }) + "\n\ndata: [DONE]\n\n";
+            return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                Content = new StringContent(payload, System.Text.Encoding.UTF8, "text/event-stream")
+            });
+        }
+    }
+
+    [Fact]
+    public async Task WorkerRejectsMalformedToolArgumentsWithoutPublishingAnAnswer()
+    {
+        var store = new InMemoryEllaiSessionStore();
+        var responses = new EllaiSessionResponseStore();
+        var actor = ActorContext.FromValidatedPrincipal(new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim(ClaimTypes.NameIdentifier, "malformed-worker"), new Claim(ActorContext.AccessEpochClaimType, "1")], "test")));
+        var session = new EllaiSessionRecord("malformed-session", EllaiMode.Ask, "Active", 1, 1, 1, 1,
+            0, 12, actor.ActorId, "scope", null, null, DateTimeOffset.UtcNow);
+        await store.CreateAsync(session, default);
+        var work = new EllaiUtteranceWork(session.SessionId, "scope", "What time is it?", "public.product-help", null,
+            EllaiMode.Ask, 1, "cycle", actor, true, "consent/0", EllaiProcessingClassification.UserProvidedNonSensitive,
+            EllaiProcessingClassification.UserProvidedNonSensitive, new HashSet<string> { EllaiToolNames.Now },
+            EllaiConsentPurposes.PublicProductHelp, "turn");
+        await store.TryAcceptUtteranceAsync(session with { SessionVersion = 2, CyclesUsed = 1 }, 1, work.ClientUtteranceId,
+            default, EllaiUtteranceWorkEnvelope.Serialize(work, work.ClientUtteranceId));
+        var consent = new EllaiConsentService();
+        using var model = new MalformedWorkerClient();
+        var executor = new EllaiFrameworkExecutor(model, new EllaiPromptBuilder("Synthetic policy", "fixture"),
+            new EllaiToolBroker(new EllaiPolicyService(), consent), new EllaiUsageLedger(), new InMemoryEllaiUsageStore());
+        await using var services = new ServiceCollection().AddSingleton<IEllaiSessionStore>(store)
+            .AddSingleton<IEllaiUtteranceOutboxStore>(store).AddSingleton(responses).AddSingleton(consent)
+            .AddSingleton<IEllaiReasoningExecutor>(executor).BuildServiceProvider();
+        using var worker = new EllaiUtteranceWorker(services, NullLogger<EllaiUtteranceWorker>.Instance);
+        await worker.StartAsync(default);
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            EllaiConversationTurn turn;
+            do
+            {
+                await Task.Delay(10, timeout.Token);
+                turn = Assert.Single(await store.ReadConversationAsync(session.SessionId, actor.ActorId, timeout.Token));
+            } while (turn.CompletedAtUtc is null);
+            Assert.Equal("TerminalFailure", turn.Outcome);
+            Assert.Null(turn.AssistantText);
+            Assert.Null(turn.ToolTraceJson);
+            Assert.Equal(1, model.Calls);
+            Assert.DoesNotContain(responses.ReadSince(session.SessionId, 0).Responses,
+                item => item.Progress is null && !string.IsNullOrWhiteSpace(item.Text));
+        }
+        finally { await worker.StopAsync(default); }
+    }
+
+    private sealed class MalformedWorkerClient : IChatClient
+    {
+        public int Calls { get; private set; }
+        public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            await Task.Yield();
+            Calls++;
+            yield return new ChatResponseUpdate(ChatRole.Assistant,
+                [new FunctionCallContent("malformed", EllaiToolNames.Now) { Exception = new FormatException("synthetic parse failure") }]);
+        }
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+        public void Dispose() { }
+    }
+
     [Theory]
-    [InlineData(null, false, false)]
-    [InlineData(EllaiToolNames.Now, false, false)]
-    [InlineData(EllaiToolNames.Capabilities, false, false)]
-    [InlineData(EllaiToolNames.Receipts, false, false)]
-    [InlineData(EllaiToolNames.UiCatalogue, false, false)]
-    [InlineData(EllaiToolNames.UiCatalogue, true, false)]
-    [InlineData(EllaiToolNames.UiCatalogue, false, true)]
-    public async Task WorkerRunsFrameworkExecutorAndPersistsAndStreamsAnswer(string? toolName, bool changeCatalogue, bool filterGoal)
+    [InlineData(null, false, false, false)]
+    [InlineData(EllaiToolNames.Now, false, false, false)]
+    [InlineData(EllaiToolNames.Capabilities, false, false, false)]
+    [InlineData(EllaiToolNames.Receipts, false, false, false)]
+    [InlineData(EllaiToolNames.UiCatalogue, false, false, false)]
+    [InlineData(EllaiToolNames.UiCatalogue, true, false, false)]
+    [InlineData(EllaiToolNames.UiCatalogue, false, true, false)]
+    [InlineData(EllaiToolNames.UiObserve, false, false, false)]
+    [InlineData(EllaiToolNames.UiObserve, false, false, true)]
+    public async Task WorkerRunsFrameworkExecutorAndPersistsAndStreamsAnswer(string? toolName, bool changeCatalogue, bool filterGoal,
+        bool changeObservationBeforeAnswer)
     {
         var store = new InMemoryEllaiSessionStore();
         var responses = new EllaiSessionResponseStore();
@@ -630,11 +890,21 @@ public sealed class EllaiUtteranceWorkerOutcomeTests
         using var model = new FrameworkStreamingClient(toolName, filterGoal);
         var registry = new EllaiUiRegistry();
         if (!changeCatalogue) EllaiReportGuidanceDescriptors.RegisterAll(registry);
+        var uiObservations = new InMemoryEllaiUiObservationStore();
+        await uiObservations.RecordAsync(new(session.SessionId, "view-1", "context-1", "web", ["report.entry"],
+            DateTimeOffset.UtcNow.AddSeconds(-2), [new("report.entry", UiObservationState.Ready)]), CancellationToken.None);
+        if (changeObservationBeforeAnswer)
+            model.BeforeAnswer = () => uiObservations.RecordAsync(new(session.SessionId, "view-2", "context-2", "web", [],
+                DateTimeOffset.UtcNow), CancellationToken.None);
+        else if (toolName == EllaiToolNames.UiObserve)
+            model.BeforeAnswer = () => uiObservations.RecordAsync(new(session.SessionId, "view-1", "context-1", "web", ["report.entry"],
+                DateTimeOffset.UtcNow, [new("report.entry", UiObservationState.Ready)]), CancellationToken.None);
         var registrations = new ServiceCollection()
             .AddSingleton<IEllaiSessionStore>(store).AddSingleton<IEllaiUtteranceOutboxStore>(store)
             .AddSingleton(responses).AddSingleton(consent).AddSingleton<EllaiUsageLedger>()
             .AddSingleton<IEllaiUsageStore>(usage).AddScoped(_ => new EllaiPromptBuilder("Synthetic test policy", "v-test"))
-            .AddScoped(_ => new EllaiToolBroker(new EllaiPolicyService(), consent, receipts: receipts, uiRegistry: registry));
+            .AddScoped(_ => new EllaiToolBroker(new EllaiPolicyService(), consent, receipts: receipts, uiRegistry: registry,
+                uiDiscovery: new EllaiUiDiscoveryService(), uiObservations: uiObservations));
         registrations.AddEllaiReasoningExecutor(new EllaiOptions
         {
             Enabled = true, ApiKey = "synthetic", ApiUrl = "https://fixture.invalid", ReasoningModel = "fixture"
@@ -654,6 +924,15 @@ public sealed class EllaiUtteranceWorkerOutcomeTests
                 await Task.Delay(10, timeout.Token);
                 turn = Assert.Single(await store.ReadConversationAsync(session.SessionId, actor.ActorId, timeout.Token));
             } while (turn.CompletedAtUtc is null);
+            if (changeObservationBeforeAnswer)
+            {
+                Assert.Contains("\"allowed\":true", model.ToolResult);
+                Assert.Equal("TerminalFailure", turn.Outcome);
+                Assert.Null(turn.AssistantText);
+                Assert.DoesNotContain(responses.ReadSince(session.SessionId, 0).Responses,
+                    item => item.Text.Contains("Synthetic answer.", StringComparison.Ordinal));
+                return;
+            }
             Assert.Equal("Completed", turn.Outcome);
             Assert.Equal("Synthetic answer.", turn.AssistantText);
             var published = responses.ReadSince(session.SessionId, 0).Responses;
@@ -673,6 +952,7 @@ public sealed class EllaiUtteranceWorkerOutcomeTests
                     (toolName == EllaiToolNames.Now ? item.ClockVersion == EllaiObservedToolResult.CurrentClockVersion :
                      toolName == EllaiToolNames.Capabilities ? item.CapabilityVersion == EllaiObservedToolResult.CurrentCapabilityVersion :
                      toolName == EllaiToolNames.Receipts ? item.ReceiptListDigest is not null :
+                     toolName == EllaiToolNames.UiObserve ? item.UiObservationReplayScope is not null :
                         item.UiCatalogueReplayScope is not null && (!filterGoal || item.UiCatalogueReplayScope.GoalTag == "report-help")));
             }
             {
@@ -710,6 +990,7 @@ public sealed class EllaiUtteranceWorkerOutcomeTests
     {
         public int Calls { get; private set; }
         public string ToolResult { get; private set; } = string.Empty;
+        public Func<Task>? BeforeAnswer { get; set; }
         public IReadOnlyList<string> LastMessages { get; private set; } = [];
         public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null,
             CancellationToken cancellationToken = default) => throw new NotSupportedException();
@@ -729,12 +1010,13 @@ public sealed class EllaiUtteranceWorkerOutcomeTests
                         : toolName == EllaiToolNames.State ? new Dictionary<string, object?> { ["projection"] = "queue" }
                         : toolName == EllaiToolNames.Imports ? new Dictionary<string, object?> { ["workspace_id"] = "test", ["organization_id"] = "org", ["country"] = "SZ" }
                         : toolName == EllaiToolNames.ImportStatus ? new Dictionary<string, object?> { ["import_id"] = "b6e9999d-f6d8-4d2d-acd8-dcfd820249f2" }
-                        : toolName == EllaiToolNames.UiObserve ? new Dictionary<string, object?> { ["controls"] = "test-control", ["view"] = "current" }
+                        : toolName == EllaiToolNames.UiObserve ? new Dictionary<string, object?> { ["controls"] = "report.entry", ["view"] = "current" }
                         : new Dictionary<string, object?>())]);
             else
             {
                 ToolResult = string.Join(" ", messages.SelectMany(message => message.Contents)
                     .OfType<FunctionResultContent>().Select(content => content.Result?.ToString()));
+                if (BeforeAnswer is not null) await BeforeAnswer();
                 yield return new ChatResponseUpdate(ChatRole.Assistant, Answer);
             }
             yield return new ChatResponseUpdate(ChatRole.Assistant,
@@ -1109,13 +1391,15 @@ public sealed class EllaiUtteranceWorkerOutcomeTests
         await store.TryAcceptUtteranceAsync(session with { SessionVersion = 2, CyclesUsed = 1 }, 1, "u-1",
             CancellationToken.None, EllaiUtteranceWorkEnvelope.Serialize(work, "u-1"));
         var consent = new EllaiConsentService();
-        using var client = new OutcomeChatClient(valid ? Answer : "{}", superseded ? async () =>
+        // Invalid JSON is retried under the configured advisory usage policy. An oversized
+        // response exercises the terminal-failure path without relying on a retry ceiling.
+        using var client = new OutcomeChatClient(valid ? Answer : new string('x', 512_001), superseded ? async () =>
         {
             await store.TryUpdateAsync(session with { SessionVersion = 3, InteractionEpoch = 2 },
                 2, CancellationToken.None);
         } : null);
         var loop = new EllaiFrameworkExecutor(client, new EllaiPromptBuilder("Synthetic test policy", "v-test"),
-            new EllaiToolBroker(new EllaiPolicyService(), consent), new EllaiUsageLedger(sessionTokenBudget: 10_000), new InMemoryEllaiUsageStore());
+            new EllaiToolBroker(new EllaiPolicyService(), consent), new EllaiUsageLedger(sessionTokenBudget: 10_000, enforceLimits: false), new InMemoryEllaiUsageStore());
         await using var services = new ServiceCollection()
             .AddSingleton<IEllaiSessionStore>(store).AddSingleton<IEllaiUtteranceOutboxStore>(store)
             .AddSingleton(responses).AddSingleton(consent).AddSingleton<IEllaiReasoningExecutor>(loop).BuildServiceProvider();

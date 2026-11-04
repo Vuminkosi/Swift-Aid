@@ -58,6 +58,28 @@ public sealed class EllaiContractTests
     }
 
     [Fact]
+    public void ValidNeedInputWithChoicesAndEmptySpeechPasses()
+    {
+        var decision = new EllaiDecision(2, DecisionKind.NeedInput, "Choose a window.", "",
+            [], [new EllaiQuestion("window", "Which window?", ["week", "month"])], [], null, [], null, null);
+
+        Assert.Empty(EllaiDecisionValidator.Validate(decision));
+    }
+
+    [Theory]
+    [InlineData(2000, true)]
+    [InlineData(2001, false)]
+    public void SpokenTextHasACharacterLimitEvenWithoutWordSeparators(int length, bool valid)
+    {
+        var decision = new EllaiDecision(2, DecisionKind.Answer, "Answer.", new string('x', length),
+            [], [], [], null, [], null, null);
+
+        var errors = EllaiDecisionValidator.Validate(decision);
+
+        Assert.Equal(valid, errors.Count == 0);
+    }
+
+    [Fact]
     public void ObservedClaimWithoutEvidenceIsRejected()
     {
         var claim = new GroundedClaim("c1", "created task", ClaimKind.Observed, Array.Empty<EvidenceRef>());
