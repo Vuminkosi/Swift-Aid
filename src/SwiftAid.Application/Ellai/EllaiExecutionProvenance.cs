@@ -162,16 +162,16 @@ public sealed record EllaiObservedToolResult(
 }
 
 /// <summary>Case identity and digest for a fresh authorized timeline re-read.</summary>
-public sealed record EllaiCaseTimelineReplayScope(string CaseId, string Digest)
+public sealed record EllaiCaseTimelineReplayScope(string CaseId, string Digest, bool IncludeRelated = false)
 {
     public bool IsValid() => Guid.TryParseExact(CaseId, "D", out var id) && id != Guid.Empty &&
         CaseId == id.ToString("D") && Digest is { Length: 64 } &&
         Digest.All(character => character is >= '0' and <= '9' or >= 'A' and <= 'F');
 
-    public static EllaiCaseTimelineReplayScope Create(string caseId, EllaiToolResult result)
+    public static EllaiCaseTimelineReplayScope Create(string caseId, EllaiToolResult result, bool includeRelated = false)
     {
         var content = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(new { result.ResultSummary, result.ItemCount, result.Evidence });
-        return new(caseId, Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(content)));
+        return new(caseId, Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(content)), includeRelated);
     }
 }
 

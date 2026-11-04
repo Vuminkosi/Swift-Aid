@@ -64,7 +64,7 @@ public sealed class EllaiCaseSpecialist(IChatClient client, IEllaiFrameworkAgent
         {
             decision = await agent.RunAsync(context, trustedPolicy +
                 "\nYou are the case specialist, not the supervisor. Delegation is unavailable here. " +
-                "Use the authorized case queue for owned-case searches and the case timeline for a specific case. " +
+                "Use the authorized case queue for owned-case searches and the case timeline for a specific case. Set include_related to true only when asked for possible related cases. " +
                 "Report only observed cases and history, distinguish an empty result from an unavailable query, and mention incomplete pages. " +
                 "Never calculate a total from a sampled case list; use an authorized aggregate for counts. " +
                 "do not invent events, people, conclusions or actions. Return only JSON with final_decision containing " +

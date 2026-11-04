@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Globalization;
 using SwiftAid.Application.Authorization;
 using SwiftAid.Application.Cases;
+using SwiftAid.Application.Cases.Correlation;
 using SwiftAid.Application.Cases.Spatial;
 using SwiftAid.Application.HealthEvidence;
 using SwiftAid.Contracts.Cases;
@@ -232,7 +233,7 @@ public sealed class EllaiToolBroker
         $"{EllaiToolNames.OwnedCaseCount}(window_days) — count current-actor owned, readable managed cases created within 1..365 days; rejects incomplete results. This is a case count, not a diagnosis, incidence or animal count.",
         $"{EllaiToolNames.OwnedRegionCounts}() — rank unsuppressed administrative-region counts for the current officer's readable, owned cases created in the last 30 days. Not population incidence or a hotspot map.",
         $"{EllaiToolNames.ApprovedHealthSources}(topic, jurisdiction, language) — list explicitly approved, current source references only; no medical advice or generated health education.",
-        $"{EllaiToolNames.CaseTimeline}(case_id) — read the most recent authorized case history; older entries may exist.",
+        $"{EllaiToolNames.CaseTimeline}(case_id, include_related?) — read authorized case history and, when requested, possible related cases; older entries may exist.",
     };
 
     /// <summary>Returns the existing model-facing description for a canonical tool.</summary>
@@ -280,6 +281,7 @@ public sealed class EllaiToolBroker
     private readonly OwnedCaseSpatialAnalysis? _spatial;
     private readonly IApprovedHealthSourceRegistry? _healthSources;
     private readonly ICaseTimelineQuery? _timeline;
+    private readonly CaseCorrelationQuery? _correlations;
     private readonly IEllaiLocationReplayProtector? _locationReplayProtector;
     private readonly ICommunitySessionService? _communitySessions;
 
@@ -305,7 +307,7 @@ public sealed class EllaiToolBroker
         EllaiUiAuthorityResolver? uiAuthority = null, IEllaiExactReferenceIndex? referenceIndex = null,
         IDashboardAggregateQuery? dashboard = null, ICaseTimelineQuery? timeline = null, IEllaiLocationReplayProtector? locationReplayProtector = null,
         ICommunitySessionService? communitySessions = null, OwnedCaseSpatialAnalysis? spatial = null,
-        IApprovedHealthSourceRegistry? healthSources = null)
+        IApprovedHealthSourceRegistry? healthSources = null, CaseCorrelationQuery? correlations = null)
     {
         _policy = policy ?? throw new ArgumentNullException(nameof(policy));
         _consent = consent ?? throw new ArgumentNullException(nameof(consent));
@@ -318,6 +320,7 @@ public sealed class EllaiToolBroker
         _spatial = spatial;
         _healthSources = healthSources;
         _timeline = timeline;
+        _correlations = correlations;
         _locationReplayProtector = locationReplayProtector;
         _communitySessions = communitySessions;
         _uiAuthority = uiAuthority ?? new EllaiUiAuthorityResolver();
@@ -492,6 +495,10 @@ public sealed class EllaiToolBroker
         if (!request.Arguments.TryGetValue("case_id", out var value) ||
             !Guid.TryParseExact(value, "D", out var caseId) || caseId == Guid.Empty)
             return Deny(request.ToolName, "A valid case ID is required.", EllaiToolReasonCodes.InvalidArguments);
+        var includeRelated = false;
+        if (request.Arguments.TryGetValue("include_related", out var relatedValue) &&
+            !bool.TryParse(relatedValue, out includeRelated))
+            return Deny(request.ToolName, "The related-case option is invalid.", EllaiToolReasonCodes.InvalidArguments);
 
         CaseTimelineResult result;
         try
@@ -541,15 +548,36 @@ public sealed class EllaiToolBroker
               (work.NextFollowUpDueUtc is { } due ? $", earliest due {due:O}. " : ". ") +
               "Counts are case-level; authorized escalation links are shown in the history when present. "
             : "Current escalation and follow-up summary is unavailable. ";
+        var eventLines = lines.Take(MaxItems).ToList();
+        if (includeRelated)
+        {
+            if (_correlations is null)
+                return Deny(request.ToolName, "Related-case suggestions are unavailable.", EllaiToolReasonCodes.Unavailable);
+            SwiftAid.Contracts.Cases.CaseCorrelationPage page;
+            try { page = await _correlations.GetPageAsync(context.Actor, caseId, null, ct).ConfigureAwait(false); }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+            catch (Exception error) when (error is not OutOfMemoryException)
+            { return Deny(request.ToolName, "Related-case suggestions are unavailable.", EllaiToolReasonCodes.Unavailable); }
+            if (!page.Allowed) return Deny(request.ToolName, "The case was not found or is not accessible.", EllaiToolReasonCodes.DeniedByPolicy);
+            var relatedLines = page.Candidates.Select(candidate =>
+                $"Possible related case {candidate.RelatedCaseId:D}; review {(candidate.Decision?.ToString() ?? "Pending")}; " +
+                "shared attributes do not establish identity or causation.").ToArray();
+            var related = relatedLines.Length == 0
+                ? new[] { "No currently accessible related-case suggestions were found." }
+                : relatedLines;
+            truncated |= related.Length + eventLines.Count > MaxItems || page.NextCursor is not null;
+            eventLines = related.Concat(eventLines).Take(MaxItems).ToList();
+        }
         var output = new EllaiToolResult(request.ToolName, true, null, [evidence],
-            "Authorized case history, newest events first; sealed report content and actor identifiers are not included. " + workSummary +
+            (includeRelated ? "Authorized possible relationships and case history, with newest events first; " : "Authorized case history, newest events first; ") +
+            "sealed report content and actor identifiers are not included. " + workSummary +
             (truncated ? "Some history or activity is omitted.\n" : "\n") +
-            (entries.Length == 0 ? "No authoritative entries were returned." : string.Join("\n", lines.Take(MaxItems))),
+            (eventLines.Count == 0 ? "No authoritative entries were returned." : string.Join("\n", eventLines)),
             entries.Length, truncated, EllaiToolReasonCodes.Ok)
         {
             HistoryValidUntilUtc = DateTimeOffset.UtcNow.AddMinutes(5)
         };
-        return output with { CaseTimelineReplayScope = EllaiCaseTimelineReplayScope.Create(id, output) };
+        return output with { CaseTimelineReplayScope = EllaiCaseTimelineReplayScope.Create(id, output, includeRelated) };
     }
 
     private async Task<EllaiToolResult> ReadApprovedHealthSourcesAsync(EllaiToolContext context, EllaiToolRequest request, CancellationToken ct)

@@ -38,6 +38,7 @@ public static class EllaiToolContractCatalog
             ["organization_id"] = "Authorized destination organization identifier.",
             ["import_id"] = "Canonical import identifier.",
             ["case_id"] = "Canonical case identifier.",
+            ["include_related"] = "Set to true only when the user requests possible related cases.",
             ["window_days"] = "Required whole-day lookback window from 1 to 365 days.",
             ["status"] = "Optional public session status: Scheduled, Completed, or Cancelled.",
             ["jurisdiction"] = "Exact jurisdiction of the approved source.",
@@ -78,7 +79,7 @@ public static class EllaiToolContractCatalog
             [EllaiToolNames.OwnedCaseCount] = Contract(EllaiToolNames.OwnedCaseCount, ("window_days", true)),
             [EllaiToolNames.OwnedRegionCounts] = Contract(EllaiToolNames.OwnedRegionCounts),
             [EllaiToolNames.ApprovedHealthSources] = Contract(EllaiToolNames.ApprovedHealthSources, ("topic", true), ("jurisdiction", true), ("language", true)),
-            [EllaiToolNames.CaseTimeline] = Contract(EllaiToolNames.CaseTimeline, ("case_id", true)),
+            [EllaiToolNames.CaseTimeline] = Contract(EllaiToolNames.CaseTimeline, ("case_id", true), ("include_related", false)),
             [EllaiToolNames.PublicSessions] = Contract(EllaiToolNames.PublicSessions, ("status", false)),
         });
 

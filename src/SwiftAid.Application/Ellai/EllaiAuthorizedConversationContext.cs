@@ -156,8 +156,9 @@ public static class EllaiAuthorizedConversationContext
                         return decisions[turn.ClientUtteranceId] = false;
                     try
                     {
-                        var current = await invokeTool(toolContext, new EllaiToolRequest(EllaiToolNames.CaseTimeline,
-                            new Dictionary<string, string> { ["case_id"] = scope.CaseId }), ct).ConfigureAwait(false);
+                        var arguments = new Dictionary<string, string> { ["case_id"] = scope.CaseId };
+                        if (scope.IncludeRelated) arguments["include_related"] = "true";
+                        var current = await invokeTool(toolContext, new EllaiToolRequest(EllaiToolNames.CaseTimeline, arguments), ct).ConfigureAwait(false);
                         ct.ThrowIfCancellationRequested();
                         if (!current.Allowed || current.Truncated || current.CaseTimelineReplayScope != scope ||
                             !current.Evidence.SequenceEqual(observation.Evidence))
