@@ -22,7 +22,7 @@ The following 11 interactive roles are enabled in the checked-in Gateway default
 
 ## Operational roles
 
-These are bounded background workflows. Their MVP interactive read delegates inherit the current workspace session's admitted reads; those delegates do not run jobs or execute actions. Their schedulers are disabled by default and require explicit workspace, organization and policy configuration. Their checked-in code does not prove a live worker is running. See `docs/ellai-operational-schedule-configuration.md` for configuration and rollout requirements.
+These are bounded background workflows. Their MVP interactive read delegates inherit the current session's admitted reads; guests can ask general product-help questions but do not gain case or operational data access. The delegates do not run jobs or execute actions. Their schedulers are disabled by default and require explicit workspace, organization and policy configuration. Their checked-in code does not prove a live worker is running. See `docs/ellai-operational-schedule-configuration.md` for configuration and rollout requirements.
 
 | Identity | Role | Existing implementation boundary | Material gaps |
 |---|---|---|---|
