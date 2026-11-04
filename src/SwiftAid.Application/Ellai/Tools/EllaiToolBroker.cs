@@ -578,12 +578,12 @@ public sealed class EllaiToolBroker
                 ? new[] { "No currently accessible related-case suggestions were found." }
                 : relatedLines;
             truncated |= related.Length + eventLines.Count > MaxItems || page.NextCursor is not null;
-            eventLines = related.Concat(eventLines).Take(MaxItems).ToList();
+            eventLines = currentOfficerLines.Concat(related).Concat(lines).Take(MaxItems).ToList();
         }
         var output = new EllaiToolResult(request.ToolName, true, null, [evidence],
             (includeRelated ? "Authorized possible relationships and case history, with newest events first; " : "Authorized case history, newest events first; ") +
             "sealed report content and actor identifiers are not included. " + workSummary +
-            (truncated ? "Some history, activity or current officer assignments are omitted.\n" : "\n") +
+            (truncated ? "Some history, activity, current officer assignments or related-case suggestions are omitted.\n" : "\n") +
             (eventLines.Count == 0 ? "No authoritative entries were returned." : string.Join("\n", eventLines)),
             entries.Length, truncated, EllaiToolReasonCodes.Ok)
         {
