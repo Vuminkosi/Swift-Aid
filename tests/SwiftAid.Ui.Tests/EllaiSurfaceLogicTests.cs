@@ -2409,8 +2409,13 @@ public sealed partial class EllaiSurfaceLogicTests
 
         public Exception? RejectionException { get; init; }
 
+        public Func<CancellationToken, Task<bool>>? ReportConsentHandler { get; init; }
+        public Task<bool> GrantReportVoiceConsentAsync(string sessionId, CancellationToken cancellationToken) =>
+            ReportConsentHandler?.Invoke(cancellationToken) ?? Task.FromResult(false);
+
+        public Func<CancellationToken, Task<bool>>? VoiceConsentHandler { get; init; }
         public Task<bool> GrantVoiceCaptureConsentAsync(string sessionId, CancellationToken cancellationToken) =>
-            Task.FromResult(true);
+            VoiceConsentHandler?.Invoke(cancellationToken) ?? Task.FromResult(true);
 
         public Task<EllaiVoiceTranscriptionResult?> TranscribeVoiceAsync(
             string sessionId,

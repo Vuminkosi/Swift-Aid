@@ -7,6 +7,21 @@ namespace SwiftAid.Ui.Tests;
 public sealed class ReportVoiceAssistantContextTests
 {
     [Fact]
+    public async Task EndingAssistanceCancelsPendingCaptureStartup()
+    {
+        var context = new EllaiPublicReportDraftContext();
+        context.Register(new object(), _ => true, () => null, _ => true, _ => true, _ => true, new object());
+        var pending = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        CancellationToken token = default;
+        context.RegisterVoiceController(new object(), (_, ct) => { token = ct; return pending.Task; }, () => Task.CompletedTask);
+        var start = context.StartReportVoiceAsync(EllaiVoiceCaptureMode.Live);
+        context.EndReportVoiceAssistance();
+        Assert.True(token.IsCancellationRequested);
+        pending.SetResult(false);
+        Assert.False(await start);
+    }
+
+    [Fact]
     public async Task OneTranscriptCanAutofillMultipleDirectlyStatedFields()
     {
         var context = new EllaiPublicReportDraftContext();

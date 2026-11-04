@@ -9,17 +9,22 @@ public partial class EllaiGuidanceHost
     private bool _reportVoiceCapture;
     private readonly SemaphoreSlim _reportVoiceExtractionGate = new(1, 1);
 
-    private async Task<bool> StartReportVoiceCaptureAsync(EllaiVoiceCaptureMode mode)
+    private async Task<bool> StartReportVoiceCaptureAsync(EllaiVoiceCaptureMode mode, CancellationToken cancellationToken)
     {
         var started = false;
         await InvokeAsync(async () =>
         {
             if (_sessionView is not { Status: "Active" }) await SelectModeAsync(EllaiMode.Ask);
-            if (_sessionView is not { Status: "Active" } session) return;
-            if (!await ReviewClient.GrantReportVoiceConsentAsync(session.SessionId, CancellationToken.None)) return;
+            if (_sessionView is not { Status: "Active" } session || cancellationToken.IsCancellationRequested ||
+                _isRecordingAudio || _startingVoiceCapture || _voiceTranscriptionInProgress) return;
+            if (!await ReviewClient.GrantReportVoiceConsentAsync(session.SessionId, cancellationToken) ||
+                cancellationToken.IsCancellationRequested || _isRecordingAudio || _startingVoiceCapture ||
+                _voiceTranscriptionInProgress) return;
             ShowComposer = true;
-            await StartVoiceCaptureAsync(mode, reportCapture: true);
-            started = _isRecordingAudio;
+            var previousCaptureId = _liveVoiceCaptureId;
+            await StartVoiceCaptureCoreAsync(mode, reportCapture: true, cancellationToken);
+            started = _isRecordingAudio && _reportVoiceCapture && _liveVoiceCaptureId is not null &&
+                !string.Equals(_liveVoiceCaptureId, previousCaptureId, StringComparison.Ordinal);
         });
         return started;
     }

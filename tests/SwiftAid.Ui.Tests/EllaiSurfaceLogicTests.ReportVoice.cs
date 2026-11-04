@@ -8,6 +8,91 @@ namespace SwiftAid.Ui.Tests;
 public sealed partial class EllaiSurfaceLogicTests
 {
     [Fact]
+    public async Task EllaiCaptureStartingDuringReportConsentRemainsUntouched()
+    {
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var grant = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var client = new FakeReviewClient { ReportConsentHandler = _ => { entered.TrySetResult(); return grant.Task; } };
+        using var host = await CreateHost(client, CreateSession(1), string.Empty);
+        var capture = new RecordingJsModule();
+        SetField(host, "_captureModule", capture);
+        SetField(host, "_microphoneCaptureAvailable", true);
+        var start = InvokeTask(host, "StartReportVoiceCaptureAsync", EllaiVoiceCaptureMode.Live, CancellationToken.None);
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        SetField(host, "_isRecordingAudio", true);
+        SetField(host, "_reportVoiceCapture", false);
+        SetField(host, "_liveVoiceCaptureId", "ellai-capture");
+        grant.SetResult(true);
+        await start.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.True(GetField<bool>(host, "_isRecordingAudio"));
+        Assert.False(GetField<bool>(host, "_reportVoiceCapture"));
+        Assert.Equal("ellai-capture", GetField<string>(host, "_liveVoiceCaptureId"));
+        Assert.DoesNotContain("startCapture", capture.Invocations);
+    }
+
+    [Fact]
+    public async Task ActiveEllaiCaptureIsNotClaimedAsAReportCapture()
+    {
+        var client = new FakeReviewClient { ReportConsentHandler = _ => Task.FromResult(true) };
+        using var host = await CreateHost(client, CreateSession(1), string.Empty);
+        SetField(host, "_isRecordingAudio", true);
+        SetField(host, "_reportVoiceCapture", false);
+        SetField(host, "_liveVoiceCaptureId", "ellai-capture");
+        SetField(host, "_microphoneCaptureAvailable", true);
+        SetField(host, "_captureModule", new RecordingJsModule());
+        var method = typeof(EllaiGuidanceHost).GetMethod("StartReportVoiceCaptureAsync",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+        var started = await host.Dispatcher.InvokeAsync(async () =>
+            await (Task<bool>)method.Invoke(host.Component, [EllaiVoiceCaptureMode.Live, CancellationToken.None])!);
+        Assert.False(started);
+        Assert.True(GetField<bool>(host, "_isRecordingAudio"));
+        Assert.False(GetField<bool>(host, "_reportVoiceCapture"));
+        Assert.Equal("ellai-capture", GetField<string>(host, "_liveVoiceCaptureId"));
+    }
+
+    [Fact]
+    public async Task WithdrawingWhileReportConsentIsPendingDoesNotStartMicrophone()
+    {
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var grant = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var client = new FakeReviewClient { ReportConsentHandler = _ => { entered.TrySetResult(); return grant.Task; } };
+        using var host = await CreateHost(client, CreateSession(1), string.Empty);
+        var capture = new RecordingJsModule();
+        SetField(host, "_captureModule", capture);
+        SetField(host, "_microphoneCaptureAvailable", true);
+        using var cancellation = new CancellationTokenSource();
+        var start = InvokeTask(host, "StartReportVoiceCaptureAsync", EllaiVoiceCaptureMode.Live, cancellation.Token);
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        cancellation.Cancel();
+        grant.SetResult(true);
+        await start.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.False(GetField<bool>(host, "_isRecordingAudio"));
+        Assert.DoesNotContain("startCapture", capture.Invocations);
+    }
+
+    [Fact]
+    public async Task WithdrawingReportConsentDuringMicrophoneAdmissionDoesNotStartCapture()
+    {
+        var admissionStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var admission = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var client = new FakeReviewClient { VoiceConsentHandler = _ => { admissionStarted.TrySetResult(); return admission.Task; } };
+        using var host = await CreateHost(client, CreateSession(1), string.Empty);
+        var capture = new RecordingJsModule();
+        SetField(host, "_captureModule", capture);
+        SetField(host, "_microphoneCaptureAvailable", true);
+        using var cancellation = new CancellationTokenSource();
+        var start = InvokeTask(host, "StartVoiceCaptureCoreAsync", EllaiVoiceCaptureMode.Live, true, cancellation.Token);
+        await admissionStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        cancellation.Cancel();
+        admission.SetResult(true);
+        await start.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.False(GetField<bool>(host, "_isRecordingAudio"));
+        Assert.False(GetField<bool>(host, "_startingVoiceCapture"));
+        Assert.DoesNotContain("startCapture", capture.Invocations);
+        Assert.Equal(0, client.LiveTranscriptionCalls);
+    }
+
+    [Fact]
     public async Task EarlyCompletedLiveTurnIsNotLostDuringMicrophoneStartup()
     {
         var extracted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);

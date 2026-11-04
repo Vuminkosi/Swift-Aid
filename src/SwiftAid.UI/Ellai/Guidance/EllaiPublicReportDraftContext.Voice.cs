@@ -8,7 +8,7 @@ public sealed partial class EllaiPublicReportDraftContext
     private object? _voiceController;
     private object? _voiceReportIdentity;
     private Func<ReportVoiceSuggestion, string, bool>? _autoFillVoice;
-    private Func<EllaiVoiceCaptureMode, Task<bool>>? _startVoice;
+    private Func<EllaiVoiceCaptureMode, CancellationToken, Task<bool>>? _startVoice;
     private Func<Task>? _stopVoice;
     private Func<Func<CancellationToken, Task<byte[]>>, string, CancellationToken, Task<bool>>? _savedVoice;
     private readonly HashSet<string> _voiceTurns = new(StringComparer.Ordinal);
@@ -28,6 +28,10 @@ public sealed partial class EllaiPublicReportDraftContext
     public IReadOnlyList<ReportVoiceSuggestion> VoiceSuggestions { get { lock (_gate) return _voiceSuggestions; } }
 
     public void RegisterVoiceController(object controller, Func<EllaiVoiceCaptureMode, Task<bool>> start, Func<Task> stop,
+        Func<Func<CancellationToken, Task<byte[]>>, string, CancellationToken, Task<bool>>? savedVoice = null) =>
+        RegisterVoiceController(controller, (mode, _) => start(mode), stop, savedVoice);
+
+    public void RegisterVoiceController(object controller, Func<EllaiVoiceCaptureMode, CancellationToken, Task<bool>> start, Func<Task> stop,
         Func<Func<CancellationToken, Task<byte[]>>, string, CancellationToken, Task<bool>>? savedVoice = null)
     {
         lock (_gate) { _voiceController = controller; _startVoice = start; _stopVoice = stop; _savedVoice = savedVoice; }
@@ -51,7 +55,8 @@ public sealed partial class EllaiPublicReportDraftContext
     /// <summary>Called only after an explicit processing choice in the report form.</summary>
     public async Task<bool> StartReportVoiceAsync(EllaiVoiceCaptureMode mode)
     {
-        Func<EllaiVoiceCaptureMode, Task<bool>>? start;
+        Func<EllaiVoiceCaptureMode, CancellationToken, Task<bool>>? start;
+        CancellationToken cancellationToken;
         long generation;
         lock (_gate)
         {
@@ -59,6 +64,7 @@ public sealed partial class EllaiPublicReportDraftContext
             _voiceLifetime?.Cancel();
             _voiceLifetime?.Dispose();
             _voiceLifetime = new CancellationTokenSource();
+            cancellationToken = _voiceLifetime.Token;
             _voiceEnabled = true;
             _voiceCaptureId = null;
             generation = ++_voiceGeneration;
@@ -69,7 +75,7 @@ public sealed partial class EllaiPublicReportDraftContext
         }
         VoiceChanged?.Invoke();
         bool started;
-        try { started = await start(mode).ConfigureAwait(false); }
+        try { started = await start(mode, cancellationToken).ConfigureAwait(false); }
         catch (Exception) { started = false; }
         Func<Task>? stopStale = null;
         var stale = false;

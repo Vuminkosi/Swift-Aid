@@ -422,14 +422,17 @@
         && !_startingSession && !_startingVoiceCapture && !_voiceTranscriptionInProgress
         && !_isRecordingAudio && !_cancelOutcomeUnknown && !_startOutcomeUnknown;
 
-    private async Task StartVoiceCaptureAsync(EllaiVoiceCaptureMode mode, bool reportCapture = false)
+    private Task StartVoiceCaptureAsync(EllaiVoiceCaptureMode mode, bool reportCapture = false) =>
+        StartVoiceCaptureCoreAsync(mode, reportCapture, CancellationToken.None);
+
+    private async Task StartVoiceCaptureCoreAsync(EllaiVoiceCaptureMode mode, bool reportCapture, CancellationToken reportCancellation)
     {
         var session = _sessionView;
         var useNativeLiveCapture = (mode == EllaiVoiceCaptureMode.Live || reportCapture)
             && _nativeVoiceCapture?.IsAvailable == true;
         var useBrowserLiveVoiceWebSocket = mode == EllaiVoiceCaptureMode.Live
             && !useNativeLiveCapture && !ReviewClient.UsesGatewayPcmAudioDownload;
-        if ((!useNativeLiveCapture && !_microphoneCaptureAvailable)
+        if (reportCancellation.IsCancellationRequested || (!useNativeLiveCapture && !_microphoneCaptureAvailable)
             || (!useNativeLiveCapture && _captureModule is null)
             || session is null || !string.Equals(session.Status, "Active", StringComparison.Ordinal)
             || _isRecordingAudio || _voiceTranscriptionInProgress || _startingVoiceCapture)
@@ -458,6 +461,12 @@
             return;
         }
 
+        if (reportCancellation.IsCancellationRequested)
+        {
+            _startingVoiceCapture = false;
+            return;
+        }
+
         if (!_voiceCaptureConsentGranted)
         {
             if (!await ReviewClient.GrantVoiceCaptureConsentAsync(session.SessionId, CancellationToken.None)
@@ -471,6 +480,11 @@
             _voiceCaptureConsentGranted = true;
         }
 
+        if (reportCancellation.IsCancellationRequested)
+        {
+            _startingVoiceCapture = false;
+            return;
+        }
         DiscardCapturedAudio();
         lock (_capturedPcmGate)
         {
@@ -507,7 +521,7 @@
 
             }
 
-            if (_sessionView is null
+            if (reportCancellation.IsCancellationRequested || _sessionView is null
                 || !string.Equals(_sessionView.SessionId, session.SessionId, StringComparison.Ordinal)
                 || !string.Equals(_sessionView.Status, "Active", StringComparison.Ordinal))
             {
