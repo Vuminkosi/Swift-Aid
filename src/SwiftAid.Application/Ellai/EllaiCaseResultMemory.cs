@@ -89,8 +89,8 @@ public sealed class EllaiCaseResultMemory(EllaiTopicService topics, ICaseQueueQu
         if (caseId == Guid.Empty || caseId is not null && field != "submitter")
             return new(EllaiToolNames.Topic, false, "A case_id is valid only for submitter attribution on a retained case.", [], "", 0, false,
                 EllaiToolReasonCodes.InvalidArguments);
-        if (groupBy is not null && (groupBy is not ("region" or "locality") || field is not null || placeId is not null || caseId is not null))
-            return new(EllaiToolNames.Topic, false, "Location grouping can only be used on retained cases without a field or exact-place filter.", [], "", 0, false,
+        if (groupBy is not null && (groupBy is not ("region" or "locality" or "reported-day") || field is not null || placeId is not null || caseId is not null))
+            return new(EllaiToolNames.Topic, false, "Grouping can only be used on retained cases without a field or exact-place filter.", [], "", 0, false,
                 EllaiToolReasonCodes.InvalidArguments);
         if (context.Actor is null) return Unavailable();
         EllaiTopicEntry? indexedTopic = null;
@@ -197,6 +197,36 @@ public sealed class EllaiCaseResultMemory(EllaiTopicService topics, ICaseQueueQu
                     unknownLocations = true;
             }
             rows = matched.ToArray();
+        }
+        if (groupBy == "reported-day")
+        {
+            var groups = rows.Where(pair => pair.row.CreatedAtUtc.HasValue)
+                .GroupBy(pair => pair.row.CreatedAtUtc!.Value.ToUniversalTime().ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), StringComparer.Ordinal)
+                .OrderBy(group => group.Key, StringComparer.Ordinal)
+                .ToArray();
+            var unknownReportedDates = rows.Any(pair => pair.row.CreatedAtUtc is null);
+            var groupEvidence = groups.SelectMany(group => group.Select(pair =>
+                new EvidenceRef("CaseQueue", pair.row.CaseId.ToString("D"),
+                    pair.row.AggregateVersion.ToString(CultureInfo.InvariantCulture), "reported-day", pair.row.CaseId.ToString("D")))).ToArray();
+            var groupSummary = JsonSerializer.Serialize(new
+            {
+                groupBy,
+                dateBasis = "managed-case creation/report timestamp in UTC",
+                groups = groups.Select(group => new
+                {
+                    reportedDateUtc = group.Key,
+                    count = group.Count(),
+                    cases = group.Select(pair => pair.row.CaseId).ToArray()
+                }).ToArray(),
+                context = "Groups contain only cases from the previously retained result set that remain currently authorized. This is report date, not event occurrence or symptom-onset date. Evidence references identify each case."
+            });
+            var reportedDayIncomplete = incomplete || unavailableRows || unknownReportedDates || unknownClassification;
+            return new EllaiToolResult(EllaiToolNames.Topic, true, null, groupEvidence,
+                completeness + "Grouped the previously retrieved cases by their managed-case creation/report date in UTC; this is not a new search. " +
+                (unknownReportedDates ? "Cases without a recorded creation/report timestamp are omitted. " : "") +
+                (unavailableRows ? "Cases no longer available under current access are omitted. " : "") +
+                (unknownClassification ? "Cases with unknown classification are excluded. " : "") + groupSummary,
+                groupEvidence.Length, reportedDayIncomplete) { HistoryValidUntilUtc = snapshot.ExpiresAtUtc };
         }
         if (groupBy is "region" or "locality")
         {

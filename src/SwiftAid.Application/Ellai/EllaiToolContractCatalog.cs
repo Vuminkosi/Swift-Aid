@@ -258,6 +258,7 @@ public static class EllaiToolContractCatalog
             (EllaiToolNames.State, "projection") => Array.AsReadOnly(new[] { "feature", "queue" }),
             (EllaiToolNames.State, "workflow") => Array.AsReadOnly(new[] { "Reported", "UnderReview", "Active", "AwaitingFollowUp", "Resolved" }),
             (EllaiToolNames.State, "sort") => Array.AsReadOnly(new[] { "latest-reported", "latest-updated" }),
+            (EllaiToolNames.Evidence, "group_by") => Array.AsReadOnly(new[] { "region", "locality", "reported-day" }),
             (EllaiToolNames.Evidence, "classification_filter") => Array.AsReadOnly(new[] { "Classified", "Unclassified" }),
             _ => AllowedValues.GetValueOrDefault(argumentName)
         };

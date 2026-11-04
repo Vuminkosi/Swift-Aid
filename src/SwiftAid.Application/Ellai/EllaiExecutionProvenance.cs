@@ -180,7 +180,7 @@ public sealed record EllaiRetainedCaseReplay(string Reference, string? Field, st
             PlaceId is { Length: >= 1 and <= 120 } && PlaceId == PlaceId.Trim() && (Field is null or "observations")) &&
         (CaseId is null || Field == "submitter" && Guid.TryParseExact(CaseId, "D", out var caseId) &&
             caseId != Guid.Empty && CaseId == caseId.ToString("D")) &&
-        (GroupBy is null || (GroupBy is "region" or "locality") && Field is null && PlaceId is null && CaseId is null) && Digest is { Length: 64 } &&
+        (GroupBy is null || (GroupBy is "region" or "locality" or "reported-day") && Field is null && PlaceId is null && CaseId is null) && Digest is { Length: 64 } &&
         Digest.All(character => character is >= '0' and <= '9' or >= 'A' and <= 'F');
 
     public static EllaiRetainedCaseReplay? Create(EllaiToolRequest request, EllaiToolResult result)
@@ -208,7 +208,7 @@ public sealed record EllaiRetainedCaseReplay(string Reference, string? Field, st
                 placeId.Length is < 1 or > 120 || placeId != placeId.Trim() || field is not null and not "observations")) return null;
         if (caseId is not null && (field != "submitter" || !Guid.TryParseExact(caseId, "D", out var parsedCaseId) ||
             parsedCaseId == Guid.Empty || caseId != parsedCaseId.ToString("D"))) return null;
-        if (groupBy is not null && (groupBy is not ("region" or "locality") || field is not null || placeId is not null || caseId is not null)) return null;
+        if (groupBy is not null && (groupBy is not ("region" or "locality" or "reported-day") || field is not null || placeId is not null || caseId is not null)) return null;
         var candidate = new EllaiRetainedCaseReplay(reference, request.Arguments.GetValueOrDefault("field"),
             field switch
             {
