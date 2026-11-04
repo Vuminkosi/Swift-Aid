@@ -4105,3 +4105,22 @@ no answer or tool trace. This does not verify malformed output from live Muse;
 the separate split-function-name adapter correction is described above.
 The complete default application suite also passed 1,194, failed 0 and skipped
 18 after this change using the application test command above without a filter.
+
+### Gateway startup with NATS disabled — 2026-11-04
+
+The Development Gateway previously failed service-provider validation when
+`Nats:Enabled=false`: three outbox dispatchers required an `INatsClient` that
+is registered only when NATS is enabled. The ingestion worker already exits
+without resolving these dispatchers when NATS is disabled. The Gateway now
+registers them only when their transport is enabled.
+
+PASS: `dotnet build src/SwiftAid.Gateway/SwiftAid.Gateway.csproj --no-restore
+-m:1 -nr:false -p:WasmBuildNative=false` completed with zero warnings and
+errors. PASS: the `IngestionDispatcherRegistrationTests` integration filter
+passed 2/2, including a post-commit `--no-build --no-restore` run. PASS: a
+current Debug Gateway started with NATS disabled against a disposable PostgreSQL
+database after applying 63 migrations. The rendered
+`tests/SwiftAid.Ui.Tests/ellai-conversation.browser.cjs` live-provider test
+completed two synthetic turns, recalled the test word, restored the conversation
+after refresh, and passed its mobile, reduced-motion, cancellation, and page-error
+checks. This does not verify NATS delivery, deployed environments, or Android.
