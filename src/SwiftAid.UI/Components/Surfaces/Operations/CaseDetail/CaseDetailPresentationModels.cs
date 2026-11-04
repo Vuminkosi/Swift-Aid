@@ -1,7 +1,7 @@
 namespace SwiftAid.UI.Components.Surfaces.Operations.CaseDetail;
 
 public enum CaseDetailSubjectType { Human, Animal, Unknown }
-public enum CaseDetailObservationCategory { Clinical, Environmental, Community }
+public enum CaseDetailObservationCategory { Clinical, Environmental, Community, Unknown }
 public enum CaseDetailOperationStatus { Accepted, Replayed, Conflict, Denied, Offline, Unavailable, Failed }
 
 public sealed record CaseDetailSummary(

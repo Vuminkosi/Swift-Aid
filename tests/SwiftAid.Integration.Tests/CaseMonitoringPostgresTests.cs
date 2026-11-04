@@ -46,7 +46,7 @@ namespace SwiftAid.Integration.Tests;
 /// </summary>
 [Trait("Category", "IntakePostgres")]
 [Collection(IntakePostgresCollection.Name)]
-public sealed class CaseMonitoringPostgresTests
+public sealed partial class CaseMonitoringPostgresTests
 {
     private static readonly DateTimeOffset FirstDueAtUtc = new(2026, 10, 30, 8, 0, 0, TimeSpan.Zero);
     private static readonly DateTimeOffset SecondDueAtUtc = new(2026, 11, 2, 8, 0, 0, TimeSpan.Zero);
@@ -344,8 +344,9 @@ public sealed class CaseMonitoringPostgresTests
         Assert.Equal(CaseCommandProcessingStatus.Accepted, closed.Status);
         timeline = await query.GetAsync(actor, caseId, 1, default);
         Assert.Equal(new CaseTimelineWorkSummary(0, 1, FirstDueAtUtc), timeline.Timeline!.WorkSummary);
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            query.GetAsync(CreateOfficer("unauthorized-" + Guid.NewGuid()), caseId, 1, default));
+        var denied = await query.GetAsync(CreateOfficer("unauthorized-" + Guid.NewGuid()), caseId, 1, default);
+        Assert.Null(denied.Timeline);
+        Assert.NotEqual(CaseTimelineAccess.Found, denied.Access);
     }
 
     [IntakePostgresFact]

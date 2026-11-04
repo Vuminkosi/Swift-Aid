@@ -49,7 +49,9 @@ public sealed class CaseQueueGatewayClient(
 
         try
         {
-            return await queue.GetMineAsync(actor, limit, cursor, cancellationToken).ConfigureAwait(false);
+            var now = DateTimeOffset.UtcNow;
+            return await queue.GetMineAsync(actor, limit,
+                new CaseQueueFilter(ReportedFromUtc: now.AddDays(-30), ReportedBeforeUtc: now), cursor, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception)
         {

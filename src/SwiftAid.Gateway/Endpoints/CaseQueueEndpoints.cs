@@ -100,7 +100,8 @@ public static class CaseQueueEndpoints
 
         try
         {
-            var result = await query.GetMineAsync(actor, limit, cursor, cancellationToken).ConfigureAwait(false);
+            var now = DateTimeOffset.UtcNow;
+            var result = await query.GetMineAsync(actor, limit, new CaseQueueFilter(ReportedFromUtc: now.AddDays(-30), ReportedBeforeUtc: now), cursor, cancellationToken).ConfigureAwait(false);
             return MapResult(result);
         }
         catch (ArgumentException)

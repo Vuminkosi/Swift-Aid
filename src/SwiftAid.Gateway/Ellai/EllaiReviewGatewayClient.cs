@@ -894,13 +894,24 @@ public sealed class EllaiReviewGatewayClient(
             : null;
     }
 
-    private static Task<bool> HasCurrentScopedStaffAuthorizationAsync(CancellationToken cancellationToken)
+    private async Task<bool> HasCurrentScopedStaffAuthorizationAsync(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        // SwiftAidStaffApi currently establishes authentication only. Until a
-        // trusted server-issued staff + active-scope capability is available,
-        // privileged review/evidence operations fail closed.
-        return Task.FromResult(false);
+        try
+        {
+            var principal = (await _authenticationStateProvider.GetAuthenticationStateAsync()).User;
+            var actor = ActorContext.FromValidatedPrincipal(principal);
+            await using var scope = _serviceProvider.CreateAsyncScope();
+            var source = scope.ServiceProvider.GetService<IScopeService>();
+            if (source is null) return false;
+            var manifest = await source.GetAsync(actor, cancellationToken);
+            var now = DateTimeOffset.UtcNow;
+            return manifest.AccessEpoch == actor.AccessEpoch && manifest.ExpiresAtUtc > now &&
+                manifest.Grants.Any(grant => grant.ValidFromUtc <= now && grant.ExpiresAtUtc > now &&
+                    grant.Operations.Contains(nameof(CaseOperation.ReadCase), StringComparer.Ordinal));
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch (Exception error) when (error is UnauthorizedAccessException or ScopeUnavailableException) { return false; }
     }
 
     private async Task<T?> WithAuthenticatedAsync<T>(

@@ -406,7 +406,7 @@ public sealed partial class PostgresCaseCommandPersistence : ICaseCommandPersist
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (@event is not (CaseAssigned or CaseReportCorrected or CaseActionRequested or CaseActionRequestReviewed or CaseResolved or CaseReopened
-                or CaseObservationRecorded or CaseFollowUpScheduled or CaseFollowUpAcknowledged or CaseFollowUpOutcomeRecorded
+                or CaseDiscussionPosted or CaseObservationRecorded or CaseFollowUpScheduled or CaseFollowUpAcknowledged or CaseFollowUpOutcomeRecorded
                 or CaseEscalationRaised or CaseEscalationAcknowledged or CaseEscalationActionRecorded or CaseEscalationClosed or CaseAssignmentAcknowledged
                 or CaseCollaboratorGranted or CaseCollaboratorRevoked
                 or AssistanceRequested or AssistanceActivityRecorded or ActionOwnerChanged))

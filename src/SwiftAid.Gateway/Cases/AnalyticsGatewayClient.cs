@@ -54,8 +54,9 @@ public sealed class AnalyticsGatewayClient(
             return Denied<Page<AnalyticsMetric>>();
         }
 
-        var aggregateQuery = _serviceProvider.GetService<IDashboardAggregateQuery>();
-        var monitoringQuery = _serviceProvider.GetService<ICaseMonitoringQueueQuery>();
+        await using var serviceScope = _serviceProvider.CreateAsyncScope();
+        var aggregateQuery = serviceScope.ServiceProvider.GetService<IDashboardAggregateQuery>();
+        var monitoringQuery = serviceScope.ServiceProvider.GetService<ICaseMonitoringQueueQuery>();
         if (aggregateQuery is null || monitoringQuery is null)
         {
             return Unavailable<Page<AnalyticsMetric>>("Analytics are not available right now.");

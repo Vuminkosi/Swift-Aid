@@ -55,6 +55,8 @@ else
                     @if (membership.IsOwner)
                     {
                         <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined">Owner</MudChip>
+                        <MudButton Href="@($"/organizations/{Uri.EscapeDataString(membership.OrganizationId)}/manage")"
+                                   Variant="Variant.Text" Color="Color.Primary" Size="Size.Small">Manage organization</MudButton>
                     }
                     @foreach (var workspace in membership.WorkspaceIds)
                     {

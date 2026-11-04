@@ -8,7 +8,7 @@
   "properties": {
     "schemaVersion": { "const": 1 },
     "eventId": { "type": "string", "format": "uuid" },
-    "eventType": { "enum": ["CaseReported", "CaseAssigned", "CaseReportCorrected", "CaseActionRequested", "CaseActionRequestReviewed", "CaseResolved", "CaseReopened", "CaseObservationRecorded", "CaseFollowUpScheduled", "CaseFollowUpAcknowledged", "CaseFollowUpOutcomeRecorded", "CaseEscalationRaised", "CaseEscalationAcknowledged", "CaseEscalationClosed", "CaseAssignmentAcknowledged", "CaseCollaboratorGranted", "CaseCollaboratorRevoked", "AssistanceRequested", "AssistanceAccepted", "AssistanceProgressRecorded", "AssistanceProvided", "AssistanceReceiptConfirmed", "AssistanceUnfulfilled", "AssistanceCancelled", "ActionOwnerChanged", "CaseEscalationActionRecorded"] },
+    "eventType": { "enum": ["CaseReported", "CaseAssigned", "CaseReportCorrected", "CaseActionRequested", "CaseActionRequestReviewed", "CaseResolved", "CaseReopened", "CaseObservationRecorded", "CaseFollowUpScheduled", "CaseFollowUpAcknowledged", "CaseFollowUpOutcomeRecorded", "CaseEscalationRaised", "CaseEscalationAcknowledged", "CaseEscalationClosed", "CaseAssignmentAcknowledged", "CaseCollaboratorGranted", "CaseCollaboratorRevoked", "AssistanceRequested", "AssistanceAccepted", "AssistanceProgressRecorded", "AssistanceProvided", "AssistanceReceiptConfirmed", "AssistanceUnfulfilled", "AssistanceCancelled", "ActionOwnerChanged", "CaseEscalationActionRecorded", "CaseDiscussionPosted"] },
     "caseId": { "type": "string", "format": "uuid" },
     "aggregateVersion": { "type": "integer", "minimum": 1 },
     "reportRevision": { "type": "integer", "minimum": 1 },
@@ -51,6 +51,7 @@
     { "if": { "properties": { "eventType": { "const": "CaseActionRequestReviewed" } }, "required": ["eventType"] }, "then": { "properties": { "payload": { "$ref": "#/$defs/actionReview" } } } },
     { "if": { "properties": { "eventType": { "const": "CaseResolved" } }, "required": ["eventType"] }, "then": { "properties": { "payload": { "$ref": "#/$defs/resolution" } } } },
     { "if": { "properties": { "eventType": { "const": "CaseReopened" } }, "required": ["eventType"] }, "then": { "properties": { "payload": { "$ref": "#/$defs/reopening" } } } },
+    { "if": { "properties": { "eventType": { "const": "CaseDiscussionPosted" } }, "required": ["eventType"] }, "then": { "properties": { "payload": { "$ref": "#/$defs/discussionPosted" } } } },
     { "if": { "properties": { "eventType": { "const": "CaseObservationRecorded" } }, "required": ["eventType"] }, "then": { "properties": { "payload": { "$ref": "#/$defs/observationRecorded" } } } },
     { "if": { "properties": { "eventType": { "const": "CaseFollowUpScheduled" } }, "required": ["eventType"] }, "then": { "properties": { "payload": { "$ref": "#/$defs/followUpScheduled" } } } },
     { "if": { "properties": { "eventType": { "const": "CaseFollowUpAcknowledged" } }, "required": ["eventType"] }, "then": { "properties": { "payload": { "$ref": "#/$defs/followUpAcknowledged" } } } },
@@ -160,6 +161,15 @@
       "type": "object", "additionalProperties": false,
       "required": ["reason", "accountableOwnerId"],
       "properties": { "reason": { "type": "string", "minLength": 1 }, "accountableOwnerId": { "type": "string", "minLength": 1 } }
+    },
+    "discussionPosted": {
+      "type": "object", "additionalProperties": false,
+      "required": ["message", "mentionReferences", "evidenceKeys"],
+      "properties": {
+        "message": { "type": "string", "minLength": 1, "maxLength": 4000 },
+        "mentionReferences": { "type": "array", "maxItems": 20, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 160 } },
+        "evidenceKeys": { "type": "array", "maxItems": 10, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 160 } }
+      }
     },
     "observationRecorded": {
       "type": "object", "additionalProperties": false,

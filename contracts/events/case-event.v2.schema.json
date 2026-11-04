@@ -8,7 +8,7 @@
   "properties": {
     "schemaVersion": { "const": 2 },
     "eventId": { "type": "string", "format": "uuid" },
-    "eventType": { "enum": ["CaseReported", "CaseReportCorrected"] },
+    "eventType": { "enum": ["CaseReported", "CaseReportCorrected", "CaseObservationRecorded"] },
     "caseId": { "type": "string", "format": "uuid" },
     "aggregateVersion": { "type": "integer", "minimum": 1 },
     "reportRevision": { "type": "integer", "minimum": 1 },
@@ -16,13 +16,36 @@
     "actorId": { "type": "string", "minLength": 1 },
     "occurredAtUtc": { "type": ["string", "null"], "format": "date-time" },
     "recordedAtUtc": { "type": "string", "format": "date-time" },
-    "payload": { "oneOf": [{ "$ref": "#/$defs/reported" }, { "$ref": "#/$defs/correction" }] }
+    "payload": { "oneOf": [{ "$ref": "#/$defs/reported" }, { "$ref": "#/$defs/correction" }, { "$ref": "#/$defs/observation" }] }
   },
   "allOf": [
+    { "if": { "properties": { "eventType": { "const": "CaseObservationRecorded" } }, "required": ["eventType"] }, "then": { "properties": { "payload": { "$ref": "#/$defs/observation" } } } },
     { "if": { "properties": { "eventType": { "const": "CaseReported" } }, "required": ["eventType"] }, "then": { "properties": { "aggregateVersion": { "const": 1 }, "reportRevision": { "const": 1 }, "payload": { "$ref": "#/$defs/reported" } } } },
     { "if": { "properties": { "eventType": { "const": "CaseReportCorrected" } }, "required": ["eventType"] }, "then": { "properties": { "payload": { "$ref": "#/$defs/correction" } } } }
   ],
   "$defs": {
+    "observation": {
+      "type": "object", "additionalProperties": false,
+      "required": ["observationId", "narrative", "source", "category", "attachment"],
+      "properties": {
+        "observationId": { "type": "string", "format": "uuid" },
+        "narrative": { "type": "string", "minLength": 1 },
+        "source": { "type": "string", "minLength": 1 },
+        "category": { "enum": [null, "Clinical", "Environmental", "Community"] },
+        "attachment": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/recordedAttachment" }] }
+      }
+    },
+    "recordedAttachment": {
+      "type": "object", "additionalProperties": false,
+      "required": ["objectId", "fileName", "contentType", "byteLength", "sha256"],
+      "properties": {
+        "objectId": { "type": "string", "format": "uuid" },
+        "fileName": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "contentType": { "enum": ["image/jpeg", "image/png", "application/pdf", "text/plain; charset=utf-8"] },
+        "byteLength": { "type": "integer", "minimum": 1, "maximum": 10485760 },
+        "sha256": { "type": "string", "pattern": "^[A-Fa-f0-9]{64}$" }
+      }
+    },
     "reported": {
       "type": "object", "additionalProperties": false, "required": ["workspaceId", "report"],
       "properties": { "workspaceId": { "type": "string", "minLength": 1 }, "report": { "$ref": "#/$defs/report" } }

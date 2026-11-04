@@ -25,7 +25,7 @@
             <MudText id="case-detail-title" data-ellai-control="case-detail.heading" data-bonboarding-anchor="ellai-case-detail-heading" Typo="Typo.h5" HtmlTag="h1">Case details</MudText>
         }
         <nav class="case-detail__quick-actions" aria-label="Case quick actions">
-            <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Outlined.Event" OnClick="@(() => SelectTab(2))">Add follow-up</MudButton>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Outlined.Event" OnClick="OpenFollowUp" Disabled="@(WorkIsBusy || WorkVersion < 2 || !OnWorkAction.HasDelegate)">Add follow-up</MudButton>
             <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Outlined.NoteAdd" OnClick="OpenObservation">Add observation</MudButton>
             <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Outlined.AttachFile" OnClick="@(() => SelectTab(5))">Attachments</MudButton>
         </nav>
@@ -33,12 +33,11 @@
 
     <MudTabs data-ellai-control="case-detail.tabs" data-bonboarding-anchor="ellai-case-detail-tabs" @ref="_tabs" @bind-ActivePanelIndex="_activePanelIndex" @bind-ActivePanelIndex:after="SyncActiveTabToUriAsync" Rounded="false" ApplyEffectsToContainer="false" Class="case-detail__tabs">
         <MudTabPanel Text="Overview" data-ellai-control="case-detail.overview" data-bonboarding-anchor="ellai-case-detail-overview" Icon="@Icons.Material.Outlined.FolderOpen">
-            @ReportContent
             @if (OverviewData is { State: CaseDetailPanelState.Populated, Summary: { } overview })
             {
-                <section class="case-detail__section" aria-labelledby="summary-heading">
+                <section class="case-detail__section case-detail__summary-card" aria-labelledby="summary-heading">
                     <MudText Typo="Typo.subtitle1" HtmlTag="h2" id="summary-heading" data-ellai-control="case-detail.summary" data-bonboarding-anchor="ellai-case-detail-summary">Case summary</MudText>
-                    <p>@overview.Summary</p>
+                    <p class="case-detail__summary-text">@overview.Summary</p>
                     <dl class="case-detail__facts">
                         <div><dt>Type</dt><dd>@SubjectTypeLabel(overview.SubjectType)</dd></div>
                         <div><dt>Clinical classification</dt><dd>@overview.ClassificationLabel</dd></div>
@@ -61,12 +60,19 @@
                 var state = OverviewData?.State ?? CaseDetailPanelState.Unavailable;
                 <CaseDetailUnavailable State="state" Title="@(PanelTitle(state, "Case summary"))" Description="@(PanelDescription(state, "case summary"))" OnRetry="OnRefreshOverview" />
             }
-            <CaseClassificationPanel CaseId="CaseId" />
-            <CaseCorrelationPanel CaseId="CaseId" />
-            <CaseCollaboratorsPanel CaseId="CaseId" />
-            <EligibleHealthOfficersPanel CaseId="CaseId" />
-            <OfficerEscalationReviewPanel CaseId="CaseId" OnAssigned="RefreshAfterOfficerAssignmentAsync" />
-            <CaseTranslationPanel CaseId="CaseId" />
+            <section class="case-detail__section" aria-label="Original report">@ReportContent</section>
+            <MudExpansionPanels MultiExpansion="true" Elevation="0" Outlined="true" Class="case-detail__tools">
+                <MudExpansionPanel Text="Classification and related cases">
+                    <CaseClassificationPanel CaseId="CaseId" />
+                    <CaseCorrelationPanel CaseId="CaseId" />
+                </MudExpansionPanel>
+                <MudExpansionPanel Text="People and case access">
+                    <CaseCollaboratorsPanel CaseId="CaseId" />
+                    <EligibleHealthOfficersPanel CaseId="CaseId" />
+                    <OfficerEscalationReviewPanel CaseId="CaseId" OnAssigned="RefreshAfterOfficerAssignmentAsync" />
+                </MudExpansionPanel>
+                <MudExpansionPanel Text="Report translation"><CaseTranslationPanel CaseId="CaseId" /></MudExpansionPanel>
+            </MudExpansionPanels>
             <section class="case-detail__section" aria-labelledby="correction-heading">
                 <div class="case-detail__section-heading">
                     <MudText Typo="Typo.subtitle1" HtmlTag="h2" id="correction-heading">Report correction</MudText>
@@ -287,6 +293,18 @@
             </section>
         </MudTabPanel>
     </MudTabs>
+    <MudDialog @bind-Visible="_showFollowUpDialog" Options="@(new DialogOptions { FullWidth = true, MaxWidth = MaxWidth.Large, BackdropClick = false })">
+        <TitleContent><MudText Typo="Typo.h6">Schedule a follow-up</MudText></TitleContent>
+        <DialogContent>
+            @if (_newFollowUpSelection is not null)
+            {
+                <OperationsWorkManagementSurface Title="New follow-up" Description="Choose responsible staff, a due date and what needs to be done."
+                    State="OperationsSurfaceState.Populated" Items="NewFollowUpItems" RequestedSelection="_newFollowUpSelection"
+                    IsBusy="WorkIsBusy" StatusMessage="WorkStatusMessage" StatusIsError="WorkStatusIsError" OnAction="HandleWorkActionAsync" />
+            }
+        </DialogContent>
+        <DialogActions><MudButton OnClick="CloseFollowUp" Disabled="WorkIsBusy">Close</MudButton></DialogActions>
+    </MudDialog>
 </section>
 
 @code {
@@ -380,6 +398,8 @@
 
     protected override void OnParametersSet()
     {
+        if (_newFollowUpSelection is { } pending && (pending.CaseId != CaseId
+            || WorkItems.Any(item => item.WorkKey == $"fu:{pending.RequestId:D}"))) CloseFollowUp();
         if (CaseId != _boundCaseId) { _followUpSelection = null; _followUpReviewMessage = null; _boundCaseId = CaseId; _caseVersion = 0; _savingCorrection = false; CloseDiscussionForm(); CloseObservationForm(); CloseCorrectionForm(); CancelAssistanceRequest(); }
         if (_assistanceRequestId is { } assistanceId && WorkItems.Any(item => item.WorkKey == $"ast:{assistanceId:D}"))
         {
@@ -396,6 +416,35 @@
             _correctionAccessChanged = false;
         }
         _caseVersion = Math.Max(_caseVersion, Math.Max(DiscussionData?.AggregateVersion ?? 0, EvidenceData?.AggregateVersion ?? 0));
+    }
+
+    private bool _showFollowUpDialog;
+    private long _newFollowUpVersion;
+    private OperationsWorkManagementSurface.WorkSelectionRequest? _newFollowUpSelection;
+    private IReadOnlyList<OperationsWorkManagementSurface.OperationsWorkItem> NewFollowUpItems =>
+        _newFollowUpSelection is { } selection
+            ? [new(CaseId, selection.WorkKey, _newFollowUpVersion, "New follow-up",
+                OperationsWorkManagementSurface.OperationsWorkKind.FollowUp,
+                OperationsWorkManagementSurface.OperationsWorkStatus.Open,
+                OperationsWorkManagementSurface.OperationsAssignmentStatus.Unassigned,
+                "Schedule the next action for this case.", DateTimeOffset.UtcNow, null,
+                [OperationsWorkManagementSurface.OperationsWorkAction.ScheduleFollowUp], [])]
+            : [];
+
+    private void OpenFollowUp()
+    {
+        if (WorkIsBusy || WorkVersion < 2 || !OnWorkAction.HasDelegate) return;
+        var id = Guid.NewGuid();
+        _newFollowUpVersion = WorkVersion;
+        _newFollowUpSelection = new(id, CaseId, $"follow-up:new:{id:D}",
+            OperationsWorkManagementSurface.OperationsWorkAction.ScheduleFollowUp);
+        _showFollowUpDialog = true;
+    }
+
+    private void CloseFollowUp()
+    {
+        _showFollowUpDialog = false;
+        _newFollowUpSelection = null;
     }
 
     private void OpenAssistanceRequest()

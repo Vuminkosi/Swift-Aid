@@ -90,7 +90,7 @@ public static class CanonicalCaseCommandHasher
         }
 
         if (command is not (CorrectReportCommand or RequestCaseActionCommand or ReviewCaseActionRequestCommand or ResolveCaseCommand or ReopenCaseCommand
-            or RecordObservationCommand or ScheduleFollowUpCommand or RecordFollowUpOutcomeCommand or ChangeActionOwnerCommand
+            or PostCaseDiscussionCommand or RecordObservationCommand or ScheduleFollowUpCommand or RecordFollowUpOutcomeCommand or ChangeActionOwnerCommand
             or RaiseEscalationCommand or AcknowledgeEscalationCommand or RecordEscalationActionCommand or CloseEscalationCommand or AcknowledgeAssignmentCommand or AcknowledgeFollowUpCommand
             or GrantCaseCollaboratorCommand or RevokeCaseCollaboratorCommand or RequestAssistanceCommand or UpdateAssistanceCommand))
         {
@@ -288,6 +288,28 @@ public static class CanonicalCaseCommandHasher
             case AcceptCaseCommand:
                 throw new NotSupportedException("Case creation is not supported by the non-creation command hash protocol.");
 
+            case PostCaseDiscussionCommand discussion:
+                if (!discussion.IsValid) throw new ArgumentException("Invalid discussion command.");
+                RequireText(discussion.Message, nameof(discussion.Message));
+                if (discussion.MentionReferences is null || discussion.EvidenceKeys is null)
+                    throw new ArgumentException("Discussion references are required.");
+                var discussionSnapshot = discussion with
+                {
+                    MentionReferences = Array.AsReadOnly(discussion.MentionReferences.OrderBy(value => value, StringComparer.Ordinal).ToArray()),
+                    EvidenceKeys = Array.AsReadOnly(discussion.EvidenceKeys.OrderBy(value => value, StringComparer.Ordinal).ToArray())
+                };
+                return (discussionSnapshot, "PostCaseDiscussion", "Staff discussion", writer =>
+                {
+                    writer.WriteStartObject();
+                    writer.WriteString("message", discussionSnapshot.Message);
+                    writer.WriteStartArray("mentionReferences");
+                    foreach (var reference in discussionSnapshot.MentionReferences) writer.WriteStringValue(reference);
+                    writer.WriteEndArray();
+                    writer.WriteStartArray("evidenceKeys");
+                    foreach (var reference in discussionSnapshot.EvidenceKeys) writer.WriteStringValue(reference);
+                    writer.WriteEndArray();
+                    writer.WriteEndObject();
+                });
             case RecordObservationCommand observation:
                 RequireIdentifier(observation.ObservationId, nameof(observation.ObservationId));
                 RequireText(observation.Narrative, nameof(observation.Narrative));
@@ -300,6 +322,16 @@ public static class CanonicalCaseCommandHasher
                     writer.WriteString("observationId", observationSnapshot.ObservationId.ToString("D"));
                     writer.WriteString("narrative", observationSnapshot.Narrative);
                     writer.WriteString("source", observationSnapshot.Source);
+                    if (observationSnapshot.Category is not null) writer.WriteString("category", observationSnapshot.Category);
+                    if (observationSnapshot.Attachment is { } attachment)
+                    {
+                        if (!attachment.IsValid) throw new ArgumentException("Invalid original evidence metadata.");
+                        // Storage location is opaque and may differ on an exact retried upload.
+                        writer.WriteString("fileName", attachment.FileName);
+                        writer.WriteString("contentType", attachment.ContentType);
+                        writer.WriteNumber("byteLength", attachment.ByteLength);
+                        writer.WriteString("sha256", attachment.Sha256);
+                    }
                     writer.WriteEndObject();
                 });
 

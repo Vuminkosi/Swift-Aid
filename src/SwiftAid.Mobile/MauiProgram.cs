@@ -104,7 +104,8 @@ public static class MauiProgram
         
         
         
-        builder.Services.AddSingleton<IAiInvestigationClient, UnavailableInvestigationClient>();
+        builder.Services.AddSingleton<IAiInvestigationClient>(sp => new InvestigationHttpClient(
+            sp.GetRequiredService<IHttpClientFactory>().CreateClient("SwiftAid.NotificationApi")));
         builder.Services.AddSingleton<IMobileHomeOverviewClient, HomeOverviewHttpClient>();
         builder.Services.AddTransient<IAnalyticsClient>(sp => new AnalyticsHttpClient(
             sp.GetRequiredService<IHttpClientFactory>().CreateClient("SwiftAid.NotificationApi")));
@@ -114,13 +115,17 @@ public static class MauiProgram
                 sp.GetRequiredService<IHttpClientFactory>().CreateClient("SwiftAid.NotificationApi"), sp.GetRequiredService<IWorkspaceAccessClient>()));
         builder.Services.AddTransient<SurveillancePlaceLookupClient>(sp => new SurveillancePlaceLookupClient(
                 sp.GetRequiredService<IHttpClientFactory>().CreateClient("SwiftAid.NotificationApi")));
-        builder.Services.AddSingleton<IOrganizationManagementClient, UnavailableOrganizationManagementClient>();
+        builder.Services.AddSingleton<OrganizationManagementContext>();
+        builder.Services.AddSingleton<IOrganizationManagementClient>(sp => new OrganizationManagementHttpClient(
+            sp.GetRequiredService<IHttpClientFactory>().CreateClient("SwiftAid.NotificationApi"), sp.GetRequiredService<OrganizationManagementContext>()));
         builder.Services.AddSingleton<ICaseWorkspaceClient, MobileCaseWorkspaceClient>();
-        builder.Services.AddSingleton<ICaseDiscussionClient, UnavailableCaseDiscussionClient>();
-        builder.Services.AddSingleton<ICaseDiscussionCommandClient, UnavailableCaseDiscussionCommandClient>();
-        builder.Services.AddSingleton<ICaseEvidenceClient, UnavailableCaseEvidenceClient>();
-        builder.Services.AddSingleton<ICaseEvidenceUploadClient, UnavailableCaseEvidenceUploadClient>();
-        builder.Services.AddSingleton<ICaseEvidenceContentClient, UnavailableCaseEvidenceContentClient>();
+        builder.Services.AddSingleton(sp => new CaseDiscussionHttpClient(sp.GetRequiredService<IHttpClientFactory>().CreateClient("SwiftAid.NotificationApi")));
+        builder.Services.AddSingleton<ICaseDiscussionClient>(sp => sp.GetRequiredService<CaseDiscussionHttpClient>());
+        builder.Services.AddSingleton<ICaseDiscussionCommandClient>(sp => sp.GetRequiredService<CaseDiscussionHttpClient>());
+        builder.Services.AddSingleton(sp => new CaseEvidenceHttpClient(sp.GetRequiredService<IHttpClientFactory>().CreateClient("SwiftAid.NotificationApi")));
+        builder.Services.AddSingleton<ICaseEvidenceClient>(sp => sp.GetRequiredService<CaseEvidenceHttpClient>());
+        builder.Services.AddSingleton<ICaseEvidenceUploadClient>(sp => sp.GetRequiredService<CaseEvidenceHttpClient>());
+        builder.Services.AddSingleton<ICaseEvidenceContentClient>(sp => sp.GetRequiredService<CaseEvidenceHttpClient>());
         builder.Services.AddSingleton<ICaseDetailSummaryClient>(sp => new CaseDetailSummaryHttpClient(
             sp.GetRequiredService<IHttpClientFactory>().CreateClient("SwiftAid.NotificationApi")));
         builder.Services.AddSingleton<ICaseReportDetailsClient>(sp => new CaseReportDetailsHttpClient(
@@ -131,7 +136,7 @@ public static class MauiProgram
             new SwiftAid.Client.Cases.CaseClassificationHttpClient(sp.GetRequiredService<IHttpClientFactory>().CreateClient("SwiftAid.NotificationApi")));
         builder.Services.AddTransient<ICaseCorrectionReadClient>(sp => new CaseCorrectionReadHttpClient(
                 sp.GetRequiredService<IHttpClientFactory>().CreateClient("SwiftAid.NotificationApi")));
-        builder.Services.AddSingleton<ICaseObservationClient, UnavailableCaseObservationClient>();
+        builder.Services.AddSingleton<ICaseObservationClient>(sp => sp.GetRequiredService<CaseEvidenceHttpClient>());
         builder.Services.AddTransient<IPublicCommunitySessionClient, HttpPublicCommunitySessionClient>();
 
         var configuredGatewayAddress = builder.Configuration["SwiftAid:GatewayBaseAddress"];

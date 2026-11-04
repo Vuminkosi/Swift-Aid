@@ -1,0 +1,108 @@
+@page "/organizations/{OrganizationId}/manage"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@using SwiftAid.UI.Components.Surfaces.Operations
+
+<PageTitle>Organization management | SwiftAid</PageTitle>
+@using Client = SwiftAid.Client.Presentation
+@implements IDisposable
+@inject Client.IOrganizationManagementClient Management
+@inject Client.OrganizationManagementContext Selection
+
+<MudAlert Severity="Severity.Info" Dense="true" Class="mb-3">Organization roles and service regions do not grant case access. Case permissions are managed separately.</MudAlert>
+<OperationsOrganizationSurface WorkspaceState="_state" ProfileState="_state" RequestState="_state" InvitationState="_state"
+    SsoState="_state" AuditState="_state" Profile="_profile" Members="_members" MembershipRequests="_requests"
+    Invitations="_invitations" SsoConfiguration="_sso" AuditEntries="_audit" CanManageMembers="_canManage"
+    Busy="_busy" StatusMessage="_message" StatusSeverity="_severity" OnRetry="RefreshAsync"
+    OnUpdateProfile="UpdateProfileAsync" OnSubmitMembershipRequest="RequestAsync" OnReviewMembershipRequest="ReviewAsync"
+    OnUpdateMember="UpdateMemberAsync" OnRevokeMembership="RevokeAsync" OnSendInvitation="InviteAsync" OnRequestSsoSetup="SsoAsync" />
+
+@code {
+    [Parameter, EditorRequired] public string OrganizationId { get; set; } = "";
+    private readonly CancellationTokenSource _lifetime = new();
+    private string? _loadedId;
+    private bool _busy;
+    private bool _canManage;
+    private int _generation;
+    private string? _message;
+    private Severity _severity = Severity.Info;
+    private OperationsSurfaceState _state = OperationsSurfaceState.Loading;
+    private OrganizationProfile? _profile;
+    private OrganizationSsoConfiguration? _sso;
+    private IReadOnlyList<ManagedOrganizationMember> _members = [];
+    private IReadOnlyList<OrganizationMembershipRequest> _requests = [];
+    private IReadOnlyList<OrganizationInvitation> _invitations = [];
+    private IReadOnlyList<OrganizationAuditEntry> _audit = [];
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loadedId == OrganizationId) return;
+        _loadedId = OrganizationId;
+        Selection.OrganizationId = OrganizationId;
+        _generation++;
+        _profile = null; _sso = null; _members = []; _requests = []; _invitations = []; _audit = []; _canManage = false;
+        await RefreshAsync();
+    }
+
+    private async Task RefreshAsync()
+    {
+        var generation = _generation;
+        _busy = true;
+        try
+        {
+            var profile = await Management.GetProfileAsync(_lifetime.Token);
+            var members = await Management.ListManagedMembersAsync(new(1, 100), _lifetime.Token);
+            var requests = await Management.ListMembershipRequestsAsync(new(1, 100), _lifetime.Token);
+            var sso = await Management.GetSsoConfigurationAsync(_lifetime.Token);
+            var audit = await Management.GetAuditAsync(_lifetime.Token);
+            if (generation != _generation) return;
+            _canManage = members.Succeeded;
+            _state = profile.Succeeded ? OperationsSurfaceState.Populated : OperationsSurfaceState.Error;
+            _profile = profile.Value is { } p ? new(p.DisplayName, (OrganizationCountry)p.Country, (OrganizationRegion)p.Region) : null;
+            _members = members.Value?.Items.Select(m => new ManagedOrganizationMember(m.Id, m.DisplayName, (OrganizationRole)m.Role,
+                (OrganizationCountry)m.Country, (OrganizationRegion)m.Region, m.Status)).ToArray() ?? [];
+            _requests = requests.Value?.Items.Select(r => new OrganizationMembershipRequest(r.Id, r.RequesterName, (OrganizationCountry)r.Country,
+                (OrganizationRegion)r.Region, (OrganizationRole)r.RequestedRole, (OrganizationMembershipRequestStatus)r.Status, r.CreatedAtUtc)).ToArray() ?? [];
+            _sso = sso.Value is { } s ? new((OrganizationSsoStatus)s.Status, s.Description, s.HasStoredSecret) : null;
+            _audit = audit.Value?.Select(a => new OrganizationAuditEntry((OrganizationAuditAction)a.Action, a.Summary, a.OccurredAtUtc)).ToArray() ?? [];
+            if (!profile.Succeeded) { _message = "Organization details could not be loaded. Check your membership and retry."; _severity = Severity.Warning; }
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { }
+        catch (Exception) { if (generation == _generation) { _state = OperationsSurfaceState.Error; _message = "Organization details could not be loaded. Please retry."; _severity = Severity.Warning; } }
+        finally { if (generation == _generation) _busy = false; }
+    }
+
+    private async Task ExecuteAsync<T>(Func<Task<Client.UiCapabilityResult<T>>> action)
+    {
+        if (_busy) return;
+        var generation = _generation;
+        _busy = true;
+        try
+        {
+            var result = await action();
+            if (generation != _generation) return;
+            _message = result.Succeeded ? "Saved." : result.Code switch
+            {
+                Client.UiCapabilityResultCode.Denied => "You no longer have permission for this organization.",
+                Client.UiCapabilityResultCode.Conflict => "The organization changed or this action is not valid in its current state. Refresh and try again.",
+                Client.UiCapabilityResultCode.InvalidRequest => "Check the entered values and reason.",
+                _ => "The change could not be confirmed. Refresh before retrying."
+            };
+            _severity = result.Succeeded ? Severity.Success : Severity.Warning;
+            if (result.Value is Client.OrganizationInvitation invitation)
+                _invitations = [new(invitation.Id, invitation.Email, invitation.Role, invitation.Status), .. _invitations];
+            await RefreshAsync();
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { }
+        catch (Exception) { if (generation == _generation) { _message = "The change could not be confirmed. Refresh before retrying."; _severity = Severity.Warning; } }
+        finally { if (generation == _generation) _busy = false; }
+    }
+
+    private Task UpdateProfileAsync(OrganizationProfileUpdate value) => ExecuteAsync(() => Management.UpdateProfileAsync(new(value.DisplayName, (Client.OrganizationCountry)value.Country, (Client.OrganizationRegion)value.Region, value.Reason), _lifetime.Token));
+    private Task RequestAsync(OrganizationMembershipRequestSubmission value) => ExecuteAsync(() => Management.SubmitMembershipRequestAsync(new(value.RequesterName, (Client.OrganizationCountry)value.Country, (Client.OrganizationRegion)value.Region, (Client.OrganizationRole)value.RequestedRole, value.Reason), _lifetime.Token));
+    private Task ReviewAsync(OrganizationMembershipRequestReview value) => ExecuteAsync(() => Management.ReviewMembershipRequestAsync(new(value.RequestId, value.Approve, value.Reason), _lifetime.Token));
+    private Task UpdateMemberAsync(OrganizationMemberChange value) => ExecuteAsync(() => Management.UpdateMemberAsync(new(value.MemberId, (Client.OrganizationRole?)value.Role, (Client.OrganizationCountry?)value.Country, (Client.OrganizationRegion?)value.Region, value.Reason), _lifetime.Token));
+    private Task RevokeAsync(OrganizationMembershipRevocation value) => ExecuteAsync(() => Management.RevokeMembershipAsync(new(value.MemberId, value.Reason), _lifetime.Token));
+    private Task InviteAsync(OrganizationInvitationRequest value) => ExecuteAsync(() => Management.SendInvitationAsync(new(value.Email, (Client.OrganizationRole)value.Role, (Client.OrganizationCountry)value.Country, (Client.OrganizationRegion)value.Region, value.Reason), _lifetime.Token));
+    private Task SsoAsync(string reason) => ExecuteAsync(() => Management.RequestSsoSetupAsync(reason, _lifetime.Token));
+    public void Dispose() { _generation++; _lifetime.Cancel(); _lifetime.Dispose(); }
+}

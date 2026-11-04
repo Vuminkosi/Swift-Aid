@@ -118,7 +118,7 @@ public sealed record CaseEvidenceDetail(
     public bool IsValid =>
         CaseId != Guid.Empty && AggregateVersion >= 0 && Evidence is { IsValid: true } &&
         !string.IsNullOrWhiteSpace(ContentType) && ContentType.Length <= 128 &&
-        ByteLength is > 0 and <= CaseEvidenceDownload.MaximumContentBytes &&
+        ByteLength is > 0 and <= CaseEvidenceUploadRequest.MaximumContentBytes &&
         Sha256 is { Length: 64 } && Sha256.All(Uri.IsHexDigit);
 }
 

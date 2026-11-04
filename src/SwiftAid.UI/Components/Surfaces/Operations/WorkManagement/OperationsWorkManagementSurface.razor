@@ -445,6 +445,17 @@
         return OnFilterChanged.InvokeAsync(filter);
     }
 
+    private OperationsWorkAction? _requestedAction;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_requestedAction is { } action && SelectedItem is { } item && AvailableActions(item).Contains(action))
+        {
+            _requestedAction = null;
+            await SetActionAsync(action);
+        }
+    }
+
     protected override void OnParametersSet()
     {
         if (RequestedSelection is { } request && request.RequestId != _lastSelectionRequestId)
@@ -452,7 +463,11 @@
             _lastSelectionRequestId = request.RequestId;
             var requested = Items.FirstOrDefault(item => item.CaseId == request.CaseId &&
                 string.Equals(item.WorkKey, request.WorkKey, StringComparison.Ordinal));
-            if (requested is not null) SelectWork(requested);
+            if (requested is not null)
+            {
+                SelectWork(requested);
+                _requestedAction = request.Action;
+            }
         }
         if (Items.Count == 0)
         {
@@ -1154,7 +1169,7 @@
         FollowUpOutcome? FollowUpOutcome = null,
         EscalationReason? EscalationReason = null,
         EscalationActionKind? EscalationAction = null);
-    public sealed record WorkSelectionRequest(Guid RequestId, Guid CaseId, string WorkKey);
+    public sealed record WorkSelectionRequest(Guid RequestId, Guid CaseId, string WorkKey, OperationsWorkAction? Action = null);
     public sealed record OperationsWorkItem(
         Guid CaseId,
         string WorkKey,

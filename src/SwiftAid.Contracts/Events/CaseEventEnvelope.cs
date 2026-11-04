@@ -29,7 +29,8 @@ public enum CaseEventType
     AssistanceCancelled,
     CaseFollowUpAcknowledged,
     ActionOwnerChanged,
-    CaseEscalationActionRecorded
+    CaseEscalationActionRecorded,
+    CaseDiscussionPosted
 }
 
 public abstract record CaseEventPayload;
@@ -78,6 +79,7 @@ public sealed record CaseResolvedPayload(string Reason) : CaseEventPayload;
 public sealed record CaseReopenedPayload(string Reason, string AccountableOwnerId) : CaseEventPayload;
 
 public sealed record CaseObservationRecordedPayload(Guid ObservationId, string Narrative, string Source) : CaseEventPayload;
+public sealed record CaseObservationRecordedV2Payload(Guid ObservationId, string Narrative, string Source, string? Category, RecordedAttachment? Attachment) : CaseEventPayload;
 
 public sealed record CaseFollowUpScheduledPayload(Guid FollowUpId, string Purpose, string AssigneeActorId, DateTimeOffset DueAtUtc) : CaseEventPayload;
 
@@ -119,3 +121,6 @@ public sealed record CaseEventEnvelope<TPayload>(
     DateTimeOffset? OccurredAtUtc,
     DateTimeOffset RecordedAtUtc,
     TPayload Payload) where TPayload : CaseEventPayload;
+
+public sealed record CaseDiscussionPostedPayload(string Message, IReadOnlyList<string> MentionReferences,
+    IReadOnlyList<string> EvidenceKeys) : CaseEventPayload;

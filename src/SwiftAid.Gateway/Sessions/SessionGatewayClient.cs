@@ -32,29 +32,23 @@ public sealed class SessionGatewayClient(
         serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
 
     /// <summary>Lists published public sessions; failures propagate to the presentation adapter.</summary>
-    public async Task<IReadOnlyList<PublicSessionView>> ListPublicAsync(
-        int? limit,
-        CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<PublicSessionView>> ListPublicAsync(int? limit, CancellationToken cancellationToken = default)
     {
-        var service = _serviceProvider.GetService<ICommunitySessionService>()
-            ?? throw new InvalidOperationException("The community session service is unavailable.");
-        return await service.ListPublicAsync(limit, cancellationToken).ConfigureAwait(false);
+        await using var scope = _serviceProvider.CreateAsyncScope();
+        return await scope.ServiceProvider.GetRequiredService<ICommunitySessionService>().ListPublicAsync(limit, cancellationToken);
     }
 
-    public Task<PublicSessionPage> QueryPublicAsync(PublicSessionQuery query, CancellationToken cancellationToken = default)
+    public async Task<PublicSessionPage> QueryPublicAsync(PublicSessionQuery query, CancellationToken cancellationToken = default)
     {
-        var service = _serviceProvider.GetService<ICommunitySessionService>()
-            ?? throw new InvalidOperationException("The community session service is unavailable.");
-        return service.QueryPublicAsync(query, cancellationToken);
+        await using var scope = _serviceProvider.CreateAsyncScope();
+        return await scope.ServiceProvider.GetRequiredService<ICommunitySessionService>().QueryPublicAsync(query, cancellationToken);
     }
 
-    public Task<PublicSessionView?> GetPublicAsync(Guid sessionId, CancellationToken cancellationToken = default)
+    public async Task<PublicSessionView?> GetPublicAsync(Guid sessionId, CancellationToken cancellationToken = default)
     {
-        var service = _serviceProvider.GetService<ICommunitySessionService>()
-            ?? throw new InvalidOperationException("The community session service is unavailable.");
-        return service.GetPublicAsync(sessionId, cancellationToken);
+        await using var scope = _serviceProvider.CreateAsyncScope();
+        return await scope.ServiceProvider.GetRequiredService<ICommunitySessionService>().GetPublicAsync(sessionId, cancellationToken);
     }
-
     /// <summary>Loads the plain-text invitation for a published session, if available.</summary>
     public async Task<string?> GetInvitationTextAsync(
         Guid sessionId,

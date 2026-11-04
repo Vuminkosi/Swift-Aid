@@ -22,7 +22,7 @@ public sealed class EllaiSessionEntity
 }
 
 /// <summary>Accepted utterance identity: one row per (session,
-/// client-utterance) pair enforces §7.1 idempotency across restarts and
+/// client-utterance) pair enforces Â§7.1 idempotency across restarts and
 /// gateway instances. Replays read this row instead of consuming a cycle.</summary>
 public sealed class EllaiUtteranceEntity
 {
@@ -36,6 +36,7 @@ public sealed class EllaiUtteranceEntity
     public string? UiProposalsJson { get; set; }
     public string? ToolTraceJson { get; set; }
     public string? FrameworkSessionJson { get; set; }
+    public string? DecisionJson { get; set; }
     public string Outcome { get; set; } = "Queued";
     public DateTimeOffset? LeaseExpiresAtUtc { get; set; }
     public int AttemptCount { get; set; }

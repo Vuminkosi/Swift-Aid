@@ -141,6 +141,8 @@ public sealed class SwiftAidDbContext(DbContextOptions<SwiftAidDbContext> option
         modelBuilder.ApplyConfiguration(new SessionReminderOccurrenceEntityConfiguration());
         modelBuilder.ApplyConfiguration(new SessionReminderDeliveryEntityConfiguration());
         modelBuilder.ApplyConfiguration(new CommunitySessionSubscriptionEntityConfiguration());
+        modelBuilder.ApplyConfiguration(new OrganizationAdministrationConfiguration());
+        modelBuilder.ApplyConfiguration(new Ellai.AgentInvestigationConfiguration());
         modelBuilder.ApplyConfiguration(new Ellai.EllaiSessionEntityConfiguration());
         modelBuilder.ApplyConfiguration(new Ellai.EllaiCheckpointEntityConfiguration());
         modelBuilder.ApplyConfiguration(new Ellai.EllaiUtteranceEntityConfiguration());
@@ -678,7 +680,7 @@ public sealed class SwiftAidDbContext(DbContextOptions<SwiftAidDbContext> option
         caseEvent.ToTable("case_events", table =>
         {
             table.HasCheckConstraint("ck_case_events_versions", "aggregate_version > 0 AND report_revision > 0 AND schema_version > 0");
-            table.HasCheckConstraint("ck_case_events_type", "event_type IN ('CaseReported', 'CaseAssigned', 'CaseReportCorrected', 'CaseActionRequested', 'CaseActionRequestReviewed', 'CaseResolved', 'CaseReopened', 'CaseObservationRecorded', 'CaseFollowUpScheduled', 'CaseFollowUpAcknowledged', 'CaseFollowUpOutcomeRecorded', 'CaseEscalationRaised', 'CaseEscalationAcknowledged', 'CaseEscalationActionRecorded', 'CaseEscalationClosed', 'CaseAssignmentAcknowledged', 'CaseCollaboratorGranted', 'CaseCollaboratorRevoked', 'AssistanceRequested', 'AssistanceAccepted', 'AssistanceProgressRecorded', 'AssistanceProvided', 'AssistanceReceiptConfirmed', 'AssistanceUnfulfilled', 'AssistanceCancelled', 'ActionOwnerChanged')");
+            table.HasCheckConstraint("ck_case_events_type", "event_type IN ('CaseReported', 'CaseAssigned', 'CaseReportCorrected', 'CaseActionRequested', 'CaseActionRequestReviewed', 'CaseResolved', 'CaseReopened', 'CaseObservationRecorded', 'CaseFollowUpScheduled', 'CaseFollowUpAcknowledged', 'CaseFollowUpOutcomeRecorded', 'CaseEscalationRaised', 'CaseEscalationAcknowledged', 'CaseEscalationActionRecorded', 'CaseEscalationClosed', 'CaseAssignmentAcknowledged', 'CaseCollaboratorGranted', 'CaseCollaboratorRevoked', 'AssistanceRequested', 'AssistanceAccepted', 'AssistanceProgressRecorded', 'AssistanceProvided', 'AssistanceReceiptConfirmed', 'AssistanceUnfulfilled', 'AssistanceCancelled', 'ActionOwnerChanged', 'CaseDiscussionPosted')");
             table.HasCheckConstraint("ck_case_events_actor", "length(btrim(actor_id)) > 0");
         });
         caseEvent.HasKey(entity => entity.EventId).HasName("pk_case_events");

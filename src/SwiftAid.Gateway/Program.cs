@@ -74,8 +74,9 @@ builder.Services.AddScoped<SwiftAid.Contracts.Cases.ICaseTranslationClient, Case
 builder.Services.AddScoped<ICaseCorrectionReadClient, CaseCorrectionReadGatewayClient>();
 
 
-builder.Services.AddScoped<IAiInvestigationClient, UnavailableInvestigationClient>();
-builder.Services.AddScoped<IOrganizationManagementClient, UnavailableOrganizationManagementClient>();
+builder.Services.AddScoped<IAiInvestigationClient, SwiftAid.Gateway.Ellai.InvestigationGatewayClient>();
+builder.Services.AddScoped<OrganizationManagementContext>();
+builder.Services.AddScoped<IOrganizationManagementClient, OrganizationManagementGatewayClient>();
 if (builder.Configuration.GetValue<bool>("Identity:Enabled") || builder.Configuration.GetValue<bool>("Federation:Enabled"))
     builder.Services.AddScoped<IAccountPresentationClient, GatewayAccountPresentationClient>();
 else
@@ -84,6 +85,15 @@ builder.Services.AddScoped<IWorkspaceAccessClient, GatewayWorkspaceAccessClient>
 builder.Services.AddScoped<IStaffSessionEditorClient, GatewayStaffSessionEditorClient>();
 builder.Services.AddScoped<IStaffSessionHistoryClient, GatewayStaffSessionHistoryClient>();
 builder.Services.AddScoped<IMapAggregateClient, MapAggregateGatewayClient>();
+builder.Services.AddScoped<IGeoLookupClient, ScopedGeoLookupClient>();
+builder.Services.AddScoped<CaseDiscussionGatewayClient>();
+builder.Services.AddScoped<ICaseDiscussionClient>(services => services.GetRequiredService<CaseDiscussionGatewayClient>());
+builder.Services.AddScoped<ICaseDiscussionCommandClient>(services => services.GetRequiredService<CaseDiscussionGatewayClient>());
+builder.Services.AddScoped<ICaseObservationClient, CaseObservationGatewayClient>();
+builder.Services.AddScoped<CaseEvidenceGatewayClient>();
+builder.Services.AddScoped<ICaseEvidenceClient>(services => services.GetRequiredService<CaseEvidenceGatewayClient>());
+builder.Services.AddScoped<ICaseEvidenceUploadClient>(services => services.GetRequiredService<CaseEvidenceGatewayClient>());
+builder.Services.AddScoped<ICaseEvidenceContentClient>(services => services.GetRequiredService<CaseEvidenceGatewayClient>());
 builder.Services.AddScoped<ISurveillanceMapDetailsClient, SurveillanceMapDetailsGatewayClient>();
 builder.Services.AddScoped<ISurveillanceMapDetailsRequest, SurveillanceMapDetailsRequest>();
 builder.Services.AddScoped<IWorkspaceAccessRequest, WorkspaceAccessRequest>();
@@ -380,6 +390,10 @@ app.MapHealthSourceEndpoints();
 app.MapCommunityResearchEndpoints();
 app.MapCorrelationDecisionEndpoints();
 app.MapCaseDetailEndpoints();
+app.MapCaseEvidenceEndpoints();
+app.MapCaseDiscussionEndpoints();
+app.MapOrganizationManagementEndpoints();
+app.MapInvestigationEndpoints();
 app.MapCaseQueueEndpoints();
 app.MapMapAggregateEndpoints();
 app.MapHomeOverviewEndpoints();

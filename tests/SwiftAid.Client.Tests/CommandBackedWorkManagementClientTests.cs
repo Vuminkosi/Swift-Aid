@@ -7,6 +7,22 @@ namespace SwiftAid.Client.Tests;
 public sealed class CommandBackedWorkManagementClientTests
 {
     [Fact]
+    public async Task NewFollowUp_preserves_identity_and_command_id_across_retries()
+    {
+        var commands = new StubCommandClient();
+        var client = new CommandBackedWorkManagementClient(commands, new StubMonitoringClient(), new StubTimelineClient());
+        var id = Guid.NewGuid();
+        var commandId = Guid.NewGuid();
+        var command = new WorkManagementCommand(CaseId, $"follow-up:new:{id:D}", WorkManagementAction.ScheduleFollowUp,
+            ExpectedVersion: 7, WorkerKey: "eligible-staff-1", Details: "Check progress.",
+            DueAtUtc: DateTimeOffset.UtcNow.AddDays(1), LocalTimeZoneId: "UTC", LocalOffset: TimeSpan.Zero, CommandId: commandId);
+        await client.ExecuteAsync(command, new WorkManagementQuery(new PageRequest(1, 25)));
+        await client.ExecuteAsync(command, new WorkManagementQuery(new PageRequest(1, 25)));
+        Assert.Equal(2, commands.Sent.Count);
+        Assert.All(commands.Sent, sent => { Assert.Equal(id, sent.Input.FollowUpId); Assert.Equal(commandId, sent.Input.CommandId); });
+    }
+
+    [Fact]
     public async Task CaseScopedWorkReadsBeyondGlobalLimitAndDoesNotUseGlobalQueue()
     {
         var pages = new ScopedPages();

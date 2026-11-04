@@ -52,6 +52,8 @@ public sealed class CaseQueueClientScopeTests
         Assert.Equal(CaseQueueAccess.Allowed, result.Access);
         Assert.Equal("cursor-token", query.LastCursor);
         Assert.Equal(50, query.LastLimit);
+        Assert.NotNull(query.LastFilter);
+        Assert.Equal(TimeSpan.FromDays(30), query.LastFilter.ReportedBeforeUtc - query.LastFilter.ReportedFromUtc);
     }
 
     private sealed class ReadGate
@@ -65,6 +67,8 @@ public sealed class CaseQueueClientScopeTests
 
     private sealed class BlockingQuery(ReadGate gate) : ICaseQueueQuery, IAsyncDisposable
     {
+        public Task<CaseQueueResult> GetMineAsync(ActorContext actor, int? limit, CaseQueueFilter filter, string? cursor, CancellationToken ct) =>
+            GetMineAsync(actor, limit, ct);
         private readonly Guid _id = Guid.NewGuid();
         public async Task<CaseQueueResult> GetMineAsync(ActorContext actor, int? limit, CancellationToken ct)
         {
@@ -83,6 +87,12 @@ public sealed class CaseQueueClientScopeTests
 
     private sealed class RecordingQuery : ICaseQueueQuery
     {
+        public CaseQueueFilter? LastFilter { get; private set; }
+        public Task<CaseQueueResult> GetMineAsync(ActorContext actor, int? limit, CaseQueueFilter filter, string? cursor, CancellationToken ct)
+        {
+            LastFilter = filter;
+            return GetMineAsync(actor, limit, cursor, ct);
+        }
         public string? LastCursor { get; private set; }
         public int? LastLimit { get; private set; }
 

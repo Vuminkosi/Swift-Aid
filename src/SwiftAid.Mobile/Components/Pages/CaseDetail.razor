@@ -311,9 +311,12 @@
         var client = ServiceProvider.GetService<IWorkManagementClient>();
         var snapshot = _workSnapshot;
         var current = _workItems.FirstOrDefault(item => string.Equals(item.WorkKey, request.WorkKey, StringComparison.Ordinal));
-        if (client is null || _workBusy || _workState != OperationsSurfaceState.Populated || snapshot is null ||
+        var isNewFollowUp = request.Action == OperationsWorkManagementSurface.OperationsWorkAction.ScheduleFollowUp
+            && request.WorkKey.StartsWith("follow-up:new:", StringComparison.Ordinal)
+            && Guid.TryParse(request.WorkKey["follow-up:new:".Length..], out var newFollowUpId) && newFollowUpId != Guid.Empty;
+        if (client is null || _workBusy || _workState is not (OperationsSurfaceState.Populated or OperationsSurfaceState.Empty) || snapshot is null ||
             request.CaseId != _loadedCaseId || snapshot.CaseId != _loadedCaseId || request.ExpectedVersion != snapshot.Version ||
-            current is null || current.CaseId != _loadedCaseId || current.Version != snapshot.Version || !current.AvailableActions.Contains(request.Action) ||
+            (!isNewFollowUp && (current is null || current.CaseId != _loadedCaseId || current.Version != snapshot.Version || !current.AvailableActions.Contains(request.Action))) ||
             !Enum.TryParse<WorkManagementAction>(request.Action.ToString(), out var action) || !Enum.IsDefined(action))
         {
             _workStatusMessage = "This action is no longer available. Refresh coordination work and try again.";

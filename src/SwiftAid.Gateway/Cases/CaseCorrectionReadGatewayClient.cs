@@ -43,7 +43,8 @@ public sealed class CaseCorrectionReadGatewayClient(
 
         try
         {
-            var query = serviceProvider.GetService<ICaseCorrectionReadQuery>();
+            await using var scope = serviceProvider.CreateAsyncScope();
+            var query = scope.ServiceProvider.GetService<ICaseCorrectionReadQuery>();
             if (query is null)
             {
                 return Unavailable();

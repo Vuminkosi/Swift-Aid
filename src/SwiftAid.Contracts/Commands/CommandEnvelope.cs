@@ -80,7 +80,9 @@ public sealed record RecordObservationCommand(
     string Source,
     string Reason,
     DateTimeOffset? OccurredAtUtc,
-    DateTimeOffset RecordedAtUtc)
+    DateTimeOffset RecordedAtUtc,
+    string? Category = null,
+    RecordedAttachment? Attachment = null)
     : CaseCommand(CommandId, ExpectedVersion, OccurredAtUtc, RecordedAtUtc);
 
 /// <summary>Schedules follow-up work with an eligible assignee and an actor-chosen due time.</summary>
@@ -236,4 +238,20 @@ public enum CaseCapability
 public sealed record ActorCapabilities(string ActorId, CaseCapability Capabilities)
 {
     public bool Has(CaseCapability capability) => Capabilities.HasFlag(capability);
+}
+
+/// <summary>Append-only staff discussion; references are validated against the case history.</summary>
+public sealed record PostCaseDiscussionCommand(Guid CommandId, long ExpectedVersion, string Message,
+    IReadOnlyList<string> MentionReferences, IReadOnlyList<string> EvidenceKeys, DateTimeOffset RecordedAtUtc)
+    : CaseCommand(CommandId, ExpectedVersion, null, RecordedAtUtc)
+{
+    public bool IsValid => CommandId != Guid.Empty && ExpectedVersion >= 0 &&
+        !string.IsNullOrWhiteSpace(Message) && Message.Length <= 4000 &&
+        !Message.Any(value => char.IsControl(value) && value is not '\r' and not '\n') &&
+        ValidReferences(MentionReferences, 20) && ValidReferences(EvidenceKeys, 10);
+
+    private static bool ValidReferences(IReadOnlyList<string>? references, int limit) =>
+        references is not null && references.Count <= limit &&
+        references.All(value => !string.IsNullOrWhiteSpace(value) && value.Length <= 160 && !value.Any(char.IsControl)) &&
+        references.Distinct(StringComparer.Ordinal).Count() == references.Count;
 }

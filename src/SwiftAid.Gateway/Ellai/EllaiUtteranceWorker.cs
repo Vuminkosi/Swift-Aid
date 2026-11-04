@@ -145,6 +145,7 @@ public sealed class EllaiUtteranceWorker(
                     {
                         UiProposalsJson = EllaiUiProposalPayload.Serialize(runOutcome.Decision?.UiIntents ?? []),
                         FrameworkSessionJson = runOutcome.FrameworkSessionJson,
+                        DecisionJson = runOutcome.Decision is null ? null : System.Text.Json.JsonSerializer.Serialize(runOutcome.Decision),
                         ExpectedOwnerActorId = work.Actor.ActorId,
                         ExpectedScopeEpoch = work.ScopeEpoch,
                         ToolTraceJson = runOutcome.InheritedObservations is null

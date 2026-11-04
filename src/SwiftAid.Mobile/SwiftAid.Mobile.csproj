@@ -85,5 +85,6 @@
   </ItemGroup>
   <ItemGroup>
     <RazorComponent Include="..\SwiftAid.Gateway\Components\Pages\Investigations.razor" Link="Components\Pages\Investigations.razor" />
+    <RazorComponent Include="..\SwiftAid.Gateway\Components\Pages\OrganizationManagement.razor" Link="Components\Pages\OrganizationManagement.razor" />
   </ItemGroup>
 </Project>

@@ -8,6 +8,7 @@ public sealed record EllaiUtteranceResolution(string Outcome, string? AssistantT
     /// <summary>Server-observed tool references for this turn, not authorization to replay it.</summary>
     public string? ToolTraceJson { get; init; }
     public string? FrameworkSessionJson { get; init; }
+    public string? DecisionJson { get; init; }
     public string? ExpectedOwnerActorId { get; init; }
     public string? ExpectedScopeEpoch { get; init; }
 
@@ -22,6 +23,14 @@ public sealed record EllaiUtteranceResolution(string Outcome, string? AssistantT
 
     public void Validate()
     {
+        if (DecisionJson is not null)
+        {
+            if (Outcome != "Completed" || System.Text.Encoding.UTF8.GetByteCount(DecisionJson) > 1_048_576)
+                throw new ArgumentException("Only completed turns may retain a bounded decision.");
+            using var decision = System.Text.Json.JsonDocument.Parse(DecisionJson);
+            if (decision.RootElement.ValueKind != System.Text.Json.JsonValueKind.Object)
+                throw new ArgumentException("A retained decision must be an object.");
+        }
         if (FrameworkSessionJson is not null && (Outcome != "Completed" ||
             System.Text.Encoding.UTF8.GetByteCount(FrameworkSessionJson) > 1_048_576))
             throw new ArgumentException("Only completed decisions may retain a bounded framework session.");

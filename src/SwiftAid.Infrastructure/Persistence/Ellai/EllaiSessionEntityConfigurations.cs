@@ -12,7 +12,7 @@ public sealed class EllaiSessionEntityConfiguration : IEntityTypeConfiguration<E
             table.HasCheckConstraint("ck_ellai_sessions_version", "version > 0");
             table.HasCheckConstraint("ck_ellai_sessions_guidance_size",
                 "guidance_json IS NULL OR octet_length(guidance_json::text) <= 131072");
-            table.HasCheckConstraint("ck_ellai_sessions_status", "status IN ('Active', 'Completed', 'Cancelled')");
+            table.HasCheckConstraint("ck_ellai_sessions_status", "status IN ('Active', 'Paused', 'Completed', 'Cancelled')");
             table.HasCheckConstraint("ck_ellai_sessions_cycles", "cycles_used >= 0 AND cycles_allowed >= 1");
             table.HasCheckConstraint(
                 "ck_ellai_sessions_ids_nonempty",
@@ -82,6 +82,7 @@ public sealed class EllaiUtteranceEntityConfiguration : IEntityTypeConfiguration
         builder.Property(entity => entity.UiProposalsJson).HasColumnName("ui_proposals_json").HasColumnType("jsonb");
         builder.Property(entity => entity.ToolTraceJson).HasColumnName("tool_trace_json").HasColumnType("jsonb");
         builder.Property(entity => entity.FrameworkSessionJson).HasColumnName("framework_session_json").HasColumnType("jsonb");
+        builder.Property(entity => entity.DecisionJson).HasColumnName("decision_json").HasColumnType("jsonb");
         builder.Property(entity => entity.AssistantText).HasColumnName("assistant_text").HasColumnType("text");
         builder.Property(entity => entity.Outcome).HasColumnName("outcome").HasColumnType("text").HasDefaultValue("Queued");
         builder.Property(entity => entity.LeaseExpiresAtUtc).HasColumnName("lease_expires_at_utc").HasColumnType("timestamp with time zone");

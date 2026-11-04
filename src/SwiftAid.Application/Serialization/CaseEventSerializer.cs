@@ -40,6 +40,9 @@ public sealed class CaseEventSerializer
                 new CaseResolvedPayload(resolution.Reason)),
             CaseReopened reopening => Serialize(reopening, CaseEventType.CaseReopened,
                 new CaseReopenedPayload(reopening.Reason, reopening.AccountableOwnerId)),
+            CaseDiscussionPosted discussion => Serialize(discussion, CaseEventType.CaseDiscussionPosted, new CaseDiscussionPostedPayload(discussion.Message, discussion.MentionReferences, discussion.EvidenceKeys)),
+            CaseObservationRecorded observation when observation.Category is not null || observation.Attachment is not null => Serialize(observation, CaseEventType.CaseObservationRecorded,
+                new CaseObservationRecordedV2Payload(observation.ObservationId, observation.Narrative, observation.Source, observation.Category, observation.Attachment), 2),
             CaseObservationRecorded observation => Serialize(observation, CaseEventType.CaseObservationRecorded,
                 new CaseObservationRecordedPayload(observation.ObservationId, observation.Narrative, observation.Source)),
             CaseFollowUpScheduled scheduled => Serialize(scheduled, CaseEventType.CaseFollowUpScheduled,
@@ -67,10 +70,11 @@ public sealed class CaseEventSerializer
         ArgumentNullException.ThrowIfNull(@event);
         return @event switch
         {
+            CaseObservationRecorded observation when observation.Category is not null || observation.Attachment is not null => 2,
             CaseReported { ReportData: CaseReportEventData.HumanV2 or CaseReportEventData.AnimalV2 } => 2,
             CaseReportCorrected { CorrectedReportData: CaseReportEventData.HumanV2 or CaseReportEventData.AnimalV2 } => 2,
             CaseReported or CaseAssigned or CaseAssignmentAcknowledged or CaseReportCorrected or CaseActionRequested or CaseActionRequestReviewed or CaseResolved or CaseReopened
-            or CaseObservationRecorded or CaseFollowUpScheduled or CaseFollowUpAcknowledged or CaseFollowUpOutcomeRecorded
+            or CaseDiscussionPosted or CaseObservationRecorded or CaseFollowUpScheduled or CaseFollowUpAcknowledged or CaseFollowUpOutcomeRecorded
             or CaseEscalationRaised or CaseEscalationAcknowledged or CaseEscalationActionRecorded or CaseEscalationClosed
             or CaseCollaboratorGranted or CaseCollaboratorRevoked or AssistanceRequested or AssistanceActivityRecorded or ActionOwnerChanged => 1,
             _ => throw new NotSupportedException($"Event type {@event.GetType().Name} is not supported by the case-event wire contract.")

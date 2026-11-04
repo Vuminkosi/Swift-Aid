@@ -269,6 +269,7 @@ public sealed class CaseTimelineQuery(
         "CaseActionRequestReviewed" => "Protected action reviewed",
         "CaseResolved" => "Case resolved",
         "CaseReopened" => "Case reopened",
+        "CaseDiscussionPosted" => "Discussion posted",
         "CaseObservationRecorded" => "Observation recorded",
         "CaseFollowUpScheduled" => "Follow-up scheduled",
         "CaseFollowUpAcknowledged" => "Follow-up acknowledged",
