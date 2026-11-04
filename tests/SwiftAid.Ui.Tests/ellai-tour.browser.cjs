@@ -180,6 +180,34 @@ const { chromium } = require(process.env.SWIFTAID_PLAYWRIGHT_PACKAGE || 'playwri
         await page.goto(base + '/ellai-report-fixture');
         await page.waitForSelector('[data-fixture-ready=true]');
         await page.getByRole('button', { name: 'Continue to details' }).click();
+        await page.getByLabel('Describe what happened').fill('Synthetic description');
+        await page.getByLabel('Describe what happened').press('Tab');
+        await page.getByRole('button', { name: 'Guide report details' }).click();
+        await page.locator('.bit-bonboarding-popover').waitFor({ state: 'visible' });
+        await page.getByRole('button', { name: 'Review report', exact: true }).click();
+        for (const name of [
+            'I confirm the selected event country.',
+            'I reviewed the report-handling information.',
+            'I reviewed the original statement and the known or unknown details above.'
+        ]) await page.getByRole('checkbox', { name, exact: true }).check();
+        await page.evaluate(async () => { window.fixtureObservations = await import('/_content/SwiftAid.UI/js/ellai-ui-observations.js'); });
+        await page.getByRole('button', { name: 'Simulate server rejection' }).click();
+        await page.waitForFunction(() => window.fixtureObservations.collect().validationInputIds?.[0] === 'report.server-validation-unknown');
+        await page.getByRole('button', { name: 'Refresh validation target' }).click();
+        await page.waitForFunction(() => {
+            const target = document.querySelector('[data-bonboarding-anchor="ellai-report-return-details"]')?.getBoundingClientRect();
+            const spot = document.querySelector('.bit-bonboarding-spotlight')?.getBoundingClientRect();
+            return target && spot && spot.left <= target.left && spot.top <= target.top && spot.right >= target.right && spot.bottom >= target.bottom;
+        });
+        await page.locator('[data-bonboarding-anchor="ellai-report-return-details"]').click();
+        await page.getByLabel('Describe what happened').fill('Corrected synthetic description');
+        await page.getByLabel('Describe what happened').press('Tab');
+        await page.waitForFunction(() => !window.fixtureObservations.collect().validationInputIds?.includes('report.server-validation-unknown'));
+        assert.equal(await page.locator('#submission-count').textContent(), '0');
+        console.log('PASS: unclassified server rejection highlights return to details and clears after an edit');
+        await page.goto(base + '/ellai-report-fixture');
+        await page.waitForSelector('[data-fixture-ready=true]');
+        await page.getByRole('button', { name: 'Continue to details' }).click();
         await page.getByRole('combobox', { name: 'When did this happen?' }).click();
         await page.getByRole('option', { name: 'Exact time' }).click();
         await page.getByRole('button', { name: 'Save draft', exact: true }).click();

@@ -19,6 +19,7 @@
     <button @onclick="AdvanceSubjectGuidance">Advance observed guidance</button>
     <button @onclick="StartDetailsGuidance">Guide report details</button>
     <button @onclick="RefreshValidationGuidance">Refresh validation target</button>
+    <button @onclick="() => _serverValidationRevision++">Simulate server rejection</button>
     <button @onclick="() => _countryAvailable = !_countryAvailable">Toggle country availability</button>
     <button @onclick="() => _privacyAvailable = !_privacyAvailable">Toggle privacy availability</button>
     <button @onclick="() => _policyAvailable = !_policyAvailable">Toggle policy availability</button>
@@ -29,7 +30,7 @@
         ProcessingPolicyReference="/policy" ProcessingPolicyVersion="@(_policyAvailable ? "fixture-v1" : null)"
         ProcessingPolicyAcknowledgementLabel="I reviewed the report-handling information."
         OnSubmit="Receive" SubmitButtonLabel="Send report" CurrentDraftId="_draftId" OnSaveDraft="SaveAsync"
-        EditableDraftSnapshotsSupported="_snapshotsSupported" />
+        EditableDraftSnapshotsSupported="_snapshotsSupported" ServerValidationRevision="_serverValidationRevision" />
     @if (_pendingSave is not null)
     {
         <button @onclick="CompleteSave">Finish fixture storage</button>
@@ -46,6 +47,7 @@
     private bool _privacyAvailable = true;
     private bool _policyAvailable = true;
     private bool _snapshotsSupported;
+    private long _serverValidationRevision;
     private GuidedReportStepper? _stepper;
     private IBonboardingTourSession? _tour;
     private readonly Dictionary<string, string> _detailsAnchors = new()
