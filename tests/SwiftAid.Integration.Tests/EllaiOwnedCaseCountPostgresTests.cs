@@ -1,5 +1,6 @@
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.EntityFrameworkCore;
 using SwiftAid.Application.Cases;
@@ -23,7 +24,13 @@ public sealed class EllaiOwnedCaseCountPostgresTests
     [FrameworkPostgresFact]
     public Task TranslatedCountCompletesWhilePostgresGrantIsCurrent() => RunTranslatedCountAsync(revoke: false);
 
-    private static async Task RunTranslatedCountAsync(bool revoke)
+    [LanguagePostgresFact]
+    public Task NllbTranslatedCountIsWithheldWhenPostgresGrantExpires() => RunTranslatedCountAsync(revoke: true, liveLanguage: true);
+
+    [LanguagePostgresFact]
+    public Task NllbTranslatedCountCompletesWhilePostgresGrantIsCurrent() => RunTranslatedCountAsync(revoke: false, liveLanguage: true);
+
+    private static async Task RunTranslatedCountAsync(bool revoke, bool liveLanguage = false)
     {
         await using var fixture = await CaseAuthorityPostgresFixture.CreateAsync(frameworkFixture: true);
         await using var db = fixture.CreateDbContext();
@@ -41,7 +48,14 @@ public sealed class EllaiOwnedCaseCountPostgresTests
             EllaiProcessingClassification.UserProvidedNonSensitive, EllaiProcessingClassification.UserProvidedNonSensitive,
             new HashSet<string> { EllaiToolNames.OwnedCaseCount }, EllaiConsentPurposes.PublicProductHelp, "count-turn",
             Languages: new("eng", "sna"));
-        var languages = new GrantExpiringTranslation(revoke ? () => fixture.SetGrantExpiryAsync(DateTimeOffset.UtcNow.AddMinutes(-1)) : null);
+        using var http = new HttpClient();
+        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["EllaiLanguage:Endpoint"] = Environment.GetEnvironmentVariable("SWIFTAID_TEST_LANGUAGE_ENDPOINT"),
+            ["EllaiLanguage:InternalKey"] = Environment.GetEnvironmentVariable("SWIFTAID_TEST_LANGUAGE_KEY")
+        }).Build();
+        IEllaiLanguageClient? realLanguage = liveLanguage ? new EllaiLanguageClient(http, config) : null;
+        var languages = new GrantExpiringTranslation(revoke ? () => fixture.SetGrantExpiryAsync(DateTimeOffset.UtcNow.AddMinutes(-1)) : null, realLanguage);
         var outcome = await EllaiUtteranceRunner.RunOneAsync(work,
             new(executor, null, null, consent, Languages: languages, Dashboard: query), 256, default);
 
@@ -55,20 +69,35 @@ public sealed class EllaiOwnedCaseCountPostgresTests
         else
         {
             Assert.True(outcome.Completed);
-            Assert.Equal("Synthetic translated count", outcome.DisplayText);
+            if (liveLanguage) Assert.False(string.IsNullOrWhiteSpace(outcome.DisplayText));
+            else Assert.Equal("Synthetic translated count", outcome.DisplayText);
         }
     }
 
-    private sealed class GrantExpiringTranslation(Func<Task>? onTranslate) : IEllaiLanguageClient
+    private sealed class LanguagePostgresFactAttribute : FactAttribute
+    {
+        public LanguagePostgresFactAttribute()
+        {
+            if (Environment.GetEnvironmentVariable("SWIFTAID_RUN_FRAMEWORK_POSTGRES_FIXTURES") != "1" ||
+                string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("SWIFTAID_TEST_LANGUAGE_ENDPOINT")) ||
+                string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("SWIFTAID_TEST_LANGUAGE_KEY")))
+                Skip = "Requires the real language endpoint and a dedicated disposable PostgreSQL fixture.";
+        }
+    }
+
+    private sealed class GrantExpiringTranslation(Func<Task>? onTranslate, IEllaiLanguageClient? inner = null) : IEllaiLanguageClient
     {
         public bool IsConfigured => true;
         public int Calls { get; private set; }
         public async Task<EllaiTranslationResult> TranslateAsync(EllaiTranslationRequest request, CancellationToken ct)
         {
             Calls++;
+            var result = inner is null
+                ? new EllaiTranslationResult(request.RequestId, "Synthetic translated count", request.SourceLanguage,
+                    request.TargetLanguage, "fixture", "fixture", 4, 1, "unreviewed")
+                : await inner.TranslateAsync(request, ct);
             if (onTranslate is not null) await onTranslate();
-            return new EllaiTranslationResult(request.RequestId, "Synthetic translated count", request.SourceLanguage,
-                request.TargetLanguage, "fixture", "fixture", 4, 1, "unreviewed");
+            return result;
         }
         public Task<EllaiNativeTranscriptionResult> TranscribeAsync(EllaiNativeTranscriptionRequest request, CancellationToken ct) =>
             throw new NotSupportedException();
