@@ -55,7 +55,8 @@ public sealed record EllaiObservedToolResult(
             var limit = request.Arguments.TryGetValue("limit", out var rawLimit) && int.TryParse(rawLimit, out var parsed) ? parsed : 20;
             var candidate = new EllaiCaseListQuery(limit, request.Arguments.GetValueOrDefault("country"),
                 request.Arguments.GetValueOrDefault("workflow"), request.Arguments.GetValueOrDefault("sort"),
-                request.Arguments.GetValueOrDefault("place_id"));
+                request.Arguments.GetValueOrDefault("place_id"), request.Arguments.GetValueOrDefault("reported_from"),
+                request.Arguments.GetValueOrDefault("reported_before"));
             if (candidate.IsValid()) caseQuery = candidate;
         }
         var staticFeature = request.ToolName == EllaiToolNames.State && result.Allowed &&
@@ -257,12 +258,31 @@ public sealed record EllaiImportListScope(string WorkspaceId, string Organizatio
 }
 
 /// <summary>The existing owned-case query options needed to recheck list membership.</summary>
-public sealed record EllaiCaseListQuery(int Limit, string? Country, string? Workflow, string? Sort, string? PlaceId = null)
+public sealed record EllaiCaseListQuery(int Limit, string? Country, string? Workflow, string? Sort,
+    string? PlaceId = null, string? ReportedFrom = null, string? ReportedBefore = null)
 {
     public bool IsValid() => Limit is >= 1 and <= 20 &&
         (Country is null || Country.Length == 2 && Country.All(character => character is >= 'A' and <= 'Z')) &&
         (Workflow is null or "Reported" or "UnderReview" or "Active" or "AwaitingFollowUp" or "Resolved") &&
         (Sort is null or "latest-reported" or "latest-updated") &&
         (PlaceId is null || Country is not null && Workflow is null && Sort == "latest-reported" &&
-            !string.IsNullOrWhiteSpace(PlaceId) && PlaceId.Length <= 120 && PlaceId == PlaceId.Trim());
+            !string.IsNullOrWhiteSpace(PlaceId) && PlaceId.Length <= 120 && PlaceId == PlaceId.Trim()) &&
+        TryGetReportedRange(out _, out _);
+
+    public bool TryGetReportedRange(out DateTimeOffset? fromUtc, out DateTimeOffset? beforeUtc)
+    {
+        fromUtc = null;
+        beforeUtc = null;
+        if (ReportedFrom is null && ReportedBefore is null) return true;
+        if (ReportedFrom is null || ReportedBefore is null ||
+            !DateOnly.TryParseExact(ReportedFrom, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.None, out var from) ||
+            !DateOnly.TryParseExact(ReportedBefore, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.None, out var before) ||
+            before <= from || before.DayNumber - from.DayNumber > 365)
+            return false;
+        fromUtc = new DateTimeOffset(from.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc));
+        beforeUtc = new DateTimeOffset(before.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc));
+        return true;
+    }
 }

@@ -241,11 +241,14 @@ public static class EllaiAuthorizedConversationContext
                             return decisions[decisionKey] = false;
                         try
                         {
-                            var request = new EllaiToolRequest(EllaiToolNames.State, new Dictionary<string, string>
+                            var arguments = new Dictionary<string, string>
                             {
                                 ["projection"] = "queue", ["limit"] = query.Limit.ToString(CultureInfo.InvariantCulture),
                                 ["country"] = query.Country!, ["sort"] = "latest-reported", ["place_id"] = query.PlaceId
-                            });
+                            };
+                            if (query.ReportedFrom is not null) arguments["reported_from"] = query.ReportedFrom;
+                            if (query.ReportedBefore is not null) arguments["reported_before"] = query.ReportedBefore;
+                            var request = new EllaiToolRequest(EllaiToolNames.State, arguments);
                             var current = await invokeTool(toolContext with { RevalidationOnly = true }, request, ct).ConfigureAwait(false);
                             ct.ThrowIfCancellationRequested();
                             if (!current.Allowed || current.Truncated != observation.Truncated || current.ReasonCode != EllaiToolReasonCodes.Ok ||
@@ -260,10 +263,14 @@ public static class EllaiAuthorizedConversationContext
                     }
                     try
                     {
-                        var current = query.Country is null && query.Workflow is null && query.Sort is null
+                        if (!query.TryGetReportedRange(out var reportedFromUtc, out var reportedBeforeUtc))
+                            return decisions[decisionKey] = false;
+                        var current = query.Country is null && query.Workflow is null && query.Sort is null && reportedFromUtc is null
                             ? await queue.GetMineAsync(actor, query.Limit, ct).ConfigureAwait(false)
                             : await queue.GetMineAsync(actor, query.Limit,
-                                new CaseQueueFilter(query.Country, query.Workflow, query.Sort == "latest-reported"), ct).ConfigureAwait(false);
+                                new CaseQueueFilter(query.Country, query.Workflow,
+                                    query.Sort == "latest-reported" || query.Sort is null && reportedFromUtc is not null,
+                                    ReportedFromUtc: reportedFromUtc, ReportedBeforeUtc: reportedBeforeUtc), ct).ConfigureAwait(false);
                         ct.ThrowIfCancellationRequested();
                         var items = current.Items.Take(query.Limit).ToArray();
                         if (current.Access != CaseQueueAccess.Allowed ||
