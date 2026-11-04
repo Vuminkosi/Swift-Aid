@@ -61,7 +61,12 @@ public sealed class TranslationRegistry(SwiftAidDbContext db, IDataProtectionPro
         var row = await db.Set<TranslationArtifactEntity>().FromSqlInterpolated($"""
             SELECT artifact.* FROM swiftaid_translation.artifacts artifact
             JOIN LATERAL (
-                SELECT MAX(c.created_at_utc) AS latest_case_utc
+                SELECT MAX(COALESCE((
+                    SELECT report.received_at_utc
+                    FROM swiftaid_intake.intake_promotions promotion
+                    JOIN swiftaid_intake.intake_reports report ON report.receipt_id = promotion.receipt_id
+                    WHERE promotion.case_id = c.case_id
+                ), c.created_at_utc)) AS latest_case_utc
                 FROM swiftaid_translation.associations association
                 JOIN managed_cases c ON c.case_id = association."CaseId"
                     AND c.workspace_id = artifact."WorkspaceId" AND c.organization_id = artifact."OrganizationId"
