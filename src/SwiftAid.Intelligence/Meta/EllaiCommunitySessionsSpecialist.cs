@@ -40,10 +40,10 @@ public sealed class EllaiCommunitySessionsSpecialist(IChatClient client, IEllaiF
         try
         {
             decision = await agent.RunAsync(context, trustedPolicy +
-                "\nYou are the community sessions specialist. Read only published public sessions. Apply a status filter only when the user requests it. " +
+                "\nYou are the community sessions specialist. Read published public sessions and use any other admitted read tool when relevant to the user's SwiftAid question. Apply a session status filter only when the user requests it. " +
                 "Never approve, submit, " +
                 "execute or invent an action. Return only a grounded Answer in the required final_decision JSON schema. " +
-                "Each claim text must exactly match one returned session line and cite its own session evidence. For an empty search, use the exact returned search message and cite its PublicSessionSearch evidence. " +
+                "Each claim text must exactly match a returned source line and cite its evidence. For an empty session search, use the exact returned search message and cite its PublicSessionSearch evidence. " +
                 "Set displayText and spokenText to claim texts joined by a newline, with no other prose.",
                 [new ChatMessage(ChatRole.User, task)], 2048, isCurrent, Read, usage, ct,
                 maxModelCalls: profile.MaxModelCalls).ConfigureAwait(false);
@@ -51,11 +51,9 @@ public sealed class EllaiCommunitySessionsSpecialist(IChatClient client, IEllaiF
         finally { onModelCalls?.Invoke(agent.LastModelCallCount); }
         if (decision is null || decision.Kind != DecisionKind.Answer || decision.Claims.Count == 0 ||
             decision.UiIntents.Count != 0 || decision.PlanProposal is not null ||
-            decision.Claims.Any(claim => claim.Kind != ClaimKind.Observed || claim.Evidence.Count == 0 ||
-                claim.Evidence.Any(reference => reference.SourceKind is not ("PublicSession" or "PublicSessionSearch"))))
+            decision.Claims.Any(claim => claim.Kind != ClaimKind.Observed || claim.Evidence.Count == 0))
             return new(EllaiSpecialistOutcome.Unverified, null);
 
-        var grounded = new HashSet<(EvidenceRef Reference, string Line)>();
         foreach (var (request, original) in observations)
         {
             if (!await isCurrent(ct).ConfigureAwait(false)) return new(EllaiSpecialistOutcome.Stale, null);
@@ -65,20 +63,12 @@ public sealed class EllaiCommunitySessionsSpecialist(IChatClient client, IEllaiF
             catch (Exception error) when (error is not OutOfMemoryException) { return new(EllaiSpecialistOutcome.Stale, null); }
             if (!fresh.Allowed || fresh.Truncated != original.Truncated || fresh.ToolName != original.ToolName ||
                 fresh.ItemCount != original.ItemCount || fresh.ResultSummary != original.ResultSummary ||
-                !fresh.Evidence.SequenceEqual(original.Evidence) || !await isCurrent(ct).ConfigureAwait(false))
+                !fresh.Evidence.SequenceEqual(original.Evidence) || fresh.CaseTimelineReplayScope != original.CaseTimelineReplayScope ||
+                fresh.UiCatalogueReplayScope != original.UiCatalogueReplayScope || fresh.UiObservationReplayScope != original.UiObservationReplayScope ||
+                !await isCurrent(ct).ConfigureAwait(false))
                 return new(EllaiSpecialistOutcome.Stale, null);
-            foreach (var reference in original.Evidence)
-                foreach (var line in original.ResultSummary.Split('\n'))
-                    if (reference.SourceKind == "PublicSession" &&
-                        line.StartsWith($"session {reference.ResourceId} · ", StringComparison.Ordinal) ||
-                        reference.SourceKind == "PublicSessionSearch" && original.ItemCount == 0 &&
-                        reference == new EvidenceRef("PublicSessionSearch", "public-sessions", "1", "search", "public-sessions/1") &&
-                        line == original.ResultSummary)
-                        grounded.Add((reference, line));
         }
-        if (decision.Claims.Any(claim => claim.Evidence.Any(reference => !grounded.Contains((reference, claim.Text)))) ||
-            decision.DisplayText != string.Join("\n", decision.Claims.Select(claim => claim.Text)) ||
-            decision.SpokenText != decision.DisplayText)
+        if (!EllaiSpecialistGrounding.IsGrounded(decision, observations))
             return new(EllaiSpecialistOutcome.Unverified, null);
         return new(EllaiSpecialistOutcome.Completed, decision);
     }

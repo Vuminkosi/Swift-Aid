@@ -429,7 +429,7 @@ public sealed class EllaiFrameworkAgent
                 { Interlocked.Exchange(ref invalidDelegation, 1); return "Workflow specialist could not complete the request."; }
             }
             tools.Add(AIFunctionFactory.Create(DelegateWorkflow, name: "ellai_delegate_workflow",
-                description: "Read current-session action receipt status; cannot approve or execute actions."));
+                description: "Read current-session action receipt status or other admitted SwiftAid information; cannot approve or execute actions."));
         }
         if (enableCommunitySessionsSpecialist && context.AllowedTools?.Contains(EllaiToolNames.PublicSessions) == true)
         {
@@ -462,7 +462,7 @@ public sealed class EllaiFrameworkAgent
                 { Interlocked.Exchange(ref invalidDelegation, 1); return "Community sessions specialist could not complete the request."; }
             }
             tools.Add(AIFunctionFactory.Create(DelegateCommunitySessions, name: "ellai_delegate_community_sessions",
-                description: "Read published public sessions; cannot schedule or execute actions."));
+                description: "Read published public sessions or other admitted SwiftAid information; cannot schedule or execute actions."));
         }
         if (enableSurveillanceSpecialist && context.AllowedTools is { } surveillanceTools &&
             (surveillanceTools.Contains(EllaiToolNames.ClassificationSnapshot) || surveillanceTools.Contains(EllaiToolNames.SurveillanceSignals)))
