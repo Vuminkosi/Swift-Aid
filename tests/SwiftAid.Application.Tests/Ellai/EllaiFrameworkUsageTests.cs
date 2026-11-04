@@ -1,11 +1,31 @@
 using Microsoft.Extensions.AI;
 using SwiftAid.Application.Ellai;
 using SwiftAid.Intelligence.Meta;
+using System.Text.Json;
 
 namespace SwiftAid.Application.Tests.Ellai;
 
 public sealed class EllaiFrameworkUsageTests
 {
+    [Fact]
+    public async Task StructuredResponseSchemaCountsTowardsReservationAndMissingUsageEstimate()
+    {
+        using var schema = JsonDocument.Parse("{\"type\":\"object\",\"description\":\"" + new string('a', 600) + "\"}");
+        var messages = new[] { new ChatMessage(ChatRole.User, "hello") };
+        var plain = new ChatOptions { MaxOutputTokens = 100 };
+        var structured = new ChatOptions { MaxOutputTokens = 100,
+            ResponseFormat = ChatResponseFormat.ForJsonSchema(schema.RootElement, "decision") };
+        var store = new InMemoryEllaiUsageStore();
+        var usage = new EllaiFrameworkUsage("session", new EllaiUsageLedger(sessionTokenBudget: 500), store);
+
+        Assert.True(usage.CanDispatch(messages, plain));
+        Assert.False(usage.CanDispatch(messages, structured));
+        await usage.RecordAsync(new ChatResponse(), messages, structured, default);
+        var totals = await store.TotalsAsync("session", default);
+        Assert.Equal(0, totals.PromptTokens);
+        Assert.True(totals.TotalTokens >= 700);
+    }
+
     [Theory]
     [InlineData(-1)]
     [InlineData(0)]
