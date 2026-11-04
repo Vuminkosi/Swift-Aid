@@ -209,6 +209,7 @@ public sealed class PublicReportDraft : IValidatableObject
             SubjectScope = submission.SubjectScope,
             AgeYearsText = submission.AgeYears?.ToString(System.Globalization.CultureInfo.InvariantCulture),
             Gender = submission.Gender,
+            DeathRelated = submission.DeathRelated,
             Narrative = submission.Narrative,
             ObservationsText = string.Join(Environment.NewLine, submission.Observations),
             OccurrencePrecision = occurrence.Precision,
