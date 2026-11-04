@@ -4504,7 +4504,7 @@ turn. The command used `ELLAI_LIVE=1`, the configured provider settings and
 `dotnet test tests/SwiftAid.Application.Tests/SwiftAid.Application.Tests.csproj
 --no-build --no-restore -m:1 -nr:false` filtered to those four existing tests.
 The application test assembly was built with a local community-session fixture
-compatibility edit; that edit did not change Ellai runtime source. Two other
-community-session assertions still fail under the newer material-approval
-behavior. This run does not establish deployed end-to-end behavior, device
+compatibility edit; that edit did not change Ellai runtime source. After the
+fixture was aligned with owner review and current material eligibility, its
+existing focused checks passed 27/27. This run does not establish deployed end-to-end behavior, device
 acceptance, or non-streaming cancellation against an uncooperative provider.
