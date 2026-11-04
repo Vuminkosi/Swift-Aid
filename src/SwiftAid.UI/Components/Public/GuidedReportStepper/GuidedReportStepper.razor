@@ -127,6 +127,14 @@
                     <MudTextField T="string" Label="Describe what happened" Variant="Variant.Outlined" Lines="4" MaxLength="6000"
                                   @bind-Value="Draft.Narrative" For="@(() => Draft.Narrative)" />
                 </div>
+                @if (Draft.SubjectScope == IntakeSubjectScope.Human)
+                {
+                    <div class="@ValidationClass(nameof(Draft.AgeYearsText))" tabindex="-1" @ref="_ageValidationTarget" data-ellai-control="report.narrative" data-ellai-input="report.age-years">
+                        <MudTextField T="string" Label="Age in years (optional)" InputType="InputType.Number" Variant="Variant.Outlined"
+                                      HelperText="Enter completed years, or leave blank if unknown." MaxLength="10"
+                                      @bind-Value="Draft.AgeYearsText" For="@(() => Draft.AgeYearsText)" />
+                    </div>
+                }
                 <div class="guided-report__observation-input">
                     <MudText Typo="Typo.subtitle2" id="reported-observations-heading">Reported observations (optional)</MudText>
                     <MudText Typo="Typo.body2" Class="guided-report__observation-guidance">
@@ -314,6 +322,10 @@
                 </MudAlert>
                 <dl class="guided-report__summary">
                     <div><dt>Subject</dt><dd>@SubjectLabel</dd></div>
+                    @if (Draft.SubjectScope == IntakeSubjectScope.Human)
+                    {
+                        <div><dt>Reported age in years</dt><dd>@UnknownIfEmpty(Draft.AgeYearsText)</dd></div>
+                    }
                     <div><dt>Original statement</dt><dd>@UnknownIfEmpty(Draft.Narrative)</dd><dd class="guided-report__provenance">Your words, shown as entered</dd></div>
                     <div><dt>Separate observations</dt><dd>@ObservationSummary</dd><dd class="guided-report__provenance">You entered these details. No others were added.</dd></div>
                     <div><dt>Reported time</dt><dd>@TimeSummary</dd><dd class="guided-report__provenance">@(Draft.OccurrencePrecision == ReportedTimePrecision.Unknown ? "Not provided; remains unknown" : "From the time you entered")</dd></div>
@@ -447,6 +459,7 @@
     private ElementReference _stepHeading;
     private ElementReference _validationSummary;
     private ElementReference _narrativeValidationTarget;
+    private ElementReference _ageValidationTarget;
     private ElementReference _observationsValidationTarget;
     private ElementReference _dateValidationTarget;
     private ElementReference _timeValidationTarget;
@@ -567,6 +580,7 @@
             var target = _validationField switch
             {
                 nameof(PublicReportDraft.Narrative) => _narrativeValidationTarget,
+                nameof(PublicReportDraft.AgeYearsText) => _ageValidationTarget,
                 nameof(PublicReportDraft.ObservationsText) => _observationsValidationTarget,
                 nameof(PublicReportDraft.OccurrenceDate) => _dateValidationTarget,
                 nameof(PublicReportDraft.OccurrenceTime) => _timeValidationTarget,
@@ -1108,6 +1122,12 @@
             isValid = false;
         }
 
+        if (Draft.SubjectScope == IntakeSubjectScope.Human && !Draft.HasValidAge())
+        {
+            AddError(nameof(Draft.AgeYearsText), "Enter age in whole years, or leave it blank if unknown.");
+            isValid = false;
+        }
+
         if ((Draft.Narrative?.Length ?? 0) > 6000)
         {
             AddError(nameof(Draft.Narrative), "Keep the description under 6,000 characters.");
@@ -1435,6 +1455,7 @@
 
     private static bool DraftMatches(PublicReportDraft actual, PublicReportDraft expected) =>
         actual.SubjectScope == expected.SubjectScope &&
+        actual.AgeYearsText == expected.AgeYearsText &&
         actual.Narrative == expected.Narrative &&
         actual.ObservationsText == expected.ObservationsText &&
         actual.OccurrencePrecision == expected.OccurrencePrecision &&

@@ -12,6 +12,13 @@ public sealed class PublicReportDraft : IValidatableObject
     [Required(ErrorMessage = "Choose whether this concern is about a person or an animal.")]
     public IntakeSubjectScope? SubjectScope { get; set; }
 
+    /// <summary>Optional completed years reported for a human; empty means unknown.</summary>
+    public string? AgeYearsText { get; set; }
+
+    public bool HasValidAge() => string.IsNullOrWhiteSpace(AgeYearsText) ||
+        int.TryParse(AgeYearsText, System.Globalization.NumberStyles.None,
+            System.Globalization.CultureInfo.InvariantCulture, out var age) && age >= 0;
+
     [StringLength(6000, ErrorMessage = "Keep the description under 6,000 characters.")]
     public string? Narrative { get; set; }
 
@@ -45,6 +52,8 @@ public sealed class PublicReportDraft : IValidatableObject
     public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
     {
         var observations = GetObservations();
+        if (SubjectScope == IntakeSubjectScope.Human && !HasValidAge())
+            yield return new ValidationResult("Enter age in whole years, or leave it blank if unknown.", [nameof(AgeYearsText)]);
         if (observations.Count > 20)
             yield return new ValidationResult("Add no more than 20 separate observations.", [nameof(ObservationsText)]);
         if (observations.Any(value => value.Length > 1000))
@@ -95,6 +104,8 @@ public sealed class PublicReportDraft : IValidatableObject
         return new PublicReportDraft
         {
             SubjectScope = submission.SubjectScope,
+            AgeYearsText = submission.SubjectScope == IntakeSubjectScope.Human
+                ? submission.AgeYears?.ToString(System.Globalization.CultureInfo.InvariantCulture) : null,
             Narrative = submission.Narrative,
             ObservationsText = string.Join(Environment.NewLine, submission.Observations),
             OccurrencePrecision = occurrence.Precision,
@@ -134,6 +145,9 @@ public sealed class PublicReportDraft : IValidatableObject
 
         if (SubjectScope is null)
             throw new InvalidOperationException("Choose whether the concern is about a person or an animal before saving.");
+
+        if (SubjectScope == IntakeSubjectScope.Human && !HasValidAge())
+            throw new InvalidOperationException("Enter age in whole years, or leave it blank if unknown.");
 
         if (Narrative?.Length > 6000)
             throw new InvalidOperationException("Keep the description under 6,000 characters.");
@@ -246,7 +260,12 @@ public sealed class PublicReportDraft : IValidatableObject
             capturedAt,
             occurrence,
             location,
-            confirmations);
+            confirmations)
+        {
+            AgeYears = SubjectScope == IntakeSubjectScope.Human && !string.IsNullOrWhiteSpace(AgeYearsText)
+                ? int.Parse(AgeYearsText, System.Globalization.NumberStyles.None,
+                    System.Globalization.CultureInfo.InvariantCulture) : null
+        };
     }
 
     public IReadOnlyList<string> GetObservations() => (ObservationsText ?? string.Empty)

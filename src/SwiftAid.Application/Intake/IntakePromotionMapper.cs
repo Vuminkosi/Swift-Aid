@@ -9,7 +9,7 @@ namespace SwiftAid.Application.Intake;
 
 /// <summary>Pure mapping from a sealed intake submission to a managed-case registration report.</summary>
 /// <remarks>
-/// Guest intake collects no structured clinical facts: human subject reference, age, and
+/// Guest intake collects no structured clinical facts: human subject reference and
 /// concern, animal species, holding, and head counts stay explicitly unknown with reporter
 /// provenance, while the reporter narrative and observations are preserved verbatim as
 /// evidence. The first original-audio attachment, when present, is linked by its stable
@@ -38,6 +38,8 @@ public static class IntakePromotionMapper
         ArgumentNullException.ThrowIfNull(submission);
         if (reportId == Guid.Empty || string.IsNullOrWhiteSpace(sourcePrefix) || sourcePrefix.Length > 400)
             throw new ArgumentException("A stable report and source reference are required.");
+        if (submission.AgeYears < 0 || submission.AgeYears.HasValue && submission.SubjectScope != IntakeSubjectScope.Human)
+            throw new ArgumentException("The reported age is invalid for this subject.", nameof(submission));
         var context = new ReportContext(
             ToOccurrenceFact(sourcePrefix, submission.Occurrence),
             submission.CapturedAt.Value?.ToUniversalTime(),
@@ -64,7 +66,9 @@ public static class IntakePromotionMapper
                     reportId,
                     context,
                     ReportedFact<string>.Unknown(ReporterProvenance(sourcePrefix, "subject-reference")),
-                    ReportedFact<int>.Unknown(ReporterProvenance(sourcePrefix, "age")),
+                    submission.AgeYears is { } age
+                        ? ReportedFact<int>.Known(age, ReporterProvenance(sourcePrefix, "age"))
+                        : ReportedFact<int>.Unknown(ReporterProvenance(sourcePrefix, "age")),
                     ReportedFact<string>.Unknown(ReporterProvenance(sourcePrefix, "concern")),
                     evidence),
                 confirmations)

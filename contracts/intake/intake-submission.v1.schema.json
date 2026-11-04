@@ -20,6 +20,7 @@
     "schemaVersion": { "const": 1 },
     "clientSubmissionId": { "$ref": "#/$defs/nonNilUuid" },
     "subjectScope": { "enum": ["human", "individual", "herd", "flock", "otherGroup"] },
+    "ageYears": { "type": "integer", "minimum": 0, "description": "Optional reported age in completed years for a human subject. Omit when unknown; the server rejects an age on animal reports." },
     "narrative": { "type": ["string", "null"], "maxLength": 6000, "pattern": "^(?!\\s)(.*\\S)?$" },
     "observations": {
       "type": "array",
@@ -146,6 +147,11 @@
           }
         }
       }
+    },
+    {
+      "description": "Reported human age is not applicable to animal submissions.",
+      "if": { "required": ["ageYears"] },
+      "then": { "properties": { "subjectScope": { "const": "human" } } }
     }
   ],
   "$defs": {
