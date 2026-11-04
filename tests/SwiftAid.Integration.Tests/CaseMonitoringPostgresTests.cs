@@ -1,10 +1,17 @@
 using System.Security.Claims;
+using System.Runtime.CompilerServices;
+using Microsoft.Agents.AI;
+using Microsoft.Extensions.AI;
+using SwiftAid.Gateway.Ellai;
+using SwiftAid.Intelligence.Meta;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.DependencyInjection;
+using OpenIddict.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 using SwiftAid.Infrastructure.Classification;
@@ -41,6 +48,120 @@ public sealed class CaseMonitoringPostgresTests
 {
     private static readonly DateTimeOffset FirstDueAtUtc = new(2026, 10, 30, 8, 0, 0, TimeSpan.Zero);
     private static readonly DateTimeOffset SecondDueAtUtc = new(2026, 11, 2, 8, 0, 0, TimeSpan.Zero);
+
+    [IntakePostgresFact]
+    public async Task FollowUpScheduledSweepDrainsBoundedBatchesWithSeparateSessions()
+    {
+        // Immutable recommendation rows require a disposable database.
+        await using var db = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
+        await SeedMonitoringScopeAsync(db, [CaseOperation.ReadCase, CaseOperation.ManageFollowUp]);
+        using var keyRing = SyntheticMonitoringKeyRing.Create();
+        using var provider = ProtectedPayloadDataProtectionProviderFactory.Create(
+            keyRing.CreateOptions(), new TestHostEnvironment(Environments.Production));
+        var caseId = await SeedMonitoredCaseAsync(db, keyRing.CreateOptions(), provider);
+        var actor = CreateOfficer("officer-1");
+        for (var index = 0; index < 2; index++)
+        {
+            var scheduled = await ProcessCommandAsync(db, actor, caseId,
+                new ScheduleFollowUpCommand(Guid.NewGuid(), 2 + index, Guid.NewGuid(), "synthetic", "officer-1",
+                    FirstDueAtUtc.AddMinutes(index), "staff scheduled", null, DateTimeOffset.UtcNow), keyRing.CreateOptions(), provider);
+            Assert.Equal(CaseCommandProcessingStatus.Accepted, scheduled.Status);
+        }
+        var settings = Options.Create(new EllaiFollowUpOptions { Enabled = true, Organizations = ["org-zw-1"] });
+        var sweep = new EllaiFollowUpSweep(db, new EllaiFollowUpWork(db, settings), settings);
+        var options = new EllaiFollowUpScheduleOptions { Enabled = true, Workspaces = ["workspace-1"], PolicyVersion = "policy/1", BatchSize = 1 };
+        var initialSessions = await db.Database.SqlQuery<int>($"SELECT count(*)::int AS \"Value\" FROM ellai_sessions").SingleAsync();
+        using var client = new FollowUpNoInferenceClient();
+        var agent = EllaiFrameworkAgentFactory.Instance.Create(client, new ChatClientAgentOptions { Name = "test", UseProvidedChatClientAsIs = true });
+        var sessions = new List<AgentSession>();
+        async Task<AgentSession> Open(CancellationToken ct)
+        {
+            var session = await agent.CreateSessionAsync(cancellationToken: ct);
+            sessions.Add(session);
+            return session;
+        }
+        Assert.Equal("disabled", await sweep.RunAsync("workspace-1", new EllaiFollowUpScheduleOptions(), Open, new EllaiFollowUpSweepProgress(), default));
+        Assert.Equal("disabled", await sweep.RunAsync("other", options, Open, new EllaiFollowUpSweepProgress(), default));
+        var deniedSettings = Options.Create(new EllaiFollowUpOptions { Enabled = true, Organizations = ["other-org"] });
+        var deniedSweep = new EllaiFollowUpSweep(db, new EllaiFollowUpWork(db, deniedSettings), deniedSettings);
+        Assert.Equal("scope-unavailable", await deniedSweep.RunAsync("workspace-1", options, Open, new EllaiFollowUpSweepProgress(), default));
+        var schedules = new PostgresEllaiOperationalScheduleStore(db);
+        Assert.True(await schedules.CreateAsync("workspace-1", "ops.followup", 4, "policy/1", DateTimeOffset.UtcNow.AddMinutes(-1), default));
+        var mismatched = new EllaiFollowUpScheduleOptions { Enabled = true, Workspaces = ["workspace-1"], PolicyVersion = "policy/2" };
+        Assert.Equal("policy-mismatch", await sweep.RunAsync("workspace-1", mismatched, Open, new EllaiFollowUpSweepProgress(), default));
+        Assert.Empty(sessions);
+        var first = new EllaiFollowUpSweepProgress();
+        Assert.Equal("batch-limit", await sweep.RunAsync("workspace-1", options, Open, first, default));
+        Assert.Equal(1, first.ChangesCommitted);
+        Assert.Equal(1, await db.Database.SqlQuery<int>($"SELECT count(*)::int AS \"Value\" FROM ellai_follow_up_recommendations WHERE run_id = {first.RunId}").SingleAsync());
+        Assert.Equal("batch-limit", await sweep.RunAsync("workspace-1", options, Open, new EllaiFollowUpSweepProgress(), default));
+        var empty = new EllaiFollowUpSweepProgress();
+        Assert.Equal("complete", await sweep.RunAsync("workspace-1", options, Open, empty, default));
+        Assert.Equal(0, empty.ChangesCommitted);
+        Assert.Equal(0, await db.Database.SqlQuery<int>($"SELECT count(*)::int AS \"Value\" FROM ellai_follow_up_recommendations WHERE run_id = {empty.RunId}").SingleAsync());
+        Assert.Equal("not-due", await sweep.RunAsync("workspace-1", options, Open, new EllaiFollowUpSweepProgress(), default));
+        Assert.Equal(3, sessions.Count);
+        Assert.Equal(3, sessions.Distinct(ReferenceEqualityComparer.Instance).Count());
+        Assert.Equal(0, client.Calls);
+
+        // Exercise the actual hosted worker against another committed staff schedule.
+        var third = await ProcessCommandAsync(db, actor, caseId,
+            new ScheduleFollowUpCommand(Guid.NewGuid(), 4, Guid.NewGuid(), "synthetic", "officer-1",
+                FirstDueAtUtc, "staff scheduled", null, DateTimeOffset.UtcNow), keyRing.CreateOptions(), provider);
+        Assert.Equal(CaseCommandProcessingStatus.Accepted, third.Status);
+        await db.Database.ExecuteSqlInterpolatedAsync($"UPDATE ellai_operational_schedules SET next_due_utc = clock_timestamp() - interval '1 minute' WHERE workspace_id = {"workspace-1"} AND role_id = 'ops.followup'");
+        var connection = db.Database.GetConnectionString();
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton<IOptions<EllaiFollowUpScheduleOptions>>(Options.Create(options));
+        services.AddSingleton<IOptions<EllaiFollowUpOptions>>(settings);
+        services.AddSingleton<IEllaiFrameworkAgentFactory>(EllaiFrameworkAgentFactory.Instance);
+        services.AddKeyedSingleton<IChatClient>(EllaiReasoningRegistration.FrameworkClientKey, client);
+        services.AddScoped(_ => new SwiftAidDbContext(new DbContextOptionsBuilder<SwiftAidDbContext>()
+            .UseNpgsql(connection).UseOpenIddict().Options));
+        services.AddScoped<EllaiFollowUpWork>();
+        services.AddScoped<EllaiFollowUpSweep>();
+        services.AddSingleton<EllaiFollowUpScheduleWorker>();
+        await using var providerServices = services.BuildServiceProvider();
+        var hosted = providerServices.GetRequiredService<EllaiFollowUpScheduleWorker>();
+        await hosted.StartAsync(default);
+        try
+        {
+            var count = 0;
+            for (var attempt = 0; attempt < 100 && count < 3; attempt++)
+            {
+                count = await db.Database.SqlQuery<int>($"SELECT count(*)::int AS \"Value\" FROM ellai_follow_up_recommendations WHERE case_id = {caseId}").SingleAsync();
+                if (count < 3) await Task.Delay(100);
+            }
+            Assert.Equal(3, count);
+            Assert.Equal(initialSessions, await db.Database.SqlQuery<int>($"SELECT count(*)::int AS \"Value\" FROM ellai_sessions").SingleAsync());
+            Assert.Equal(0, client.Calls);
+        }
+        finally { await hosted.StopAsync(default); }
+    }
+
+    private sealed class FollowUpNoInferenceClient : IChatClient
+    {
+        public int Calls { get; private set; }
+        public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null,
+            CancellationToken cancellationToken = default)
+        {
+            Calls++;
+            throw new InvalidOperationException("Unexpected inference.");
+        }
+        public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            Calls++;
+            await Task.Yield();
+            throw new InvalidOperationException("Unexpected inference.");
+#pragma warning disable CS0162
+            yield break;
+#pragma warning restore CS0162
+        }
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+        public void Dispose() { }
+    }
 
     [IntakePostgresFact]
     public async Task FollowUpRecommendationIsFencedDeduplicatedAndVisibleInAuthorizedHistory()

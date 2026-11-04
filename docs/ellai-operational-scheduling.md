@@ -1,7 +1,8 @@
 # Ellai operational scheduling
 
 The schedule store is a disabled-by-default coordination foundation. The quality
-worker creates rows only for explicitly configured and authorized workspaces.
+and follow-up workers create rows only for explicitly configured and authorized
+workspaces.
 It accepts only the six operational role IDs and four- or eight-hour cadences.
 Workspace and role form the schedule identity; policy version is captured in
 each lease. A database-clock lease, unique lease ID and increasing fencing token
@@ -16,7 +17,7 @@ sweep. The migration refuses rollback while schedule rows exist.
 The intended starting cadences from the design are four hours for enrichment,
 quality and follow-up; eight hours for organization, correlation and spatial
 analysis. These are not enabled defaults. Authorized workspace provisioning,
-role-specific handlers beyond quality, retry limits, durable operational metrics,
+role-specific handlers beyond quality and follow-up, retry limits, durable operational metrics,
 model-cost ceilings and complete scheduling policy remain to be implemented.
 Trusted database-only handlers may use
 the fenced transaction boundary, which rechecks lease expiry before commit and
@@ -72,9 +73,16 @@ remain unverified.
 
 ## Follow-up review work unit
 
-`EllaiFollowUpWork.RunOneAsync` is a disabled-by-default, database-only work
-unit, not yet registered with a hosted scheduler. It requires an `ops.followup`
-lease and an explicit bounded organization scope. It records one immutable
+`EllaiFollowUpWork.RunOneAsync` is a database-only work unit. Its hosted
+scheduler is disabled by default; enable it through `Ellai:Operational:FollowUp`
+with `Enabled`, explicit `Workspaces`, `Organizations`, and `PolicyVersion`.
+`BatchSize` defaults to 10 (maximum 100) and `PollSeconds` to 60 (30-3600).
+Ellai's framework client must also be configured. The worker uses a 4-hour UTC
+schedule with stable role-and-workspace jitter of up to 299 seconds. It creates
+one ephemeral framework session per bounded turn, emits sanitized run telemetry,
+and performs no inference. A full batch releases its lease without advancing
+its due cursor; a drained sweep advances beyond missed intervals. The work unit
+requires an `ops.followup` lease and an explicit bounded organization scope. It records one immutable
 recommendation to review an overdue, still-open staff-set follow-up schedule.
 The source schedule event, due date, case version, policy, run and work turn are
 recorded; a unique follow-up/schedule-version key prevents repeated records.
@@ -86,7 +94,6 @@ completion does not erase that historical recommendation. It is not a current
 approval, a notification, an officer assignment, a clinical priority, or a new
 due date. The new migration refuses rollback when recommendations exist.
 
-The work unit still needs a configured 4-hour hosted worker with one ephemeral
-framework session per turn, operational telemetry and a human review workflow.
-Production grants, migration deployment, rendered UI and live worker operation
+A human review workflow and durable operational metrics remain outstanding.
+Production grants, migration deployment, rendered UI and deployed worker operation
 are not verified. No user or officer messages are sent by this work unit.

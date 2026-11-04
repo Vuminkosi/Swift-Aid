@@ -251,6 +251,11 @@ builder.Services.Configure<SwiftAid.Gateway.Ellai.EllaiQualityScheduleOptions>(b
 builder.Services.AddScoped<SwiftAid.Infrastructure.Classification.EllaiQualityWork>();
 builder.Services.AddScoped<SwiftAid.Gateway.Ellai.EllaiQualitySweep>();
 builder.Services.AddHostedService<SwiftAid.Gateway.Ellai.EllaiQualityScheduleWorker>();
+builder.Services.Configure<SwiftAid.Infrastructure.Classification.EllaiFollowUpOptions>(builder.Configuration.GetSection("Ellai:Operational:FollowUp"));
+builder.Services.Configure<SwiftAid.Gateway.Ellai.EllaiFollowUpScheduleOptions>(builder.Configuration.GetSection("Ellai:Operational:FollowUp"));
+builder.Services.AddScoped<SwiftAid.Infrastructure.Classification.EllaiFollowUpWork>();
+builder.Services.AddScoped<SwiftAid.Gateway.Ellai.EllaiFollowUpSweep>();
+builder.Services.AddHostedService<SwiftAid.Gateway.Ellai.EllaiFollowUpScheduleWorker>();
 builder.Services.Configure<SwiftAid.Infrastructure.Classification.TranslationOptions>(builder.Configuration.GetSection("ExperimentalMultilingualIntelligence"));
 builder.Services.AddScoped<SwiftAid.Infrastructure.Classification.TranslationRegistry>();
 builder.Services.AddScoped<SwiftAid.Infrastructure.Classification.CaseTranslationService>();
