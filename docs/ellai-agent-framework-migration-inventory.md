@@ -4307,3 +4307,23 @@ FullyQualifiedName~LiveMuseStreamsEvidenceBackedSegmentBeforeCompletion
 test process. The TRX is retained in the application test project's
 `TestResults`. This is one direct-agent run with synthetic tool evidence, not
 browser playback, deployed behavior, or a provider reliability guarantee.
+
+### Current live synthetic voice pipeline — 2026-11-04
+
+At `181297a2`, `SyntheticSpeechFlowsThroughLiveTranscriptionMuseAndSpeech`
+passed 1/1. The test generated synthetic English speech with the existing local
+Kokoro service, sent the resulting audio to the configured live transcription
+adapter, processed the recognized turn through the framework worker and live
+Muse, and obtained nonzero synthesized response PCM. Session persistence was
+in memory. A temporary loopback relay connected the test to the existing speech
+service and was removed; the shared speech service was not restarted.
+
+PASS: with `OS=Windows_NT`, `ELLAI_LIVE=1`, `SWIFTAID_TEST_LIVE_ASR=1`,
+`SWIFTAID_TEST_LIVE_SPEECH=1` and provider settings in the test process,
+`dotnet test tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj
+--no-build --no-restore -m:1 -nr:false -p:WasmBuildNative=false --filter
+FullyQualifiedName~SyntheticSpeechFlowsThroughLiveTranscriptionMuseAndSpeech
+--logger 'trx;LogFileName=ellai-live-voice-current-20261104.trx' --logger
+'console;verbosity=normal'` passed. The TRX is retained under the integration
+test project's `TestResults`. Microphone capture, browser or physical playback,
+durable sessions and deployed behavior are not verified by this run.
