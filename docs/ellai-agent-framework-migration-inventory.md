@@ -4124,3 +4124,17 @@ database after applying 63 migrations. The rendered
 completed two synthetic turns, recalled the test word, restored the conversation
 after refresh, and passed its mobile, reduced-motion, cancellation, and page-error
 checks. This does not verify NATS delivery, deployed environments, or Android.
+
+### Current integration regression rerun — 2026-11-04
+
+At `94b72574`, a Windows local run of `dotnet test
+tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj --no-build
+--no-restore -m:1 -nr:false -p:WasmBuildNative=false --logger
+'trx;LogFileName=ellai-migration-current-20261104.trx' --logger
+'console;verbosity=quiet'` passed 811, failed 0 and skipped 350. The run set
+`OS=Windows_NT`, `ELLAI_LIVE=0`, and disabled the framework, intake, and
+SQL-authority PostgreSQL fixture opt-ins. The TRX file is retained under the
+integration project's `TestResults` directory. The previously intermittent
+native WebSocket test passed in this run, but the earlier failure details were
+not captured; this rerun does not establish its root cause or close the skipped
+integration and deployment gates.
