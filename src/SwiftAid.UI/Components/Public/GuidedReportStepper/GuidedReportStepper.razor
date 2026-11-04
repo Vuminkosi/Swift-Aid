@@ -251,11 +251,10 @@
                 @if (Draft.OnsetPrecision != ReportedTimePrecision.Unknown)
                 {
                     <div data-bonboarding-anchor="ellai-report-onset-date">
-                    <MudTextField T="string" Label="Reported onset date" InputType="InputType.Text" Placeholder="YYYY-MM-DD"
-                                  HelperText="Use the date the reporter says symptoms or signs began. Leave it unknown if not known."
-                                  Variant="Variant.Outlined" Immediate="true"
-                                  Value="@(Draft.OnsetDateText ?? Draft.OnsetDate?.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture))"
-                                  ValueChanged="OnsetDateChangedAsync" For="@(() => Draft.OnsetDateText)" />
+                    <MudDatePicker Label="Reported onset date" Date="Draft.OnsetDate"
+                                   DateChanged="OnsetCalendarDateChangedAsync" Editable="false" Clearable="true"
+                                   DateFormat="dd MMM yyyy" Variant="Variant.Outlined"
+                                   HelperText="Choose when symptoms or signs began. Keep the date unknown if not known." />
                     </div>
                 }
                 @if (Draft.OnsetPrecision == ReportedTimePrecision.Exact)
@@ -284,11 +283,10 @@
                 @if (Draft.OccurrencePrecision != ReportedTimePrecision.Unknown)
                 {
                     <div data-bonboarding-anchor="ellai-report-occurrence-date">
-                    <MudTextField T="string" Label="Reported date" InputType="InputType.Text" Placeholder="YYYY-MM-DD"
-                                  HelperText="Enter the date as year-month-day, for example 2026-10-01."
-                                  Variant="Variant.Outlined" Immediate="true"
-                                  Value="@(Draft.OccurrenceDateText ?? Draft.OccurrenceDate?.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture))"
-                                  ValueChanged="OccurrenceDateChangedAsync" For="@(() => Draft.OccurrenceDateText)" />
+                    <MudDatePicker Label="Reported date" Date="Draft.OccurrenceDate"
+                                   DateChanged="OccurrenceCalendarDateChangedAsync" Editable="false" Clearable="true"
+                                   DateFormat="dd MMM yyyy" Variant="Variant.Outlined"
+                                   HelperText="Choose when this happened. Keep the date unknown if not known." />
                     </div>
                 }
                 @if (Draft.OccurrencePrecision == ReportedTimePrecision.Exact)
@@ -695,17 +693,20 @@
                 nameof(PublicReportDraft.Locality) => _localityValidationTarget,
                 _ => _locationValidationTarget
             };
-            await target.FocusAsync();
+            if (target.Context is not null)
+                await target.FocusAsync();
+            else if (_validationSummary.Context is not null)
+                await _validationSummary.FocusAsync();
         }
         else if (_focusStepHeadingAfterRender)
         {
             _focusStepHeadingAfterRender = false;
-            await _stepHeading.FocusAsync();
+            if (_stepHeading.Context is not null) await _stepHeading.FocusAsync();
         }
         else if (_focusValidationSummaryAfterRender)
         {
             _focusValidationSummaryAfterRender = false;
-            await _validationSummary.FocusAsync();
+            if (_validationSummary.Context is not null) await _validationSummary.FocusAsync();
         }
     }
 
@@ -1620,6 +1621,12 @@
             SwiftAid.UI.Ellai.Guidance.EllaiValidationGuidance;
         _validationGuidance?.Publish(_validationMessage);
     }
+
+    private Task OccurrenceCalendarDateChangedAsync(DateTime? value) =>
+        OccurrenceDateChangedAsync(value?.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture));
+
+    private Task OnsetCalendarDateChangedAsync(DateTime? value) =>
+        OnsetDateChangedAsync(value?.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture));
 
     private Task OccurrenceDateChangedAsync(string? value)
     {
