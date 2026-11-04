@@ -412,7 +412,9 @@ public sealed class EllaiFrameworkAgent
                         return "UI specialist could not verify an answer.";
                     }
                     var json = System.Text.Json.JsonSerializer.Serialize(result.Decision);
-                    return json.Length <= 12000 ? json : "UI specialist result exceeded its limit.";
+                    if (json.Length <= 12000) return json;
+                    Interlocked.Exchange(ref invalidDelegation, 1);
+                    return "UI specialist result exceeded its limit.";
                 }
                 catch (OperationCanceledException) when (!token.IsCancellationRequested && deadline.IsCancellationRequested)
                 { Interlocked.Exchange(ref invalidDelegation, 1); return "UI specialist timed out."; }
