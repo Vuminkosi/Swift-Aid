@@ -26,6 +26,9 @@ public sealed class EllaiOwnedCaseCountPostgresTests
     [LiveCountFact]
     public Task LiveMuseWorkerCommitsAuthorizedPostgresCount() => RunWorkerCountAsync(revoke: false, liveModel: true);
 
+    [LiveCountFact]
+    public Task LiveMuseWorkerWithholdsCountAfterPostgresGrantExpires() => RunWorkerCountAsync(revoke: true, liveModel: true);
+
     private static async Task RunWorkerCountAsync(bool revoke, bool liveModel = false)
     {
         await using var fixture = await CaseAuthorityPostgresFixture.CreateAsync(frameworkFixture: true);
