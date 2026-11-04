@@ -58,7 +58,7 @@ public sealed class EllaiQualityWork(SwiftAidDbContext db, PostgresProtectedCase
                     AND NOT EXISTS (
                         SELECT 1 FROM swiftaid_classification.quality_assessments q
                         WHERE q."SourceEventId" = e.event_id AND q."Version" = {ReportQualityRules.Version})
-                ORDER BY c.case_id FOR SHARE OF c, w, o, wo LIMIT 1
+                ORDER BY c.created_at_utc DESC, c.case_id FOR SHARE OF c, w, o, wo LIMIT 1
                 """).ToArrayAsync(token).ConfigureAwait(false);
             var candidate = candidates.SingleOrDefault();
             if (candidate is null) return false;

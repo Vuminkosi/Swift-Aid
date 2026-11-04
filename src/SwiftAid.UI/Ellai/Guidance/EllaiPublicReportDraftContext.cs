@@ -5,6 +5,8 @@ namespace SwiftAid.UI.Ellai.Guidance;
 /// <summary>Short lived bridge from a validated Ellai intent to the mounted public report form.</summary>
 public sealed class EllaiPublicReportDraftContext
 {
+    private const int MaximumAgeCorrectionHistory = 10;
+
     private readonly object _gate = new();
     private object? _owner;
     private Func<int?, bool>? _setAge;
@@ -16,7 +18,7 @@ public sealed class EllaiPublicReportDraftContext
     private DateTimeOffset _captureExpiresAt;
     private bool _captureActive;
 
-    private readonly Stack<int> _previousAges = new();
+    private readonly List<int> _previousAges = [];
     private enum PendingEditKind { Age, PreviousAge, Observation, Locality, Narrative }
     private sealed record PendingEdit(PendingEditKind Kind, int? Age = null, string? Text = null);
 
@@ -24,7 +26,8 @@ public sealed class EllaiPublicReportDraftContext
     {
         lock (_gate)
         {
-            if (!_captureActive || DateTimeOffset.UtcNow >= _captureExpiresAt) _pending.Clear();
+            _pending.Clear();
+            _previousAges.Clear();
             _captureActive = true;
             _captureExpiresAt = DateTimeOffset.UtcNow.AddMinutes(10);
         }
@@ -78,6 +81,7 @@ public sealed class EllaiPublicReportDraftContext
             _setLocality = null;
             _appendNarrative = null;
             _pending.Clear();
+            _previousAges.Clear();
             _captureActive = false;
         }
     }
@@ -181,7 +185,14 @@ public sealed class EllaiPublicReportDraftContext
         var previous = getAge?.Invoke();
         if (setAge?.Invoke(age) != true) return false;
         if (previous is { } value && value != age)
-            lock (_gate) _previousAges.Push(value);
+        {
+            lock (_gate)
+            {
+                if (_previousAges.Count == MaximumAgeCorrectionHistory)
+                    _previousAges.RemoveAt(0);
+                _previousAges.Add(value);
+            }
+        }
         return true;
     }
 
@@ -192,9 +203,15 @@ public sealed class EllaiPublicReportDraftContext
         lock (_gate)
         {
             if (_previousAges.Count == 0 || _setAge is not { } callback) return false;
-            previous = _previousAges.Pop();
+            previous = _previousAges[^1];
             setAge = callback;
         }
-        return setAge(previous);
+        if (setAge(previous) != true) return false;
+        lock (_gate)
+        {
+            if (_previousAges.Count > 0 && _previousAges[^1] == previous)
+                _previousAges.RemoveAt(_previousAges.Count - 1);
+        }
+        return true;
     }
 }

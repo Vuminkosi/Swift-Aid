@@ -48,7 +48,7 @@ public sealed class EllaiFollowUpWork(SwiftAidDbContext db, IOptions<EllaiFollow
 
             var acknowledgement = await db.Database.SqlQuery<FollowUpCandidate>($"""
                 SELECT c.case_id AS "CaseId", c.organization_id AS "OrganizationId",
-                    c.aggregate_version AS "CaseVersion", f.follow_up_id AS "FollowUpId",
+                    c.aggregate_version AS "CaseVersion", c.created_at_utc AS "CaseCreatedAtUtc", f.follow_up_id AS "FollowUpId",
                     a.aggregate_version AS "ScheduleVersion", a.follow_up_event_id AS "EventId",
                     a.acknowledgement_due_utc AS "DueAtUtc", a.assignment_id AS "AssignmentId"
                 FROM health_officer_escalation_assignments a
@@ -66,25 +66,11 @@ public sealed class EllaiFollowUpWork(SwiftAidDbContext db, IOptions<EllaiFollow
                     AND f.assignee_actor_id = a.officer_actor_id AND a.acknowledgement_due_utc < clock_timestamp()
                     AND NOT EXISTS (SELECT 1 FROM ellai_follow_up_recommendations r
                         WHERE r.officer_assignment_id = a.assignment_id AND r.recommendation_kind = 'OfficerAcknowledgementDue')
-                ORDER BY a.acknowledgement_due_utc, a.assignment_id FOR SHARE OF c, f, e LIMIT 1
+                ORDER BY c.created_at_utc DESC, c.case_id, a.acknowledgement_due_utc, a.assignment_id FOR SHARE OF c, f, e LIMIT 1
                 """).SingleOrDefaultAsync(token).ConfigureAwait(false);
-            if (acknowledgement is not null)
-            {
-                if (!await db.Database.SqlQuery<bool>($"SELECT swiftaid_internal.lock_workspace_organization({lease.WorkspaceId}, {acknowledgement.OrganizationId}) AS \"Value\"")
-                    .SingleAsync(token).ConfigureAwait(false)) throw new UnauthorizedAccessException();
-                await db.Database.ExecuteSqlInterpolatedAsync($"""
-                    INSERT INTO ellai_follow_up_recommendations
-                        (activity_id, case_id, follow_up_id, source_event_id, schedule_version, due_at_utc,
-                         source_case_version, policy_version, run_id, work_turn_id, recorded_at_utc, recommendation_kind, officer_assignment_id)
-                    VALUES ({Guid.NewGuid()}, {acknowledgement.CaseId}, {acknowledgement.FollowUpId}, {acknowledgement.EventId},
-                        {acknowledgement.ScheduleVersion}, {acknowledgement.DueAtUtc}, {acknowledgement.CaseVersion}, {lease.PolicyVersion},
-                        {runId}, {workTurnId}, clock_timestamp(), 'OfficerAcknowledgementDue', {acknowledgement.AssignmentId})
-                    """, token).ConfigureAwait(false);
-                return true;
-            }
             var items = await db.Database.SqlQuery<FollowUpCandidate>($"""
                 SELECT c.case_id AS "CaseId", c.organization_id AS "OrganizationId",
-                    c.aggregate_version AS "CaseVersion", f.follow_up_id AS "FollowUpId",
+                    c.aggregate_version AS "CaseVersion", c.created_at_utc AS "CaseCreatedAtUtc", f.follow_up_id AS "FollowUpId",
                     f.current_schedule_version AS "ScheduleVersion", f.current_schedule_event_id AS "EventId",
                     f.due_at_utc AS "DueAtUtc", NULL::uuid AS "AssignmentId"
                 FROM managed_case_follow_ups f
@@ -102,9 +88,27 @@ public sealed class EllaiFollowUpWork(SwiftAidDbContext db, IOptions<EllaiFollow
                     AND NOT EXISTS (SELECT 1 FROM ellai_follow_up_recommendations r
                         WHERE r.follow_up_id = f.follow_up_id AND r.schedule_version = f.current_schedule_version
                             AND r.recommendation_kind = 'FollowUpDue')
-                ORDER BY f.due_at_utc, f.follow_up_id FOR SHARE OF c, f LIMIT 1
+                ORDER BY c.created_at_utc DESC, c.case_id, f.due_at_utc, f.follow_up_id FOR SHARE OF c, f LIMIT 1
                 """).ToArrayAsync(token).ConfigureAwait(false);
             var item = items.SingleOrDefault();
+            if (acknowledgement is not null && (item is null ||
+                acknowledgement.CaseCreatedAtUtc > item.CaseCreatedAtUtc ||
+                acknowledgement.CaseCreatedAtUtc == item.CaseCreatedAtUtc &&
+                (string.CompareOrdinal(acknowledgement.CaseId.ToString("D"), item.CaseId.ToString("D")) < 0 ||
+                 acknowledgement.CaseId == item.CaseId && acknowledgement.DueAtUtc <= item.DueAtUtc)))
+            {
+                if (!await db.Database.SqlQuery<bool>($"SELECT swiftaid_internal.lock_workspace_organization({lease.WorkspaceId}, {acknowledgement.OrganizationId}) AS \"Value\"")
+                    .SingleAsync(token).ConfigureAwait(false)) throw new UnauthorizedAccessException();
+                await db.Database.ExecuteSqlInterpolatedAsync($"""
+                    INSERT INTO ellai_follow_up_recommendations
+                        (activity_id, case_id, follow_up_id, source_event_id, schedule_version, due_at_utc,
+                         source_case_version, policy_version, run_id, work_turn_id, recorded_at_utc, recommendation_kind, officer_assignment_id)
+                    VALUES ({Guid.NewGuid()}, {acknowledgement.CaseId}, {acknowledgement.FollowUpId}, {acknowledgement.EventId},
+                        {acknowledgement.ScheduleVersion}, {acknowledgement.DueAtUtc}, {acknowledgement.CaseVersion}, {lease.PolicyVersion},
+                        {runId}, {workTurnId}, clock_timestamp(), 'OfficerAcknowledgementDue', {acknowledgement.AssignmentId})
+                    """, token).ConfigureAwait(false);
+                return true;
+            }
             if (item is null) return false;
             if (!await db.Database.SqlQuery<bool>($"SELECT swiftaid_internal.lock_workspace_organization({lease.WorkspaceId}, {item.OrganizationId}) AS \"Value\"")
                 .SingleAsync(token).ConfigureAwait(false)) throw new UnauthorizedAccessException();
@@ -125,6 +129,7 @@ public sealed class EllaiFollowUpWork(SwiftAidDbContext db, IOptions<EllaiFollow
         public Guid CaseId { get; init; }
         public string OrganizationId { get; init; } = "";
         public long CaseVersion { get; init; }
+        public DateTimeOffset CaseCreatedAtUtc { get; init; }
         public Guid FollowUpId { get; init; }
         public long ScheduleVersion { get; init; }
         public Guid EventId { get; init; }
