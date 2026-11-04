@@ -48,7 +48,7 @@ public sealed class EllaiFollowUpWork(SwiftAidDbContext db, IOptions<EllaiFollow
 
             var acknowledgement = await db.Database.SqlQuery<FollowUpCandidate>($"""
                 SELECT c.case_id AS "CaseId", c.organization_id AS "OrganizationId",
-                    c.aggregate_version AS "CaseVersion", c.created_at_utc AS "CaseCreatedAtUtc", f.follow_up_id AS "FollowUpId",
+                    c.aggregate_version AS "CaseVersion", report_time.received_at_utc AS "CaseCreatedAtUtc", f.follow_up_id AS "FollowUpId",
                     a.aggregate_version AS "ScheduleVersion", a.follow_up_event_id AS "EventId",
                     a.acknowledgement_due_utc AS "DueAtUtc", a.assignment_id AS "AssignmentId"
                 FROM health_officer_escalation_assignments a
@@ -59,18 +59,24 @@ public sealed class EllaiFollowUpWork(SwiftAidDbContext db, IOptions<EllaiFollow
                     AND wo.organization_id = c.organization_id AND wo.status = 'Active'
                 JOIN managed_case_follow_ups f ON f.follow_up_id = a.follow_up_id AND f.case_id = a.case_id
                 JOIN managed_case_escalations e ON e.escalation_id = a.escalation_id AND e.case_id = a.case_id
+                CROSS JOIN LATERAL (SELECT COALESCE((
+                    SELECT report.received_at_utc FROM swiftaid_intake.intake_promotions promotion
+                    JOIN swiftaid_intake.intake_reports report ON report.receipt_id = promotion.receipt_id
+                    WHERE promotion.case_id = c.case_id
+                ), c.created_at_utc) AS received_at_utc) report_time
                 WHERE c.workspace_id = {lease.WorkspaceId} AND c.organization_id = ANY({options.Organizations})
+                    AND report_time.received_at_utc BETWEEN clock_timestamp() - interval '30 days' AND clock_timestamp()
                     AND c.workflow <> 'Resolved' AND e.status <> 'Closed' AND f.status = 'Scheduled'
                     AND f.acknowledged_version IS DISTINCT FROM 0
                     AND (f.current_schedule_version = a.aggregate_version OR f.acknowledged_version = 1)
                     AND f.assignee_actor_id = a.officer_actor_id AND a.acknowledgement_due_utc < clock_timestamp()
                     AND NOT EXISTS (SELECT 1 FROM ellai_follow_up_recommendations r
                         WHERE r.officer_assignment_id = a.assignment_id AND r.recommendation_kind = 'OfficerAcknowledgementDue')
-                ORDER BY c.created_at_utc DESC, c.case_id, a.acknowledgement_due_utc, a.assignment_id FOR SHARE OF c, f, e LIMIT 1
+                ORDER BY report_time.received_at_utc DESC, c.case_id, a.acknowledgement_due_utc, a.assignment_id FOR SHARE OF c, f, e LIMIT 1
                 """).SingleOrDefaultAsync(token).ConfigureAwait(false);
             var items = await db.Database.SqlQuery<FollowUpCandidate>($"""
                 SELECT c.case_id AS "CaseId", c.organization_id AS "OrganizationId",
-                    c.aggregate_version AS "CaseVersion", c.created_at_utc AS "CaseCreatedAtUtc", f.follow_up_id AS "FollowUpId",
+                    c.aggregate_version AS "CaseVersion", report_time.received_at_utc AS "CaseCreatedAtUtc", f.follow_up_id AS "FollowUpId",
                     f.current_schedule_version AS "ScheduleVersion", f.current_schedule_event_id AS "EventId",
                     f.due_at_utc AS "DueAtUtc", NULL::uuid AS "AssignmentId"
                 FROM managed_case_follow_ups f
@@ -82,13 +88,19 @@ public sealed class EllaiFollowUpWork(SwiftAidDbContext db, IOptions<EllaiFollow
                 JOIN case_events e ON e.event_id = f.current_schedule_event_id AND e.case_id = c.case_id
                     AND e.aggregate_version = f.current_schedule_version
                     AND e.event_type IN ('CaseFollowUpScheduled', 'CaseFollowUpOutcomeRecorded')
+                CROSS JOIN LATERAL (SELECT COALESCE((
+                    SELECT report.received_at_utc FROM swiftaid_intake.intake_promotions promotion
+                    JOIN swiftaid_intake.intake_reports report ON report.receipt_id = promotion.receipt_id
+                    WHERE promotion.case_id = c.case_id
+                ), c.created_at_utc) AS received_at_utc) report_time
                 WHERE c.workspace_id = {lease.WorkspaceId} AND c.organization_id = ANY({options.Organizations})
+                    AND report_time.received_at_utc BETWEEN clock_timestamp() - interval '30 days' AND clock_timestamp()
                     AND c.workflow <> 'Resolved' AND f.status IN ('Scheduled', 'Acknowledged')
                     AND f.due_at_utc < clock_timestamp()
                     AND NOT EXISTS (SELECT 1 FROM ellai_follow_up_recommendations r
                         WHERE r.follow_up_id = f.follow_up_id AND r.schedule_version = f.current_schedule_version
                             AND r.recommendation_kind = 'FollowUpDue')
-                ORDER BY c.created_at_utc DESC, c.case_id, f.due_at_utc, f.follow_up_id FOR SHARE OF c, f LIMIT 1
+                ORDER BY report_time.received_at_utc DESC, c.case_id, f.due_at_utc, f.follow_up_id FOR SHARE OF c, f LIMIT 1
                 """).ToArrayAsync(token).ConfigureAwait(false);
             var item = items.SingleOrDefault();
             if (acknowledgement is not null && (item is null ||
