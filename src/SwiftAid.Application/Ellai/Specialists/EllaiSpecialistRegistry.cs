@@ -16,6 +16,7 @@ public static class EllaiSpecialistRegistry
     public const string Geospatial = "core.geospatial";
     public const string Workflow = "core.workflow";
     public const string Surveillance = "core.surveillance";
+    public const string Reporting = "core.reporting";
     public const string CommunitySessions = "community.sessions";
 
     private static readonly FrozenDictionary<string, EllaiSpecialistProfile> Profiles =
@@ -33,6 +34,8 @@ public static class EllaiSpecialistRegistry
                 new[] { EllaiToolNames.Locations }.ToFrozenSet(StringComparer.Ordinal)),
             new EllaiSpecialistProfile(Workflow, 1, "Ellai:Specialists:Workflow:Enabled",
                 new[] { EllaiToolNames.Receipts }.ToFrozenSet(StringComparer.Ordinal)),
+            new EllaiSpecialistProfile(Reporting, 1, "Ellai:Specialists:Reporting:Enabled",
+                new[] { EllaiToolNames.UiCatalogue, EllaiToolNames.UiObserve }.ToFrozenSet(StringComparer.Ordinal)),
             new EllaiSpecialistProfile(Surveillance, 1, "Ellai:Specialists:Surveillance:Enabled",
                 new[] { EllaiToolNames.ClassificationSnapshot }.ToFrozenSet(StringComparer.Ordinal)),
             new EllaiSpecialistProfile(CommunitySessions, 1, "Ellai:Specialists:CommunitySessions:Enabled",
