@@ -61,7 +61,7 @@ public static class EllaiAuthorizedConversationContext
             var references = new Dictionary<Guid, long>();
             foreach (var observation in trace.Observations)
             {
-                if (!observation.Allowed || (observation.Truncated && observation.ToolName != EllaiToolNames.PublicSessions) ||
+                if (!observation.Allowed || (observation.Truncated && observation.ToolName is not (EllaiToolNames.PublicSessions or EllaiToolNames.CaseTimeline)) ||
                     toolContext?.AllowedTools is { } allowedTools && !allowedTools.Contains(observation.ToolName))
                     return decisions[turn.ClientUtteranceId] = false;
                 // This validator returns only a format verdict about the model's
@@ -160,8 +160,11 @@ public static class EllaiAuthorizedConversationContext
                         if (scope.IncludeRelated) arguments["include_related"] = "true";
                         var current = await invokeTool(toolContext, new EllaiToolRequest(EllaiToolNames.CaseTimeline, arguments), ct).ConfigureAwait(false);
                         ct.ThrowIfCancellationRequested();
-                        if (!current.Allowed || current.Truncated || current.CaseTimelineReplayScope != scope ||
-                            !current.Evidence.SequenceEqual(observation.Evidence))
+                        var timelineSummary = current.ResultSummary.Split('\n')[0];
+                        if (!current.Allowed || current.Truncated != observation.Truncated || current.CaseTimelineReplayScope != scope ||
+                            !current.Evidence.SequenceEqual(observation.Evidence) ||
+                            observation.Truncated && (string.IsNullOrWhiteSpace(timelineSummary) || turn.AssistantText is null ||
+                                !turn.AssistantText.Contains(timelineSummary, StringComparison.Ordinal)))
                             return decisions[turn.ClientUtteranceId] = false;
                     }
                     catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }

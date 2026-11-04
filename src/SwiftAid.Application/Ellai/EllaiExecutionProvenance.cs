@@ -104,7 +104,7 @@ public sealed record EllaiObservedToolResult(
                 IsValidReceiptResult(result, receiptLookupId is null && request.Arguments.Count == 0)
                     ? ReceiptListFingerprint(result) : null,
             receiptLookupId,
-            request.ToolName == EllaiToolNames.CaseTimeline && result.Allowed && !result.Truncated
+            request.ToolName == EllaiToolNames.CaseTimeline && result.Allowed
                 ? result.CaseTimelineReplayScope : null,
             request.ToolName == EllaiToolNames.UiObserve && result.Allowed && !result.Truncated
                 ? result.UiObservationReplayScope : null,
