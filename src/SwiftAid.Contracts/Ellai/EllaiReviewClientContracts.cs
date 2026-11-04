@@ -1,3 +1,5 @@
+using SwiftAid.Contracts.Intake;
+
 namespace SwiftAid.Contracts.Ellai;
 
 public static class EllaiConsentPurposes
@@ -269,6 +271,14 @@ public interface IEllaiReviewClient
 
     Task<bool> GrantVoiceCaptureConsentAsync(string sessionId, CancellationToken cancellationToken) =>
         Task.FromResult(false);
+
+    /// <summary>Grant report extraction only after the user explicitly agrees to that processing.</summary>
+    Task<bool> GrantReportVoiceConsentAsync(string sessionId, CancellationToken cancellationToken) =>
+        Task.FromResult(false);
+
+    Task<ReportVoiceExtractionResponse?> ExtractReportVoiceAsync(
+        string sessionId, string transcript, CancellationToken cancellationToken) =>
+        Task.FromResult<ReportVoiceExtractionResponse?>(null);
 
     Task<EllaiVoiceTranscriptionResult?> TranscribeVoiceAsync(
         string sessionId, byte[] audio, EllaiVoiceCaptureMode mode, CancellationToken cancellationToken,

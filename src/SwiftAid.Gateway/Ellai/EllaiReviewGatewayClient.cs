@@ -4,6 +4,7 @@ using System.Security.Claims;
 using SwiftAid.Application.Ellai;
 using SwiftAid.Application.Authorization;
 using SwiftAid.Contracts.Ellai;
+using SwiftAid.Contracts.Intake;
 
 namespace SwiftAid.Gateway.Ellai;
 
@@ -218,6 +219,37 @@ public sealed class EllaiReviewGatewayClient(
         {
             return false;
         }
+    }
+
+    public async Task<bool> GrantReportVoiceConsentAsync(string sessionId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var state = await _authenticationStateProvider.GetAuthenticationStateAsync().ConfigureAwait(false);
+            var principal = ResolvePrincipal(state.User, sessionId);
+            if (principal is null) return false;
+            var actor = ActorContext.FromValidatedPrincipal(principal);
+            return await _serviceProvider.GetRequiredService<ReportVoiceGatewayService>()
+                .GrantAsync(sessionId, actor.ActorId, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch (Exception) { return false; }
+    }
+
+    public async Task<ReportVoiceExtractionResponse?> ExtractReportVoiceAsync(
+        string sessionId, string transcript, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var state = await _authenticationStateProvider.GetAuthenticationStateAsync().ConfigureAwait(false);
+            var principal = ResolvePrincipal(state.User, sessionId);
+            if (principal is null) return null;
+            var actor = ActorContext.FromValidatedPrincipal(principal);
+            return await _serviceProvider.GetRequiredService<ReportVoiceGatewayService>()
+                .ExtractAsync(sessionId, actor.ActorId, transcript, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch (Exception) { return null; }
     }
 
     public async Task<bool> GrantVoiceCaptureConsentAsync(

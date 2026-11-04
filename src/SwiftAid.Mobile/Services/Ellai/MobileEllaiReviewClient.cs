@@ -124,6 +124,13 @@ public sealed class MobileEllaiReviewClient : IEllaiReviewClient
     public Task<bool> GrantVoiceCaptureConsentAsync(string sessionId, CancellationToken cancellationToken) =>
         ClientFor(sessionId).GrantVoiceCaptureConsentAsync(sessionId, cancellationToken);
 
+    public Task<bool> GrantReportVoiceConsentAsync(string sessionId, CancellationToken cancellationToken) =>
+        ClientFor(sessionId).GrantReportVoiceConsentAsync(sessionId, cancellationToken);
+
+    public Task<SwiftAid.Contracts.Intake.ReportVoiceExtractionResponse?> ExtractReportVoiceAsync(
+        string sessionId, string transcript, CancellationToken cancellationToken) =>
+        ClientFor(sessionId).ExtractReportVoiceAsync(sessionId, transcript, cancellationToken);
+
     public Task<EllaiVoiceTranscriptionResult?> TranscribeVoiceAsync(
         string sessionId, byte[] audio, EllaiVoiceCaptureMode mode, CancellationToken cancellationToken,
         string? voiceCaptureId = null, long voiceCaptureOffsetSamples = 0) =>

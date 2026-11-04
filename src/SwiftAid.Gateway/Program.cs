@@ -209,6 +209,9 @@ builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiTrainingVerifier>();
     builder.Services.AddScoped<SwiftAid.Intelligence.Meta.EllaiReasoningRouter>();
     SwiftAid.Gateway.Ellai.EllaiReasoningRegistration.AddEllaiUsageAccounting(builder.Services, ellai);
     builder.Services.AddScoped<SwiftAid.Application.Ellai.IEllaiTurnCompletionClient, SwiftAid.Intelligence.Meta.EllaiProviderTurnClient>();
+    builder.Services.AddScoped<SwiftAid.Application.Intake.ReportVoiceExtraction>();
+    builder.Services.AddScoped<SwiftAid.Application.Intake.ReportVoiceExtractionAdmission>();
+    builder.Services.AddScoped<SwiftAid.Gateway.Ellai.ReportVoiceGatewayService>();
     if (ellai.Enabled)
     {
         var policyPath = SwiftAid.Application.Ellai.EllaiRuntimePolicy.ResolvePath(builder.Environment.ContentRootPath, ellai.PolicyPath);

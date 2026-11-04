@@ -116,6 +116,11 @@ public static class EllaiGuestEndpoints
             return await next(context).ConfigureAwait(false);
         });
 
+        group.MapPost("/sessions/{sessionId}/report-voice/consent", ReportVoiceEndpoints.ConsentAsync)
+            .WithMetadata(new RequestSizeLimitAttribute(1024));
+        group.MapPost("/sessions/{sessionId}/report-voice/extract", ReportVoiceEndpoints.ExtractAsync)
+            .WithMetadata(new RequestSizeLimitAttribute(32768));
+
         group.MapGet("/sessions/{sessionId}/guidance/admission", EllaiGuidanceProposalEndpoint.ReadAsync);
         group.MapPost("/sessions/{sessionId}/guidance/plan", EllaiGuidanceProposalEndpoint.PrepareAsync);
         group.MapPost("/sessions/{sessionId}/guidance/narration", EllaiGuidanceProposalEndpoint.NarrateAsync);

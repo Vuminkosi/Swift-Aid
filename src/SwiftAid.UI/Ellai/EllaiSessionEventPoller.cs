@@ -1,6 +1,7 @@
 using System.Net.Http.Json;
 using System.Text.Json;
 using SwiftAid.Contracts.Ellai;
+using SwiftAid.Contracts.Intake;
 
 namespace SwiftAid.UI.Ellai;
 
@@ -251,6 +252,56 @@ public sealed class EllaiReviewHttpClient(HttpClient http, bool useGuestRoutes =
         }
 
         return true;
+    }
+
+    public async Task<bool> GrantReportVoiceConsentAsync(string sessionId, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(sessionId)) return false;
+        try
+        {
+            using var response = await PostReportVoiceAsync($"{SessionRoute(sessionId)}/report-voice/consent",
+                new ReportVoiceConsentRequest(true), cancellationToken).ConfigureAwait(false);
+            return response.IsSuccessStatusCode;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch (Exception) { return false; }
+    }
+
+    public async Task<ReportVoiceExtractionResponse?> ExtractReportVoiceAsync(
+        string sessionId, string transcript, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(sessionId) || string.IsNullOrWhiteSpace(transcript) || transcript.Length > 6000)
+            return null;
+        try
+        {
+            using var response = await PostReportVoiceAsync($"{SessionRoute(sessionId)}/report-voice/extract",
+                new ReportVoiceExtractionRequest(transcript), cancellationToken).ConfigureAwait(false);
+            return response.IsSuccessStatusCode
+                ? await response.Content.ReadFromJsonAsync<ReportVoiceExtractionResponse>(Json, cancellationToken).ConfigureAwait(false)
+                : null;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch (Exception) { return null; }
+    }
+
+    private async Task<HttpResponseMessage> PostReportVoiceAsync<T>(string route, T value, CancellationToken ct)
+    {
+        if (_useGuestRoutes) return await PostAsJsonAsync(route, value, ct).ConfigureAwait(false);
+        string? token = null;
+        try
+        {
+            using var response = await _http.GetAsync("auth/antiforgery", ct).ConfigureAwait(false);
+            if (response.IsSuccessStatusCode)
+            {
+                using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false));
+                if (document.RootElement.TryGetProperty("requestToken", out var property)) token = property.GetString();
+            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        catch (Exception) { }
+        using var request = new HttpRequestMessage(HttpMethod.Post, route) { Content = JsonContent.Create(value, options: Json) };
+        if (!string.IsNullOrWhiteSpace(token)) request.Headers.TryAddWithoutValidation("X-CSRF-TOKEN", token);
+        return await _http.SendAsync(request, ct).ConfigureAwait(false);
     }
 
     public async Task<EllaiVoiceTranscriptionResult?> TranscribeVoiceAsync(
