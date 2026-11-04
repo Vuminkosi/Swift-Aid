@@ -50,8 +50,8 @@ public static class ClassificationWorkerEndpoints
         group.MapPost("/claim", async (ClassificationClaimRequest request, ClassificationRegistry registry, ClassificationBackfillStore backfill, CancellationToken ct) =>
         {
             if (request.BackfillJobId is { } id) await backfill.ValidateNoticeAsync(id, request.Notice.MessageId, ct);
-            var claim = await registry.ClaimAsync(request.Notice, ct);
-            if (request.BackfillJobId is { } job) await backfill.BindResultAsync(job, request.Notice.MessageId, claim.ConfigurationHash!, ct, claim.State, claim.Lease?.LeaseId);
+            var claim = await registry.ClaimAsync(request.Notice, ct, request.BackfillJobId);
+            if (request.BackfillJobId is { } job) await backfill.BindResultAsync(job, request.Notice.MessageId, claim.ConfigurationHash!, ct, claim.State);
             return Results.Ok(claim);
         });
         group.MapPost("/complete", async (ClassificationCompletion request, ClassificationRegistry registry, CancellationToken ct) =>

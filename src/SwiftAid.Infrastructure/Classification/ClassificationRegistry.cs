@@ -23,7 +23,7 @@ public sealed class ClassificationRegistry(
     private ClassificationOptions Options => configured.Value;
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
-    public async Task<ClassificationClaim> ClaimAsync(IngestionNotice notice, CancellationToken ct)
+    public async Task<ClassificationClaim> ClaimAsync(IngestionNotice notice, CancellationToken ct, Guid? backfillJobId = null)
     {
         Options.Validate();
         if (!notice.IsValid() || notice.SourceKind != "case") throw new ArgumentException("Unsupported notice.");
@@ -169,6 +169,30 @@ public sealed class ClassificationRegistry(
             response = new("Leased", new(result.Id, result.LeaseId.Value, config, fingerprint, result.LeaseUntilUtc.Value, text, profile));
         }
         await db.SaveChangesAsync(ct);
+        if (backfillJobId is { } jobId && response.Lease is { } scheduledLease)
+        {
+            // Attribution is committed with the result lease, before the worker
+            // can receive it. A lost response or crash cannot create an untracked
+            // successful scheduled classification.
+            var recorded = await db.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO ellai_enrichment_claims (claim_id, job_id, source_event_id, result_id, lease_id, recorded_at_utc)
+                SELECT gen_random_uuid(), j.job_id, item."SourceEventId", r."Id", {scheduledLease.LeaseId}, {now}
+                FROM ellai_enrichment_jobs j
+                JOIN swiftaid_classification.backfills job ON job."Id" = j.job_id
+                JOIN swiftaid_classification.backfill_items item ON item."JobId" = j.job_id
+                JOIN swiftaid_classification.results r ON r."Id" = {result.Id}
+                WHERE j.job_id = {jobId} AND item."SourceEventId" = {source.EventId}
+                    AND item."State" = 'Pending' AND job."State" = 'Running'
+                    AND job."WorkerId" = {Options.WorkerId} AND job."WorkspaceId" = {header.WorkspaceId}
+                    AND job."OrganizationId" = {header.OrganizationId} AND job."ConfigurationHash" = {Options.Profile.Hash}
+                    AND r."State" = 'Leased' AND r."LeaseId" = {scheduledLease.LeaseId}
+                ON CONFLICT (job_id, source_event_id, lease_id) DO NOTHING
+                """, ct).ConfigureAwait(false);
+            if (recorded == 0 && await db.Database.SqlQuery<int>($"""
+                SELECT count(*)::int AS "Value" FROM ellai_enrichment_jobs WHERE job_id = {jobId}
+                """).SingleAsync(ct).ConfigureAwait(false) != 0)
+                throw new InvalidOperationException("Scheduled enrichment claim could not be attributed.");
+        }
         // A historical backfill can create an old association after the initial sweep.
         await SupersedeOldFactsAsync(header.CaseId, header.ReportRevision, ct);
         await transaction.CommitAsync(ct);
