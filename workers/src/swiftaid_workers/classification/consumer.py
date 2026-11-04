@@ -14,7 +14,7 @@ import httpx
 import nats
 
 logger = logging.getLogger(__name__)
-TERMINAL = {"Completed", "Failed", "Superseded", "Quarantined"}
+TERMINAL = {"Completed", "Failed", "Superseded", "Quarantined", "Expired"}
 
 
 class GatewayClient:

@@ -148,12 +148,50 @@ public sealed class ClassificationBackfillStore(SwiftAidDbContext db, IOptions<C
             FROM counts c WHERE j."Id" = {id}
             """, ct);
         await db.Entry(job).ReloadAsync(ct);
-        var source = await (from item in db.Set<ClassificationBackfillItemEntity>().AsNoTracking()
-                            join e in db.CaseEvents.AsNoTracking() on item.SourceEventId equals e.EventId
-                            where item.JobId == id && item.State == "Pending"
-                            orderby item.Ordinal
-                            select e).FirstOrDefaultAsync(ct);
-        if (source is null) job.State = "Completed";
+        var expiredCandidates = await db.Database.SqlQuery<ExpiryCandidate>($"""
+            SELECT item."SourceEventId" AS "SourceEventId", item."ResultId" AS "ResultId"
+            FROM swiftaid_classification.backfill_items item
+            JOIN case_events e ON e.event_id = item."SourceEventId"
+            JOIN managed_cases c ON c.case_id = e.case_id
+            WHERE item."JobId" = {id} AND item."State" = 'Pending'
+                AND NOT (COALESCE((SELECT report.received_at_utc FROM swiftaid_intake.intake_promotions promotion
+                    JOIN swiftaid_intake.intake_reports report ON report.receipt_id = promotion.receipt_id
+                    WHERE promotion.case_id = c.case_id), c.created_at_utc)
+                    BETWEEN clock_timestamp() - interval '30 days' AND clock_timestamp())
+            ORDER BY item."Ordinal" LIMIT 100
+            """).ToArrayAsync(ct);
+        foreach (var candidate in expiredCandidates)
+        {
+            if (candidate.ResultId is { } resultId)
+            {
+                var key = $"classification-result:{resultId}";
+                if (!await db.Database.SqlQuery<bool>($"SELECT pg_try_advisory_xact_lock(hashtextextended({key}, 0)) AS \"Value\"").SingleAsync(ct))
+                    continue;
+                var result = await db.Set<ClassificationResultEntity>().AsNoTracking().SingleAsync(row => row.Id == resultId, ct);
+                // Terminal outcomes reconcile on the next pass; active leases may complete.
+                if (result.State is "Completed" or "Failed" || result.State == "Leased" && result.LeaseUntilUtc > clock.GetUtcNow())
+                    continue;
+            }
+            var item = await db.Set<ClassificationBackfillItemEntity>().SingleAsync(row => row.JobId == id && row.SourceEventId == candidate.SourceEventId, ct);
+            if (item.State != "Pending") continue;
+            item.State = "Expired";
+            job.Pending--;
+            job.Expired++;
+        }
+        await db.SaveChangesAsync(ct);
+        var sourceId = await db.Database.SqlQuery<Guid?>($"""
+            SELECT e.event_id AS "Value" FROM swiftaid_classification.backfill_items item
+            JOIN case_events e ON e.event_id = item."SourceEventId"
+            JOIN managed_cases c ON c.case_id = e.case_id
+            WHERE item."JobId" = {id} AND item."State" = 'Pending'
+                AND COALESCE((SELECT report.received_at_utc FROM swiftaid_intake.intake_promotions promotion
+                    JOIN swiftaid_intake.intake_reports report ON report.receipt_id = promotion.receipt_id
+                    WHERE promotion.case_id = c.case_id), c.created_at_utc)
+                    BETWEEN clock_timestamp() - interval '30 days' AND clock_timestamp()
+            ORDER BY item."Ordinal" LIMIT 1
+            """).FirstOrDefaultAsync(ct);
+        var source = sourceId is null ? null : await db.CaseEvents.AsNoTracking().SingleAsync(e => e.EventId == sourceId, ct);
+        if (source is null && job.Pending == 0) job.State = "Completed";
         job.UpdatedAtUtc = clock.GetUtcNow();
         await db.SaveChangesAsync(ct);
         var status = await SummarizeAsync(job, ct);
@@ -228,9 +266,15 @@ public sealed class ClassificationBackfillStore(SwiftAidDbContext db, IOptions<C
     {
         return Task.FromResult(new ClassificationBackfillStatus(job.Id,
             job.ConfigurationHash == options.Value.Profile.Hash ? job.State : "ConfigurationChanged", job.ConfigurationHash,
-            job.Eligible, job.Pending, job.NewlyClassified, job.Reused, job.Abstained, job.Failed, job.CreatedAtUtc, job.UpdatedAtUtc, job.Superseded));
+            job.Eligible, job.Pending, job.NewlyClassified, job.Reused, job.Abstained, job.Failed, job.CreatedAtUtc, job.UpdatedAtUtc, job.Superseded, job.Expired));
     }
 
     private Task<int> LockAsync(Guid id, CancellationToken ct) =>
         db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({"classification-backfill:" + id}, 0))", ct);
+
+    private sealed class ExpiryCandidate
+    {
+        public Guid SourceEventId { get; init; }
+        public Guid? ResultId { get; init; }
+    }
 }

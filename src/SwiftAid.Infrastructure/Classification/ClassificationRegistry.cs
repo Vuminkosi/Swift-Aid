@@ -43,6 +43,22 @@ public sealed class ClassificationRegistry(
                                       Options.Organizations.Contains(job.OrganizationId) && item.SourceEventId == notice.MessageId
                                   select job.Id).AnyAsync(ct);
             if (!admitted) throw new UnauthorizedAccessException();
+            var expired = await db.Database.SqlQuery<bool>($"""
+                SELECT EXISTS (SELECT 1 FROM swiftaid_classification.backfill_items item
+                    JOIN case_events e ON e.event_id = item."SourceEventId"
+                    JOIN managed_cases c ON c.case_id = e.case_id
+                    WHERE item."JobId" = {admissionJobId} AND item."SourceEventId" = {notice.MessageId}
+                        AND (item."State" = 'Expired' OR item."State" = 'Pending' AND NOT
+                            (COALESCE((SELECT report.received_at_utc FROM swiftaid_intake.intake_promotions promotion
+                            JOIN swiftaid_intake.intake_reports report ON report.receipt_id = promotion.receipt_id
+                            WHERE promotion.case_id = c.case_id), c.created_at_utc)
+                            BETWEEN clock_timestamp() - interval '30 days' AND clock_timestamp()))) AS "Value"
+                """).SingleAsync(ct);
+            if (expired)
+            {
+                await transaction.CommitAsync(ct);
+                return new ClassificationClaim("Expired", ConfigurationHash: Options.Profile.Hash);
+            }
         }
         await LockAsync($"classification-inbox:{notice.MessageId}:{Options.Profile.Hash}", ct);
         var sourceNotice = await db.CaseEvents.AsNoTracking().SingleOrDefaultAsync(e => e.EventId == notice.MessageId, ct);
