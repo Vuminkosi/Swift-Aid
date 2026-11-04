@@ -6,15 +6,19 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Minio;
 using Minio.DataModel.Args;
 using NATS.Client.Core;
 using NATS.Client.JetStream.Models;
+using NATS.Client.JetStream;
 using NATS.Net;
 using SwiftAid.Application.Abstractions;
 using SwiftAid.Contracts.Commands;
 using SwiftAid.Contracts.Events;
 using SwiftAid.Infrastructure.Configuration;
+using SwiftAid.Gateway.Notifications;
 using Xunit.Sdk;
 
 namespace SwiftAid.Integration.Tests;
@@ -152,6 +156,52 @@ public sealed class ProviderAdapterContainerTests : IClassFixture<ProviderServic
 
         Assert.Equal(EventPublishStatus.Unavailable, missingStreamResult.Status);
         Assert.Equal("jetstream-unavailable", missingStreamResult.FailureCode);
+    }
+
+    [ProviderFixtureFact]
+    public async Task NotificationBridgeConsumesFromProvisionedStreamAndRemovesItsConsumer()
+    {
+        await using var services = _fixture.CreateServiceProvider();
+        var client = services.GetRequiredService<INatsClient>();
+        var jetStream = client.CreateJetStreamContext();
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        await Assert.ThrowsAsync<NatsJSApiException>(async () =>
+            await jetStream.CreateConsumerAsync("MISSING_SWIFTAID_NOTIFICATION_STREAM",
+                new ConsumerConfig("missing_stream_probe"), deadline.Token));
+
+        using var bridge = new JetStreamNotificationChangeBridge(services,
+            services.GetRequiredService<IServiceScopeFactory>(), services.GetRequiredService<IOptions<NatsOptions>>(),
+            TimeProvider.System, NullLogger<JetStreamNotificationChangeBridge>.Instance);
+        await bridge.StartAsync(deadline.Token);
+        string? consumerName = null;
+        try
+        {
+            while (consumerName is null)
+            {
+                await foreach (var consumer in jetStream.ListConsumersAsync(ProviderServicesFixture.NotificationStream, deadline.Token))
+                    if (consumer.Info.Name.StartsWith("swiftaid_gateway_notifications_", StringComparison.Ordinal))
+                        consumerName = consumer.Info.Name;
+                if (consumerName is null) await Task.Delay(100, deadline.Token);
+            }
+
+            var notification = new InAppNotification(Guid.NewGuid(), "synthetic-recipient",
+                InAppNotificationKind.CaseUpdateAvailable, Guid.NewGuid(), DateTimeOffset.UtcNow);
+            var result = await services.GetRequiredService<IInAppNotificationPublisher>().PublishAsync(notification, deadline.Token);
+            Assert.Equal(InAppNotificationPublishStatus.AcknowledgedByJetStream, result.Status);
+            while (true)
+            {
+                var consumer = await jetStream.GetConsumerAsync(ProviderServicesFixture.NotificationStream, consumerName, deadline.Token);
+                if (consumer.Info.AckFloor.ConsumerSeq >= 1) break;
+                await Task.Delay(100, deadline.Token);
+            }
+        }
+        finally
+        {
+            await bridge.StopAsync(CancellationToken.None);
+        }
+
+        await foreach (var consumer in jetStream.ListConsumersAsync(ProviderServicesFixture.NotificationStream, deadline.Token))
+            Assert.NotEqual(consumerName, consumer.Info.Name);
     }
 }
 
