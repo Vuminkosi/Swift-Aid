@@ -21,11 +21,31 @@ internal sealed class EllaiMvpReadSpecialist(IChatClient client, IEllaiFramework
             !EllaiSpecialistRegistry.TryCreateToolContext(agentId, true, parent, out var context) ||
             context!.AllowedTools is not { Count: > 0 }) return new(EllaiSpecialistOutcome.Denied, null);
         var observations = new List<(EllaiToolRequest Request, EllaiToolResult Result)>();
+        var deniedObservation = false;
         async Task<EllaiToolResult> Read(EllaiToolContext child, EllaiToolRequest request, CancellationToken token)
         {
             var result = await invoke(child, request, token).ConfigureAwait(false);
             if (result.Allowed) observations.Add((request, result));
+            else deniedObservation = true;
             return result;
+        }
+        async Task<bool> RevalidateObservations(CancellationToken token)
+        {
+            if (deniedObservation) return false;
+            foreach (var (request, original) in observations)
+            {
+                if (!await isCurrent(token).ConfigureAwait(false)) return false;
+                EllaiToolResult fresh;
+                try { fresh = await revalidate(context, request, token).ConfigureAwait(false); }
+                catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
+                catch (Exception error) when (error is not OutOfMemoryException) { return false; }
+                if (!fresh.Allowed || fresh.Truncated != original.Truncated || fresh.ToolName != original.ToolName ||
+                    fresh.ItemCount != original.ItemCount || fresh.ResultSummary != original.ResultSummary ||
+                    !fresh.Evidence.SequenceEqual(original.Evidence) || fresh.CaseTimelineReplayScope != original.CaseTimelineReplayScope ||
+                    fresh.UiCatalogueReplayScope != original.UiCatalogueReplayScope || fresh.UiObservationReplayScope != original.UiObservationReplayScope)
+                    return false;
+            }
+            return await isCurrent(token).ConfigureAwait(false);
         }
         var agent = new EllaiFrameworkAgent(client, agentFactory);
         EllaiDecision? decision;
@@ -38,7 +58,8 @@ internal sealed class EllaiMvpReadSpecialist(IChatClient client, IEllaiFramework
                 "When using a truncated case timeline, include its first line as a claim with the timeline evidence. " +
                 "Set displayText and spokenText to claim texts joined by newlines.",
                 [new ChatMessage(ChatRole.User, task)], 2048, isCurrent, Read, usage, ct,
-                revalidateTool: revalidate, maxModelCalls: profile.MaxModelCalls).ConfigureAwait(false);
+                revalidateTool: revalidate, revalidateStreamObservations: RevalidateObservations,
+                maxModelCalls: profile.MaxModelCalls).ConfigureAwait(false);
         }
         finally { onModelCalls?.Invoke(agent.LastModelCallCount); }
         if (EllaiSpecialistGrounding.IsFrameworkVerifiedDeterministic(decision, observations))
