@@ -4415,3 +4415,23 @@ the fix, including a foreign row beyond the presentation limit. After commit
 `10ed7f7e`, the full application suite passed 1,265, failed 0 and skipped 19
 with `--no-build --no-restore -m:1 -nr:false`. The failing-store cases are
 synthetic; deployed behavior and an independent security review remain unverified.
+
+### Current live translated aggregate — 2026-11-04
+
+At `f14f12af`, the framework worker's authorized and revoked count tests passed
+2/2 using live Muse, the existing local NLLB service, and synthetic records in
+a fresh disposable PostGIS 17 database. The authorized translated answer was
+committed and delivered; the answer was withheld when the grant expired after
+translation. This is a local service-contract and authorization check, not a
+translation-quality or deployed Gateway assessment.
+
+PASS: with `OS=Windows_NT`, `ELLAI_LIVE=1`, the dedicated framework PostgreSQL
+fixture and a loopback language-service relay, `dotnet test
+tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj --no-restore
+-m:1 -nr:false -p:WasmBuildNative=false` filtered to
+`LiveMuseAndNllbWorkerCommitsAuthorizedPostgresCount` and
+`LiveMuseAndNllbWorkerWithholdsCountAfterGrantExpires` passed 2/2. The TRX
+`ellai-live-translation-current-20261104.trx` remains under the integration
+test project's `TestResults`. The task-owned database and relay were removed;
+the existing language service was not restarted. Provider settings and the
+relay key were supplied only to the test process.
