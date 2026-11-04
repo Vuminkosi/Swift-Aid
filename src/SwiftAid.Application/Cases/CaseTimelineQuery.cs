@@ -115,6 +115,11 @@ public sealed class CaseTimelineQuery(
         {
             return new CaseTimelineResult(CaseTimelineAccess.NotFoundOrNotAuthorized, null);
         }
+        catch (InvalidOperationException error) when (error.Message is
+            "The case authority scope is unavailable." or "The current case authority scope is unavailable.")
+        {
+            return new CaseTimelineResult(CaseTimelineAccess.NotFoundOrNotAuthorized, null);
+        }
 
         await using (lease.ConfigureAwait(false))
         {
