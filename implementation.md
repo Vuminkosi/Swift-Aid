@@ -4550,3 +4550,9 @@ PASS: Gateway build with Application and Infrastructure project references, zero
 Durable owned-case query provenance now retains the validated inclusive/exclusive UTC report-date pair. Historical tool-result revalidation repeats the same dates for both ordinary queue reads and exact occurrence-place scans, using current actor authorization and the established incomplete-result checks. Old traces without date bounds remain valid and revalidate as unbounded queries; malformed or overlong date ranges are rejected from provenance.
 
 PASS: Gateway build with Application and Infrastructure project references, zero warnings and errors. PASS: `git diff --check`. No tests added or run, per user instruction. NOT VERIFIED: persisted live traces, provider/browser replay, or deployment. No migration.
+
+### Ellai grouping of retained case results by region (2026-11-04)
+
+`ellai_evidence(ref=case-results, group_by=region)` groups only the exact retained result set after reauthorizing its cases under current Search and ReadCase access. The response gives region counts and the case IDs supporting each group; unknown regions and records no longer accessible are omitted and mark the result incomplete. Country is part of the grouping key so same-named regions in different countries remain distinct. The new argument and its safe result fingerprint are included in durable history revalidation, and the prompt directs contextual requests such as "group them" to this retained-set operation rather than a fresh search.
+
+PASS: `dotnet build src/SwiftAid.Gateway/SwiftAid.Gateway.csproj --no-restore -m:1 -nr:false -p:WasmBuildNative=false --verbosity quiet` (zero warnings, zero errors), run before and after commit. PASS: `git diff --check`. No tests added or run, per user instruction. NOT VERIFIED: live authorized case data, model tool selection, PostgreSQL runtime query behavior, browser/session replay, or deployment. No migration.
