@@ -14,6 +14,10 @@
 <ErrorBoundary @ref="_boundary">
     <ChildContent>
         <OrganizationsSurface Snapshot="_snapshot" OnRefresh="RefreshAsync" OnSearch="SearchAsync" OnRequest="RequestAsync" OnRedeem="RedeemAsync" OnIssue="IssueAsync" OnCreate="CreateAsync" />
+        @if (_snapshot.ViewState == OrganizationsViewState.Ready && OfficerAdministrationEnabled)
+        {
+            <HealthOfficerAdministrationPanel />
+        }
     </ChildContent>
     <ErrorContent>
         <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" role="alert">
@@ -29,6 +33,7 @@
 </AccountSettingsLayout>
 
 @code {
+    private bool OfficerAdministrationEnabled => ServiceProvider.GetService<Microsoft.Extensions.Options.IOptions<SwiftAid.Application.Cases.HealthOfficerDirectoryOptions>>()?.Value is { Enabled: true, AdministrationEnabled: true };
     private ErrorBoundary? _boundary;
 
     private OrganizationsSnapshot _snapshot = OrganizationsSnapshot.Loading;

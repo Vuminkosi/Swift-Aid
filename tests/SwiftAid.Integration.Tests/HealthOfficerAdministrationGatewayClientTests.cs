@@ -11,6 +11,18 @@ namespace SwiftAid.Integration.Tests;
 public sealed class HealthOfficerAdministrationGatewayClientTests
 {
     [Fact]
+    public async Task LookupUsesAuthenticatedScopeAndReturnsCurrentVersion()
+    {
+        await using var provider = new ServiceCollection().AddScoped<IHealthOfficerDesignationQuery, Query>()
+            .BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true });
+        var client = new HealthOfficerAdministrationGatewayClient(new Auth(true), provider);
+        var result = await client.LookupAsync(new() { TargetActorId = "target", OrganizationId = "org", CountryCode = "SZ", Sector = "HumanHealth" });
+        Assert.Equal(HealthOfficerAdministrationStatus.Available, result.Status);
+        Assert.Equal(4, result.Current!.Version);
+        Assert.Equal("Revoked", result.Current.Status);
+    }
+
+    [Fact]
     public async Task UsesAuthenticatedActorSeparateScopeAndPreservesUnknownOutcome()
     {
         var servicesCreated = new List<Service>();
@@ -31,9 +43,12 @@ public sealed class HealthOfficerAdministrationGatewayClientTests
         try { Assert.Equal(HealthOfficerAdministrationStatus.OutcomeUnknown, (await client.ChangeAsync(request)).Status); }
         finally { Service.Fail = false; }
         Assert.True(servicesCreated[1].Disposed);
+        Service.MalformedReceipt = true;
+        try { Assert.Equal(HealthOfficerAdministrationStatus.OutcomeUnknown, (await client.ChangeAsync(request)).Status); }
+        finally { Service.MalformedReceipt = false; }
         var anonymous = new HealthOfficerAdministrationGatewayClient(new Auth(false), provider);
         Assert.Equal(HealthOfficerAdministrationStatus.Denied, (await anonymous.ChangeAsync(request)).Status);
-        Assert.Equal(2, servicesCreated.Count);
+        Assert.Equal(3, servicesCreated.Count);
     }
 
     private sealed class Auth(bool authenticated) : AuthenticationStateProvider
@@ -45,6 +60,7 @@ public sealed class HealthOfficerAdministrationGatewayClientTests
     private sealed class Service : IHealthOfficerDesignationAdministration, IAsyncDisposable
     {
         public static bool Fail { get; set; }
+        public static bool MalformedReceipt { get; set; }
         public bool Disposed { get; private set; }
         public ActorContext? Actor { get; private set; }
         public HealthOfficerDesignationChange? Change { get; private set; }
@@ -52,8 +68,21 @@ public sealed class HealthOfficerAdministrationGatewayClientTests
         {
             Actor = actor; Change = change;
             if (Fail) throw new InvalidOperationException("Synthetic unknown result");
+            if (MalformedReceipt) return Task.FromResult(new HealthOfficerDesignationChangeResult(HealthOfficerDesignationChangeStatus.Recorded));
             return Task.FromResult(new HealthOfficerDesignationChangeResult(HealthOfficerDesignationChangeStatus.Recorded, Guid.NewGuid(), 1));
         }
         public ValueTask DisposeAsync() { Disposed = true; return ValueTask.CompletedTask; }
+    }
+
+    private sealed class Query : IHealthOfficerDesignationQuery
+    {
+        public Task<HealthOfficerDesignationReadResult> GetAsync(ActorContext actor, HealthOfficerDesignationScope scope, CancellationToken ct)
+        {
+            Assert.Equal("trusted", actor.ActorId);
+            Assert.Equal("org", scope.OrganizationId);
+            Assert.Equal("target", scope.TargetActorId);
+            return Task.FromResult(new HealthOfficerDesignationReadResult(HealthOfficerDesignationReadStatus.Available,
+                new(Guid.NewGuid(), 4, "Revoked", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddDays(1))));
+        }
     }
 }

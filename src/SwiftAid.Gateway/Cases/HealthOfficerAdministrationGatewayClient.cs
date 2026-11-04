@@ -51,6 +51,7 @@ public sealed class HealthOfficerAdministrationGatewayClient(AuthenticationState
                     when result.DesignationId is { } id && id != Guid.Empty && result.Version is > 0 =>
                     new(result.Status == HealthOfficerDesignationChangeStatus.Recorded ? HealthOfficerAdministrationStatus.Recorded : HealthOfficerAdministrationStatus.Replayed,
                         new(id, result.Version.Value, result.Status == HealthOfficerDesignationChangeStatus.Replayed)),
+                HealthOfficerDesignationChangeStatus.Recorded or HealthOfficerDesignationChangeStatus.Replayed => new(HealthOfficerAdministrationStatus.OutcomeUnknown),
                 HealthOfficerDesignationChangeStatus.Denied => new(HealthOfficerAdministrationStatus.Denied),
                 HealthOfficerDesignationChangeStatus.Invalid => new(HealthOfficerAdministrationStatus.Invalid),
                 HealthOfficerDesignationChangeStatus.Conflict => new(HealthOfficerAdministrationStatus.Conflict),

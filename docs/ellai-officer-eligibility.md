@@ -42,6 +42,10 @@ workflow yet. Production database
 roles must be separated so the application cannot grant itself administrator
 authority, and an approved bootstrap and revocation process must be established
 before either gate is enabled. A designation is not a professional licence check.
+When both gates are enabled, the signed-in web organizations page offers a
+lookup and explicit review before a designation change. An uncertain result
+keeps the same command identity for retry. This is not a mobile administration
+workflow and it does not provision the separate administrator grant.
 
 The separately gated administration lookup accepts one explicit organization,
 country, sector and actor reference in the request body. It uses the same current
