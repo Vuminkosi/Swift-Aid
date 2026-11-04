@@ -10,6 +10,9 @@ public sealed class EllaiCaseFilterTests
     [Theory]
     [InlineData("Change her age to 26.", 26)]
     [InlineData("Correct the patient's age to 0", 0)]
+    [InlineData("The patient is 24 years old.", 24)]
+    [InlineData("She is 24 years old.", 24)]
+    [InlineData("30-year-old patient", 30)]
     public void ReportDraftContextAppliesOnlyAnExplicitAgeInTheSameUtterance(string utterance, int expectedAge)
     {
         var context = new EllaiPublicReportDraftContext();
