@@ -5,11 +5,78 @@ using SwiftAid.Contracts.Intake;
 using SwiftAid.Gateway.Intake;
 using SwiftAid.Gateway.Presentation;
 using SwiftAid.Client.Presentation;
+using Microsoft.AspNetCore.DataProtection;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
+using SwiftAid.Domain.Intake;
+using SwiftAid.Infrastructure.Persistence.Entities.Intake;
+using SwiftAid.Infrastructure.Persistence.Repositories.Intake;
+using System.Security.Cryptography;
+using System.Text.Json;
 
 namespace SwiftAid.Integration.Tests;
 
+[Collection(IntakePostgresCollection.Name)]
 public sealed class WebGuestIntakeServiceTests
 {
+    [IntakePostgresFact]
+    public async Task LostAcknowledgementAndExpiredCapabilityReturnOriginalPostgresReceipt()
+    {
+        await using var db = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
+        var limits = IntakeLimits.Default;
+        var authority = new PostgresIntakeSessionAuthority(db, limits, Options.Create(new IntakeSessionOptions()));
+        var sessions = new IntakeSessionEndpointService(authority, new PostgresIntakeReceiptReader(db), TimeProvider.System);
+        var submissions = new PostgresIntakeSubmissionStore(db, limits, new EphemeralDataProtectionProvider());
+        var intake = new CommitThenDropIntakeService(submissions);
+        var service = new WebGuestIntakeService(sessions, intake);
+        var submission = GuestSubmissionSamples.Human();
+
+        await Assert.ThrowsAsync<IOException>(() => service.SubmitAsync(submission));
+        var sessionId = intake.SessionId;
+        var originalReceipt = intake.FirstReceipt!;
+        db.ChangeTracker.Clear();
+        var past = DateTimeOffset.UtcNow.AddMinutes(-2);
+        await db.Set<IntakeCapabilityEntity>().Where(item => item.SessionId == sessionId)
+            .ExecuteUpdateAsync(update => update.SetProperty(item => item.CreatedAtUtc, past)
+                .SetProperty(item => item.ExpiresAtUtc, past.AddMinutes(1)));
+        db.ChangeTracker.Clear();
+
+        var retried = await service.SubmitAsync(submission);
+
+        Assert.Equal(originalReceipt.ReceiptId, retried.ReceiptId);
+        Assert.Equal(sessionId, intake.SessionId);
+        Assert.Equal(1, await db.Set<IntakeReportEntity>().CountAsync(item => item.SessionId == sessionId &&
+            item.ClientSubmissionId == submission.ClientSubmissionId));
+        Assert.Equal(1, await db.Set<IntakeOutboxEntity>().CountAsync(item => item.ReceiptId == originalReceipt.ReceiptId));
+        var conflict = await Assert.ThrowsAsync<IntakeSubmissionException>(() => service.SubmitAsync(
+            submission with { Narrative = "A different synthetic report" }));
+        Assert.Equal(IntakeErrorCode.SubmissionConflict, conflict.Code);
+        Assert.Equal(1, await db.Set<IntakeReportEntity>().CountAsync(item => item.SessionId == sessionId &&
+            item.ClientSubmissionId == submission.ClientSubmissionId));
+    }
+
+    private sealed class CommitThenDropIntakeService(PostgresIntakeSubmissionStore store) : IIntakeService
+    {
+        public Guid SessionId { get; private set; }
+        public IntakeReceipt? FirstReceipt { get; private set; }
+
+        public async Task<IntakeReceipt> SubmitAsync(IntakeSubmission submission, IntakeCapability capability, CancellationToken ct)
+        {
+            SessionId = capability.SessionId;
+            var digest = SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(submission));
+            var receipt = await store.CommitAsync(submission, capability, digest,
+                new CoverageResult(IntakeRoutingStatus.NeedsRouting, null), DateTimeOffset.UtcNow, [], ct);
+            if (FirstReceipt is null)
+            {
+                FirstReceipt = receipt;
+                throw new IOException("Synthetic lost acknowledgement after commit.");
+            }
+            return receipt;
+        }
+
+        public Task<IntakeDecisionResult> DecideAsync(IntakeDecision command,
+            SwiftAid.Application.Authorization.ActorContext actor, CancellationToken ct) => throw new NotSupportedException();
+    }
     [Fact]
     public async Task ConflictingSubmissionIsNotReportedAsTransientFailure()
     {
