@@ -25,6 +25,18 @@ grant, coverage, case version and approver authority under appropriate locks.
 Availability, workload and category-specific policy are not currently represented,
 and must not be inferred from this lookup. Controlled designation provisioning,
 operator authorization, data stewardship and production database grants remain
-to be implemented and independently reviewed before this directory is enabled
+to be completed and independently reviewed before this directory is enabled
 for operational use. Threshold policies and officer assignment are not supplied
 by this slice.
+
+An internal designation service additionally requires `Ellai:Operational:OfficerDirectory:AdministrationEnabled`
+and the directory gate, both off by default. It requires a current, separately
+provisioned administrator event for the exact organization, country and sector,
+an active administrator membership and access epoch, and prohibits self-designation.
+Successful changes and command receipts are append-only and versioned. Authority
+events are also append-only; a later revoked or suspended event supersedes an
+earlier grant. The migration creates no administrators. There is no product
+administration endpoint or administrator-grant workflow yet. Production database
+roles must be separated so the application cannot grant itself administrator
+authority, and an approved bootstrap and revocation process must be established
+before either gate is enabled. A designation is not a professional licence check.
