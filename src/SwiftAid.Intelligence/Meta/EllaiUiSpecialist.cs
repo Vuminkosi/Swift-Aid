@@ -32,17 +32,16 @@ public sealed class EllaiUiSpecialist(IChatClient client, IEllaiFrameworkAgentFa
         try
         {
             decision = await agent.RunAsync(context, trustedPolicy +
-                "\nYou are the UI discovery specialist. Use only the entitled semantic catalogue and current-screen observations. " +
+                "\nYou are the UI discovery specialist. Use the entitled semantic catalogue and current-screen observations for UI questions, and any other admitted read tool when relevant to the user's SwiftAid question. " +
                 "Do not invent controls, routes, screen state, navigation, tour steps or completed actions. " +
-                "Return only a grounded Answer in the required final_decision JSON schema; include exact observed evidence. " +
+                "Return only a grounded Answer in the required final_decision JSON schema. For answers using other admitted tools, each claim must exactly match a returned source line and cite its evidence; set displayText and spokenText to the claim texts joined by a newline. " +
                 "Do not propose UI intents or actions; the supervisor handles validated guidance.",
                 [new ChatMessage(ChatRole.User, task)], 2048, isCurrent, Read, usage, ct, maxModelCalls: profile.MaxModelCalls).ConfigureAwait(false);
         }
         finally { onModelCalls?.Invoke(agent.LastModelCallCount); }
         if (decision is null || decision.Kind != DecisionKind.Answer || decision.Claims.Count == 0 ||
             decision.UiIntents.Count != 0 || decision.PlanProposal is not null ||
-            decision.Claims.Any(claim => claim.Kind != ClaimKind.Observed || claim.Evidence.Count == 0 ||
-                claim.Evidence.Any(e => e.SourceKind is not ("UiCatalogue" or "UiObservation"))))
+            decision.Claims.Any(claim => claim.Kind != ClaimKind.Observed || claim.Evidence.Count == 0))
             return new(EllaiSpecialistOutcome.Unverified, null);
         foreach (var (request, original) in observations)
         {
@@ -52,11 +51,15 @@ public sealed class EllaiUiSpecialist(IChatClient client, IEllaiFrameworkAgentFa
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
             catch (Exception error) when (error is not OutOfMemoryException) { return new(EllaiSpecialistOutcome.Stale, null); }
             if (!fresh.Allowed || original.Truncated || fresh.Truncated || fresh.ToolName != original.ToolName ||
-                !fresh.Evidence.SequenceEqual(original.Evidence) ||
+                fresh.ItemCount != original.ItemCount || fresh.ResultSummary != original.ResultSummary ||
+                !fresh.Evidence.SequenceEqual(original.Evidence) || fresh.CaseTimelineReplayScope != original.CaseTimelineReplayScope ||
                 (request.ToolName == EllaiToolNames.UiCatalogue && (original.UiCatalogueReplayScope is null || fresh.UiCatalogueReplayScope != original.UiCatalogueReplayScope)) ||
                 (request.ToolName == EllaiToolNames.UiObserve && (original.UiObservationReplayScope is null || fresh.UiObservationReplayScope != original.UiObservationReplayScope)) ||
                 !await isCurrent(ct).ConfigureAwait(false)) return new(EllaiSpecialistOutcome.Stale, null);
         }
+        if (!decision.Claims.All(claim => claim.Evidence.All(reference => reference.SourceKind is "UiCatalogue" or "UiObservation")) &&
+            !EllaiSpecialistGrounding.IsGrounded(decision, observations))
+            return new(EllaiSpecialistOutcome.Unverified, null);
         return new(EllaiSpecialistOutcome.Completed, decision);
     }
 }

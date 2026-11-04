@@ -23,9 +23,6 @@ public sealed class EllaiReportingSpecialist(IChatClient client, IEllaiFramework
         var observations = new List<(EllaiToolRequest Request, EllaiToolResult Result)>();
         async Task<EllaiToolResult> Read(EllaiToolContext child, EllaiToolRequest request, CancellationToken token)
         {
-            if (!request.Arguments.TryGetValue("feature", out var feature) || feature != EllaiReportUiManifest.FeatureId)
-                return new(request.ToolName, false, "Only the report form is available.", [], string.Empty, 0, false,
-                    EllaiToolReasonCodes.InvalidArguments);
             var result = await invoke(child, request, token).ConfigureAwait(false);
             if (result.Allowed) observations.Add((request, result));
             return result;
@@ -35,10 +32,10 @@ public sealed class EllaiReportingSpecialist(IChatClient client, IEllaiFramework
         try
         {
             decision = await agent.RunAsync(context, trustedPolicy +
-                "\nYou are the reporting specialist. Read only the entitled report-form catalogue and current-screen observations. " +
-                "Always provide feature=report to both tools. A client observation does not establish whether a value was saved, " +
+                "\nYou are the reporting specialist. Use the entitled report-form catalogue and current-screen observations for report UI questions, and any other admitted read tool when relevant to the user's SwiftAid question. " +
+                "Provide feature=report when querying report controls. A client observation does not establish whether a value was saved, " +
                 "whether a report was submitted, or why validation did not pass. Do not invent missing values, diagnoses, " +
-                "controls or actions. Return an Answer with observed claims, each exactly matching one returned control line " +
+                "controls or actions. Return an Answer with observed claims, each exactly matching one returned source line " +
                 "and citing that line's evidence. Set displayText and spokenText to the claim texts joined by a newline. " +
                 "Do not propose UI intents or actions; the supervisor and form handle guidance and explicit confirmation.",
                 [new ChatMessage(ChatRole.User, task)], 2048, isCurrent, Read, usage, ct, maxModelCalls: profile.MaxModelCalls).ConfigureAwait(false);
@@ -46,10 +43,8 @@ public sealed class EllaiReportingSpecialist(IChatClient client, IEllaiFramework
         finally { onModelCalls?.Invoke(agent.LastModelCallCount); }
         if (decision is null || decision.Kind != DecisionKind.Answer || decision.Claims.Count == 0 ||
             decision.UiIntents.Count != 0 || decision.PlanProposal is not null ||
-            decision.Claims.Any(claim => claim.Kind != ClaimKind.Observed || claim.Evidence.Count == 0 ||
-                claim.Evidence.Any(e => e.SourceKind is not ("UiCatalogue" or "UiObservation"))))
+            decision.Claims.Any(claim => claim.Kind != ClaimKind.Observed || claim.Evidence.Count == 0))
             return new(EllaiSpecialistOutcome.Unverified, null);
-        var grounded = new HashSet<(EvidenceRef Reference, string Line)>();
         foreach (var (request, original) in observations)
         {
             if (!await isCurrent(ct).ConfigureAwait(false)) return new(EllaiSpecialistOutcome.Stale, null);
@@ -58,18 +53,13 @@ public sealed class EllaiReportingSpecialist(IChatClient client, IEllaiFramework
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
             catch (Exception error) when (error is not OutOfMemoryException) { return new(EllaiSpecialistOutcome.Stale, null); }
             if (!fresh.Allowed || original.Truncated || fresh.Truncated || fresh.ToolName != original.ToolName ||
-                !fresh.Evidence.SequenceEqual(original.Evidence) ||
+                fresh.ItemCount != original.ItemCount || fresh.ResultSummary != original.ResultSummary ||
+                !fresh.Evidence.SequenceEqual(original.Evidence) || fresh.CaseTimelineReplayScope != original.CaseTimelineReplayScope ||
                 (request.ToolName == EllaiToolNames.UiCatalogue && (original.UiCatalogueReplayScope is null || fresh.UiCatalogueReplayScope != original.UiCatalogueReplayScope)) ||
                 (request.ToolName == EllaiToolNames.UiObserve && (original.UiObservationReplayScope is null || fresh.UiObservationReplayScope != original.UiObservationReplayScope)) ||
                 !await isCurrent(ct).ConfigureAwait(false)) return new(EllaiSpecialistOutcome.Stale, null);
-            foreach (var reference in original.Evidence)
-                foreach (var line in original.ResultSummary.Split('\n'))
-                    if (line.StartsWith($"control {reference.ResourceId} · ", StringComparison.Ordinal))
-                        grounded.Add((reference, line));
         }
-        if (decision.Claims.Any(claim => claim.Evidence.Any(reference => !grounded.Contains((reference, claim.Text)))) ||
-            decision.DisplayText != string.Join("\n", decision.Claims.Select(claim => claim.Text)) ||
-            decision.SpokenText != decision.DisplayText)
+        if (!EllaiSpecialistGrounding.IsGrounded(decision, observations))
             return new(EllaiSpecialistOutcome.Unverified, null);
         return new(EllaiSpecialistOutcome.Completed, decision);
     }
