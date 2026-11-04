@@ -18,6 +18,63 @@ namespace SwiftAid.Integration.Tests;
 public sealed class EllaiOwnedCaseCountPostgresTests
 {
     [FrameworkPostgresFact]
+    public Task TranslatedCountIsWithheldWhenPostgresGrantExpires() => RunTranslatedCountAsync(revoke: true);
+
+    [FrameworkPostgresFact]
+    public Task TranslatedCountCompletesWhilePostgresGrantIsCurrent() => RunTranslatedCountAsync(revoke: false);
+
+    private static async Task RunTranslatedCountAsync(bool revoke)
+    {
+        await using var fixture = await CaseAuthorityPostgresFixture.CreateAsync(frameworkFixture: true);
+        await using var db = fixture.CreateDbContext();
+        var unit = new PostgresCaseCommandUnitOfWork(db);
+        var query = new DashboardAggregateQuery(new PostgresDashboardAggregateStore(db),
+            new CaseAccessPolicy(new PostgresCurrentAccessGrantStore(db, unit), new PostgresCaseAccessDescriptorStore(db, unit)),
+            unit, TimeProvider.System);
+        var consent = new EllaiConsentService();
+        var broker = new EllaiToolBroker(new EllaiPolicyService(), consent, dashboard: query);
+        using var model = new CountClient();
+        var executor = new EllaiFrameworkExecutor(model, new EllaiPromptBuilder("Synthetic policy", "fixture"),
+            broker, new EllaiUsageLedger(), new InMemoryEllaiUsageStore());
+        var work = new EllaiUtteranceWork("translated-count", "scope", "Count my cases", "cases", null,
+            EllaiMode.Ask, 1, "count-cycle", fixture.CreateActor(), true, "consent/0",
+            EllaiProcessingClassification.UserProvidedNonSensitive, EllaiProcessingClassification.UserProvidedNonSensitive,
+            new HashSet<string> { EllaiToolNames.OwnedCaseCount }, EllaiConsentPurposes.PublicProductHelp, "count-turn",
+            Languages: new("eng", "sna"));
+        var languages = new GrantExpiringTranslation(revoke ? () => fixture.SetGrantExpiryAsync(DateTimeOffset.UtcNow.AddMinutes(-1)) : null);
+        var outcome = await EllaiUtteranceRunner.RunOneAsync(work,
+            new(executor, null, null, consent, Languages: languages, Dashboard: query), 256, default);
+
+        Assert.Equal(1, languages.Calls);
+        if (revoke)
+        {
+            Assert.False(outcome.Completed);
+            Assert.Null(outcome.DisplayText);
+            Assert.Equal(EllaiToolReasonCodes.DeniedByPolicy, outcome.FailureCode);
+        }
+        else
+        {
+            Assert.True(outcome.Completed);
+            Assert.Equal("Synthetic translated count", outcome.DisplayText);
+        }
+    }
+
+    private sealed class GrantExpiringTranslation(Func<Task>? onTranslate) : IEllaiLanguageClient
+    {
+        public bool IsConfigured => true;
+        public int Calls { get; private set; }
+        public async Task<EllaiTranslationResult> TranslateAsync(EllaiTranslationRequest request, CancellationToken ct)
+        {
+            Calls++;
+            if (onTranslate is not null) await onTranslate();
+            return new EllaiTranslationResult(request.RequestId, "Synthetic translated count", request.SourceLanguage,
+                request.TargetLanguage, "fixture", "fixture", 4, 1, "unreviewed");
+        }
+        public Task<EllaiNativeTranscriptionResult> TranscribeAsync(EllaiNativeTranscriptionRequest request, CancellationToken ct) =>
+            throw new NotSupportedException();
+    }
+
+    [FrameworkPostgresFact]
     public Task WorkerDoesNotCommitCountWhenPostgresGrantExpiresDuringPublication() => RunWorkerCountAsync(revoke: true);
 
     [FrameworkPostgresFact]

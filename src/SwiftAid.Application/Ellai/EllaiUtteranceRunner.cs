@@ -247,6 +247,14 @@ public static class EllaiUtteranceRunner
             {
                 return new(true, false, "The reply could not be translated.", FailureCode: "TranslationUnavailable");
             }
+            // Translation can outlive the authority that allowed this turn's
+            // tool observations. Do not return its result unless the complete
+            // current-turn provenance is still authorized.
+            if (outcome.ToolCallsUsed > 0 && (outcome.ObservedTools is not { Count: > 0 } ||
+                !await request.RevalidateStreamObservations!(outcome.ObservedTools, ct).ConfigureAwait(false)))
+            {
+                return new(true, false, "The session or its permissions changed.", FailureCode: EllaiToolReasonCodes.DeniedByPolicy);
+            }
         }
         // In particular, the legacy loop can finish after an in-flight provider
         // request without another iteration gate. Do not persist its answer if
