@@ -109,6 +109,26 @@ public sealed partial class GuidedReportDraftPersistenceTests
     }
 
     [Fact]
+    public void RestoredSnapshotKeepsEvidenceButRequiresCurrentReviewAndConfirmations()
+    {
+        var draft = CreateDraft("Synthetic original entry");
+        draft.CountryCode = "SZ";
+        draft.CountryConfirmed = true;
+        draft.ReportReviewConfirmed = true;
+        draft.ProcessingConfirmed = true;
+        draft.OccurrenceOffset = "+02:";
+
+        var restored = PublicReportDraft.FromFormSnapshot(draft.ToFormSnapshot());
+
+        Assert.Equal("Synthetic original entry", restored.Narrative);
+        Assert.Equal("SZ", restored.CountryCode);
+        Assert.Equal("+02:", restored.OccurrenceOffset);
+        Assert.False(restored.CountryConfirmed);
+        Assert.False(restored.ReportReviewConfirmed);
+        Assert.False(restored.ProcessingConfirmed);
+    }
+
+    [Fact]
     public async Task SupportedEditableDraftSavesAndRestoresIncompleteTimeWithoutQueuableCarrier()
     {
         var draft = CreateDraft("Synthetic private entry");

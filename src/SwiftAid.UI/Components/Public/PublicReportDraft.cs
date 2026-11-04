@@ -39,6 +39,11 @@ public sealed class PublicReportDraft : IValidatableObject
                 ?? throw new InvalidOperationException("The editable draft is empty.");
             if (draft.SubjectScope is null || !Enum.IsDefined(draft.SubjectScope.Value))
                 throw new InvalidOperationException("The editable draft subject is invalid.");
+            // The local snapshot may outlive the catalogue or policy shown when
+            // these acknowledgements were made. Require review against current metadata.
+            draft.CountryConfirmed = false;
+            draft.ReportReviewConfirmed = false;
+            draft.ProcessingConfirmed = false;
             return draft;
         }
         catch (System.Text.Json.JsonException error)
