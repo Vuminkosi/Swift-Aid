@@ -239,6 +239,13 @@ duplicate keys, rejecting them before invocation. The full application suite
 passed 1,238 with 19 skipped; a post-commit filter covering duplicate arguments,
 split names and interleaved calls passed 4/4. This does not establish live Muse
 behavior for malformed calls or coverage of providers without raw SDK data.
+Follow-up synthetic adapter tests covered Meta, Ollama and serverless routes
+in both framework delivery modes. All six rejected duplicate arguments before
+broker invocation. A separate interleaved two-call stream, with one valid call
+and one duplicate-argument call, rejected the entire batch without invoking
+either tool. The combined post-commit filter passed 7/7. Serverless converts
+its completed response to framework updates; this is not proof of native
+serverless streaming or live provider behavior.
 
 ## Provider observations and open checks
 
