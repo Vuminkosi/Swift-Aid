@@ -85,6 +85,18 @@ public sealed class EllaiOwnedCaseCountPostgresTests
         }
     }
 
+    private sealed class LiveLanguagePostgresFactAttribute : FactAttribute
+    {
+        public LiveLanguagePostgresFactAttribute()
+        {
+            if (Environment.GetEnvironmentVariable("ELLAI_LIVE") != "1" ||
+                Environment.GetEnvironmentVariable("SWIFTAID_RUN_FRAMEWORK_POSTGRES_FIXTURES") != "1" ||
+                string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("SWIFTAID_TEST_LANGUAGE_ENDPOINT")) ||
+                string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("SWIFTAID_TEST_LANGUAGE_KEY")))
+                Skip = "Requires live Muse, the real language endpoint and a dedicated disposable PostgreSQL fixture.";
+        }
+    }
+
     private sealed class GrantExpiringTranslation(Func<Task>? onTranslate, IEllaiLanguageClient? inner = null) : IEllaiLanguageClient
     {
         public bool IsConfigured => true;
@@ -120,6 +132,12 @@ public sealed class EllaiOwnedCaseCountPostgresTests
 
     [LanguagePostgresFact]
     public Task NllbWorkerWithholdsCountAfterPostgresGrantExpires() => RunWorkerCountAsync(revoke: true, liveLanguage: true);
+
+    [LiveLanguagePostgresFact]
+    public Task LiveMuseAndNllbWorkerCommitsAuthorizedPostgresCount() => RunWorkerCountAsync(revoke: false, liveModel: true, liveLanguage: true);
+
+    [LiveLanguagePostgresFact]
+    public Task LiveMuseAndNllbWorkerWithholdsCountAfterGrantExpires() => RunWorkerCountAsync(revoke: true, liveModel: true, liveLanguage: true);
 
     private static async Task RunWorkerCountAsync(bool revoke, bool liveModel = false, bool liveLanguage = false)
     {
