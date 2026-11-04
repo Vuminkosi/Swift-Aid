@@ -13,10 +13,15 @@ public sealed class EllaiGuidanceLiveProviderTests
         using var http = new HttpClient() { Timeout = TimeSpan.FromSeconds(120) };
         var router = new EllaiReasoningRouter(options, new(http, options), new(http, options), new(http, options));
         var planner = new EllaiModelGuidancePlanner(new EllaiProviderTurnClient(router));
-        var result = await planner.ComposeAsync("Guide me through completing and submitting a synthetic report.",
-            GuidanceMode.Navigation, new(EllaiReportUiManifest.All, "synthetic", "synthetic", false), [], default);
-        Assert.True(result.Draft is not null, string.Join("; ", result.Errors));
-        Assert.Empty(EllaiDecisionValidator.ValidateDraft(result.Draft!));
+        foreach (var mode in new[] { GuidanceMode.Navigation, GuidanceMode.Demo })
+        {
+            var result = await planner.ComposeAsync("Guide me through completing and submitting a synthetic report.",
+                mode, new(EllaiReportUiManifest.All, "synthetic", "synthetic", false), [], default);
+            Assert.True(result.Draft is not null, string.Join("; ", result.Errors));
+            Assert.Equal(GuidancePlanStatus.Ready, result.Draft!.Status);
+            Assert.NotEmpty(result.Draft.Steps);
+            Assert.Empty(EllaiDecisionValidator.ValidateDraft(result.Draft));
+        }
     }
 
     private sealed class LivePlanningFactAttribute : FactAttribute
