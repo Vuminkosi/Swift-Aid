@@ -178,7 +178,7 @@ public sealed class CaseMonitoringPostgresTests
     {
         // The immutable recommendation is retained; this test requires a disposable database.
         await using var db = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
-        await SeedMonitoringScopeAsync(db, [CaseOperation.ReadCase, CaseOperation.ManageFollowUp]);
+        var followUpGrant = await SeedMonitoringScopeAsync(db, [CaseOperation.ReadCase, CaseOperation.ManageFollowUp]);
         using var keyRing = SyntheticMonitoringKeyRing.Create();
         using var provider = ProtectedPayloadDataProtectionProviderFactory.Create(
             keyRing.CreateOptions(), new TestHostEnvironment(Environments.Production));
@@ -233,6 +233,16 @@ public sealed class CaseMonitoringPostgresTests
         Assert.Contains("Overdue follow-up review recommended", after.ResultSummary, StringComparison.Ordinal);
         Assert.Contains("recommendation is current", after.ResultSummary, StringComparison.Ordinal);
         Assert.NotEqual(before.CaseTimelineReplayScope, after.CaseTimelineReplayScope);
+        await db.AccessGrantOperations.Where(item => item.GrantGroupId == followUpGrant && item.Operation == CaseOperation.ManageFollowUp)
+            .ExecuteDeleteAsync();
+        var readOnlyTimeline = await timelineQuery.GetAsync(actor, caseId, 20, default);
+        Assert.Equal(CaseTimelineAccess.Found, readOnlyTimeline.Access);
+        Assert.Empty(readOnlyTimeline.Timeline!.Entries.SelectMany(entry => entry.AgentActivities));
+        var readOnlyEllai = await broker.InvokeAsync(context, request, default);
+        Assert.True(readOnlyEllai.Allowed);
+        Assert.DoesNotContain("Overdue follow-up review recommended", readOnlyEllai.ResultSummary, StringComparison.Ordinal);
+        db.AccessGrantOperations.Add(new AccessGrantOperationEntity { GrantGroupId = followUpGrant, Operation = CaseOperation.ManageFollowUp });
+        await db.SaveChangesAsync();
         var reviewer = new PostgresFollowUpRecommendationReviewService(db, unit, policy);
         var commandId = Guid.NewGuid();
         Assert.Equal(FollowUpRecommendationReviewOutcome.NotFoundOrNotAuthorized,

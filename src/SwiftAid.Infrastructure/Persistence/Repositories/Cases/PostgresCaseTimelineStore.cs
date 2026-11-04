@@ -124,7 +124,7 @@ public sealed class PostgresCaseTimelineStore(SwiftAidDbContext dbContext) : ICa
     }
 
     public async Task<IReadOnlyList<CaseAgentActivityRow>> GetAgentActivitiesAsync(Guid caseId,
-        IReadOnlyList<Guid> eventIds, CancellationToken ct)
+        IReadOnlyList<Guid> eventIds, bool includeFollowUp, CancellationToken ct)
     {
         if (eventIds.Count == 0) return [];
         var ids = eventIds.ToArray();
@@ -147,7 +147,7 @@ public sealed class PostgresCaseTimelineStore(SwiftAidDbContext dbContext) : ICa
                     LEFT JOIN ellai_follow_up_reviews review ON review.recommendation_id = r.activity_id
                     JOIN managed_case_follow_ups f ON f.follow_up_id = r.follow_up_id AND f.case_id = r.case_id
                     JOIN managed_cases c ON c.case_id = r.case_id
-                    WHERE r.case_id = {caseId} AND r.source_event_id = ANY({ids})
+                    WHERE {includeFollowUp} AND r.case_id = {caseId} AND r.source_event_id = ANY({ids})
                 ) sources
             ) activity WHERE position <= 21 ORDER BY "SourceEventId", "RecordedAtUtc" DESC, "ActivityId" DESC
             """).ToArrayAsync(ct).ConfigureAwait(false);

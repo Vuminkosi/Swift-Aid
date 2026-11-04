@@ -10,6 +10,34 @@ namespace SwiftAid.Application.Tests;
 public sealed class CaseTimelineQueryTests
 {
     [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task FollowUpActivityRequiresManagementPermission(bool permitted)
+    {
+        var header = new CaseTimelineHeader(Guid.NewGuid(), "org", "workspace", "SZ", "Active", "officer-1", 4, 1, DateTimeOffset.UtcNow);
+        var row = Row(4, "CaseFollowUpScheduled");
+        var store = new StubStore(header, null, [row])
+        {
+            Activities = [new(row.EventId, Guid.NewGuid(), "ops.followup", "policy/1", DateTimeOffset.UtcNow, Guid.NewGuid())]
+        };
+        var result = await new CaseTimelineQuery(store, new FollowUpVisibilityPolicy(permitted), new StubUnitOfWork())
+            .GetAsync(CreateOfficer(), header.CaseId, 1, CancellationToken.None);
+        Assert.Equal(permitted, store.IncludeFollowUp);
+        Assert.Equal(permitted ? 1 : 0, Assert.Single(result.Timeline!.Entries).AgentActivities.Count);
+    }
+
+    private sealed class FollowUpVisibilityPolicy(bool permitted) : ICaseAccessPolicy
+    {
+        public ValueTask<AccessDecision> AuthorizeAsync(ActorContext actor, Guid caseId, CaseOperation operation, CancellationToken ct) =>
+            ValueTask.FromResult(new AccessDecision(operation == CaseOperation.ReadCase, AccessDecisionCode.Allowed, null));
+        public ValueTask<AccessDecision> AuthorizeAllAsync(ActorContext actor, Guid caseId, IReadOnlyCollection<CaseOperation> operations, CancellationToken ct)
+        {
+            var allowed = permitted && operations.Count == 2 && operations.Contains(CaseOperation.ReadCase) && operations.Contains(CaseOperation.ManageFollowUp);
+            return ValueTask.FromResult(new AccessDecision(allowed, allowed ? AccessDecisionCode.Allowed : AccessDecisionCode.GrantMissing, null));
+        }
+    }
+
+    [Theory]
     [InlineData(true, true)]
     [InlineData(false, true)]
     [InlineData(true, false)]
@@ -312,6 +340,16 @@ public sealed class CaseTimelineQueryTests
         public IReadOnlyList<CaseCollaboratorGrantView> Collaborators { get; set; } = [];
         public bool OfficerAssignmentsRead { get; private set; }
         public IReadOnlyList<CaseOfficerEscalationRow> OfficerAssignments { get; set; } = [];
+        public bool IncludeFollowUp { get; private set; }
+        public IReadOnlyList<CaseAgentActivityRow> Activities { get; set; } = [];
+
+        public Task<IReadOnlyList<CaseAgentActivityRow>> GetAgentActivitiesAsync(Guid caseId, IReadOnlyList<Guid> eventIds,
+            bool includeFollowUp, CancellationToken ct)
+        {
+            IncludeFollowUp = includeFollowUp;
+            return Task.FromResult<IReadOnlyList<CaseAgentActivityRow>>(Activities.Where(item => eventIds.Contains(item.SourceEventId) &&
+                (includeFollowUp || item.RoleId != "ops.followup")).ToArray());
+        }
 
         public Task<IReadOnlyList<CaseOfficerEscalationRow>> GetOfficerEscalationsAsync(ICaseCommandLease lease, Guid caseId, IReadOnlyList<Guid> eventIds, CancellationToken ct)
         {

@@ -45,7 +45,7 @@ public interface ICaseTimelineStore
         Task.FromResult<CaseTimelineWorkSummary?>(null);
 
     Task<IReadOnlyList<CaseAgentActivityRow>> GetAgentActivitiesAsync(Guid caseId, IReadOnlyList<Guid> eventIds,
-        CancellationToken ct) => Task.FromResult<IReadOnlyList<CaseAgentActivityRow>>([]);
+        bool includeFollowUp, CancellationToken ct) => Task.FromResult<IReadOnlyList<CaseAgentActivityRow>>([]);
 
     Task<IReadOnlyList<CaseOfficerEscalationRow>> GetOfficerEscalationsAsync(ICaseCommandLease lease, Guid caseId, IReadOnlyList<Guid> eventIds,
         CancellationToken ct) => Task.FromResult<IReadOnlyList<CaseOfficerEscalationRow>>([]);
@@ -157,7 +157,10 @@ public sealed class CaseTimelineQuery(
                 .OrderBy(row => row.AggregateVersion)
                 .ThenBy(row => row.RecordedAtUtc)
                 .ToArray();
-            var activityRows = await _store.GetAgentActivitiesAsync(caseId, pageRows.Select(row => row.EventId).ToArray(), ct).ConfigureAwait(false);
+            var followUpDecision = await _policy.AuthorizeAllAsync(actor, caseId,
+                [CaseOperation.ReadCase, CaseOperation.ManageFollowUp], ct).ConfigureAwait(false);
+            var activityRows = await _store.GetAgentActivitiesAsync(caseId, pageRows.Select(row => row.EventId).ToArray(),
+                followUpDecision.IsAllowed, ct).ConfigureAwait(false);
             var officerDecision = await _policy.AuthorizeAllAsync(actor, caseId,
                 [CaseOperation.ReadCase, CaseOperation.ManageEscalation, CaseOperation.ManageFollowUp], ct).ConfigureAwait(false);
             var officerRows = officerDecision.IsAllowed
