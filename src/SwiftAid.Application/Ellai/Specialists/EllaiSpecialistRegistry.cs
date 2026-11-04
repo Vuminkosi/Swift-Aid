@@ -19,7 +19,7 @@ public static class EllaiSpecialistRegistry
             new EllaiSpecialistProfile(Knowledge, 1, "Ellai:Specialists:Knowledge:Enabled",
                 new[] { EllaiToolNames.DocsSearch, EllaiToolNames.DocsGet }.ToFrozenSet(StringComparer.Ordinal)),
             new EllaiSpecialistProfile(Case, 1, "Ellai:Specialists:Case:Enabled",
-                new[] { EllaiToolNames.CaseTimeline }.ToFrozenSet(StringComparer.Ordinal)),
+                new[] { EllaiToolNames.CaseTimeline, EllaiToolNames.State }.ToFrozenSet(StringComparer.Ordinal)),
             new EllaiSpecialistProfile(Analytics, 1, "Ellai:Specialists:Analytics:Enabled",
                 new[] { EllaiToolNames.OwnedCaseCount }.ToFrozenSet(StringComparer.Ordinal))
         }.ToFrozenDictionary(profile => profile.AgentId, StringComparer.Ordinal);

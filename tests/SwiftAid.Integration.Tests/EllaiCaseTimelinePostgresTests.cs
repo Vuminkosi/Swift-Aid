@@ -15,6 +15,69 @@ namespace SwiftAid.Integration.Tests;
 
 public sealed partial class CaseCommandProcessingPostgresTests
 {
+    [FrameworkPostgresFact]
+    public async Task CaseSpecialistSearchesAuthorizedPostgresQueueAndRechecksBeforeAnswer()
+    {
+        await using var fixture = await CaseAuthorityPostgresFixture.CreateAsync(frameworkFixture: true);
+        await using var db = fixture.CreateDbContext();
+        var unit = new PostgresCaseCommandUnitOfWork(db);
+        var policy = new CaseAccessPolicy(new PostgresCurrentAccessGrantStore(db, unit), new PostgresCaseAccessDescriptorStore(db, unit));
+        var queue = new CaseQueueQuery(new PostgresCaseQueueStore(db), policy, unit);
+        var consent = new EllaiConsentService();
+        consent.Grant("case-queue-agent", EllaiConsentDimension.ReasoningText, EllaiToolBroker.ToolReadPurpose,
+            EllaiProcessingClassification.SyntheticDemo, TimeSpan.FromMinutes(5));
+        var context = new EllaiToolContext("case-queue-agent", "epoch", "cases", null, 4, true,
+            DataClassification: EllaiProcessingClassification.SyntheticDemo, Actor: fixture.CreateActor(),
+            AllowedTools: new HashSet<string> { EllaiToolNames.State });
+        var broker = new EllaiToolBroker(new EllaiPolicyService(), consent, queue: queue);
+        async Task<EllaiCycleOutcome> RunAsync(bool revoke)
+        {
+            using var model = new CaseQueueDelegationClient(fixture.CaseId);
+            var calls = 0;
+            var executor = new EllaiFrameworkExecutor(model, new EllaiPromptBuilder("Synthetic policy", "fixture"),
+                broker, new EllaiUsageLedger(), new InMemoryEllaiUsageStore(), enableCaseSpecialist: true);
+            return await executor.RunAsync(new EllaiLoopRequest(context, "Find my cases in Eswatini",
+                new EllaiRoleOverlay("ask", "Be brief."), "queue", 1024, "cycle", 1), default,
+                invokeToolAsync: async (child, request, ct) =>
+                {
+                    var result = await broker.InvokeAsync(child, request, ct);
+                    if (++calls == 1 && revoke) await fixture.SetGrantExpiryAsync(DateTimeOffset.UtcNow.AddMinutes(-1));
+                    return result;
+                });
+        }
+        var allowed = await RunAsync(false);
+        Assert.True(allowed.Completed, allowed.FailureCode);
+        Assert.Equal(EllaiToolNames.State, Assert.Single(allowed.ObservedTools!).ToolName);
+        Assert.Contains(allowed.Decision!.Claims.SelectMany(claim => claim.Evidence), evidence => evidence.ResourceId == fixture.CaseId.ToString("D"));
+        var denied = await RunAsync(true);
+        Assert.False(denied.Completed);
+        Assert.Null(denied.Decision);
+    }
+
+    private sealed class CaseQueueDelegationClient(Guid caseId) : IChatClient
+    {
+        private int _calls;
+        public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
+        {
+            if (++_calls == 1)
+                return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant,
+                    [new FunctionCallContent("delegate", "ellai_delegate_case", new Dictionary<string, object?> { ["task"] = "Find my cases in Eswatini" })])));
+            if (_calls == 2)
+                return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant,
+                    [new FunctionCallContent("queue", EllaiToolNames.State, new Dictionary<string, object?> { ["projection"] = "queue", ["country"] = "SZ" })])));
+            var json = """
+                {"final_decision":{"schemaVersion":2,"kind":"Answer","displayText":"A case is recorded in Eswatini.","spokenText":"A case is recorded in Eswatini.",
+                "claims":[{"claimId":"c1","text":"A case is recorded in Eswatini.","kind":"Observed","evidence":[{"sourceKind":"CaseQueue","resourceId":"CASE_ID","version":"2","fieldPath":null,"evidenceId":"CASE_ID"}]}],
+                "questions":[],"uiIntents":[],"planProposal":null,"topicRefs":[],"resumeSuggestion":null,"stopReason":null}}
+                """.Replace("CASE_ID", caseId.ToString("D"), StringComparison.Ordinal);
+            return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant, json)));
+        }
+        public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+        public void Dispose() { }
+    }
+
     [FrameworkPostgresLiveMuseFact]
     public async Task LiveMuseDelegatesCaseHistoryThroughAuthorizedPostgresTimeline()
     {

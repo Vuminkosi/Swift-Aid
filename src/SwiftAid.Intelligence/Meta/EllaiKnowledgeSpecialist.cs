@@ -10,7 +10,8 @@ public enum EllaiSpecialistOutcome
     Completed,
     Denied,
     InvalidTask,
-    Unverified
+    Unverified,
+    Stale
 }
 
 public sealed record EllaiSpecialistResult(EllaiSpecialistOutcome Outcome, EllaiDecision? Decision);

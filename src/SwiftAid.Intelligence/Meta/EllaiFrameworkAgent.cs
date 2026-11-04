@@ -50,11 +50,12 @@ public sealed class EllaiFrameworkAgent
         LastFrameworkSessionJson = null;
         LastRepairUsed = false;
         LastModelCallCount = 0;
+        var staleCaseDelegation = 0;
         async Task<bool> Current(CancellationToken token)
         {
             try
             {
-                var allowed = await isCurrent(token).ConfigureAwait(false);
+                var allowed = Volatile.Read(ref staleCaseDelegation) == 0 && await isCurrent(token).ConfigureAwait(false);
                 token.ThrowIfCancellationRequested();
                 return allowed;
             }
@@ -147,7 +148,8 @@ public sealed class EllaiFrameworkAgent
                 description: "Delegate one bounded question about approved documentation to the knowledge specialist."));
         }
         if (enableCaseSpecialist && context.Actor is not null &&
-            context.AllowedTools?.Contains(EllaiToolNames.CaseTimeline) == true)
+            (context.AllowedTools?.Contains(EllaiToolNames.CaseTimeline) == true ||
+             context.AllowedTools?.Contains(EllaiToolNames.State) == true))
         {
             var delegationCount = 0;
             async Task<string> DelegateCase(string task, CancellationToken token)
@@ -159,19 +161,24 @@ public sealed class EllaiFrameworkAgent
                 {
                     var result = await new EllaiCaseSpecialist(_client, _agentFactory).RunAsync(task,
                         instructions, true, context, usage, Current, InvokeGuardedTool, token,
-                        calls => Interlocked.Add(ref delegatedModelCalls, calls)).ConfigureAwait(false);
+                        calls => Interlocked.Add(ref delegatedModelCalls, calls), revalidateTool ?? invoke).ConfigureAwait(false);
+                    if (result.Outcome == EllaiSpecialistOutcome.Stale)
+                    {
+                        Interlocked.Exchange(ref staleCaseDelegation, 1);
+                        return "Case data changed while it was being checked.";
+                    }
                     if (result.Outcome != EllaiSpecialistOutcome.Completed || result.Decision is null)
                         return "Case specialist could not verify an answer.";
                     var json = System.Text.Json.JsonSerializer.Serialize(result.Decision);
                     return json.Length <= 12000 ? json : "Case specialist result exceeded its limit.";
                 }
-                catch (EllaiFrameworkFailureException)
+                catch (EllaiFrameworkFailureException error) when (error.Code != EllaiToolReasonCodes.DeniedByPolicy)
                 {
                     return "Case specialist could not complete the request.";
                 }
             }
             tools.Add(AIFunctionFactory.Create(DelegateCase, name: "ellai_delegate_case",
-                description: "Delegate one bounded question about an authorized case timeline to the case specialist."));
+                description: "Delegate one bounded question about the authorized owned-case queue or a case timeline."));
         }
         if (enableAnalyticsSpecialist && context.Actor is not null &&
             context.AllowedTools?.Contains(EllaiToolNames.OwnedCaseCount) == true)
@@ -302,6 +309,7 @@ public sealed class EllaiFrameworkAgent
             }
         }
         finally { LastModelCallCount = guardedClient.CallSequence + Volatile.Read(ref delegatedModelCalls); }
+        if (Volatile.Read(ref staleCaseDelegation) != 0) { LastFailureCode = EllaiToolReasonCodes.DeniedByPolicy; return null; }
         EllaiDecision? decision = null;
         if (guard.FailureCode is not null) { LastFailureCode = guard.FailureCode; return null; }
         while (countResult is null)

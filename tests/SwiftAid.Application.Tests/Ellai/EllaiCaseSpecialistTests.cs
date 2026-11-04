@@ -34,8 +34,48 @@ public sealed class EllaiCaseSpecialistTests
 
         Assert.NotNull(decision);
         Assert.Equal(caseId.ToString("D"), Assert.Single(Assert.Single(decision.Claims).Evidence).ResourceId);
-        Assert.Equal(1, calls);
+        Assert.Equal(2, calls);
         Assert.Equal(4, agent.LastModelCallCount);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    public async Task CaseQueueDelegationRechecksExactEvidence(int failureMode)
+    {
+        var caseId = Guid.NewGuid();
+        using var model = new CaseClient(caseId, queue: true);
+        var context = Context() with { AllowedTools = new HashSet<string> { EllaiToolNames.State } };
+        var calls = 0;
+        var agent = new EllaiFrameworkAgent(model);
+        async Task<EllaiDecision?> Run() => await agent.RunAsync(context, "Trusted policy", [new ChatMessage(ChatRole.User, "Find my cases")],
+            512, _ => Task.FromResult(true), (child, request, _) =>
+            {
+                Assert.Equal(EllaiToolNames.State, request.ToolName);
+                Assert.Equal("queue", request.Arguments["projection"]);
+                Assert.Same(context.Actor, child.Actor);
+                Assert.Equal(context.SessionId, child.SessionId);
+                Assert.DoesNotContain(EllaiToolNames.CaseTimeline, child.AllowedTools!);
+                calls++;
+                if (failureMode == 2 && calls > 1) throw new InvalidOperationException("synthetic read failure");
+                var version = failureMode == 1 && calls > 1 ? "4" : "3";
+                return Task.FromResult(new EllaiToolResult(request.ToolName, true, null,
+                    [new EvidenceRef("CaseQueue", caseId.ToString("D"), version, null, caseId.ToString("D"))],
+                    "Assignment acknowledged.", 1, false));
+            }, Usage(), default, enableCaseSpecialist: true);
+        if (failureMode != 0)
+        {
+            try { Assert.Null(await Run()); }
+            catch (EllaiFrameworkFailureException error) { Assert.Equal(EllaiToolReasonCodes.DeniedByPolicy, error.Code); }
+        }
+        else
+        {
+            var decision = await Run();
+            Assert.NotNull(decision);
+            Assert.Equal(caseId.ToString("D"), Assert.Single(Assert.Single(decision.Claims).Evidence).ResourceId);
+        }
+        Assert.Equal(2, calls);
     }
 
     [Fact]
@@ -54,6 +94,26 @@ public sealed class EllaiCaseSpecialistTests
         Assert.Equal(EllaiSpecialistOutcome.Denied, anonymous.Outcome);
         Assert.Equal(EllaiSpecialistOutcome.Denied, denied.Outcome);
         Assert.Equal(0, model.Calls);
+    }
+
+    [Fact]
+    public async Task CaseSpecialistCannotUseNonQueueStateProjection()
+    {
+        using var model = new CaseClient(Guid.NewGuid(), queue: true, projection: "feature");
+        var context = Context() with { AllowedTools = new HashSet<string> { EllaiToolNames.State } };
+        var calls = 0;
+        try
+        {
+            var decision = await new EllaiFrameworkAgent(model).RunAsync(context, "policy", [new ChatMessage(ChatRole.User, "cases")], 512,
+                _ => Task.FromResult(true), (_, request, _) =>
+                {
+                    calls++;
+                    return Task.FromResult(new EllaiToolResult(request.ToolName, true, null, [], "private", 1, false));
+                }, Usage(), default, enableCaseSpecialist: true);
+            Assert.Null(decision);
+        }
+        catch (EllaiFrameworkFailureException) { }
+        Assert.Equal(0, calls);
     }
 
     [Fact]
@@ -91,7 +151,7 @@ public sealed class EllaiCaseSpecialistTests
 
     private static EllaiFrameworkUsage Usage() => new("session", new EllaiUsageLedger(), new InMemoryEllaiUsageStore());
 
-    private sealed class CaseClient(Guid caseId) : IChatClient
+    private sealed class CaseClient(Guid caseId, bool queue = false, string projection = "queue") : IChatClient
     {
         public int Calls { get; private set; }
         public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null,
@@ -102,8 +162,13 @@ public sealed class EllaiCaseSpecialistTests
                 return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant,
                     [new FunctionCallContent("delegate", "ellai_delegate_case", new Dictionary<string, object?> { ["task"] = "Read the case history" })])));
             if (Calls == 2)
+            {
+                if (queue)
+                    return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant,
+                        [new FunctionCallContent("queue", EllaiToolNames.State, new Dictionary<string, object?> { ["projection"] = projection })])));
                 return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant,
                     [new FunctionCallContent("timeline", EllaiToolNames.CaseTimeline, new Dictionary<string, object?> { ["case_id"] = caseId.ToString("D") })])));
+            }
             var json = """
                 {"final_decision":{"schemaVersion":2,"kind":"Answer","displayText":"Assignment acknowledged.","spokenText":"Assignment acknowledged.",
                 "claims":[{"claimId":"c1","text":"Assignment acknowledged.","kind":"Observed","evidence":[{"sourceKind":"CaseQueue","resourceId":"CASE_ID","version":"3","fieldPath":null,"evidenceId":"CASE_ID"}]}],
