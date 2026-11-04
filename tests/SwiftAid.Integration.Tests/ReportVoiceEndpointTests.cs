@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Net;
 using System.Net.Http.Json;
 using System.Security.Claims;
@@ -149,6 +150,156 @@ public sealed class ReportVoiceEndpointTests
         var result = await response.Content.ReadFromJsonAsync<ReportVoiceExtractionResponse>();
         Assert.Equal("Ready", result!.Status);
         Assert.Equal("fever", Assert.Single(result.Suggestions).Value);
+    }
+
+    [SyntheticGatewayLiveFact]
+    public async Task SyntheticRecordedAndOpenLiveStreamsTraverseGatewayAndProvider()
+    {
+        var options = EllaiOptions.Bind(Environment.GetEnvironmentVariable);
+        Assert.Empty(options.Validate());
+        var wav = await File.ReadAllBytesAsync(Environment.GetEnvironmentVariable("SWIFTAID_TEST_SYNTHETIC_REPORT_WAV")!);
+        Assert.True(wav.Length > 44 && wav.AsSpan(0, 4).SequenceEqual("RIFF"u8) &&
+            wav.AsSpan(36, 4).SequenceEqual("data"u8) &&
+            BinaryPrimitives.ReadInt16LittleEndian(wav.AsSpan(20, 2)) == 1 &&
+            BinaryPrimitives.ReadInt16LittleEndian(wav.AsSpan(22, 2)) == 1 &&
+            BinaryPrimitives.ReadInt32LittleEndian(wav.AsSpan(24, 4)) == 24000 &&
+            BinaryPrimitives.ReadInt16LittleEndian(wav.AsSpan(34, 2)) == 16);
+        using var providerHttp = new HttpClient { Timeout = TimeSpan.FromSeconds(90) };
+        var router = new EllaiReasoningRouter(options, new EllaiReasoningAdapter(providerHttp, options),
+            new OllamaEllaiReasoningProvider(providerHttp, options), new ServerlessEllaiReasoningProvider(providerHttp, options));
+        var sessions = new InMemoryEllaiSessionStore();
+        await sessions.CreateAsync(new EllaiSessionRecord("session", EllaiMode.Ask, "Active", 1, 1, 1, 1,
+            0, 10, "owner", "scope", null, null, DateTimeOffset.UtcNow), default);
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseTestServer();
+        builder.Services.AddAuthentication("fixture").AddScheme<AuthenticationSchemeOptions, FixtureAuthentication>("fixture", _ => { });
+        builder.Services.AddAuthorization();
+        builder.Services.AddAntiforgery();
+        builder.Services.AddSingleton(options);
+        builder.Services.AddSingleton<IEllaiSessionStore>(sessions);
+        builder.Services.AddSingleton<EllaiConsentService>();
+        builder.Services.AddSingleton<IEllaiConsentStore, InMemoryEllaiConsentStore>();
+        builder.Services.AddSingleton<EllaiUsageLedger>();
+        builder.Services.AddSingleton<IEllaiUsageStore, InMemoryEllaiUsageStore>();
+        builder.Services.AddSingleton<IEllaiTurnCompletionClient>(new EllaiProviderTurnClient(router));
+        builder.Services.AddSingleton(new MetaAsrUploadAdapter(providerHttp, options));
+        builder.Services.AddSingleton(new MetaAsrRealtimeAdapter(options));
+        builder.Services.AddSingleton(new EllaiVoiceTurnCoordinator());
+        builder.Services.AddSingleton<IVoiceActivityDetector, SileroOnnxVoiceActivityDetector>();
+        builder.Services.AddTransient<SileroVoiceActivityAudioStream>();
+        builder.Services.AddScoped<ReportVoiceExtraction>();
+        builder.Services.AddScoped<ReportVoiceExtractionAdmission>();
+        builder.Services.AddScoped<ReportVoiceGatewayService>();
+        builder.Services.AddScoped<EllaiVoiceTranscriptionService>();
+        await using var app = builder.Build();
+        app.UseAuthentication();
+        app.UseAuthorization();
+        var group = app.MapGroup("/sessions/{sessionId}").RequireAuthorization();
+        group.MapPost("/consent", ReportVoiceEndpoints.ConsentAsync);
+        group.MapPost("/extract", ReportVoiceEndpoints.ExtractAsync);
+        group.MapPost("/saved", ReportVoiceEndpoints.TranscribeSavedAsync);
+        await app.StartAsync();
+        using var client = app.GetTestClient();
+        Assert.Equal(HttpStatusCode.NoContent,
+            (await client.PostAsJsonAsync("/sessions/session/consent", new ReportVoiceConsentRequest(true))).StatusCode);
+        using var audio = new ByteArrayContent(wav);
+        audio.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("audio/wav");
+        using var response = await client.PostAsync("/sessions/session/saved", audio);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var transcription = await response.Content.ReadFromJsonAsync<EllaiVoiceTranscriptionResult>();
+        Assert.NotNull(transcription);
+        Assert.False(string.IsNullOrWhiteSpace(transcription.Transcript));
+        Assert.False(transcription.ServerSubmission);
+        using var extracted = await client.PostAsJsonAsync("/sessions/session/extract", new ReportVoiceExtractionRequest(transcription.Transcript));
+        Assert.Equal(HttpStatusCode.OK, extracted.StatusCode);
+        Assert.Equal("no-store, private", extracted.Headers.CacheControl!.ToString());
+        var report = await extracted.Content.ReadFromJsonAsync<ReportVoiceExtractionResponse>();
+        Assert.Equal("Ready", report!.Status);
+        Assert.Contains("age", report.Suggestions.Select(item => item.Field));
+        Assert.Contains("locality", report.Suggestions.Select(item => item.Field));
+        Assert.All(report.Suggestions, item => Assert.True(transcription.Transcript.Contains(item.Evidence, StringComparison.Ordinal)));
+        Assert.True((await app.Services.GetRequiredService<IEllaiUsageStore>().TotalsAsync("session", default)).TotalTokens > 0);
+
+        using var scope = app.Services.CreateScope();
+        var voice = scope.ServiceProvider.GetRequiredService<EllaiVoiceTranscriptionService>();
+        Assert.True(await voice.GrantVoiceConsentAsync("session", default));
+        var pcm = new byte[wav.Length - 44 + 48_000];
+        Array.Copy(wav, 44, pcm, 0, wav.Length - 44);
+        using var liveAudio = new OpenPcmStream(pcm);
+        using var liveTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        var liveTask = voice.TranscribeAsync("session", EllaiVoiceCaptureMode.Live, liveAudio,
+            null, liveTimeout.Token, "synthetic-live-capture", submissionPrincipal: null);
+        var coordinator = app.Services.GetRequiredService<EllaiVoiceTurnCoordinator>();
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(30);
+        try
+        {
+            while (coordinator.GetCompletedTurns("session").Count == 0 && !liveTask.IsCompleted && DateTimeOffset.UtcNow < deadline)
+                await Task.Delay(100, liveTimeout.Token);
+            var completed = coordinator.GetCompletedTurns("session");
+            Assert.NotEmpty(completed);
+            Assert.False(liveTask.IsCompleted);
+            using var liveExtracted = await client.PostAsJsonAsync("/sessions/session/extract",
+                new ReportVoiceExtractionRequest(completed[0].Transcript));
+            Assert.Equal(HttpStatusCode.OK, liveExtracted.StatusCode);
+            var liveReport = await liveExtracted.Content.ReadFromJsonAsync<ReportVoiceExtractionResponse>();
+            Assert.Equal("Ready", liveReport!.Status);
+            Assert.NotEmpty(liveReport.Suggestions);
+            Assert.False(liveTask.IsCompleted);
+            Assert.Empty(await sessions.ReadConversationAsync("session", "owner", default));
+        }
+        finally { liveAudio.Complete(); }
+        var live = await liveTask;
+        Assert.NotNull(live);
+        Assert.False(live.ServerSubmission);
+        Assert.False(string.IsNullOrWhiteSpace(live.Transcript));
+    }
+
+    private sealed class OpenPcmStream(byte[] pcm) : Stream
+    {
+        private readonly TaskCompletionSource _end = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _offset;
+        public void Complete() => _end.TrySetResult();
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            if (_end.Task.IsCompleted) return 0;
+            await Task.Delay(100, cancellationToken);
+            if (_end.Task.IsCompleted) return 0;
+            var count = Math.Min(buffer.Length, 4_800);
+            if (_offset < pcm.Length)
+            {
+                count = Math.Min(count, pcm.Length - _offset);
+                pcm.AsMemory(_offset, count).CopyTo(buffer);
+                _offset += count;
+            }
+            else
+            {
+                buffer.Span[..count].Clear();
+            }
+            return count;
+        }
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) =>
+            ReadAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
+        public override int Read(byte[] buffer, int offset, int count) =>
+            ReadAsync(buffer.AsMemory(offset, count)).AsTask().GetAwaiter().GetResult();
+        public override void Flush() => throw new NotSupportedException();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
+
+    private sealed class SyntheticGatewayLiveFactAttribute : FactAttribute
+    {
+        public SyntheticGatewayLiveFactAttribute()
+        {
+            if (Environment.GetEnvironmentVariable("ELLAI_LIVE") != "1" ||
+                string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("SWIFTAID_TEST_SYNTHETIC_REPORT_WAV")))
+                Skip = "Set ELLAI_LIVE=1 and SWIFTAID_TEST_SYNTHETIC_REPORT_WAV to synthetic speech.";
+        }
     }
 
     private sealed class FixtureAsrHandler : HttpMessageHandler
