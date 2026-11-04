@@ -128,6 +128,14 @@ public sealed class OrganizationMembershipService(
                 GrantedByActorId = actorId,
                 Version = 1
             });
+            _dbContext.OrganizationOwners.Add(new OrganizationOwnerEntity
+            {
+                OwnerAssignmentId = Guid.NewGuid(),
+                OrganizationId = organization,
+                ActorId = actorId,
+                AssignedAtUtc = now,
+                AssignedByActorId = actorId
+            });
             // SaveChanges commits creator grants with the organization, workspace and membership.
             // Joining an existing organization does not use this provisioning path.
             foreach (var country in new[] { "ZW", "SZ" })

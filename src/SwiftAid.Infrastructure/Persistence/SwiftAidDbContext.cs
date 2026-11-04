@@ -29,6 +29,7 @@ public sealed class SwiftAidDbContext(DbContextOptions<SwiftAidDbContext> option
     public DbSet<ActorEntity> Actors => Set<ActorEntity>();
     public DbSet<ActorAccessStateEntity> ActorAccessStates => Set<ActorAccessStateEntity>();
     public DbSet<OrganizationEntity> Organizations => Set<OrganizationEntity>();
+    public DbSet<OrganizationOwnerEntity> OrganizationOwners => Set<OrganizationOwnerEntity>();
     public DbSet<WorkspaceEntity> Workspaces => Set<WorkspaceEntity>();
     public DbSet<WorkspaceOrganizationEntity> WorkspaceOrganizations => Set<WorkspaceOrganizationEntity>();
     public DbSet<OrganizationMembershipEntity> OrganizationMemberships => Set<OrganizationMembershipEntity>();
@@ -331,6 +332,31 @@ public sealed class SwiftAidDbContext(DbContextOptions<SwiftAidDbContext> option
 
     private static void ConfigureOrganizationsAndAccess(ModelBuilder modelBuilder)
     {
+        var organizationOwner = modelBuilder.Entity<OrganizationOwnerEntity>();
+        organizationOwner.ToTable("organization_owners", table =>
+        {
+            table.HasCheckConstraint("ck_organization_owners_ids_nonempty", "length(btrim(organization_id)) > 0 AND length(btrim(actor_id)) > 0 AND length(btrim(assigned_by_actor_id)) > 0");
+            table.HasCheckConstraint("ck_organization_owners_revocation", "(revoked_at_utc IS NULL AND revoked_by_actor_id IS NULL) OR (revoked_at_utc IS NOT NULL AND length(btrim(revoked_by_actor_id)) > 0)");
+        });
+        organizationOwner.HasKey(entity => entity.OwnerAssignmentId).HasName("pk_organization_owners");
+        organizationOwner.HasIndex(entity => new { entity.OrganizationId, entity.ActorId }).IsUnique()
+            .HasDatabaseName("ux_organization_owners_org_actor");
+        organizationOwner.Property(entity => entity.OwnerAssignmentId).HasColumnName("owner_assignment_id").HasColumnType("uuid");
+        organizationOwner.Property(entity => entity.OrganizationId).HasColumnName("organization_id").HasColumnType("text");
+        organizationOwner.Property(entity => entity.ActorId).HasColumnName("actor_id").HasColumnType("text");
+        organizationOwner.Property(entity => entity.AssignedAtUtc).HasColumnName("assigned_at_utc").HasColumnType("timestamp with time zone");
+        organizationOwner.Property(entity => entity.AssignedByActorId).HasColumnName("assigned_by_actor_id").HasColumnType("text");
+        organizationOwner.Property(entity => entity.RevokedAtUtc).HasColumnName("revoked_at_utc").HasColumnType("timestamp with time zone");
+        organizationOwner.Property(entity => entity.RevokedByActorId).HasColumnName("revoked_by_actor_id").HasColumnType("text");
+        organizationOwner.HasOne<OrganizationEntity>().WithMany().HasForeignKey(entity => entity.OrganizationId)
+            .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_organization_owners_organization");
+        organizationOwner.HasOne<ActorEntity>().WithMany().HasForeignKey(entity => entity.ActorId)
+            .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_organization_owners_actor");
+        organizationOwner.HasOne<ActorEntity>().WithMany().HasForeignKey(entity => entity.AssignedByActorId)
+            .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_organization_owners_assigned_by_actor");
+        organizationOwner.HasOne<ActorEntity>().WithMany().HasForeignKey(entity => entity.RevokedByActorId)
+            .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_organization_owners_revoked_by_actor");
+
         var membership = modelBuilder.Entity<OrganizationMembershipEntity>();
         membership.ToTable("organization_memberships", table =>
         {

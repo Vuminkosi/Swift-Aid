@@ -56,7 +56,6 @@ public sealed class ActorAccessStateEntity
 public sealed class OrganizationEntity
 {
     public required string OrganizationId { get; set; }
-    /// <summary>Explicit owner used for organization owner capabilities. Null means ownership is unverified.</summary>
     public string? OwnerActorId { get; set; }
     public PersistentResourceStatus Status { get; set; }
     public DateTimeOffset CreatedAtUtc { get; set; }
@@ -92,6 +91,18 @@ public sealed class OrganizationMembershipEntity
     public string? RevokedByActorId { get; set; }
     public string? ChangeReason { get; set; }
     public long Version { get; set; }
+}
+
+/// <summary>Explicit owner assignment; ownership is independent of ordinary organization membership.</summary>
+public sealed class OrganizationOwnerEntity
+{
+    public Guid OwnerAssignmentId { get; set; }
+    public required string OrganizationId { get; set; }
+    public required string ActorId { get; set; }
+    public DateTimeOffset AssignedAtUtc { get; set; }
+    public required string AssignedByActorId { get; set; }
+    public DateTimeOffset? RevokedAtUtc { get; set; }
+    public string? RevokedByActorId { get; set; }
 }
 
 /// <summary>One persisted scalar scope materialized as one correlated grant group.</summary>
