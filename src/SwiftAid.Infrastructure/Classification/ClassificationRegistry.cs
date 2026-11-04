@@ -37,6 +37,16 @@ public sealed class ClassificationRegistry(
             throw new ArgumentException("Notice does not match a committed source event.");
         var header = await db.ManagedCases.AsNoTracking().SingleAsync(c => c.CaseId == notice.SourceId, ct);
         await RequireScopeAsync(header.WorkspaceId, header.OrganizationId, ct);
+        // Use the same organization/workspace-before-case lock order as case
+        // commands. Hold the case revision stable only through admission; the
+        // transaction ends before any provider inference starts.
+        var lockedCases = await db.Database.SqlQuery<Guid>($"""
+            SELECT case_id AS "Value" FROM managed_cases
+            WHERE case_id = {header.CaseId} AND workspace_id = {header.WorkspaceId} AND organization_id = {header.OrganizationId}
+            FOR SHARE
+            """).ToArrayAsync(ct).ConfigureAwait(false);
+        if (lockedCases.Length != 1) throw new UnauthorizedAccessException();
+        header = await db.ManagedCases.AsNoTracking().SingleAsync(c => c.CaseId == notice.SourceId, ct);
         await SupersedeOldFactsAsync(header.CaseId, header.ReportRevision, ct);
         if (notice.ReportRevision < header.ReportRevision)
         {
