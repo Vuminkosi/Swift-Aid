@@ -253,7 +253,8 @@ public partial class EllaiGuidanceHost
                 as Microsoft.AspNetCore.Components.Authorization.AuthenticationStateProvider;
             var signedIn = auth is not null && (await auth.GetAuthenticationStateAsync()).User.Identity?.IsAuthenticated == true;
             if (!IsCurrent()) return;
-            if (!signedIn || route is null)
+            var publicHome = route == "/";
+            if ((!signedIn && !publicHome) || route is null)
             {
                 _guidanceNotice = back ? "No previous available page to return to." : "That page is not available with your current access.";
             }
@@ -268,26 +269,30 @@ public partial class EllaiGuidanceHost
             }
             else
             {
-                await ReportUiForFeatureAsync(EllaiNavigationManifest.FeatureId, _uiObservationLifetime.Token);
-                if (!IsCurrent()) return;
                 var destination = EllaiNavigationManifest.Destinations.Single(item => item.Route == route);
-                // A collapsed menu may be hidden; disabled, absent or ambiguous targets cannot navigate.
-                bool TargetAvailable() => _latestGuidanceObservation?.ControlStates?.Count(control => control.ControlId == destination.ControlId &&
-                    control.State is UiObservationState.Ready or UiObservationState.Hidden) == 1;
-                if (!TargetAvailable() && RevealNavigation.HasDelegate)
+                var available = publicHome && !signedIn;
+                if (!available)
                 {
-                    await RevealNavigation.InvokeAsync();
-                    for (var attempt = 0; attempt < 10 && IsCurrent() && !TargetAvailable(); attempt++)
+                    await ReportUiForFeatureAsync(EllaiNavigationManifest.FeatureId, _uiObservationLifetime.Token);
+                    if (!IsCurrent()) return;
+                    // A collapsed menu may be hidden; disabled, absent or ambiguous targets cannot navigate.
+                    bool TargetAvailable() => _latestGuidanceObservation?.ControlStates?.Count(control => control.ControlId == destination.ControlId &&
+                        control.State is UiObservationState.Ready or UiObservationState.Hidden) == 1;
+                    if (!TargetAvailable() && RevealNavigation.HasDelegate)
                     {
-                        await Task.Delay(100, _uiObservationLifetime.Token);
-                        await ReportUiForFeatureAsync(EllaiNavigationManifest.FeatureId, _uiObservationLifetime.Token);
+                        await RevealNavigation.InvokeAsync();
+                        for (var attempt = 0; attempt < 10 && IsCurrent() && !TargetAvailable(); attempt++)
+                        {
+                            await Task.Delay(100, _uiObservationLifetime.Token);
+                            await ReportUiForFeatureAsync(EllaiNavigationManifest.FeatureId, _uiObservationLifetime.Token);
+                        }
                     }
+                    if (!IsCurrent()) return;
+                    available = TargetAvailable();
                 }
-                if (!IsCurrent()) return;
-                var available = TargetAvailable();
                 var stillSignedIn = auth is not null && (await auth.GetAuthenticationStateAsync()).User.Identity?.IsAuthenticated == true;
                 if (!IsCurrent()) return;
-                if (available && stillSignedIn) Navigation.NavigateTo(route);
+                if (available && (publicHome || stillSignedIn)) Navigation.NavigateTo(route);
                 else _guidanceNotice = "That page is not available right now.";
             }
         }
