@@ -15,6 +15,64 @@ namespace SwiftAid.Integration.Tests;
 
 public sealed partial class CaseCommandProcessingPostgresTests
 {
+    [FrameworkPostgresLiveMuseFact]
+    public async Task LiveMuseDelegatesCaseHistoryThroughAuthorizedPostgresTimeline()
+    {
+        await using var fixture = await CaseAuthorityPostgresFixture.CreateAsync(frameworkFixture: true);
+        await using var cleanup = new CaseCommandProcessingCleanup(fixture);
+        await SetInitialWorkflowVersionAsync(fixture);
+        using var keyRing = SyntheticPayloadKeyRing.Create();
+        using var protection = ProtectedPayloadDataProtectionProviderFactory.Create(
+            keyRing.CreateOptions(), new TestHostEnvironment(Environments.Production));
+        await SeedInitialJournalAsync(fixture, keyRing.CreateOptions(), protection);
+        await using var db = fixture.CreateDbContext();
+        var unit = new PostgresCaseCommandUnitOfWork(db);
+        var policy = new CaseAccessPolicy(new PostgresCurrentAccessGrantStore(db, unit),
+            new PostgresCaseAccessDescriptorStore(db, unit));
+        var query = new CaseTimelineQuery(new PostgresCaseTimelineStore(db), policy, unit);
+        var consent = new EllaiConsentService();
+        consent.Grant("live-case-agent", EllaiConsentDimension.ReasoningText, EllaiToolBroker.ToolReadPurpose,
+            EllaiProcessingClassification.SyntheticDemo, TimeSpan.FromMinutes(5));
+        var broker = new EllaiToolBroker(new EllaiPolicyService(), consent, timeline: query);
+        var context = new EllaiToolContext("live-case-agent", "epoch", "cases", null, 4, true,
+            DataClassification: EllaiProcessingClassification.SyntheticDemo, Actor: fixture.CreateActor(),
+            AllowedTools: new HashSet<string> { EllaiToolNames.CaseTimeline });
+        var options = EllaiOptions.Bind(Environment.GetEnvironmentVariable);
+        if (!options.HasReasoningRoute) throw new InvalidOperationException("Live Muse route is not configured.");
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(90) };
+        using var provider = EllaiMuseChatClientFactory.Create(options, http);
+        using var observed = new CaseLiveProbeClient(provider);
+        var instructions = "If ellai_delegate_case is available, call it for the question. Otherwise call " +
+            $"ellai_case_timeline with case_id {fixture.CaseId:D}. Cite the exact returned evidence in an Observed claim. " +
+            "Return only JSON containing final_decision with schemaVersion 2, kind Answer, displayText, spokenText, " +
+            "claims, questions, uiIntents, planProposal, topicRefs, resumeSuggestion and stopReason. " +
+            "Use empty arrays and null for unused fields.";
+        var agent = new EllaiFrameworkAgent(observed);
+        var result = await agent.RunAsync(context, instructions,
+            [new ChatMessage(ChatRole.User, $"Read the history for case {fixture.CaseId:D}.")], 2048,
+            _ => Task.FromResult(true), broker.InvokeAsync,
+            new EllaiFrameworkUsage(context.SessionId, new EllaiUsageLedger(), new InMemoryEllaiUsageStore()), default,
+            enableCaseSpecialist: true);
+        Assert.NotNull(result);
+        Assert.Contains("ellai_delegate_case", observed.ToolCalls);
+        Assert.Contains(EllaiToolNames.CaseTimeline, observed.ToolCalls);
+        Assert.Contains(result!.Claims.SelectMany(claim => claim.Evidence), evidence =>
+            evidence.SourceKind == "CaseQueue" && evidence.ResourceId == fixture.CaseId.ToString("D"));
+    }
+
+    private sealed class CaseLiveProbeClient(IChatClient inner) : DelegatingChatClient(inner)
+    {
+        public List<string> ToolCalls { get; } = [];
+        public override async Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null, CancellationToken cancellationToken = default)
+        {
+            var response = await base.GetResponseAsync(messages, options, cancellationToken);
+            ToolCalls.AddRange(response.Messages.SelectMany(message => message.Contents)
+                .OfType<FunctionCallContent>().Select(call => call.Name));
+            return response;
+        }
+    }
+
     [FrameworkPostgresFact]
     public async Task EllaiCaseSpecialistUsesRealTimelineAndStopsAfterGrantRevocation()
     {
