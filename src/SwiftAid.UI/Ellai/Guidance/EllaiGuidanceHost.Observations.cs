@@ -175,7 +175,7 @@ public partial class EllaiGuidanceHost
                 EllaiOrganizationUiManifest.FeatureId => EllaiOrganizationUiManifest.Controls.Select(control => control.ControlId).ToArray(),
                 _ => null,
             };
-            var path = "/" + Navigation.ToBaseRelativePath(observedUri).Split('?', '#')[0].TrimEnd('/');
+            var path = ("/" + Navigation.ToBaseRelativePath(observedUri).Split('?', '#')[0].TrimEnd('/')).ToLowerInvariant();
             if (includeCurrentReport && string.Equals(path, "/report", StringComparison.OrdinalIgnoreCase) &&
                 requestedControls is not null && featureId != EllaiReportUiManifest.FeatureId)
             {
@@ -192,7 +192,7 @@ public partial class EllaiGuidanceHost
             var report = await _uiObservationModule.InvokeAsync<UiObservationReport>("collect", token,
                 new object?[] { requestedControls });
             if (report is null || !IsCurrent()) return;
-            report = report with { CurrentNavigationId = path == "/report" ? EllaiReportUiManifest.NavigationId :
+            report = report with { CurrentNavigationId = string.Equals(path, "/report", StringComparison.OrdinalIgnoreCase) ? EllaiReportUiManifest.NavigationId :
                 EllaiNavigationManifest.ResolveNavigationId(path) };
             report = report with { Platform = OperatingSystem.IsAndroid() ? "android" : OperatingSystem.IsIOS() ? "ios" : "web" };
             if (report.IsValid() && IsCurrent())

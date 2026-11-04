@@ -39,12 +39,14 @@ public sealed partial class EllaiSurfaceLogicTests
         Assert.Equal(accepted, GetField<UiObservationReport?>(host, "_latestGuidanceObservation") is not null);
     }
 
-    [Fact]
-    public async Task CurrentReportRemainsObservableWhenAnotherFeatureHasGuidance()
+    [Theory]
+    [InlineData("report")]
+    [InlineData("Report?draft=fixture")]
+    public async Task CurrentReportRemainsObservableWhenAnotherFeatureHasGuidance(string route)
     {
         var client = new FakeReviewClient { ObservationHandler = () => Task.FromResult(true) };
         using var host = await CreateHost(client, CreateSession(1), string.Empty);
-        SetProperty(host, "Navigation", new TabNavigationManager("report"));
+        SetProperty(host, "Navigation", new TabNavigationManager(route));
         SetField(host, "_guidanceFeatureId", EllaiNavigationManifest.FeatureId);
         var tour = DispatchProxy.Create<IBonboardingTourSession, NoOpBonboardingServiceProxy>();
         var proxy = (NoOpBonboardingServiceProxy)(object)tour;
@@ -64,6 +66,19 @@ public sealed partial class EllaiSurfaceLogicTests
         Assert.Contains("report.time-location", module.RequestedControls);
         Assert.Contains("navigation.escalations", module.RequestedControls);
         Assert.True(module.RequestedControls.Length <= 20);
+        Assert.Equal(EllaiReportUiManifest.NavigationId, GetField<UiObservationReport>(host, "_latestGuidanceObservation").CurrentNavigationId);
+    }
+
+    [Theory]
+    [InlineData("dashboard", "nav-dashboard")]
+    [InlineData("Dashboard?filter=fixture", "nav-dashboard")]
+    public async Task NavigationObservationNormalizesRouteCasing(string route, string navigationId)
+    {
+        using var host = await CreateHost(new FakeReviewClient { ObservationHandler = () => Task.FromResult(true) }, CreateSession(1), string.Empty);
+        SetProperty(host, "Navigation", new TabNavigationManager(route));
+        SetField(host, "_uiObservationModule", new ObservationJsModule());
+        await InvokeAsync(host, "ReportCurrentUiAsync", CancellationToken.None);
+        Assert.Equal(navigationId, GetField<UiObservationReport>(host, "_latestGuidanceObservation").CurrentNavigationId);
     }
 
     [Theory]
