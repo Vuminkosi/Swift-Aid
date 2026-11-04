@@ -1,0 +1,391 @@
+@using SwiftAid.Contracts.Ellai
+@implements IEllaiUiContextProvider
+<SwiftAid.UI.Ellai.Guidance.EllaiSemanticContext Provider="this" />
+@using SwiftAid.UI.Components.Theme
+@using SwiftAid.UI.Components.Surfaces.Operations
+
+<section class="operations-investigation" aria-labelledby="investigation-title">
+    <div class="operations-investigation__heading">
+        <div>
+            <MudText Typo="Typo.overline" Color="Color.Secondary">Administrative review</MudText>
+            <MudText Typo="Typo.h4" HtmlTag="h1" id="investigation-title" data-ellai-control="investigations.overview" data-bonboarding-anchor="ellai-investigation-overview">Investigations</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">Organize referenced information, request factual clarification, and track human review and verification.</MudText>
+        </div>
+        <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Refresh" OnClick="OnRefreshList" Disabled="Busy">Refresh</MudButton>
+    </div>
+    @if (!string.IsNullOrWhiteSpace(StatusMessage))
+    {
+        <MudAlert Severity="StatusSeverity" Variant="Variant.Outlined" role="status">@StatusMessage</MudAlert>
+    }
+    <MudGrid Spacing="3">
+        <MudItem xs="12" lg="4">
+            <section class="operations-investigation__panel" aria-labelledby="work-list-title" data-ellai-control="investigations.list" data-bonboarding-anchor="ellai-investigation-list">
+                <div class="operations-investigation__summary">
+                    <MudText Typo="Typo.subtitle1" HtmlTag="h2" id="work-list-title">Investigation work</MudText>
+                    <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Refresh" OnClick="OnRefreshList" Disabled="Busy">Refresh list</MudButton>
+                </div>
+                @if (ListState is OperationsSurfaceState.Loading or OperationsSurfaceState.Offline or OperationsSurfaceState.Denied or OperationsSurfaceState.Error or OperationsSurfaceState.Unavailable)
+                {
+                    <SwiftAidStatePanel State="ListState.ToSwiftAidViewState()" Title="Investigation list unavailable" Description="@ListMessage" OnRetry="OnRefreshList" />
+                }
+                else if (WorkItems.Count == 0)
+                {
+                    <SwiftAidStatePanel State="SwiftAidViewState.Empty" Title="No investigations yet" Description="Start an administrative review to create the first item." />
+                }
+                else
+                {
+                    @foreach (var item in WorkItems)
+                    {
+                        <MudPaper Class="operations-investigation__work-item" Outlined="true">
+                            <MudText Typo="Typo.subtitle2">@item.Title</MudText>
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">@StatusLabel(item.Status) · Updated @item.UpdatedAtUtc.ToLocalTime().ToString("g")</MudText>
+                            <MudText Typo="Typo.body2">@item.Objective</MudText>
+                            <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.OpenInNew" Disabled="Busy" OnClick="@(() => OnSelect.InvokeAsync(item.Id))">Open</MudButton>
+                        </MudPaper>
+                    }
+                }
+            </section>
+            <section class="operations-investigation__panel" aria-labelledby="start-title">
+                <MudText Typo="Typo.subtitle1" HtmlTag="h2" id="start-title">Start an investigation</MudText>
+                <MudText Typo="Typo.body2" Color="Color.Secondary">Use administrative records only. This tool does not assess health or provide advice.</MudText>
+                <MudTextField T="string" Label="Title" data-ellai-control="investigations.title" data-bonboarding-anchor="ellai-investigation-title" @bind-Value="_startTitle" MaxLength="120" Disabled="Busy" />
+                <MudTextField T="string" Label="Administrative objective" data-ellai-control="investigations.objective" data-bonboarding-anchor="ellai-investigation-objective" @bind-Value="_startObjective" Lines="3" MaxLength="1000" Disabled="Busy" />
+                <MudButton Class="mt-2" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.PlayArrow" Color="Color.Primary" Disabled="@(!CanStart)" OnClick="StartAsync" data-ellai-control="investigations.start" data-bonboarding-anchor="ellai-investigation-start">Start investigation</MudButton>
+            </section>
+        </MudItem>
+        <MudItem xs="12" lg="8">
+            @if (Snapshot is null)
+            {
+                <section class="operations-investigation__panel" aria-labelledby="detail-title" data-ellai-control="investigations.detail" data-bonboarding-anchor="ellai-investigation-detail">
+                    <MudText Typo="Typo.subtitle1" HtmlTag="h2" id="detail-title">Investigation details</MudText>
+                    @if (DetailState != OperationsSurfaceState.Empty)
+                    {
+                        <SwiftAidStatePanel State="DetailState.ToSwiftAidViewState()" Title="Investigation details unavailable" Description="@DetailMessage" OnRetry="OnRefreshList" />
+                    }
+                    else
+                    {
+                        <SwiftAidStatePanel State="SwiftAidViewState.Empty" Title="Choose an investigation" Description="Open an item from the list or start a new investigation." />
+                    }
+                </section>
+            }
+            else
+            {
+                <section class="operations-investigation__panel" aria-labelledby="detail-title" data-ellai-control="investigations.detail" data-bonboarding-anchor="ellai-investigation-detail">
+                    <div class="operations-investigation__summary">
+                        <div>
+                            <MudText Typo="Typo.subtitle1" HtmlTag="h2" id="detail-title">@Snapshot.Title</MudText>
+                            <MudText Typo="Typo.body2">@Snapshot.Objective</MudText>
+                        </div>
+                        <MudChip T="string" Color="@StatusColor(Snapshot.Status)" Variant="Variant.Outlined">@StatusLabel(Snapshot.Status)</MudChip>
+                    </div>
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">Last updated @Snapshot.UpdatedAtUtc?.ToLocalTime().ToString("g")</MudText>
+                    <MudStack Row="true" Spacing="1" Class="mt-2" AlignItems="AlignItems.Center">
+                        @if (CanPause)
+                        {
+                            <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Pause" Disabled="Busy" OnClick="PauseAsync" data-ellai-control="investigations.pause" data-bonboarding-anchor="ellai-investigation-pause">Pause</MudButton>
+                        }
+                        @if (CanResume)
+                        {
+                            <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.PlayArrow" Disabled="Busy" OnClick="ResumeAsync" data-ellai-control="investigations.resume" data-bonboarding-anchor="ellai-investigation-resume">Resume</MudButton>
+                        }
+                    </MudStack>
+                </section>
+                <MudGrid Spacing="3">
+                    <MudItem xs="12" md="6">
+                        <section class="operations-investigation__panel" aria-labelledby="evidence-title" data-ellai-control="investigations.evidence" data-bonboarding-anchor="ellai-investigation-evidence">
+                            <MudText Typo="Typo.subtitle1" HtmlTag="h3" id="evidence-title">Evidence references</MudText>
+                            @if (Snapshot.EvidenceReferences.Count == 0)
+                            {
+                                <SwiftAidStatePanel State="SwiftAidViewState.Empty" Title="No references added" Description="No evidence references are attached to this investigation." />
+                            }
+                            else
+                            {
+                                <MudList T="string" Dense="true" aria-label="Evidence references">
+                                    @foreach (var item in Snapshot.EvidenceReferences)
+                                    {
+                                        <MudListItem T="string" Text="@item.Label" SecondaryText="@SourceVersionLabel(item.SourceVersion)" />
+                                    }
+                                </MudList>
+                            }
+                            <SwiftAidStatePanel State="SwiftAidViewState.Information" Title="Adding evidence unavailable" Description="Evidence is not imported or changed from this screen." />
+                        </section>
+                    </MudItem>
+                    <MudItem xs="12" md="6">
+                        <section class="operations-investigation__panel" aria-labelledby="clarifications-title" data-ellai-control="investigations.clarifications" data-bonboarding-anchor="ellai-investigation-clarifications">
+                            <MudText Typo="Typo.subtitle1" HtmlTag="h3" id="clarifications-title">Factual clarifications</MudText>
+                            @if (Snapshot.Clarifications.Count == 0)
+                            {
+                                <SwiftAidStatePanel State="SwiftAidViewState.Empty" Title="No clarifications requested" Description="There are no open questions for this investigation." />
+                            }
+                            else
+                            {
+                                @foreach (var item in Snapshot.Clarifications)
+                                {
+                                    <div class="operations-investigation__question">
+                                        <MudText Typo="Typo.body2">@item.FactualQuestion</MudText>
+                                        @if (string.IsNullOrWhiteSpace(item.Answer))
+                                        {
+                                            <MudTextField T="string" Label="Factual answer" Value="@AnswerFor(item.Id)" ValueChanged="@(value => SetAnswer(item.Id, value))" Lines="3" MaxLength="2000" Disabled="Busy" />
+                                            <MudButton Class="mt-1" Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Send" Disabled="@(!CanReply(item.Id))" OnClick="@(() => ReplyAsync(item.Id))">Submit answer</MudButton>
+                                        }
+                                        else
+                                        {
+                                            <MudText Typo="Typo.caption" Color="Color.Secondary">Answer recorded: @item.Answer</MudText>
+                                        }
+                                    </div>
+                                }
+                            }
+                        </section>
+                    </MudItem>
+                    <MudItem xs="12" md="6">
+                        <section class="operations-investigation__panel" aria-labelledby="proposal-title" data-ellai-control="investigations.proposal" data-bonboarding-anchor="ellai-investigation-proposal">
+                            <MudText Typo="Typo.subtitle1" HtmlTag="h3" id="proposal-title">Administrative proposal</MudText>
+                            @if (Snapshot.Proposal is null)
+                            {
+                                <MudText Typo="Typo.body2" Color="Color.Secondary">No proposal has been prepared.</MudText>
+                                <MudTextField T="string" Label="Proposal summary" @bind-Value="_proposalSummary" Lines="3" MaxLength="800" Disabled="Busy" />
+                                <MudButton Class="mt-2" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Lightbulb" Disabled="@(!CanPropose)" OnClick="ProposeAsync" data-ellai-control="investigations.prepare" data-bonboarding-anchor="ellai-investigation-prepare">Prepare proposal</MudButton>
+                            }
+                            else
+                            {
+                                <MudText Typo="Typo.body2">@Snapshot.Proposal.Summary</MudText>
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">Review status: @ReviewStatusLabel(Snapshot.Proposal.ReviewStatus)</MudText>
+                                @if (!string.IsNullOrWhiteSpace(Snapshot.Proposal.ReviewReason))
+                                {
+                                    <MudText Typo="Typo.caption" Color="Color.Secondary">Review note: @Snapshot.Proposal.ReviewReason</MudText>
+                                }
+                                @if (Snapshot.Proposal.RequiresHumanApproval && string.Equals(Snapshot.Proposal.ReviewStatus, "Pending", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined">An authorized person must review this proposal. Review does not confirm that an external action was carried out.</MudAlert>
+                                    <MudTextField T="string" Label="Review reason" data-ellai-control="investigations.review-reason" data-bonboarding-anchor="ellai-investigation-review-reason" @bind-Value="_reviewReason" MaxLength="500" Disabled="Busy" />
+                                    <MudStack Row="true" Spacing="1" Class="mt-2" AlignItems="AlignItems.Center">
+                                        <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.ThumbUp" Color="Color.Primary" Disabled="@(!CanReview)" OnClick="@(() => ReviewAsync(true))" data-ellai-control="investigations.approve" data-bonboarding-anchor="ellai-investigation-approve">Approve proposal</MudButton>
+                                        <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.ThumbDown" Color="Color.Error" Disabled="@(!CanReview)" OnClick="@(() => ReviewAsync(false))" data-ellai-control="investigations.decline" data-bonboarding-anchor="ellai-investigation-decline">Decline proposal</MudButton>
+                                    </MudStack>
+                                }
+                            }
+                            @if (!string.IsNullOrWhiteSpace(Snapshot.ResultSummary))
+                            {
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">@Snapshot.ResultSummary</MudText>
+                            }
+                        </section>
+                    </MudItem>
+                    <MudItem xs="12" md="6">
+                        <section class="operations-investigation__panel" aria-labelledby="execution-title" data-ellai-control="investigations.execution" data-bonboarding-anchor="ellai-investigation-execution">
+                            <div class="operations-investigation__summary">
+                                <MudText Typo="Typo.subtitle1" HtmlTag="h3" id="execution-title">Execution and verification</MudText>
+                                <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Refresh" Disabled="@(!CanInteract || !OnRefreshExecution.HasDelegate)" OnClick="OnRefreshExecution">Refresh status</MudButton>
+                            </div>
+                            @if (ExecutionState is OperationsSurfaceState.Loading or OperationsSurfaceState.Offline or OperationsSurfaceState.Denied or OperationsSurfaceState.Error or OperationsSurfaceState.Unavailable)
+                            {
+                                <SwiftAidStatePanel State="ExecutionState.ToSwiftAidViewState()" Title="Execution status unavailable" Description="@ExecutionMessage" OnRetry="OnRefreshExecution" />
+                            }
+                            else if (Execution is null)
+                            {
+                                <SwiftAidStatePanel State="SwiftAidViewState.Empty" Title="No execution status" Description="This investigation has no execution status to display." />
+                            }
+                            else
+                            {
+                                <MudText Typo="Typo.body2">Execution: @ExecutionStatusLabel(Execution.ExecutionStatus)</MudText>
+                                <MudText Typo="Typo.body2">Verification: @VerificationStatusLabel(Execution.VerificationStatus)</MudText>
+                                @if (!string.IsNullOrWhiteSpace(Execution.ResultSummary))
+                                {
+                                    <MudText Typo="Typo.body2">@Execution.ResultSummary</MudText>
+                                }
+                                @if (Execution.Checks.Count > 0)
+                                {
+                                    <MudList T="string" Dense="true" aria-label="Verification checks">
+                                        @foreach (var check in Execution.Checks)
+                                        {
+                                            <MudListItem T="string" Text="@check.Name" SecondaryText="@CheckLabel(check)" />
+                                        }
+                                    </MudList>
+                                }
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">This status is reported here; this screen does not independently verify external work.</MudText>
+                            }
+                        </section>
+                    </MudItem>
+                </MudGrid>
+            }
+        </MudItem>
+    </MudGrid>
+</section>
+
+@code {
+    public string ComponentId => EllaiInvestigationUiManifest.Definition.ComponentId;
+    public EllaiUiManifest Describe() => EllaiInvestigationUiManifest.Definition;
+    public EllaiUiState GetState() => new(ComponentId, Busy || ListState == OperationsSurfaceState.Loading,
+        ListState == OperationsSurfaceState.Error || DetailState == OperationsSurfaceState.Error,
+        EllaiInvestigationUiManifest.Controls.Select(control => new UiControlState(control.ControlId, ControlState(control.ControlId))).ToArray());
+    private UiObservationState ControlState(string id)
+    {
+        var reviewing = Snapshot?.Proposal is { RequiresHumanApproval: true } proposal &&
+            string.Equals(proposal.ReviewStatus, "Pending", StringComparison.OrdinalIgnoreCase);
+        return id switch
+        {
+            "investigations.title" or "investigations.objective" => Busy ? UiObservationState.Disabled : UiObservationState.Ready,
+            "investigations.start" => CanStart ? UiObservationState.Ready : UiObservationState.Disabled,
+            "investigations.pause" => CanPause ? UiObservationState.Ready : UiObservationState.Unmounted,
+            "investigations.resume" => CanResume ? UiObservationState.Ready : UiObservationState.Unmounted,
+            "investigations.prepare" => Snapshot is null || Snapshot.Proposal is not null ? UiObservationState.Unmounted : CanPropose ? UiObservationState.Ready : UiObservationState.Disabled,
+            "investigations.review-reason" => !reviewing ? UiObservationState.Unmounted : Busy ? UiObservationState.Disabled : UiObservationState.Ready,
+            "investigations.approve" or "investigations.decline" => !reviewing ? UiObservationState.Unmounted : CanReview ? UiObservationState.Ready : UiObservationState.Disabled,
+            "investigations.evidence" or "investigations.clarifications" or "investigations.proposal" or "investigations.execution" => Snapshot is null ? UiObservationState.Unmounted : UiObservationState.Ready,
+            _ => UiObservationState.Ready,
+        };
+    }
+
+    private string _startTitle = string.Empty;
+    private string _startObjective = string.Empty;
+    private string _proposalSummary = string.Empty;
+    private string _reviewReason = string.Empty;
+    private readonly Dictionary<string, string> _answers = new(StringComparer.Ordinal);
+
+    [Parameter] public IReadOnlyList<OperationsInvestigationWorkItem> WorkItems { get; set; } = Array.Empty<OperationsInvestigationWorkItem>();
+    [Parameter] public OperationsSurfaceState ListState { get; set; } = OperationsSurfaceState.Loading;
+    [Parameter] public string ListMessage { get; set; } = "The investigation list is unavailable.";
+    [Parameter] public OperationsSurfaceState DetailState { get; set; } = OperationsSurfaceState.Empty;
+    [Parameter] public string DetailMessage { get; set; } = "Select an investigation to view its details.";
+    [Parameter] public OperationsInvestigationSnapshot? Snapshot { get; set; }
+    [Parameter] public OperationsSurfaceState ExecutionState { get; set; } = OperationsSurfaceState.Empty;
+    [Parameter] public string ExecutionMessage { get; set; } = "Execution and verification status is unavailable.";
+    [Parameter] public OperationsInvestigationExecutionAndVerification? Execution { get; set; }
+    [Parameter] public bool Busy { get; set; }
+    [Parameter] public string? StatusMessage { get; set; }
+    [Parameter] public Severity StatusSeverity { get; set; } = Severity.Info;
+    [Parameter] public EventCallback OnRefreshList { get; set; }
+    [Parameter] public EventCallback<string> OnSelect { get; set; }
+    [Parameter] public EventCallback<OperationsInvestigationRequest> OnStart { get; set; }
+    [Parameter] public EventCallback<OperationsInvestigationClarificationSubmission> OnClarify { get; set; }
+    [Parameter] public EventCallback<OperationsInvestigationCommand> OnPause { get; set; }
+    [Parameter] public EventCallback<OperationsInvestigationCommand> OnResume { get; set; }
+    [Parameter] public EventCallback<OperationsInvestigationProposalRequest> OnPropose { get; set; }
+    [Parameter] public EventCallback<OperationsInvestigationProposalReview> OnReviewProposal { get; set; }
+    [Parameter] public EventCallback OnRefreshExecution { get; set; }
+
+    private bool CanStart => !Busy && OnStart.HasDelegate && !string.IsNullOrWhiteSpace(_startTitle) && !string.IsNullOrWhiteSpace(_startObjective);
+    private bool CanInteract => !Busy && DetailState == OperationsSurfaceState.Populated && Snapshot is not null && Snapshot.Version > 0;
+    private bool CanPause => CanInteract && OnPause.HasDelegate && Snapshot!.Status is (OperationsInvestigationStatus.GatheringEvidence or OperationsInvestigationStatus.NeedsInput or OperationsInvestigationStatus.Resuming);
+    private bool CanResume => CanInteract && OnResume.HasDelegate && Snapshot!.Status == OperationsInvestigationStatus.Paused;
+    private bool CanPropose => CanInteract && OnPropose.HasDelegate && !string.IsNullOrWhiteSpace(_proposalSummary) &&
+        Snapshot!.Proposal is null && Snapshot!.Status is (OperationsInvestigationStatus.GatheringEvidence or OperationsInvestigationStatus.NeedsInput or OperationsInvestigationStatus.Resuming);
+    private bool CanReview => CanInteract && OnReviewProposal.HasDelegate && !string.IsNullOrWhiteSpace(_reviewReason) &&
+        Snapshot!.Status == OperationsInvestigationStatus.AwaitingApproval && Snapshot!.Proposal is { RequiresHumanApproval: true } proposal &&
+        string.Equals(proposal.ReviewStatus, "Pending", StringComparison.OrdinalIgnoreCase);
+    private bool CanReply(string id) => CanInteract && OnClarify.HasDelegate && !string.IsNullOrWhiteSpace(AnswerFor(id)) &&
+        Snapshot!.Status is (OperationsInvestigationStatus.NeedsInput or OperationsInvestigationStatus.GatheringEvidence or OperationsInvestigationStatus.Resuming);
+    private string AnswerFor(string id) => _answers.TryGetValue(id, out var answer) ? answer : string.Empty;
+    private void SetAnswer(string id, string value) => _answers[id] = value;
+
+    private async Task StartAsync()
+    {
+        if (CanStart)
+        {
+            await OnStart.InvokeAsync(new OperationsInvestigationRequest(_startTitle.Trim(), _startObjective.Trim()));
+        }
+    }
+
+    private async Task ReplyAsync(string clarificationId)
+    {
+        if (Snapshot is not null && CanReply(clarificationId))
+        {
+            await OnClarify.InvokeAsync(new OperationsInvestigationClarificationSubmission(
+                Snapshot.Id, Snapshot.Version, clarificationId, AnswerFor(clarificationId).Trim()));
+        }
+    }
+
+    private async Task PauseAsync()
+    {
+        if (Snapshot is not null && CanPause)
+        {
+            await OnPause.InvokeAsync(new OperationsInvestigationCommand(Snapshot.Id, Snapshot.Version));
+        }
+    }
+
+    private async Task ResumeAsync()
+    {
+        if (Snapshot is not null && CanResume)
+        {
+            await OnResume.InvokeAsync(new OperationsInvestigationCommand(Snapshot.Id, Snapshot.Version));
+        }
+    }
+
+    private async Task ProposeAsync()
+    {
+        if (CanPropose)
+        {
+            await OnPropose.InvokeAsync(new OperationsInvestigationProposalRequest(
+                Snapshot!.Id, Snapshot.Version, _proposalSummary.Trim()));
+        }
+    }
+
+    private async Task ReviewAsync(bool approve)
+    {
+        if (CanReview && Snapshot is not null && Snapshot.Proposal is not null)
+        {
+            await OnReviewProposal.InvokeAsync(new OperationsInvestigationProposalReview(
+                Snapshot.Id, Snapshot.Proposal.Id, approve, _reviewReason.Trim(), Snapshot.Version));
+        }
+    }
+
+    private static string StatusLabel(OperationsInvestigationStatus status) => status switch
+    {
+        OperationsInvestigationStatus.NotStarted => "Not started",
+        OperationsInvestigationStatus.GatheringEvidence => "In progress",
+        OperationsInvestigationStatus.NeedsInput => "Needs information",
+        OperationsInvestigationStatus.Paused => "Paused",
+        OperationsInvestigationStatus.AwaitingApproval => "Awaiting review",
+        OperationsInvestigationStatus.Resuming => "Resuming",
+        OperationsInvestigationStatus.Verifying => "Verifying",
+        OperationsInvestigationStatus.Partial => "Partially complete",
+        OperationsInvestigationStatus.Stale => "Needs refresh",
+        OperationsInvestigationStatus.BudgetExceeded => "Work limit reached",
+        OperationsInvestigationStatus.Completed => "Completed",
+        OperationsInvestigationStatus.Failed => "Could not continue",
+        _ => "Unavailable"
+    };
+
+    private static Color StatusColor(OperationsInvestigationStatus status) => status switch
+    {
+        OperationsInvestigationStatus.Completed => Color.Success,
+        OperationsInvestigationStatus.Failed or OperationsInvestigationStatus.Stale or OperationsInvestigationStatus.BudgetExceeded => Color.Error,
+        OperationsInvestigationStatus.NeedsInput or OperationsInvestigationStatus.AwaitingApproval or OperationsInvestigationStatus.Partial => Color.Warning,
+        _ => Color.Info
+    };
+
+    private static string ReviewStatusLabel(string? status) => status switch
+    {
+        "Approved" => "Approved",
+        "Rejected" => "Declined",
+        "Pending" => "Awaiting review",
+        _ => "Not reviewed"
+    };
+
+    private static string SourceVersionLabel(string value) => string.IsNullOrWhiteSpace(value) ? "Source unavailable" : "Source recorded";
+
+    private static string ExecutionStatusLabel(OperationsInvestigationExecutionStatus status) => status switch
+    {
+        OperationsInvestigationExecutionStatus.NotStarted => "Not started",
+        OperationsInvestigationExecutionStatus.AwaitingReview => "Awaiting review",
+        OperationsInvestigationExecutionStatus.InProgress => "In progress",
+        OperationsInvestigationExecutionStatus.Partial => "Partially complete",
+        OperationsInvestigationExecutionStatus.Completed => "Completed",
+        OperationsInvestigationExecutionStatus.Failed => "Could not complete",
+        OperationsInvestigationExecutionStatus.Stale => "Needs refresh",
+        _ => "Work limit reached"
+    };
+
+    private static string VerificationStatusLabel(OperationsInvestigationVerificationStatus status) => status switch
+    {
+        OperationsInvestigationVerificationStatus.NotStarted => "Not started",
+        OperationsInvestigationVerificationStatus.InProgress => "In progress",
+        OperationsInvestigationVerificationStatus.Passed => "Checks passed",
+        OperationsInvestigationVerificationStatus.Failed => "Checks failed",
+        _ => "Incomplete"
+    };
+
+    private static string CheckLabel(OperationsInvestigationExecutionCheck check) =>
+        string.Concat(check.Passed ? "Passed" : "Needs attention", " · ", check.Summary);
+
+}
+

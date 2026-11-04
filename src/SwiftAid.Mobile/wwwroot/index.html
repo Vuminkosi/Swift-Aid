@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>SwiftAid</title>
+    <base href="/" />
+    <script src="_content/SwiftAid.UI/js/theme-preference-bootstrap.js"></script>
+    <link rel="stylesheet" href="_content/MudBlazor/MudBlazor.min.css" />
+    <link rel="stylesheet" href="_content/Bit.Bonboarding/bit-bonboarding.css" />
+    <link rel="stylesheet" href="_content/SwiftAid.UI/css/swiftaid-theme.css" />
+    <link rel="stylesheet" href="app.css" />
+    <link rel="stylesheet" href="SwiftAid.Mobile.styles.css" />
+    <link rel="stylesheet" href="mobile-shell.css" />
+    <link rel="icon" type="image/png" href="_content/SwiftAid.UI/assets/swiftaid-icon.png" />
+    <style>
+        #swiftAidBootLoader {
+            display: grid;
+            min-height: 100dvh;
+            place-content: center;
+            justify-items: center;
+            background: var(--sa-canvas, #fff);
+        }
+
+        #swiftAidBootLoader img {
+            display: block;
+            width: min(46vw, 13rem);
+            height: auto;
+        }
+    </style>
+</head>
+<body>
+    <script src="_content/SwiftAid.UI/js/swiftaid-skip-link-fallback.js"></script>
+    <div class="status-bar-safe-area"></div>
+
+    <div id="app">
+        <div id="swiftAidBootLoader" role="status" aria-live="polite" aria-label="Loading SwiftAid">
+            <picture>
+                <source srcset="_content/SwiftAid.UI/assets/loading/swiftaid-loader-still.png" media="(prefers-reduced-motion: reduce)" />
+                <img src="_content/SwiftAid.UI/assets/loading/swiftaid-loader.gif" alt="" aria-hidden="true" width="480" height="480" />
+            </picture>
+        </div>
+    </div>
+
+    <div id="blazor-error-ui" role="alert" data-nosnippet>
+        An unhandled error has occurred.
+        <a href="." class="reload">Reload</a>
+        <button type="button" class="dismiss" aria-label="Dismiss error message">×</button>
+    </div>
+
+    <script src="_content/MudBlazor/MudBlazor.min.js"></script>
+    <script src="_framework/blazor.webview.js" autostart="false"></script>
+</body>
+</html>

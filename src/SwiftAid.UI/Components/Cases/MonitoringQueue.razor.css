@@ -1,0 +1,20 @@
+.monitoring-queue {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.monitoring-queue__state {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 1rem 0;
+}
+
+.monitoring-queue__notice {
+    display: block;
+}
+
+.monitoring-queue__overdue {
+    font-weight: 600;
+}

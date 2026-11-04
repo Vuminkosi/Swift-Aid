@@ -1,0 +1,15 @@
+@page "/landing-fixture"
+@using SwiftAid.UI.Components.Surfaces.Public
+
+<SwiftAidThemeProvider />
+<MudPopoverProvider />
+<span hidden data-fixture-ready="@(_ready ? "true" : "false")"></span>
+<WebLandingSurface />
+
+@code {
+    private bool _ready;
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (firstRender) { _ready = true; StateHasChanged(); }
+    }
+}

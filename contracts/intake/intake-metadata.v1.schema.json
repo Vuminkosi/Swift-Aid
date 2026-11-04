@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://swiftaid.online/contracts/intake/intake-metadata.v1.schema.json",
+  "title": "SwiftAid public intake metadata v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "countryCatalogueVersion", "countryCatalogueReference", "privacyNoticeVersion", "privacyNoticeReference"],
+  "properties": {
+    "version": { "type": "string", "pattern": "^[A-Za-z0-9._-]{1,64}$" },
+    "countryCatalogueVersion": { "type": "string", "pattern": "^[A-Za-z0-9._-]{1,64}$" },
+    "countryCatalogueReference": { "type": "string", "pattern": "^/public/v1/intake/metadata/countries$" },
+    "privacyNoticeVersion": { "type": "string", "pattern": "^[A-Za-z0-9._-]{1,64}$" },
+    "privacyNoticeReference": { "type": "string", "pattern": "^/privacy$" }
+  }
+}

@@ -1,0 +1,17 @@
+.managed-report-page {
+    display: grid;
+    gap: 1.25rem;
+    padding: 1rem 0.75rem max(1rem, env(safe-area-inset-bottom));
+}
+
+.managed-report-page ::deep .swiftaid-page-heading__title {
+    max-width: 20ch;
+}
+
+@media (min-width: 48rem) {
+    .managed-report-page {
+        max-width: 64rem;
+        margin-inline: auto;
+        padding: 1.5rem 1.25rem max(1.5rem, env(safe-area-inset-bottom));
+    }
+}

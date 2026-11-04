@@ -1,0 +1,147 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://swiftaid.invalid/contracts/events/case-event.v2.schema.json",
+  "title": "SwiftAid typed managed case event v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "eventId", "eventType", "caseId", "aggregateVersion", "reportRevision", "commandId", "actorId", "occurredAtUtc", "recordedAtUtc", "payload"],
+  "properties": {
+    "schemaVersion": { "const": 2 },
+    "eventId": { "type": "string", "format": "uuid" },
+    "eventType": { "enum": ["CaseReported", "CaseReportCorrected"] },
+    "caseId": { "type": "string", "format": "uuid" },
+    "aggregateVersion": { "type": "integer", "minimum": 1 },
+    "reportRevision": { "type": "integer", "minimum": 1 },
+    "commandId": { "type": "string", "format": "uuid" },
+    "actorId": { "type": "string", "minLength": 1 },
+    "occurredAtUtc": { "type": ["string", "null"], "format": "date-time" },
+    "recordedAtUtc": { "type": "string", "format": "date-time" },
+    "payload": { "oneOf": [{ "$ref": "#/$defs/reported" }, { "$ref": "#/$defs/correction" }] }
+  },
+  "allOf": [
+    { "if": { "properties": { "eventType": { "const": "CaseReported" } }, "required": ["eventType"] }, "then": { "properties": { "aggregateVersion": { "const": 1 }, "reportRevision": { "const": 1 }, "payload": { "$ref": "#/$defs/reported" } } } },
+    { "if": { "properties": { "eventType": { "const": "CaseReportCorrected" } }, "required": ["eventType"] }, "then": { "properties": { "payload": { "$ref": "#/$defs/correction" } } } }
+  ],
+  "$defs": {
+    "reported": {
+      "type": "object", "additionalProperties": false, "required": ["workspaceId", "report"],
+      "properties": { "workspaceId": { "type": "string", "minLength": 1 }, "report": { "$ref": "#/$defs/report" } }
+    },
+    "correction": {
+      "type": "object", "additionalProperties": false, "required": ["report", "reason", "previousReportRevision"],
+      "properties": { "report": { "$ref": "#/$defs/report" }, "reason": { "type": "string", "minLength": 1 }, "previousReportRevision": { "type": "integer", "minimum": 1 } }
+    },
+    "report": {
+      "type": "object", "additionalProperties": false,
+      "required": ["reportKind", "reportId", "context", "evidence", "confirmations", "human", "animal"],
+      "properties": {
+        "reportKind": { "enum": ["Human", "Animal"] },
+        "reportId": { "type": "string", "format": "uuid" },
+        "context": { "$ref": "#/$defs/context" },
+        "evidence": { "$ref": "#/$defs/evidence" },
+        "confirmations": { "$ref": "#/$defs/confirmations" },
+        "human": { "oneOf": [{ "$ref": "#/$defs/human" }, { "type": "null" }] },
+        "animal": { "oneOf": [{ "$ref": "#/$defs/animal" }, { "type": "null" }] }
+      },
+      "allOf": [
+        { "if": { "properties": { "reportKind": { "const": "Human" } }, "required": ["reportKind"] }, "then": { "properties": { "human": { "$ref": "#/$defs/human" }, "animal": { "type": "null" } } } },
+        { "if": { "properties": { "reportKind": { "const": "Animal" } }, "required": ["reportKind"] }, "then": { "properties": { "animal": { "$ref": "#/$defs/animal" }, "human": { "type": "null" } } } },
+        { "if": { "properties": { "evidence": { "properties": { "originalAudio": { "type": "object" } }, "required": ["originalAudio"] } }, "required": ["evidence"] }, "then": { "properties": { "confirmations": { "$ref": "#/$defs/confirmationsWithRecording" } } }, "else": { "properties": { "confirmations": { "$ref": "#/$defs/confirmationsWithoutRecording" } } } }
+      ]
+    },
+    "context": {
+      "type": "object", "additionalProperties": false,
+      "required": ["occurrence", "capturedAtUtc", "capturedOffset", "capturedZoneId", "capturePrecision", "location"],
+      "properties": {
+        "occurrence": { "$ref": "#/$defs/reportedTimeFact" },
+        "capturedAtUtc": { "type": ["string", "null"], "format": "date-time" },
+        "capturedOffset": { "type": ["string", "null"], "pattern": "^[+-]((0[0-9]|1[0-3]):[0-5][0-9]|14:00)$" },
+        "capturedZoneId": { "type": ["string", "null"] },
+        "capturePrecision": { "enum": ["Exact", "DateOnly", "Approximate", "Unknown"] },
+        "location": { "$ref": "#/$defs/location" }
+      }
+    },
+    "location": {
+      "type": "object", "additionalProperties": false,
+      "required": ["countryCode", "region", "area", "locality", "latitude", "longitude", "accuracyMetres", "source", "precision", "catalogueVersion"],
+      "properties": {
+        "countryCode": { "type": "string" }, "region": { "$ref": "#/$defs/place" }, "area": { "$ref": "#/$defs/place" }, "locality": { "$ref": "#/$defs/place" },
+        "latitude": { "type": ["number", "null"], "minimum": -90, "maximum": 90 }, "longitude": { "type": ["number", "null"], "minimum": -180, "maximum": 180 },
+        "accuracyMetres": { "type": ["number", "null"], "minimum": 0 }, "source": { "enum": ["Reporter", "Device", "Geocoder"] },
+        "precision": { "enum": ["Exact", "Approximate", "Unknown"] }, "catalogueVersion": { "type": ["string", "null"] }
+      }
+    },
+    "place": {
+      "type": "object", "additionalProperties": false, "required": ["reportedName", "normalizedId", "presence"],
+      "properties": { "reportedName": { "type": ["string", "null"] }, "normalizedId": { "type": ["string", "null"] }, "presence": { "enum": ["Known", "Unknown", "NotRecorded", "NotApplicable", "Absent"] } }
+    },
+    "reportedTimeFact": {
+      "type": "object", "additionalProperties": false, "required": ["state", "value", "provenance"],
+      "properties": { "state": { "enum": ["Unknown", "NotRecorded", "NotApplicable", "Absent", "Known"] }, "value": { "oneOf": [{ "$ref": "#/$defs/reportedTime" }, { "type": "null" }] }, "provenance": { "$ref": "#/$defs/provenance" } },
+      "allOf": [{ "if": { "properties": { "state": { "const": "Known" } }, "required": ["state"] }, "then": { "properties": { "value": { "$ref": "#/$defs/reportedTime" } } }, "else": { "properties": { "value": { "type": "null" } } } }]
+    },
+    "reportedTime": {
+      "type": "object", "additionalProperties": false, "required": ["value", "localDate", "rangeStart", "rangeEnd", "originalOffset", "zoneId", "precision"],
+      "properties": { "value": { "type": ["string", "null"], "format": "date-time" }, "localDate": { "type": ["string", "null"], "format": "date" }, "rangeStart": { "type": ["string", "null"], "format": "date" }, "rangeEnd": { "type": ["string", "null"], "format": "date" }, "originalOffset": { "type": ["string", "null"] }, "zoneId": { "type": ["string", "null"] }, "precision": { "enum": ["Exact", "DateOnly", "Approximate", "Unknown"] } },
+      "allOf": [
+        { "if": { "properties": { "precision": { "const": "Exact" } }, "required": ["precision"] }, "then": { "properties": { "value": { "type": "string", "format": "date-time" }, "localDate": { "type": "null" }, "rangeStart": { "type": "null" }, "rangeEnd": { "type": "null" } } } },
+        { "if": { "properties": { "precision": { "const": "DateOnly" } }, "required": ["precision"] }, "then": { "properties": { "value": { "type": "null" }, "localDate": { "type": "string", "format": "date" }, "rangeStart": { "type": "null" }, "rangeEnd": { "type": "null" } } } },
+        { "if": { "properties": { "precision": { "const": "Approximate" } }, "required": ["precision"] }, "then": { "oneOf": [
+          { "properties": { "value": { "type": "string", "format": "date-time" }, "localDate": { "type": "null" }, "rangeStart": { "type": "null" }, "rangeEnd": { "type": "null" } } },
+          { "properties": { "value": { "type": "null" }, "localDate": { "type": "string", "format": "date" }, "rangeStart": { "type": "null" }, "rangeEnd": { "type": "null" } } },
+          { "properties": { "value": { "type": "null" }, "localDate": { "type": "null" }, "rangeStart": { "type": "string", "format": "date" }, "rangeEnd": { "type": "string", "format": "date" } } }
+        ] } },
+        { "if": { "properties": { "precision": { "const": "Unknown" } }, "required": ["precision"] }, "then": { "properties": { "value": { "type": "null" }, "localDate": { "type": "null" }, "rangeStart": { "type": "null" }, "rangeEnd": { "type": "null" } } } }
+      ],
+      "description": "All seven properties are required. Approximate range endpoint ordering is enforced by the domain validator."
+    },
+    "provenance": {
+      "type": "object", "additionalProperties": false, "required": ["source", "stableReference"],
+      "properties": { "source": { "enum": ["ReporterNarrative", "ReporterObservation", "OriginalAudio", "WorkerConfirmed"] }, "stableReference": { "type": "string", "minLength": 1 } }
+    },
+    "stringFact": {
+      "allOf": [{ "$ref": "#/$defs/typedFact" }, { "if": { "properties": { "state": { "const": "Known" } }, "required": ["state"] }, "then": { "properties": { "value": { "type": "string" } } }, "else": { "properties": { "value": { "type": "null" } } } }]
+    },
+    "integerFact": {
+      "allOf": [{ "$ref": "#/$defs/typedFact" }, { "if": { "properties": { "state": { "const": "Known" } }, "required": ["state"] }, "then": { "properties": { "value": { "type": "integer", "minimum": 0 } } }, "else": { "properties": { "value": { "type": "null" } } } }]
+    },
+    "typedFact": {
+      "type": "object", "additionalProperties": false, "required": ["state", "value", "provenance"],
+      "properties": { "state": { "enum": ["Unknown", "NotRecorded", "NotApplicable", "Absent", "Known"] }, "value": {}, "provenance": { "$ref": "#/$defs/provenance" } }
+    },
+    "human": {
+      "type": "object", "additionalProperties": false, "required": ["pseudonymousSubjectReference", "ageYears", "reportedConcern"],
+      "properties": { "pseudonymousSubjectReference": { "$ref": "#/$defs/stringFact" }, "ageYears": { "$ref": "#/$defs/integerFact" }, "reportedConcern": { "$ref": "#/$defs/stringFact" } }
+    },
+    "animal": {
+      "type": "object", "additionalProperties": false, "required": ["subjectScope", "species", "holdingReference", "animalsAtRisk", "animalsAffected", "animalsDead"],
+      "properties": { "subjectScope": { "enum": ["Individual", "Herd", "Flock", "OtherGroup"] }, "species": { "$ref": "#/$defs/stringFact" }, "holdingReference": { "$ref": "#/$defs/stringFact" }, "animalsAtRisk": { "$ref": "#/$defs/animalCount" }, "animalsAffected": { "$ref": "#/$defs/animalCount" }, "animalsDead": { "$ref": "#/$defs/animalCount" } }
+    },
+    "animalCount": {
+      "type": "object", "additionalProperties": false, "required": ["state", "value", "provenance", "populationReference", "observationPeriod"],
+      "properties": { "state": { "enum": ["Unknown", "NotRecorded", "NotApplicable", "Absent", "Known"] }, "value": { "type": ["integer", "null"], "minimum": 0 }, "provenance": { "$ref": "#/$defs/provenance" }, "populationReference": { "type": ["string", "null"] }, "observationPeriod": { "oneOf": [{ "$ref": "#/$defs/reportedTimeFact" }, { "type": "null" }] } },
+      "allOf": [{ "if": { "properties": { "state": { "const": "Known" } }, "required": ["state"] }, "then": { "properties": { "value": { "type": "integer", "minimum": 0 } } }, "else": { "properties": { "value": { "type": "null" } } } }]
+    },
+    "text": {
+      "type": "object", "additionalProperties": false, "required": ["text", "provenance"],
+      "properties": { "text": { "type": "string", "minLength": 1 }, "provenance": { "$ref": "#/$defs/provenance" } }
+    },
+    "evidence": {
+      "type": "object", "additionalProperties": false, "required": ["narrative", "observations", "originalAudio"],
+      "properties": { "narrative": { "oneOf": [{ "$ref": "#/$defs/text" }, { "type": "null" }] }, "observations": { "type": "array", "items": { "$ref": "#/$defs/text" } }, "originalAudio": { "oneOf": [{ "$ref": "#/$defs/audio" }, { "type": "null" }] } },
+      "anyOf": [{ "properties": { "narrative": { "type": "object" } } }, { "properties": { "observations": { "minItems": 1 } } }, { "properties": { "originalAudio": { "type": "object" } } }]
+    },
+    "audio": {
+      "type": "object", "additionalProperties": false, "required": ["reference", "provenance"],
+      "properties": { "reference": { "type": "string", "minLength": 1 }, "provenance": { "$ref": "#/$defs/provenance" } },
+      "allOf": [{ "properties": { "provenance": { "properties": { "source": { "const": "OriginalAudio" } } } } }]
+    },
+    "confirmations": {
+      "type": "object", "additionalProperties": false,
+      "required": ["reportReviewConfirmed", "occurrenceCountryCode", "occurrenceCountryCatalogueVersion", "occurrenceCountryConfirmed", "processingConfirmed", "processingPolicyReference", "processingPolicyVersion", "recordingConfirmed", "recordingPolicyReference", "recordingPolicyVersion"],
+      "properties": { "reportReviewConfirmed": { "const": true }, "occurrenceCountryCode": { "type": "string", "minLength": 1 }, "occurrenceCountryCatalogueVersion": { "type": "string", "minLength": 1 }, "occurrenceCountryConfirmed": { "const": true }, "processingConfirmed": { "const": true }, "processingPolicyReference": { "type": "string", "minLength": 1 }, "processingPolicyVersion": { "type": "string", "minLength": 1 }, "recordingConfirmed": { "type": ["boolean", "null"] }, "recordingPolicyReference": { "type": ["string", "null"] }, "recordingPolicyVersion": { "type": ["string", "null"] } }
+    },
+    "confirmationsWithRecording": { "allOf": [{ "$ref": "#/$defs/confirmations" }, { "properties": { "recordingConfirmed": { "const": true }, "recordingPolicyReference": { "type": "string", "minLength": 1 }, "recordingPolicyVersion": { "type": "string", "minLength": 1 } } }] },
+    "confirmationsWithoutRecording": { "allOf": [{ "$ref": "#/$defs/confirmations" }, { "properties": { "recordingConfirmed": { "type": "null" }, "recordingPolicyReference": { "type": "null" }, "recordingPolicyVersion": { "type": "null" } } }] }
+  }
+}

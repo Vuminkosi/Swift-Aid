@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>SwiftAid.GuestIntake</AssemblyName>
+    <RootNamespace>SwiftAid.GuestIntake</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SwiftAid.Contracts\SwiftAid.Contracts.csproj" />
+    <Compile Include="..\SwiftAid.Client\Intake\GuestSubmission.cs" Link="Intake\GuestSubmission.cs" />
+    <Compile Include="..\SwiftAid.Client\Intake\GuestAudioCleanupContracts.cs" Link="Intake\GuestAudioCleanupContracts.cs" />
+    <Compile Include="..\SwiftAid.Client\Intake\GuestDraftMutationGate.cs" Link="Intake\GuestDraftMutationGate.cs" />
+    <Compile Include="..\SwiftAid.Client\Intake\GuestDraftStore.cs" Link="Intake\GuestDraftStore.cs" />
+    <Compile Include="..\SwiftAid.Client\Intake\GuestSubmissionCoordinator.cs" Link="Intake\GuestSubmissionCoordinator.cs" />
+    <Compile Include="..\SwiftAid.Client\Intake\GuestIntakeHttpClient.cs" Link="Intake\GuestIntakeHttpClient.cs" />
+    <Compile Include="..\SwiftAid.Client\Presentation\UiCapabilityContracts.cs" Link="Presentation\UiCapabilityContracts.cs" />
+    <Compile Include="..\SwiftAid.Client\Presentation\PublicWorkflows\PublicWorkflowContracts.cs" Link="Presentation\PublicWorkflows\PublicWorkflowContracts.cs" />
+    <Compile Include="..\SwiftAid.Client\Presentation\PublicWorkflows\PublicIntakeProcessingPolicyContracts.cs" Link="Presentation\PublicWorkflows\PublicIntakeProcessingPolicyContracts.cs" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,230 @@
+.case-report-registration {
+    display: grid;
+    gap: 1.25rem;
+    color: var(--sa-text-primary);
+}
+
+.case-report-registration__notice {
+    max-width: 72rem;
+}
+
+.case-report-registration__title {
+    color: var(--sa-text-primary);
+}
+
+.case-report-registration__sections {
+    display: grid;
+    gap: 1rem;
+}
+
+.case-report-registration__section {
+    display: grid;
+    gap: 1rem;
+    min-width: 0;
+    padding: 1rem;
+    border: 1px solid var(--sa-border);
+    border-radius: 0.875rem;
+    background: var(--sa-surface);
+}
+
+.case-report-registration__section-heading {
+    display: grid;
+    gap: 0.25rem;
+}
+
+.case-report-registration__section-heading h3 {
+    color: var(--sa-text-primary);
+}
+
+.case-report-registration__hint {
+    color: var(--sa-text-secondary);
+    line-height: 1.5;
+}
+
+.case-report-registration__field-label {
+    display: block;
+    margin-bottom: 0.375rem;
+    color: var(--sa-text-primary);
+    font-size: 0.875rem;
+    font-weight: 600;
+}
+
+.case-report-registration__field-label span {
+    color: var(--sa-text-secondary);
+    font-size: 0.8125rem;
+    font-weight: 400;
+}
+
+.case-report-registration__control {
+    width: 100%;
+    min-height: 2.75rem;
+    padding: 0.625rem 0.75rem;
+    border: 1px solid var(--sa-border);
+    border-radius: 0.5rem;
+    color: var(--sa-text-primary);
+    background: var(--sa-surface);
+    font: inherit;
+}
+
+.case-report-registration__control:focus-visible {
+    outline: 3px solid var(--sa-focus);
+    outline-offset: 2px;
+}
+
+.case-report-registration__narrative {
+    min-height: 8rem;
+    resize: vertical;
+}
+
+.case-report-registration__animal-fields,
+.case-report-registration__optional-fields {
+    display: grid;
+    gap: 1rem;
+}
+
+.case-report-registration__counts {
+    display: grid;
+    gap: 0.5rem;
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    border: 0;
+}
+
+.case-report-registration__counts legend {
+    margin-bottom: 0.25rem;
+    color: var(--sa-text-primary);
+    font-weight: 600;
+}
+
+.case-report-registration__counts p {
+    margin: 0;
+}
+
+.case-report-registration__count-grid {
+    display: grid;
+    gap: 0.75rem;
+}
+
+.case-report-registration__confirmations {
+    display: grid;
+    gap: 0.875rem;
+}
+
+.case-report-registration__reference-list {
+    display: grid;
+    gap: 0.5rem;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 13rem), 1fr));
+    padding: 0.75rem;
+    border: 1px solid var(--sa-border);
+    border-radius: 0.625rem;
+    background: var(--sa-canvas);
+}
+
+.case-report-registration__reference-list > div {
+    display: grid;
+    gap: 0.125rem;
+    min-width: 0;
+}
+
+.case-report-registration__reference-label {
+    color: var(--sa-text-secondary);
+    font-size: 0.8125rem;
+}
+
+.case-report-registration__reference-value {
+    color: var(--sa-text-primary);
+    font-size: 0.875rem;
+    font-weight: 600;
+}
+
+.case-report-registration__confirmation {
+    display: grid;
+    grid-template-columns: 1.5rem minmax(0, 1fr);
+    align-items: start;
+    column-gap: 0.625rem;
+    row-gap: 0.25rem;
+    color: var(--sa-text-primary);
+}
+
+.case-report-registration__confirmation label {
+    padding-top: 0.125rem;
+    line-height: 1.45;
+}
+
+.case-report-registration__confirmation .case-report-registration__hint {
+    grid-column: 2;
+}
+
+.case-report-registration__checkbox {
+    width: 1.25rem;
+    height: 1.25rem;
+    margin: 0.125rem;
+    accent-color: var(--sa-action-primary);
+}
+
+.case-report-registration__checkbox:focus-visible {
+    outline: 3px solid var(--sa-focus);
+    outline-offset: 3px;
+}
+
+.case-report-registration__confirmation--unavailable {
+    color: var(--sa-text-secondary);
+}
+
+.case-report-registration__confirmation--unavailable .case-report-registration__checkbox {
+    cursor: not-allowed;
+}
+
+.case-report-registration ::deep .validation-message {
+    display: block;
+    margin-top: 0.25rem;
+    color: var(--sa-danger);
+    font-size: 0.875rem;
+}
+
+.case-report-registration ::deep .validation-summary-errors {
+    color: var(--sa-danger);
+}
+
+.case-report-registration__actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.case-report-registration__feedback {
+    max-width: 48rem;
+}
+
+@media (min-width: 40rem) {
+    .case-report-registration__section {
+        padding: 1.25rem;
+    }
+
+    .case-report-registration__animal-fields,
+    .case-report-registration__optional-fields {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .case-report-registration__count-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 27rem) {
+    .case-report-registration__section {
+        padding: 0.75rem;
+    }
+
+    .case-report-registration__actions {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .case-report-registration__actions ::deep .mud-button-root {
+        width: 100%;
+        min-height: 2.75rem;
+    }
+}

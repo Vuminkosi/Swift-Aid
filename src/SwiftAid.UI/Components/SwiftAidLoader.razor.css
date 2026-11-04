@@ -1,0 +1,49 @@
+.swiftaid-loader {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    min-width: 0;
+    max-width: 100%;
+    color: var(--mud-palette-text-primary, currentColor);
+}
+
+.swiftaid-loader__visual {
+    position: relative;
+    flex: 0 0 clamp(2.5rem, 10vw, 3.5rem);
+    width: clamp(2.5rem, 10vw, 3.5rem);
+    aspect-ratio: 1;
+}
+
+.swiftaid-loader__image {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+}
+
+.swiftaid-loader__fallback {
+    position: absolute;
+    inset: 0;
+}
+
+.swiftaid-loader ::deep .swiftaid-loader__lottie {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+}
+
+.swiftaid-loader ::deep .swiftaid-loader__lottie.is-ready {
+    opacity: 1;
+}
+
+.swiftaid-loader__status {
+    min-width: 0;
+    line-height: 1.4;
+    overflow-wrap: anywhere;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .swiftaid-loader ::deep .swiftaid-loader__lottie {
+        display: none;
+    }
+}

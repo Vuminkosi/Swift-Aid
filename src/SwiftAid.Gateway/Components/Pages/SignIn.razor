@@ -1,0 +1,473 @@
+@page "/sign-in"
+@using System.ComponentModel.DataAnnotations
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+@inject NavigationManager Navigation
+
+<PageTitle>Sign in | SwiftAid</PageTitle>
+
+<div class="sign-in-page">
+<AccountEntrySurface>
+    <MudPaper Class="sign-in-panel" Elevation="0">
+        <SwiftAidPageHeading Eyebrow="Your SwiftAid account"
+                             Title="Welcome back"
+                             Description="Sign in to your account."
+                             HeadingId="sign-in-heading" />
+
+        <MudText Typo="Typo.body2" Class="sign-in-privacy-note">
+            Signing in does not by itself provide access to an organization’s records.
+        </MudText>
+
+        @if (_isLoading)
+        {
+            <MudProgressLinear Indeterminate="true" Color="Color.Primary" aria-hidden="true" />
+            <div>
+                <MudText Typo="Typo.body2">Checking how you can sign in…</MudText>
+            </div>
+        }
+
+        @if (!string.IsNullOrEmpty(_errorMessage))
+        {
+            <div role="alert" aria-atomic="true">
+                <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Class="sign-in-alert">
+                    <MudText>@_errorMessage</MudText>
+                </MudAlert>
+            </div>
+        }
+        <div hidden="@(!ShowRetryButton)">
+            <MudButton Variant="Variant.Text"
+                       Color="Color.Primary"
+                       OnClick="RetryOptionsAsync"
+                       aria-disabled="@_isLoading"
+                       aria-busy="@_isLoading" StartIcon="@Icons.Material.Filled.Refresh">
+                Try again
+            </MudButton>
+        </div>
+        @if (string.IsNullOrEmpty(_errorMessage) && !_isLoading)
+        {
+            @if (!_passwordSignInAvailable)
+            {
+                <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Class="sign-in-alert">
+                    Email and password sign-in is currently unavailable. You can continue without an account.
+                </MudAlert>
+            }
+            else
+            {
+            <EditForm Model="_passwordForm" OnSubmit="PasswordSignInAsync">
+            <DataAnnotationsValidator />
+            <div class="sign-in-password" role="group" aria-label="Sign in with email">
+                <MudTextField T="string" Label="Email address" @bind-Value="_passwordForm.Email"
+                              For="@(() => _passwordForm.Email)"
+                              Variant="Variant.Outlined" Disabled="@_passwordBusy"
+                              InputType="InputType.Email" Immediate="true" autocomplete="email"
+                              aria-label="Email address" />
+                <MudTextField T="string" Label="Password" @bind-Value="_passwordForm.Password"
+                              For="@(() => _passwordForm.Password)"
+                              Variant="Variant.Outlined" Disabled="@_passwordBusy"
+                              InputType="@(_showPassword ? InputType.Text : InputType.Password)"
+                              Adornment="Adornment.End" AdornmentIcon="@(_showPassword ? Icons.Material.Filled.VisibilityOff : Icons.Material.Filled.Visibility)"
+                              OnAdornmentClick="() => _showPassword = !_showPassword"
+                              Immediate="true" MaxLength="256" autocomplete="current-password"
+                              aria-label="Password" />
+                @if (!string.IsNullOrEmpty(_passwordError))
+                {
+                    <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" role="alert" Dense="true">
+                        <MudText>@_passwordError</MudText>
+                    </MudAlert>
+                }
+                <MudStack Row="true" Spacing="2" Justify="Justify.SpaceBetween">
+                    <MudSwitch T="bool" @bind-Value="_rememberMe" Color="Color.Primary"
+                               Label="Remember me" Disabled="@_passwordBusy" />
+                    <MudLink Href="/forgot-password">Forgot password?</MudLink>
+                </MudStack>
+                <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Filled" Color="Color.Primary" FullWidth="true"
+                           Disabled="@(_isLoading || _passwordBusy)"
+                           Class="sign-in-provider-button auth-cta" StartIcon="@Icons.Material.Filled.Login">
+                    @(_passwordBusy ? "Signing in…" : "Sign in")
+                </MudButton>
+                <MudLink Href="@RegisterHref">Don't have an account? Sign up</MudLink>
+            </div>
+            </EditForm>
+            }
+            <MudText Typo="Typo.body2" Class="sign-in-divider-text">Or continue with</MudText>
+            <div class="sign-in-provider-list" role="group" aria-label="Choose a sign-in option">
+                @foreach (var provider in _providers)
+                {
+                    <div class="sign-in-provider-option" @key="provider.Id">
+                        @if (provider.Id == FacebookProviderId)
+                        {
+                            @if (_facebookAvailable)
+                            {
+                                <MudButton id="facebook-sign-in-button"
+                                           ButtonType="ButtonType.Button"
+                                           Variant="Variant.Text"
+                                           Color="Color.Primary"
+                                           FullWidth="true"
+                                           Class="sign-in-provider-button" StartIcon="@Icons.Material.Filled.Login">
+                                    Continue with Facebook
+                                </MudButton>
+                            }
+                            else
+                            {
+                                <MudButton ButtonType="ButtonType.Button"
+                                           Variant="Variant.Text"
+                                           Color="Color.Primary"
+                                           FullWidth="true"
+                                           Class="sign-in-provider-button"
+                                           Disabled="true" StartIcon="@Icons.Material.Filled.Login">
+                                    Facebook sign-in unavailable
+                                </MudButton>
+                            }
+                            @if (_facebookAvailable)
+                            {
+                                <MudButton id="refresh-facebook-sign-in-button"
+                                           ButtonType="ButtonType.Button"
+                                           Variant="Variant.Text"
+                                           Color="Color.Primary"
+                                           FullWidth="true"
+                                           Class="sign-in-refresh-button"
+                                           hidden="hidden" StartIcon="@Icons.Material.Filled.Refresh">
+                                    Refresh sign-in choices
+                                </MudButton>
+                            }
+                        }
+                        else if (provider.Available && !string.IsNullOrWhiteSpace(_requestToken))
+                        {
+                            <form method="post" action="@GetChallengeAction(provider.Id)">
+                                <input type="hidden" name="__RequestVerificationToken" value="@_requestToken" />
+                                <MudButton ButtonType="ButtonType.Submit"
+                                           Variant="Variant.Text"
+                                           Color="Color.Primary"
+                                           FullWidth="true"
+                                           Class="sign-in-provider-button" StartIcon="@Icons.Material.Filled.Login">
+                                    Continue with @provider.DisplayName
+                                </MudButton>
+                            </form>
+                        }
+                        else
+                        {
+                            <MudButton ButtonType="ButtonType.Button"
+                                       Variant="Variant.Text"
+                                       Color="Color.Primary"
+                                       FullWidth="true"
+                                       Class="sign-in-provider-button"
+                                       Disabled="true" StartIcon="@Icons.Material.Filled.Login">
+                                @provider.DisplayName is unavailable for sign-in right now
+                            </MudButton>
+                        }
+
+                        @if (provider.Id == FacebookProviderId && _facebookAvailable)
+                        {
+                            <MudText Typo="Typo.caption" Class="sign-in-provider-note">
+                                Choose Facebook to continue. You can close its sign-in window and try again.
+                            </MudText>
+                        }
+                    </div>
+                }
+            </div>
+        }
+
+        <p id="sign-in-live-status" class="sign-in-live-status" role="status" aria-live="polite" aria-atomic="true" tabindex="-1">@_liveMessage</p>
+
+        <MudDivider Class="sign-in-divider" />
+
+        <MudButton Href="/report"
+                   id="continue-without-account"
+                   Variant="Variant.Text"
+                   Color="Color.Primary"
+                   FullWidth="true"
+                   Class="sign-in-secondary-button" StartIcon="@Icons.Material.Filled.ArrowForward">
+            Continue without an account
+        </MudButton>
+
+        <nav aria-label="Legal information">
+            <MudStack Row="true" Spacing="2" Justify="Justify.Center">
+                <MudLink Href="/privacy">Privacy</MudLink>
+                <MudLink Href="/terms">Terms</MudLink>
+            </MudStack>
+        </nav>
+    </MudPaper>
+</AccountEntrySurface>
+</div>
+
+@code {
+    private const string FacebookProviderId = "facebook";
+    private const string GoogleProviderId = "google";
+    private IJSObjectReference? _module;
+    private bool _isLoading = true;
+    private bool _passwordSignInAvailable;
+    private bool _facebookAvailable;
+    private bool _facebookWired;
+    private bool _isRetrying;
+    private bool _focusPrimaryOptionOnNextRender;
+    private string? _requestToken;
+    private string? _errorMessage;
+    private readonly PasswordSignInForm _passwordForm = new();
+    private bool _showPassword;
+    private bool _rememberMe = true;
+    private bool _passwordBusy;
+    private string? _passwordError;
+    private string _liveMessage = string.Empty;
+    private IReadOnlyList<ProviderChoice> _providers = CreateUnavailableProviders();
+    [SupplyParameterFromQuery(Name = "returnUrl")]
+    private string? RequestedReturnUrl { get; set; }
+
+    private string SafeReturnUrl => SwiftAid.Client.Navigation.LocalReturnUrlPolicy.Resolve(RequestedReturnUrl, "/dashboard");
+    private string RegisterHref => $"/register?returnUrl={Uri.EscapeDataString(SafeReturnUrl)}";
+    private bool ShowRetryButton => _errorMessage is not null || _isRetrying;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_focusPrimaryOptionOnNextRender)
+        {
+            _focusPrimaryOptionOnNextRender = false;
+            if (_module is not null)
+            {
+                await _module.InvokeVoidAsync("focusPrimaryOption");
+            }
+        }
+
+        if (!_facebookWired && _facebookAvailable && _module is not null)
+        {
+            await _module.InvokeVoidAsync(
+                "wireFacebookLogin",
+                "facebook-sign-in-button",
+                "sign-in-live-status",
+                "refresh-facebook-sign-in-button",
+                _requestToken,
+                SafeReturnUrl);
+            _facebookWired = true;
+        }
+
+        if (firstRender)
+        {
+            try
+            {
+                _module = await JS.InvokeAsync<IJSObjectReference>(
+                    "import",
+                    "./Components/Pages/SignIn.razor.js");
+                await LoadOptionsAsync(isRetry: false);
+            }
+            catch (JSException)
+            {
+                SetOptionsUnavailable();
+                _isLoading = false;
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+    }
+
+    private Task RetryOptionsAsync() => _isLoading
+        ? Task.CompletedTask
+        : LoadOptionsAsync(isRetry: true);
+
+    private async Task PasswordSignInAsync(EditContext editContext)
+    {
+        if (_isLoading || _passwordBusy || !_passwordSignInAvailable || !editContext.Validate())
+        {
+            return;
+        }
+
+        if (_module is null)
+        {
+            _passwordError = "Sign-in is temporarily unavailable. Please try again.";
+            return;
+        }
+
+        _passwordBusy = true;
+        _passwordError = null;
+        _liveMessage = "Signing in.";
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            var result = await _module.InvokeAsync<PasswordSignInResult>(
+                "passwordSignIn",
+                _passwordForm.Email?.Trim(),
+                _passwordForm.Password,
+                _rememberMe,
+                SafeReturnUrl);
+            if (result.Ok)
+            {
+                Navigation.NavigateTo(SafeReturnUrl, forceLoad: true);
+                return;
+            }
+
+            _passwordError = string.IsNullOrWhiteSpace(result.Error)
+                ? "The email or password is incorrect."
+                : result.Error;
+            _liveMessage = string.Empty;
+        }
+        catch (JSException)
+        {
+            _passwordError = "Sign-in is temporarily unavailable. Please try again.";
+            _liveMessage = string.Empty;
+        }
+        finally
+        {
+            _passwordBusy = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task LoadOptionsAsync(bool isRetry)
+    {
+        if (isRetry && _isLoading)
+        {
+            return;
+        }
+
+        _isLoading = true;
+        _isRetrying = isRetry;
+        _facebookWired = false;
+        _liveMessage = "Checking how you can sign in.";
+        _errorMessage = null;
+
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            var module = _module;
+            if (module is null)
+            {
+                module = await JS.InvokeAsync<IJSObjectReference>(
+                    "import",
+                    "./Components/Pages/SignIn.razor.js");
+                _module = module;
+            }
+
+            var result = await module.InvokeAsync<SignInOptionsResult>(
+                "loadSignInOptions",
+                SafeReturnUrl);
+
+            _providers = NormalizeProviders(result.Providers);
+            _passwordSignInAvailable = result.PasswordSignInAvailable;
+            var facebookProviderAvailable = result.Providers?.Any(provider =>
+                string.Equals(provider.Id, FacebookProviderId, StringComparison.OrdinalIgnoreCase) &&
+                provider.Available) == true;
+            _facebookAvailable = facebookProviderAvailable &&
+                                 result.FacebookWebAvailable &&
+                                 !string.IsNullOrWhiteSpace(result.RequestToken);
+            _requestToken = string.IsNullOrWhiteSpace(result.RequestToken) ? null : result.RequestToken;
+            _errorMessage = result.OptionsError;
+            _liveMessage = BuildOptionsStatusMessage();
+        }
+        catch (JSException)
+        {
+            SetOptionsUnavailable();
+        }
+        finally
+        {
+            _isLoading = false;
+            _isRetrying = false;
+            _focusPrimaryOptionOnNextRender = isRetry;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private string BuildOptionsStatusMessage()
+    {
+        if (_errorMessage is not null)
+        {
+            return "Use Try again to reload sign-in methods.";
+        }
+
+        var socialSignInAvailable = _facebookAvailable ||
+            _providers.Any(provider => provider.Available && !IsSocialProvider(provider.Id));
+        if (!_passwordSignInAvailable && !socialSignInAvailable)
+        {
+            return "Password sign-in is unavailable, and no other sign-in methods are available. You can continue without an account.";
+        }
+
+        return "Available sign-in methods are ready.";
+    }
+
+    private string GetChallengeAction(string providerId) =>
+        $"/auth/{Uri.EscapeDataString(providerId)}/challenge?returnUrl={Uri.EscapeDataString(SafeReturnUrl)}";
+
+    private void SetOptionsUnavailable()
+    {
+        _passwordSignInAvailable = false;
+        _providers = CreateUnavailableProviders();
+        _facebookAvailable = false;
+        _requestToken = null;
+        _errorMessage = "We couldn't load sign-in methods. Try again.";
+        _liveMessage = "Use Try again to reload sign-in methods.";
+    }
+
+    private static IReadOnlyList<ProviderChoice> NormalizeProviders(IReadOnlyList<ProviderChoice>? configured)
+    {
+        var providers = configured?.ToDictionary(provider => provider.Id, StringComparer.OrdinalIgnoreCase)
+                        ?? new Dictionary<string, ProviderChoice>(StringComparer.OrdinalIgnoreCase);
+
+        providers.TryAdd(FacebookProviderId, new ProviderChoice(FacebookProviderId, "Facebook", false));
+        providers.TryAdd(GoogleProviderId, new ProviderChoice(GoogleProviderId, "Google", false));
+
+        if (!providers.Values.Any(provider => !IsSocialProvider(provider.Id)))
+        {
+            providers.Add("organization", new ProviderChoice("organization", "Organization sign-in", false));
+        }
+
+        return providers.Values
+            .OrderBy(provider => ProviderOrder(provider.Id))
+            .ThenBy(provider => provider.DisplayName, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IReadOnlyList<ProviderChoice> CreateUnavailableProviders() =>
+    [
+        new(FacebookProviderId, "Facebook", false),
+        new(GoogleProviderId, "Google", false),
+        new("organization", "Organization sign-in", false)
+    ];
+
+    private static bool IsSocialProvider(string providerId) =>
+        string.Equals(providerId, FacebookProviderId, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(providerId, GoogleProviderId, StringComparison.OrdinalIgnoreCase);
+
+    private static int ProviderOrder(string providerId) => providerId.ToLowerInvariant() switch
+    {
+        FacebookProviderId => 0,
+        GoogleProviderId => 1,
+        "organization" => 2,
+        _ => 3
+    };
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_module is not null)
+        {
+            try
+            {
+                await _module.DisposeAsync();
+            }
+            catch (JSDisconnectedException)
+            {
+                // The browser may disconnect while the sign-in page is being disposed.
+            }
+        }
+    }
+
+    private sealed record ProviderChoice(string Id, string DisplayName, bool Available);
+
+    private sealed record SignInOptionsResult(
+        IReadOnlyList<ProviderChoice>? Providers,
+        bool PasswordSignInAvailable,
+        bool FacebookWebAvailable,
+        string? RequestToken,
+        string? OptionsError);
+
+    private sealed record PasswordSignInResult(bool Ok, string? Error);
+
+    private sealed class PasswordSignInForm
+    {
+        [Required(ErrorMessage = "Enter your email address.")]
+        [EmailAddress(ErrorMessage = "Enter a valid email address.")]
+        [StringLength(256)]
+        public string? Email { get; set; }
+
+        [Required(ErrorMessage = "Enter your password.")]
+        [StringLength(256)]
+        public string? Password { get; set; }
+    }
+}

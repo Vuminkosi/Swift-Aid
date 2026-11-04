@@ -1,0 +1,76 @@
+.public-report-surface {
+    display: grid;
+    gap: 0.875rem;
+    width: 100%;
+    min-width: 0;
+}
+
+.public-report-voice {
+    display: grid;
+    gap: 0.75rem;
+    min-width: 0;
+    padding: 0.875rem;
+    border: 1px solid var(--sa-border);
+    border-radius: var(--sa-radius-card);
+    background: var(--sa-surface);
+}
+
+.public-report-voice__heading {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.75rem;
+}
+
+.public-report-voice {
+    display: grid;
+    gap: 0.75rem;
+    padding: 1rem;
+    border: 1px solid var(--sa-border);
+    border-radius: 1rem;
+    background: var(--sa-surface);
+}
+
+.public-report-voice__recording {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    color: var(--sa-status-error);
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+
+.public-report-voice__recording-dot {
+    width: 0.7rem;
+    height: 0.7rem;
+    border-radius: 50%;
+    background: var(--sa-status-error);
+    animation: voice-recording-pulse 1.2s ease-in-out infinite;
+}
+
+.public-report-voice ::deep .mud-button-root {
+    min-height: 2.75rem;
+}
+
+.public-report-voice__cleanup {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.public-report-voice__cleanup > div {
+    flex: 1 1 16rem;
+    min-width: 0;
+}
+
+@keyframes voice-recording-pulse {
+    50% { opacity: 0.35; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .public-report-voice__recording-dot {
+        animation: none;
+    }
+}
+

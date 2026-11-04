@@ -1,0 +1,13 @@
+<div class="swiftaid-body-text">
+    <MudText Typo="Typography" Class="swiftaid-body-text__content">
+        @ChildContent
+    </MudText>
+</div>
+
+@code {
+    [Parameter, EditorRequired]
+    public RenderFragment ChildContent { get; set; } = default!;
+
+    [Parameter]
+    public Typo Typography { get; set; } = Typo.body2;
+}

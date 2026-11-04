@@ -1,0 +1,182 @@
+@page "/reports"
+@using System.Globalization
+@using SwiftAid.Client.Presentation
+@using SwiftAid.UI.Components.Surfaces.Operations
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@inject IAnalyticsClient AnalyticsClient
+
+<PageTitle>Reports and analytics | SwiftAid</PageTitle>
+<OperationsAnalyticsSurface Title="Reports and analytics"
+                            Eyebrow="Operations"
+                            Description="Work summaries for selected dates. These totals describe reported work only; they do not indicate health patterns or causes."
+                            State="_state" Metrics="_metrics"
+                            UpdatedAtUtc="_updatedAtUtc" ContractVersion="_contractVersion"
+                            PeriodLabel="@PeriodDescription" StatusMessage="@_message" PreviewMessage="@_previewMessage"
+                            OnRetry="LoadAsync" OnPreviewExport="PreviewExportAsync">
+    <FilterContent>
+        <MudSelect T="string" Label="Period" Value="@_period" ValueChanged="PeriodChangedAsync" Dense="true">
+            <MudSelectItem Value="@ThirtyDays">Last 30 days</MudSelectItem>
+            <MudSelectItem Value="@NinetyDays">Last 90 days</MudSelectItem>
+        </MudSelect>
+        <MudTextField T="string" Label="Region" Value="@_region" ValueChanged="RegionChangedAsync"
+                      Placeholder="All regions" Clearable="true" />
+        <MudSelect T="string" Label="Measure group" Value="@_workType" ValueChanged="WorkTypeChangedAsync" Dense="true">
+            <MudSelectItem Value="@AllMeasures">All measures</MudSelectItem>
+            <MudSelectItem Value="@ReportMeasures">Reported activity</MudSelectItem>
+            <MudSelectItem Value="@WorkMeasures">Operational work</MudSelectItem>
+            <MudSelectItem Value="@SyncMeasures">Synchronization</MudSelectItem>
+        </MudSelect>
+    </FilterContent>
+</OperationsAnalyticsSurface>
+
+@code {
+    private const string ThirtyDays = "30";
+    private const string NinetyDays = "90";
+    private const string AllMeasures = "";
+    private const string ReportMeasures = "reports";
+    private const string WorkMeasures = "work";
+    private const string SyncMeasures = "sync";
+
+    private string _period = ThirtyDays;
+    private string _region = string.Empty;
+    private string _workType = AllMeasures;
+    private IReadOnlyList<OperationsMetricView> _metrics = Array.Empty<OperationsMetricView>();
+    private OperationsSurfaceState _state = OperationsSurfaceState.Loading;
+    private DateTimeOffset? _updatedAtUtc;
+    private string _contractVersion = "Unknown";
+    private string? _message;
+    private string? _previewMessage;
+    private long _requestGeneration;
+
+    [SupplyParameterFromQuery(Name = "workType")]
+    public string? WorkTypeQuery { get; set; }
+
+    private string PeriodDescription => _period == NinetyDays ? "the last 90 days" : "the last 30 days";
+
+    protected override Task OnInitializedAsync()
+    {
+        _workType = WorkTypeQuery switch
+        {
+            ReportMeasures => ReportMeasures,
+            WorkMeasures => WorkMeasures,
+            SyncMeasures => SyncMeasures,
+            _ => AllMeasures
+        };
+
+        return LoadAsync();
+    }
+
+    private Task PeriodChangedAsync(string value)
+    {
+        _period = value;
+        return LoadAsync();
+    }
+
+    private Task RegionChangedAsync(string value)
+    {
+        _region = value;
+        return LoadAsync();
+    }
+
+    private Task WorkTypeChangedAsync(string value)
+    {
+        _workType = value;
+        return LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        var requestGeneration = ++_requestGeneration;
+        _state = OperationsSurfaceState.Loading;
+        _metrics = Array.Empty<OperationsMetricView>();
+        _updatedAtUtc = null;
+        _message = null;
+        _previewMessage = null;
+
+        try
+        {
+            var query = CurrentQuery();
+            var result = await AnalyticsClient.GetAsync(query);
+            if (requestGeneration != _requestGeneration)
+            {
+                return;
+            }
+
+            _contractVersion = result.Metadata.ContractVersion;
+            _message = null;
+            if (!result.Succeeded)
+            {
+                _state = result.Code switch
+                {
+                    UiCapabilityResultCode.Denied => OperationsSurfaceState.Denied,
+                    UiCapabilityResultCode.Unavailable => OperationsSurfaceState.Unavailable,
+                    UiCapabilityResultCode.Retryable or UiCapabilityResultCode.Cancelled => OperationsSurfaceState.Offline,
+                    _ => OperationsSurfaceState.Error
+                };
+                return;
+            }
+
+            if (result.Value?.Items is not { } items)
+            {
+                _state = OperationsSurfaceState.Error;
+                _message = "The work summary could not be loaded. Refresh to try again.";
+                return;
+            }
+
+            _metrics = items.Select(item => new OperationsMetricView(
+                item.Id,
+                item.Label,
+                item.Value.ToString(CultureInfo.InvariantCulture),
+                item.Unit,
+                Trend: item.Trend)).ToArray();
+            _updatedAtUtc = result.Metadata.UpdatedAtUtc;
+            _state = _metrics.Count > 0 ? OperationsSurfaceState.Populated : OperationsSurfaceState.Empty;
+        }
+        catch (Exception)
+        {
+            if (requestGeneration != _requestGeneration)
+            {
+                return;
+            }
+
+            _metrics = Array.Empty<OperationsMetricView>();
+            _state = OperationsSurfaceState.Error;
+            _message = "The work summary could not be loaded. Try again when your connection is available.";
+        }
+    }
+
+    private async Task PreviewExportAsync()
+    {
+        var requestGeneration = _requestGeneration;
+        _previewMessage = null;
+        try
+        {
+            var result = await AnalyticsClient.ExportPreviewAsync(CurrentQuery());
+            if (requestGeneration != _requestGeneration)
+            {
+                return;
+            }
+
+            _previewMessage = result.Succeeded && result.Value is not null
+                ? $"Preview shows {result.Value.IncludedRows} items and {result.Value.ColumnNames.Count} fields. No file was saved or shared."
+                : "The preview is not available right now.";
+        }
+        catch (Exception)
+        {
+            if (requestGeneration != _requestGeneration)
+            {
+                return;
+            }
+
+            _previewMessage = "The preview could not be loaded. Try again.";
+        }
+    }
+
+    private AnalyticsQuery CurrentQuery() => new(
+        new PageRequest(1, 100),
+        _period,
+        NullIfEmpty(_region),
+        NullIfEmpty(_workType));
+
+    private static string? NullIfEmpty(string value) => string.IsNullOrWhiteSpace(value) ? null : value;
+}

@@ -1,0 +1,98 @@
+@page "/home-surface/{State}"
+@using SwiftAid.Contracts.Cases
+@using SwiftAid.UI.Components.Surfaces.Public
+
+<PageTitle>Home surface state fixture</PageTitle>
+
+<SwiftAidThemeProvider />
+<MudPopoverProvider />
+<MudDialogProvider />
+<MudSnackbarProvider />
+
+<PublicHomeSurface IsSignedIn="true"
+                   CaseQueueClient="@_caseQueueClient"
+                   HomeOverview="_overview"
+                   WorkerReportHref="/report" />
+
+@code {
+    [Parameter]
+    public string State { get; set; } = nameof(PublicHomeOverviewState.Loading);
+
+    private readonly ICaseQueueClient _caseQueueClient = null!;
+    private PublicHomeOverview _overview = new(
+        PublicHomeOverviewState.Loading,
+        null,
+        null,
+        null,
+        Array.Empty<PublicHomeCount>(),
+        Array.Empty<PublicHomeActivity>());
+
+    protected override void OnParametersSet()
+    {
+        if (!Enum.TryParse(State, ignoreCase: true, out PublicHomeOverviewState parsedState) ||
+            !Enum.IsDefined(parsedState))
+        {
+            parsedState = PublicHomeOverviewState.Unavailable;
+        }
+
+        var counts = CountsFor(parsedState);
+
+        var activity = parsedState == PublicHomeOverviewState.Populated
+            ? new[]
+            {
+                new PublicHomeActivity(
+                    PublicHomeActivityKind.CaseReported,
+                    DateTimeOffset.UtcNow.AddMinutes(-15),
+                    PublicHomeActivityDestination.Cases)
+            }
+            : Array.Empty<PublicHomeActivity>();
+
+        _overview = new PublicHomeOverview(
+            parsedState,
+            "Test worker",
+            null,
+            null,
+            counts,
+            activity);
+    }
+
+    private static IReadOnlyList<PublicHomeCount> CountsFor(PublicHomeOverviewState state) => state switch
+    {
+        PublicHomeOverviewState.Loading or PublicHomeOverviewState.Unavailable =>
+        [
+            new(PublicHomeCountKind.Cases, PublicHomeCountState.Unavailable, null),
+            new(PublicHomeCountKind.FollowUps, PublicHomeCountState.Unavailable, null)
+        ],
+        PublicHomeOverviewState.Denied =>
+        [
+            new(PublicHomeCountKind.Cases, PublicHomeCountState.Suppressed, null),
+            new(PublicHomeCountKind.FollowUps, PublicHomeCountState.Suppressed, null)
+        ],
+        PublicHomeOverviewState.Empty =>
+        [
+            new(PublicHomeCountKind.Cases, PublicHomeCountState.Available, 0),
+            new(PublicHomeCountKind.FollowUps, PublicHomeCountState.Available, 0)
+        ],
+        PublicHomeOverviewState.Stale =>
+        [
+            new(PublicHomeCountKind.Cases, PublicHomeCountState.Available, 3),
+            new(PublicHomeCountKind.FollowUps, PublicHomeCountState.Available, 1)
+        ],
+        PublicHomeOverviewState.Partial =>
+        [
+            new(PublicHomeCountKind.Cases, PublicHomeCountState.Available, 4),
+            new(PublicHomeCountKind.FollowUps, PublicHomeCountState.Unavailable, null)
+        ],
+        PublicHomeOverviewState.FreshnessUnknown =>
+        [
+            new(PublicHomeCountKind.Cases, PublicHomeCountState.Available, 5),
+            new(PublicHomeCountKind.FollowUps, PublicHomeCountState.Available, 2)
+        ],
+        PublicHomeOverviewState.Populated =>
+        [
+            new(PublicHomeCountKind.Cases, PublicHomeCountState.Available, 4),
+            new(PublicHomeCountKind.FollowUps, PublicHomeCountState.Available, 2)
+        ],
+        _ => []
+    };
+}

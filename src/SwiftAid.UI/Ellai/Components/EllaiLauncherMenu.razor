@@ -1,0 +1,78 @@
+@using SwiftAid.Contracts.Ellai
+
+<div class="ellai-launcher-menu">
+    <MudFabMenu Class="ellai-launcher-menu__control"
+                ButtonClass="ellai-launcher-menu__button"
+                StartIcon="@Icons.Material.Filled.SmartToy"
+                Color="Color.Primary"
+                AlignItems="AlignItems.End"
+                Direction="Direction.Top"
+                CloseOnMenuItemClicked="true"
+                DropShadow="false"
+                OpenOnMouseHover="false"
+                DampenItemsBackgroundColor="false"
+                aria-label="Open Ellai actions"
+                title="Ellai actions">
+        <MudFabMenuItem OnClick="() => SelectMode(EllaiMode.Ask)"
+                        Size="Size.Small"
+                        Variant="Variant.Filled"
+                        Label="Ask"
+                        StartIcon="@Icons.Material.Outlined.QuestionAnswer"
+                        Color="Color.Primary"
+                        DropShadow="false" />
+        @if (!PublicHelpOnly)
+        {
+        <MudFabMenuItem OnClick="() => SelectMode(EllaiMode.ShowMe)"
+                        Size="Size.Small"
+                        Variant="Variant.Filled"
+                        Label="Show Me"
+                        StartIcon="@Icons.Material.Outlined.Visibility"
+                        Color="Color.Primary"
+                        DropShadow="false" />
+        <MudFabMenuItem OnClick="() => SelectMode(EllaiMode.GuideMe)"
+                        Size="Size.Small"
+                        Variant="Variant.Filled"
+                        Label="Guide Me"
+                        StartIcon="@Icons.Material.Outlined.Explore"
+                        Color="Color.Primary"
+                        DropShadow="false" />
+        <MudFabMenuItem OnClick="() => SelectMode(EllaiMode.HelpMeWork)"
+                        Size="Size.Small"
+                        Variant="Variant.Filled"
+                        Label="Help Me Work"
+                        StartIcon="@Icons.Material.Outlined.BuildCircle"
+                        Color="Color.Primary"
+                        DropShadow="false" />
+        <MudFabMenuItem OnClick="() => SelectMode(EllaiMode.ExploreBranch)"
+                        Size="Size.Small"
+                        Variant="Variant.Filled"
+                        Label="Explore Branch"
+                        StartIcon="@Icons.Material.Outlined.AccountTree"
+                        Color="Color.Primary"
+                        DropShadow="false" />
+        <MudFabMenuItem OnClick="() => SelectMode(EllaiMode.ReviewEvidence)"
+                        Size="Size.Small"
+                        Variant="Variant.Filled"
+                        Label="Review Evidence"
+                        StartIcon="@Icons.Material.Outlined.FactCheck"
+                        Color="Color.Primary"
+                        DropShadow="false" />
+        }
+    </MudFabMenu>
+</div>
+
+@code {
+    [Parameter]
+    public EventCallback<EllaiMode> OnModeSelected { get; set; }
+
+    [Parameter]
+    public EventCallback OnCreateGuide { get; set; }
+
+    [Parameter]
+    public bool PublicHelpOnly { get; set; }
+
+    private async Task SelectMode(EllaiMode mode)
+    {
+        await OnModeSelected.InvokeAsync(mode);
+    }
+}

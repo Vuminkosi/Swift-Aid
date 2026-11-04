@@ -1,0 +1,102 @@
+@page "/profile"
+@using SwiftAid.Client.Presentation
+@using SwiftAid.Gateway.Presentation
+@using SwiftAid.Infrastructure.Identity
+@using SwiftAid.UI.Components.Surfaces.Account
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.AspNetCore.Identity
+@inject IServiceProvider ServiceProvider
+
+<PageTitle>My profile | SwiftAid</PageTitle>
+
+<AccountSettingsLayout>
+
+<ProfileSurface Snapshot="_snapshot" OnRefresh="RefreshAsync" OnSave="SaveAsync" OnUploadAvatar="UploadAvatarAsync" OnDeleteAvatar="DeleteAvatarAsync" />
+
+</AccountSettingsLayout>
+
+@code {
+    private ProfileSnapshot _snapshot = ProfileSnapshot.Loading;
+
+    private IUserProfileClient ProfileClient =>
+        (IUserProfileClient?)ServiceProvider.GetService(typeof(IUserProfileClient))
+        ?? CreateFallback()
+        ?? new UnavailableUserProfileClient();
+
+    private IUserProfileClient? CreateFallback()
+    {
+        var auth = (AuthenticationStateProvider?)ServiceProvider.GetService(typeof(AuthenticationStateProvider));
+        var users = (UserManager<SwiftAidUser>?)ServiceProvider.GetService(typeof(UserManager<SwiftAidUser>));
+        var profiles = (IUserProfileService?)ServiceProvider.GetService(typeof(IUserProfileService));
+        var verification = (IEmailVerificationService?)ServiceProvider.GetService(typeof(IEmailVerificationService));
+        var avatars = (IProfileAvatarService?)ServiceProvider.GetService(typeof(IProfileAvatarService));
+        var signIn = (SignInManager<SwiftAidUser>?)ServiceProvider.GetService(typeof(SignInManager<SwiftAidUser>));
+        return auth is null || users is null || profiles is null || verification is null || avatars is null || signIn is null
+            ? null
+            : new GatewayUserProfileClient(auth, users, profiles, verification, avatars, signIn);
+    }
+
+    protected override async Task OnInitializedAsync() => await RefreshAsync();
+
+    private async Task RefreshAsync()
+    {
+        var result = await ProfileClient.GetAsync();
+        _snapshot = Map(result, result.Value);
+    }
+
+    private async Task SaveAsync(ProfileEditRequest request)
+    {
+        _snapshot = _snapshot with { IsSaving = true, StatusMessage = null, StatusIsError = false };
+        var result = await ProfileClient.SaveAsync(new UserProfileEdit(
+            request.DisplayName, request.Phone, request.Country, request.Region, request.Locality));
+        _snapshot = Map(result, result.Value);
+    }
+
+    private async Task UploadAvatarAsync(ProfileAvatarUploadRequest request)
+    {
+        _snapshot = _snapshot with { IsSavingAvatar = true, StatusMessage = null, StatusIsError = false };
+        using var content = request.Content;
+        var result = await ProfileClient.UploadAvatarAsync(
+            new UserProfileAvatarUpload(request.ContentType, content));
+        _snapshot = Map(result, result.Value);
+    }
+
+    private async Task DeleteAvatarAsync()
+    {
+        _snapshot = _snapshot with { IsSavingAvatar = true, StatusMessage = null, StatusIsError = false };
+        var result = await ProfileClient.DeleteAvatarAsync();
+        _snapshot = Map(result, result.Value);
+    }
+
+    private static ProfileSnapshot Map(UiCapabilityResult<UserProfileState> result, UserProfileState? value)
+    {
+        if (value is null)
+        {
+            return result.Code == UiCapabilityResultCode.Denied
+                ? ProfileSnapshot.SignedOut
+                : ProfileSnapshot.Unavailable with
+                {
+                    StatusMessage = result.Message ?? ProfileSnapshot.Unavailable.StatusMessage
+                };
+        }
+
+        if (!value.IsSignedIn)
+        {
+            return ProfileSnapshot.SignedOut;
+        }
+
+        return new ProfileSnapshot(
+            ProfileViewState.Ready,
+            value.DisplayName,
+            value.Phone,
+            value.Country,
+            value.Region,
+            value.Locality,
+            value.Email,
+            value.EmailVerified,
+            IsSaving: false,
+            value.StatusMessage,
+            value.StatusIsError,
+            value.AvatarUrl);
+    }
+}

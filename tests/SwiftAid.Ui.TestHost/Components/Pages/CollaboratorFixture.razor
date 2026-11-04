@@ -1,0 +1,86 @@
+@page "/collaborator-fixture"
+@using SwiftAid.Contracts.Cases
+@using SwiftAid.Contracts.Commands
+@using SwiftAid.UI.Components.Surfaces.Operations.CaseDetail
+@using SwiftAid.UI.Components.Theme
+
+<SwiftAidThemeProvider />
+<MudPopoverProvider />
+<output id="fixture-ready">@_ready</output>
+<CaseCollaboratorsPanel CaseId="_client.CaseId" TimelineClient="_client" CommandClient="_client" CandidatesClient="_client" />
+
+@code {
+    [SupplyParameterFromQuery] public bool Denied { get; set; }
+    [SupplyParameterFromQuery] public bool Grant { get; set; }
+    [SupplyParameterFromQuery] public string? Terminal { get; set; }
+    private bool _ready;
+    private readonly FixtureClient _client = new();
+    protected override void OnParametersSet()
+    {
+        _client.Denied = Denied;
+        _client.GrantMode = Grant;
+        _client.Terminal = Terminal;
+    }
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (firstRender) { _ready = true; StateHasChanged(); }
+    }
+
+    private sealed class FixtureClient : ICaseTimelineClient, ICaseCommandClient, ICaseCollaboratorCandidatesClient
+    {
+        public Guid CaseId { get; } = Guid.NewGuid();
+        private Guid _grantId = Guid.NewGuid();
+        private CaseCommandInput? _first;
+        private CaseCommandInput? _rejected;
+        private bool _revoked;
+        public bool Denied { get; set; }
+        public bool GrantMode { get; set; }
+        public string? Terminal { get; set; }
+        private long _version = 3;
+        private bool _granted;
+        public Task<CaseCollaboratorCandidatePage?> GetAsync(Guid caseId, string? search, string? after, CancellationToken cancellationToken = default, bool followUpAssignees = false) =>
+            Task.FromResult<CaseCollaboratorCandidatePage?>(new([new("candidate-1", "private-recipient-id", "Synthetic colleague", ["ReadCase", "ManageFollowUp"])], null));
+        public Task<CaseTimelineResult> GetAsync(Guid caseId, int? limit, CancellationToken cancellationToken = default, long? beforeAggregateVersion = null) =>
+            Task.FromResult(Denied ? new CaseTimelineResult(CaseTimelineAccess.NotFoundOrNotAuthorized, null) : new CaseTimelineResult(CaseTimelineAccess.Found, new CaseTimeline(
+                new CaseTimelineHeader(CaseId, "org", "workspace", "SZ", "Active", "private-owner-id", _version, 1, DateTimeOffset.UtcNow), [],
+                Collaboration: new CaseCollaborationView(true, GrantMode && !_granted ? [] : [new CaseCollaboratorGrantView(_grantId, "private-recipient-id", "Synthetic colleague",
+                    ["ReadCase", "ManageFollowUp"], DateTimeOffset.UtcNow.AddHours(1), _revoked)]))));
+
+        public Task<CaseCommandResult> SendAsync(Guid caseId, CaseCommandInput input, CancellationToken cancellationToken = default)
+        {
+            if (input.CommandType == "GrantCaseCollaborator")
+            {
+                if (caseId != CaseId || input.ExpectedVersion != _version || input.GrantId is null || input.CommandId is null ||
+                    input.CollaboratorActorId != "private-recipient-id" || input.CollaborationActions != (CaseCollaborationActions.ReadCase | CaseCollaborationActions.ManageFollowUp) ||
+                    input.Reason != "Synthetic grant reason" || input.ExpiresAtUtc != new DateTimeOffset(2030, 12, 1, 15, 30, 0, TimeSpan.Zero))
+                    throw new InvalidOperationException("Unexpected synthetic grant.");
+                if (_rejected is not null && (input.CommandId == _rejected.CommandId || input.GrantId == _rejected.GrantId))
+                    throw new InvalidOperationException("A rejected grant must be reviewed as a new request.");
+                if (Enum.TryParse<CaseCommandStatus>(Terminal, out var terminal) &&
+                    terminal is CaseCommandStatus.Conflict or CaseCommandStatus.Denied or CaseCommandStatus.Invalid)
+                {
+                    Denied = terminal == CaseCommandStatus.Denied;
+                    _rejected = input;
+                    Terminal = null;
+                    _version++;
+                    return Task.FromResult(new CaseCommandResult(terminal, input.CommandId.Value, [], null, null));
+                }
+                if (_first is null) { _first = input; return Task.FromResult(new CaseCommandResult(CaseCommandStatus.Unavailable, input.CommandId.Value, [], null, null)); }
+                if (_first != input) throw new InvalidOperationException("Grant retry changed.");
+                _grantId = input.GrantId.Value; _granted = true; _first = null;
+                return Task.FromResult(new CaseCommandResult(CaseCommandStatus.Accepted, input.CommandId.Value, [Guid.NewGuid()], ++_version, 1));
+            }
+            if (caseId != CaseId || input.GrantId != _grantId || input.ExpectedVersion != _version ||
+                input.CommandType != "RevokeCaseCollaborator" || input.Reason != "Synthetic reason" || input.CommandId is null)
+                throw new InvalidOperationException("Unexpected synthetic revocation.");
+            if (_first is null)
+            {
+                _first = input;
+                return Task.FromResult(new CaseCommandResult(CaseCommandStatus.Unavailable, input.CommandId.Value, [], null, null));
+            }
+            if (_first != input) throw new InvalidOperationException("Retry changed the frozen command.");
+            _revoked = true;
+            return Task.FromResult(new CaseCommandResult(CaseCommandStatus.Accepted, input.CommandId.Value, [Guid.NewGuid()], ++_version, 1));
+        }
+    }
+}

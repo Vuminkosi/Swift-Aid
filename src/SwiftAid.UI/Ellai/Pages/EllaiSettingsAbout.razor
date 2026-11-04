@@ -1,0 +1,285 @@
+@using SwiftAid.UI.Ellai.Components
+@using SwiftAid.Contracts.Ellai
+@page "/ellai/about"
+@implements IDisposable
+@inject IEllaiReviewClient ReviewClient
+@inject IDialogService Dialogs
+@inject IBrowserViewportService Viewport
+@inject IJSRuntime JS
+
+<MudContainer MaxWidth="MaxWidth.Medium" Class="ellai-settings">
+    <section class="ellai-settings__hero" aria-labelledby="ellai-settings-title">
+        <MudText Typo="Typo.overline" Class="ellai-settings__eyebrow">YOUR SWIFTAID GUIDE</MudText>
+        <MudText Typo="Typo.h3" HtmlTag="h1" id="ellai-settings-title" Class="ellai-settings__title">
+            Meet Ellai
+        </MudText>
+        <MudText Typo="Typo.body1" Class="ellai-settings__intro">
+            A helpful voice for finding your way around SwiftAid, understanding its features,
+            and taking the next step. You stay in control of what you share and what happens next.
+        </MudText>
+    </section>
+
+    <MudTabs Class="ellai-settings__tabs" aria-label="Ellai information and settings">
+        <MudTabPanel Text="About & settings">
+            <div class="ellai-settings__content">
+                <MudPaper Outlined="true" Class="ellai-settings__card">
+                    <MudText Typo="Typo.h6" HtmlTag="h2">Languages</MudText>
+                    <MudSelect T="string" Label="Your input language" Value="@_languages.InputLanguage"
+                               ValueChanged="SetInputLanguageAsync" Disabled="@(!_languagesLoaded)">
+                        @foreach (var language in LanguageOptions)
+                        {
+                            <MudSelectItem T="string" Value="@language.Code">@language.Name</MudSelectItem>
+                        }
+                    </MudSelect>
+                    <MudSelect T="string" Label="Ellai's reply language" Value="@_languages.OutputLanguage"
+                               ValueChanged="SetOutputLanguageAsync" Disabled="@(!_languagesLoaded)">
+                        @foreach (var language in LanguageOptions)
+                        {
+                            <MudSelectItem T="string" Value="@language.Code">@language.Name</MudSelectItem>
+                        }
+                    </MudSelect>
+                    <MudText Typo="Typo.caption">Default: English for input and replies. Choices are saved on this device.</MudText>
+                    <MudText Typo="Typo.caption">Voice input uses English. Shona, Nyanja and Tsonga replies can be read aloud. Translations may contain mistakes.</MudText>
+                    @if (_languages.OutputLanguage == "eng")
+                    {
+                        <MudSelect T="string" Label="Ellai's English voice" Value="@_languages.EnglishVoiceId"
+                                   ValueChanged="SetEnglishVoiceAsync" Disabled="@(!_languagesLoaded || _englishVoices.Count == 0)">
+                            @foreach (var voice in _englishVoices)
+                            {
+                                <MudSelectItem T="string" Value="@voice.VoiceId">@voice.Name</MudSelectItem>
+                            }
+                        </MudSelect>
+                        <MudText Typo="Typo.caption">Default: Heart, with a calm speaking pace. Changes apply to new messages and the next Live Speak session.</MudText>
+                        @if (_languagesLoaded && _englishVoices.Count == 0)
+                        {
+                            <MudText Typo="Typo.caption" role="status">Voice choices are unavailable right now.</MudText>
+                        }
+                    }
+                    @if (_languageSaveFailed)
+                    {
+                        <MudAlert Severity="Severity.Warning" role="status">Your language choices couldn't be saved. Please try again.</MudAlert>
+                    }
+                </MudPaper>
+                <MudPaper Outlined="true" Class="ellai-settings__card">
+                    <MudText Typo="Typo.h6" HtmlTag="h2">A little help, when you need it</MudText>
+                    <MudText Typo="Typo.body2">
+                        Ask Ellai a question, explore SwiftAid, or get guidance through a supported task.
+                        Ellai explains what is happening and leaves important choices with you.
+                    </MudText>
+                </MudPaper>
+
+                <MudPaper Outlined="true" Class="ellai-settings__card">
+                    <MudText Typo="Typo.h6" HtmlTag="h2">Choose how to connect</MudText>
+                    <MudText Typo="Typo.body2">
+                        Type a message or use the microphone to speak. You can keep typing when voice is unavailable.
+                    </MudText>
+                </MudPaper>
+
+                <MudPaper Outlined="true" Class="ellai-settings__card">
+                    <MudText Typo="Typo.h6" HtmlTag="h2">Voice controls and defaults</MudText>
+                    <dl class="ellai-settings__defaults">
+                        <dt>Read replies aloud</dt><dd>Off for typed conversations. Select Listen to Ellai to read this and new replies aloud.</dd>
+                        <dt>Live Speak replies</dt><dd>Voice turns on when you start Live Speak. You can turn it off beside the status.</dd>
+                        <dt>Microphone</dt><dd>Off until you select Record or Live Speak. Live Speak stays ready between turns until you stop it.</dd>
+                        <dt>Voice speed</dt><dd>Calm</dd>
+                    </dl>
+                    <MudText Typo="Typo.caption">Your listening choice lasts for the open conversation. A new conversation or reload uses these defaults.</MudText>
+                </MudPaper>
+
+                <MudPaper Outlined="true" Class="ellai-settings__card">
+                    <MudText Typo="Typo.h6" HtmlTag="h2">Your choices stay yours</MudText>
+                    <MudText Typo="Typo.body2">
+                        Ellai can help prepare a next step, but you review and approve actions that change
+                        information. Starting the microphone is always your choice.
+                    </MudText>
+                </MudPaper>
+
+                <MudPaper Outlined="true" Class="ellai-settings__card">
+                    <MudText Typo="Typo.h6" HtmlTag="h2">Your privacy</MudText>
+                    <MudText Typo="Typo.body2">
+                        For privacy, avoid sharing names, contact details, or other details that could identify someone.
+                    </MudText>
+                </MudPaper>
+
+                <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Class="ellai-settings__boundary">
+                    Ellai helps with SwiftAid and its workflows. It does not provide medical or veterinary
+                    advice, diagnosis, or emergency response.
+                </MudAlert>
+            </div>
+        </MudTabPanel>
+
+        <MudTabPanel Text="Session history" aria-label="Previous Ellai sessions">
+            <div class="ellai-settings__history">
+                <header class="ellai-history__header">
+                    <div><h2>Your conversations</h2><p>Revisit a question or pick up the context of an earlier conversation.</p></div>
+                    <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Outlined.Refresh" OnClick="RefreshAsync" Disabled="@_loading">Refresh sessions</MudButton>
+                </header>
+                @if (_loading)
+                {
+                    <MudProgressLinear Indeterminate="true" aria-label="Loading sessions" />
+                }
+                @if (_loadFailed)
+                {
+                    <MudAlert Severity="Severity.Warning" role="status">Your sessions couldn't be loaded. Please try Refresh sessions.</MudAlert>
+                }
+                else if (!_loading && _sessions.Count == 0)
+                {
+                    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" role="status">
+                        No conversations yet for your current account or guest session.
+                    </MudAlert>
+                }
+                else
+                {
+                    @foreach (var group in _sessions.OrderByDescending(item => item.UpdatedAtUtc).GroupBy(item => HistoryDateGroup(item.UpdatedAtUtc)))
+                    {
+                        <h3 class="ellai-history__group">@group.Key</h3>
+                        @foreach (var session in group)
+                        {
+                        <article @key="session.SessionId" class="ellai-settings__session">
+                            <div class="ellai-history__icon" aria-hidden="true"><MudIcon Icon="@Icons.Material.Outlined.Forum" Size="Size.Small" /></div>
+                            <div class="ellai-history__body">
+                                <h4>@(string.IsNullOrWhiteSpace(session.Preview) ? DisplayMode(session.Mode) : session.Preview)</h4>
+                                <div class="ellai-history__metadata">
+                                    <time datetime="@session.UpdatedAtUtc.ToString("O")">@session.UpdatedAtUtc.ToLocalTime().ToString("dd MMM · HH:mm")</time>
+                                    @if (session.TurnCount is { } turns) { <span>@turns @(turns == 1 ? "message sent" : "messages sent")</span> }
+                                    <span class="ellai-history__status">@DisplayStatus(session.Status)</span>
+                                </div>
+                            </div>
+                            <MudButton Class="ellai-history__open" Size="Size.Small" Color="Color.Primary" Variant="Variant.Text" EndIcon="@Icons.Material.Outlined.ArrowForward" OnClick="@(() => OpenConversationAsync(session.SessionId))">View conversation</MudButton>
+                        </article>
+                        }
+                    }
+                }
+                @if (_nextOffset is not null)
+                {
+                    <MudButton Variant="Variant.Text" Disabled="@_loading" OnClick="LoadMoreAsync">Load older sessions</MudButton>
+                }
+            </div>
+        </MudTabPanel>
+    </MudTabs>
+</MudContainer>
+
+@code {
+    private static readonly (string Code, string Name)[] LanguageOptions =
+        [("eng", "English"), ("sna", "Shona"), ("ssw", "siSwati"), ("nya", "Nyanja"), ("tso", "Tsonga")];
+    private EllaiLanguagePreferences _languages = new();
+    private readonly SemaphoreSlim _languageSaveGate = new(1, 1);
+    private bool _languagesLoaded;
+    private bool _languageSaveFailed;
+    private IReadOnlyList<EllaiEnglishVoiceDto> _englishVoices = [];
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        try
+        {
+            await using var module = await JS.InvokeAsync<IJSObjectReference>("import", "./_content/SwiftAid.UI/js/ellai-language-preferences.js");
+            var saved = await module.InvokeAsync<EllaiLanguagePreferences>("load");
+            _languages = saved is not null && saved.IsValid() ? saved : new();
+            _languagesLoaded = true;
+            _englishVoices = await ReviewClient.ListEnglishVoicesAsync(_lifetime.Token);
+        }
+        catch (JSException) { _languageSaveFailed = true; }
+        catch (JSDisconnectedException) { return; }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { return; }
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private Task SetInputLanguageAsync(string language) => SaveLanguagesAsync(_languages with { InputLanguage = language });
+    private Task SetOutputLanguageAsync(string language) => SaveLanguagesAsync(_languages with { OutputLanguage = language });
+    private Task SetEnglishVoiceAsync(string voice) => _englishVoices.Any(item => item.VoiceId == voice)
+        ? SaveLanguagesAsync(_languages with { EnglishVoiceId = voice }) : Task.CompletedTask;
+
+    private async Task SaveLanguagesAsync(EllaiLanguagePreferences value)
+    {
+        if (!value.IsValid()) return;
+        // Keep the next selection based on the latest choice even while the
+        // preceding browser-storage interop is awaiting its response.
+        _languages = value;
+        await _languageSaveGate.WaitAsync();
+        try
+        {
+            await using var module = await JS.InvokeAsync<IJSObjectReference>("import", "./_content/SwiftAid.UI/js/ellai-language-preferences.js");
+            _languageSaveFailed = !await module.InvokeAsync<bool>("save", value);
+        }
+        catch (JSException) { _languageSaveFailed = true; }
+        catch (JSDisconnectedException) { _languageSaveFailed = true; }
+        finally { _languageSaveGate.Release(); }
+    }
+
+    private readonly CancellationTokenSource _lifetime = new();
+    private readonly List<EllaiSessionHistoryItemDto> _sessions = [];
+    private int? _nextOffset;
+    private bool _loading;
+    private bool _loadFailed;
+
+    protected override Task OnInitializedAsync() => RefreshAsync();
+
+    private async Task RefreshAsync()
+    {
+        _sessions.Clear();
+        _nextOffset = null;
+        await LoadAsync(0);
+    }
+
+    private Task LoadMoreAsync() => LoadAsync(_nextOffset ?? 0);
+
+    private async Task LoadAsync(int offset)
+    {
+        _loading = true;
+        _loadFailed = false;
+        try
+        {
+            var page = await ReviewClient.ListSessionHistoryAsync(offset, _lifetime.Token);
+            if (page is null) { _loadFailed = true; return; }
+            foreach (var session in page.Sessions)
+                if (!_sessions.Any(existing => existing.SessionId == session.SessionId)) _sessions.Add(session);
+            _nextOffset = page.NextOffset;
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { }
+        catch (Exception) { _loadFailed = true; }
+        finally { _loading = false; }
+    }
+
+    private async Task OpenConversationAsync(string sessionId)
+    {
+        var breakpoint = await Viewport.GetCurrentBreakpointAsync();
+        var parameters = new DialogParameters<EllaiConversationDialog>
+        {
+            { dialog => dialog.SessionId, sessionId },
+        };
+        await Dialogs.ShowAsync<EllaiConversationDialog>("Conversation", parameters, new DialogOptions
+        {
+            MaxWidth = MaxWidth.Medium,
+            FullWidth = true,
+            FullScreen = OperatingSystem.IsAndroid() || OperatingSystem.IsIOS() || breakpoint <= Breakpoint.Sm,
+            CloseButton = true,
+            CloseOnEscapeKey = true,
+        });
+    }
+
+    public void Dispose() { _lifetime.Cancel(); _lifetime.Dispose(); }
+
+    private static string DisplayMode(string mode) => mode switch
+    {
+        "Ask" => "Asked Ellai",
+        "Guide" or "GuideMe" => "Guided session",
+        "HelpMeWork" => "Task assistance",
+        _ => "Ellai session",
+    };
+
+    private static string HistoryDateGroup(DateTimeOffset date)
+    {
+        var day = date.ToLocalTime().Date;
+        var today = DateTimeOffset.Now.Date;
+        return day == today ? "Today" : day == today.AddDays(-1) ? "Yesterday" : day.ToString("MMMM yyyy");
+    }
+
+    private static string DisplayStatus(string status) => status switch
+    {
+        "Active" or "Open" => "In progress",
+        "Completed" or "Closed" => "Completed",
+        "Canceled" or "Cancelled" => "Ended",
+        _ => "Saved session",
+    };
+}

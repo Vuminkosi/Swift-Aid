@@ -1,0 +1,110 @@
+.operations-country-map {
+    display: grid;
+    gap: 0.5rem;
+    min-width: 0;
+}
+
+.operations-country-map__svg {
+    display: block;
+    width: 100%;
+    max-height: 30rem;
+    border: 1px solid var(--sa-border);
+    border-radius: var(--sa-radius-control, 0.5rem);
+    background: var(--sa-surface-subtle);
+}
+
+.operations-country-map__country {
+    fill: var(--sa-surface);
+    stroke: var(--mud-palette-divider);
+    stroke-width: 0.45;
+    vector-effect: non-scaling-stroke;
+}
+
+.operations-country-map__country-group--selectable {
+    cursor: pointer;
+}
+
+.operations-country-map__country-group--selectable:hover .operations-country-map__country,
+.operations-country-map__country-group--selectable:focus-visible .operations-country-map__country {
+    stroke: var(--sa-text-primary);
+    stroke-width: 1.4;
+}
+
+.operations-country-map__country-group--selectable:focus-visible {
+    outline: none;
+}
+
+.operations-country-map__country--human {
+    fill: var(--mud-palette-primary);
+}
+
+.operations-country-map__country--animal {
+    fill: var(--mud-palette-secondary);
+}
+
+.operations-country-map__country--both {
+    fill: url(#operations-map-human-animal);
+}
+
+.operations-country-map__country--selected {
+    stroke: var(--sa-text-primary);
+    stroke-width: 1.5;
+}
+
+.operations-country-map__legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1rem;
+    color: var(--sa-text-secondary);
+    font-size: 0.875rem;
+}
+
+.operations-country-map__legend span {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+.operations-country-map__swatch {
+    display: inline-block;
+    width: 0.8rem;
+    height: 0.8rem;
+    border: 1px solid var(--mud-palette-divider);
+    border-radius: 0.2rem;
+    background: var(--sa-surface);
+}
+
+.operations-country-map__swatch--human {
+    background: var(--mud-palette-primary);
+}
+
+.operations-country-map__swatch--animal {
+    background: var(--mud-palette-secondary);
+}
+
+.operations-country-map__swatch--both {
+    background: linear-gradient(90deg, var(--mud-palette-primary) 50%, var(--mud-palette-secondary) 50%);
+}
+
+.operations-country-map__status {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.75rem;
+    border-radius: var(--sa-radius-control, 0.5rem);
+    color: var(--sa-text-secondary);
+    background: var(--sa-surface-subtle);
+}
+
+@media (max-width: 600px) {
+    .operations-country-map__svg {
+        max-height: 18rem;
+    }
+
+    .operations-country-map__legend {
+        gap: 0.4rem 0.75rem;
+        font-size: 0.75rem;
+    }
+}

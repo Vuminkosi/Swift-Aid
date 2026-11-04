@@ -1,0 +1,32 @@
+.session-editor {
+    min-width: 0;
+    width: 100%;
+}
+
+.session-editor__fields {
+    box-sizing: border-box;
+    max-width: 100%;
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    border: 0;
+}
+
+.session-editor__material-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin-top: 8px;
+}
+
+.session-editor__material-row .mud-input-control {
+    flex: 1;
+}
+
+.session-editor__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    margin-top: 16px;
+}

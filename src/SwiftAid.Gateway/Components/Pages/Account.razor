@@ -1,0 +1,149 @@
+@page "/account"
+@using SwiftAid.Client.Presentation
+@using SwiftAid.UI.Components.Surfaces.Account
+@using SwiftAid.UI.Components.Surfaces.Public
+@inject IServiceProvider ServiceProvider
+
+<PageTitle>Account | SwiftAid</PageTitle>
+
+<AccountSettingsLayout>
+        <AccountSurface Snapshot="_snapshot"
+                        OnSignIn="SignInAsync"
+                        OnSignOut="SignOutAsync"
+                        OnSelectWorkspace="SelectWorkspaceAsync"
+                        OnRefresh="RefreshAsync"
+                        SignInHref="/sign-in?returnUrl=%2Fdashboard"
+                        RegisterHref="/register"
+                        GuestReportHref="/report"
+                        ManageMethodsHref="/sign-in-methods"
+                        EditProfileHref="/profile"
+                        OrganizationsHref="/organizations"
+                        ParticipationHref="/participation"
+                        NotificationsHref="/notifications"
+                        SecurityHref="/security"
+                        SyncHref="/sync"
+                        PrivacyHref="/privacy"
+                        AboutHref="/about" />
+</AccountSettingsLayout>
+
+@code {
+    private AccountPresentationSnapshot _snapshot = AccountPresentationSnapshot.Unavailable;
+
+    private IAccountPresentationClient AccountClient =>
+        (IAccountPresentationClient?)ServiceProvider.GetService(typeof(IAccountPresentationClient))
+        ?? new UnavailableAccountPresentationClient();
+
+    private IWorkspaceAccessClient WorkspaceClient =>
+        (IWorkspaceAccessClient?)ServiceProvider.GetService(typeof(IWorkspaceAccessClient))
+        ?? new UnavailableWorkspaceAccessClient();
+
+    protected override Task OnInitializedAsync() => RefreshAsync();
+
+    private async Task RefreshAsync()
+    {
+        var accountResult = await AccountClient.GetStateAsync();
+        var workspaceResult = await WorkspaceClient.GetStateAsync();
+        _snapshot = Map(accountResult, workspaceResult);
+    }
+
+    private async Task SignInAsync(string providerId)
+    {
+        var result = await AccountClient.BeginSignInAsync(providerId);
+        if (result.Value is not null)
+        {
+            var workspaceResult = await WorkspaceClient.GetStateAsync();
+            _snapshot = Map(result, workspaceResult);
+        }
+        else
+        {
+            await RefreshAsync();
+            _snapshot = _snapshot with
+            {
+                StatusMessage = result.Message ?? "Couldn't complete sign-in. Try again or continue as a guest.",
+                StatusIsError = result.Code is not UiCapabilityResultCode.Cancelled
+            };
+        }
+    }
+
+    private async Task SignOutAsync()
+    {
+        var result = await AccountClient.SignOutAsync();
+        var workspaceResult = await WorkspaceClient.GetStateAsync();
+        _snapshot = Map(result, workspaceResult);
+        if (result.Value is null)
+        {
+            _snapshot = _snapshot with
+            {
+                StatusMessage = result.Message ?? "Sign-out could not be confirmed. Your saved guest drafts remain available.",
+                StatusIsError = true
+            };
+        }
+    }
+
+    private async Task SelectWorkspaceAsync(string workspaceId)
+    {
+        var result = await WorkspaceClient.SelectWorkspaceAsync(workspaceId);
+        var accountResult = await AccountClient.GetStateAsync();
+        _snapshot = Map(accountResult, result);
+        if (result.Value is not null)
+        {
+            _snapshot = _snapshot with
+            {
+                StatusMessage = result.Message ?? "Workspace view changed. Your access is unchanged.",
+                StatusIsError = false
+            };
+        }
+    }
+
+    private static AccountPresentationSnapshot Map(
+        UiCapabilityResult<AccountPresentationState> accountResult,
+        UiCapabilityResult<WorkspaceAccessState> workspaceResult)
+    {
+        if (accountResult.Value is not { } account)
+            return AccountPresentationSnapshot.Unavailable with
+            {
+                ViewState = accountResult.Code == UiCapabilityResultCode.Denied
+                    ? AccountViewState.Denied
+                    : AccountViewState.Unavailable,
+                StatusMessage = accountResult.Message
+            };
+
+        var workspaces = workspaceResult.Value;
+        var providers = account.Providers.Select(provider => new AccountProviderView(
+            provider.Id,
+            provider.Name,
+            !provider.IsAvailable
+                ? AccountProviderState.Unavailable
+                : provider.IsConnected
+                    ? AccountProviderState.Connected
+                    : AccountProviderState.NotConnected,
+            provider.StatusMessage)).ToArray();
+
+        var viewState = accountResult.Code switch
+        {
+            UiCapabilityResultCode.Denied => AccountViewState.Denied,
+            UiCapabilityResultCode.Success => AccountViewState.Available,
+            _ => AccountViewState.Unavailable
+        };
+
+        return new AccountPresentationSnapshot(
+            viewState,
+            account.IsSignedIn,
+            account.DisplayName,
+            providers,
+            workspaces is null
+                ? []
+                : workspaces.Workspaces.Select(workspace => new AccountWorkspaceView(
+                    workspace.Id,
+                    workspace.Name,
+                    string.Equals(workspace.Id, workspaces.SelectedWorkspaceId, StringComparison.Ordinal))).ToArray(),
+            workspaceResult.Code == UiCapabilityResultCode.Success && workspaceResult.Metadata.IsAvailable && workspaces is not null,
+            workspaces?.SelectedWorkspaceId,
+            workspaces is null
+                ? null
+                : workspaces.Workspaces.FirstOrDefault(x => x.Id == workspaces.SelectedWorkspaceId)?.Name,
+            account.StatusMessage ?? (account.IsSignedIn ? workspaceResult.Message : null),
+            account.StatusIsError || (account.IsSignedIn
+                && workspaceResult.Code is not UiCapabilityResultCode.Success and not UiCapabilityResultCode.Unavailable));
+    }
+}

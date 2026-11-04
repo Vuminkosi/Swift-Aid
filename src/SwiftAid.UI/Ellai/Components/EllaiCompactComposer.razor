@@ -1,0 +1,349 @@
+@using Microsoft.AspNetCore.Components.Web
+@using Microsoft.JSInterop
+@using SwiftAid.Contracts.Ellai
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+
+<div class="ellai-composer" role="region" aria-label="Ellai voice and text controls"
+     style="@PositionStyle" @ref="_rootElement">
+    <div class="ellai-composer__move-row">
+        <span class="ellai-composer__handle" tabindex="0" role="button" aria-label="Move Ellai composer. Drag in any direction, or use the arrow keys to move and Home to reset."
+              @onkeydown="OnHandleKeyDown" title="Drag to move">
+            <MudIcon Icon="@Icons.Material.Filled.OpenWith" Size="Size.Small" />
+        </span>
+        <span class="ellai-composer__header-actions">
+            <MudIconButton Icon="@Icons.Material.Filled.Settings" Size="Size.Small" Color="Color.Default"
+                           OnClick="OnOpenSettings" aria-label="Ellai About and settings"
+                           title="Ellai About and settings" />
+            <MudIconButton Icon="@Icons.Material.Filled.StopCircle" Size="Size.Small" Color="Color.Error"
+                           OnClick="OnCancel" Disabled="@(!CanCancel)" aria-label="End Ellai session"
+                           title="End Ellai session" />
+            <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" Color="Color.Default"
+                           OnClick="OnClose" aria-label="Close Ellai composer"
+                           title="Close Ellai composer" />
+        </span>
+    </div>
+    <div class="ellai-composer__input-row">
+        <div class="ellai-composer__field-wrap">
+            <MudTextField T="string" Value="@InputText" ValueChanged="OnInputChanged"
+                          Label="Message Ellai" Placeholder="Ask Ellai…" MaxLength="8000" Lines="1" Sizing="InputSizing.Auto" MaxLines="5"
+                          Disabled="@(IsRecordingAudio || IsLiveSpeaking)"
+                          Immediate="true" />
+            <span class="ellai-composer__field-actions">
+                @if (IsRecordingAudio && OnStopVoice.HasDelegate)
+                {
+                    <MudIconButton Icon="@Icons.Material.Filled.StopCircle" Color="Color.Error" Size="Size.Small"
+                                   OnClick="OnStopVoice"
+                                   aria-label="@(IsLiveSpeaking ? "Stop the live microphone session" : "Stop recording for transcription")" />
+                }
+                else
+                {
+                    <MudIconButton Icon="@Icons.Material.Filled.Mic" Color="Color.Default" Size="Size.Small"
+                                   OnClick="OnStartVoice"
+                                   Disabled="@(!CanUseMicrophone || !OnStartVoice.HasDelegate || IsLiveSpeaking)"
+                                   aria-label="@(CanUseMicrophone && OnStartVoice.HasDelegate ? "Record a voice question" : "Voice recording unavailable")"
+                                   title="@(CanUseMicrophone && OnStartVoice.HasDelegate ? "After you stop recording, Ellai transcribes and sends your question automatically." : "Voice recording is unavailable.")" />
+                }
+                @if (IsLiveSpeaking && OnStopVoice.HasDelegate)
+                {
+                    <MudIconButton Icon="@Icons.Material.Filled.GraphicEq" Color="Color.Primary"
+                                   Class="ellai-composer__live-speak ellai-composer__live-speak--active"
+                                   OnClick="OnStopVoice" data-ellai-live-speak="true"
+                                   aria-pressed="true" aria-label="Stop the live microphone session"
+                                   title="Listening. Completed turns are sent automatically; select to stop the microphone." />
+                }
+                else if (string.IsNullOrWhiteSpace(InputText))
+                {
+                    <MudIconButton Icon="@Icons.Material.Filled.GraphicEq" Color="Color.Default"
+                                   Class="ellai-composer__live-speak"
+                                   OnClick="OnStartRealtimeVoice"
+                                   Disabled="@(!CanUseRealtimeMicrophone || !OnStartRealtimeVoice.HasDelegate)"
+                                   data-ellai-audio-unlock="true"
+                                   aria-label="@(CanUseRealtimeMicrophone && OnStartRealtimeVoice.HasDelegate ? "Start live voice question" : "Live voice question unavailable")"
+                                   title="@(CanUseRealtimeMicrophone && OnStartRealtimeVoice.HasDelegate ? "Speak naturally. Completed turns are sent automatically while the microphone stays ready." : "Live voice questions are unavailable.")" />
+                }
+                else
+                {
+                    <MudIconButton Icon="@Icons.Material.Filled.Send" Color="Color.Primary"
+                                   OnClick="OnSend" Disabled="@(!CanSend)" aria-label="Send to Ellai" />
+                }
+            </span>
+        </div>
+    </div>
+    @if (!string.IsNullOrWhiteSpace(SentMessage))
+    {
+        <MudText Typo="Typo.caption" Class="ellai-composer__sent-message" aria-label="Your latest message">
+            @SentMessage
+        </MudText>
+    }
+    @if (!string.IsNullOrWhiteSpace(ResponseText))
+    {
+        <MudText Typo="Typo.caption" Class="ellai-composer__response" aria-live="polite">
+            @ResponseText
+        </MudText>
+    }
+    @if (!string.IsNullOrWhiteSpace(LivePartialTranscript))
+    {
+        <p class="ellai-composer__partial-transcript" aria-live="off">
+            @LivePartialTranscript
+        </p>
+    }
+    <div class="ellai-composer__status-row">
+    <EllaiStatusLine StatusText="@StatusText" Phase="@Phase" Placement="@Placement" />
+    @if (CanPlayResponse || IsListeningEnabled)
+    {
+        <div class="ellai-composer__speech-action">
+            <MudIconButton Icon="@(IsListeningEnabled ? Icons.Material.Filled.VolumeUp : Icons.Material.Filled.VolumeOff)"
+                           Color="@(IsListeningEnabled ? Color.Primary : Color.Default)" Size="Size.Small"
+                           OnClick="OnToggleResponseAudio"
+                           data-ellai-audio-unlock="true"
+                           aria-pressed="@(IsListeningEnabled ? "true" : "false")"
+                           aria-label="@(IsListeningEnabled ? "Turn off Ellai voice" : "Listen to Ellai")"
+                           title="@(IsListeningEnabled ? "Stop reading replies aloud" : "Read this and new replies aloud")" />
+            <span>@(IsListeningEnabled ? "Voice on" : "Listen to Ellai")</span>
+            @if (IsListeningEnabled)
+            {
+                <MudIconButton Icon="@(MicrophoneActive ? Icons.Material.Filled.Mic : Icons.Material.Filled.MicOff)"
+                               Color="@(MicrophoneActive ? Color.Primary : Color.Default)" Size="Size.Small"
+                               OnClick="@(MicrophoneActive ? OnStopVoice : OnStartRealtimeVoice)"
+                               Disabled="@(MicrophoneActive ? !OnStopVoice.HasDelegate : !CanUseRealtimeMicrophone || !OnStartRealtimeVoice.HasDelegate)"
+                               data-ellai-microphone-toggle="true" data-ellai-audio-unlock="true"
+                               aria-pressed="@(MicrophoneActive ? "true" : "false")"
+                               aria-label="@(MicrophoneActive ? "Turn off microphone" : "Turn on microphone")"
+                               title="@(MicrophoneActive ? "Stop listening; keep reading replies aloud" : "Start listening for your next question")" />
+                <span>@(MicrophoneActive ? "Mic on" : "Mic off")</span>
+            }
+        </div>
+    }
+    </div>
+</div>
+
+@code {
+    private const double MoveStep = 24;
+    private bool MicrophoneActive => IsLiveSpeaking || IsRecordingAudio;
+
+    private ElementReference _rootElement;
+    private IJSObjectReference? _dragModule;
+    private DotNetObjectReference<EllaiCompactComposer>? _dotnetReference;
+    private bool _dragAttached;
+
+    [Parameter]
+    public string? InputText { get; set; }
+
+    [Parameter]
+    public string? StatusText { get; set; }
+
+    [Parameter]
+    public string? ResponseText { get; set; }
+
+    [Parameter]
+    public string? LivePartialTranscript { get; set; }
+
+    [Parameter]
+    public string? Phase { get; set; }
+
+    [Parameter]
+    public EllaiSurfacePlacement Placement { get; set; } = EllaiSurfacePlacement.Floating;
+
+    [Parameter]
+    public bool CanSend { get; set; }
+
+    [Parameter]
+    public bool CanCancel { get; set; } = true;
+
+    [Parameter]
+    public bool CanUseMicrophone { get; set; }
+
+    [Parameter]
+    public bool CanUseRealtimeMicrophone { get; set; }
+
+    [Parameter]
+    public bool IsLiveSpeaking { get; set; }
+
+    [Parameter]
+    public bool IsRecordingAudio { get; set; }
+
+    [Parameter]
+    public bool CanPlayResponse { get; set; }
+
+    [Parameter]
+    public bool IsListeningEnabled { get; set; }
+
+    [Parameter]
+    public string? SentMessage { get; set; }
+
+    [Parameter]
+    public bool IsPlayingResponse { get; set; }
+
+    [Parameter]
+    public EllaiComposerPosition? Position { get; set; }
+
+    [Parameter]
+    public EventCallback<string?> InputTextChanged { get; set; }
+
+    [Parameter]
+    public EventCallback OnSend { get; set; }
+
+    [Parameter]
+    public EventCallback OnCancel { get; set; }
+
+    [Parameter]
+    public EventCallback OnClose { get; set; }
+
+    [Parameter]
+    public EventCallback OnOpenSettings { get; set; }
+
+    [Parameter]
+    public EventCallback OnStartVoice { get; set; }
+
+    [Parameter]
+    public EventCallback OnStartRealtimeVoice { get; set; }
+
+    [Parameter]
+    public EventCallback OnStopVoice { get; set; }
+
+    [Parameter]
+    public EventCallback OnToggleResponseAudio { get; set; }
+
+    [Parameter]
+    public EventCallback<EllaiComposerPosition?> PositionChanged { get; set; }
+
+    private string PositionStyle =>
+        Placement == EllaiSurfacePlacement.Floating && Position is not null
+            ? $"inset-inline-end:auto;inset-block-end:auto;left:{Position.X:0}px;top:{Position.Y:0}px;"
+            : string.Empty;
+
+    private async Task OnInputChanged(string? value)
+    {
+        InputText = value;
+        await InputTextChanged.InvokeAsync(value);
+    }
+
+    private IJSObjectReference? _inputModule;
+
+    [JSInvokable]
+    public async Task SubmitKeyboardMessage(string value)
+    {
+        if (IsRecordingAudio || IsLiveSpeaking || string.IsNullOrWhiteSpace(value) || value.Length > 8000)
+        {
+            return;
+        }
+        await OnInputChanged(value);
+        if (CanSend) await OnSend.InvokeAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_inputModule is null)
+        {
+            _inputModule = await JS.InvokeAsync<IJSObjectReference>(
+                "import", "./_content/SwiftAid.UI/js/ellai-composer-input.js");
+            _dotnetReference ??= DotNetObjectReference.Create(this);
+            await _inputModule.InvokeVoidAsync("attach", _rootElement, _dotnetReference);
+        }
+        if (Placement != EllaiSurfacePlacement.Floating)
+        {
+            if (_dragAttached && _dragModule is not null)
+            {
+                await _dragModule.InvokeVoidAsync("detach", _rootElement, true);
+                _dragAttached = false;
+            }
+
+            return;
+        }
+
+        if (_dragAttached)
+        {
+            return;
+        }
+
+        _dragModule ??= await JS.InvokeAsync<IJSObjectReference>(
+            "import", "./_content/SwiftAid.UI/js/ellai-composer-drag.js");
+        _dotnetReference ??= DotNetObjectReference.Create(this);
+        await _dragModule.InvokeVoidAsync("attach", _rootElement, _dotnetReference);
+        _dragAttached = true;
+    }
+
+    [JSInvokable]
+    public async Task OnInteractPositionChanged(double x, double y)
+    {
+        Position = new EllaiComposerPosition(x, y);
+        await PositionChanged.InvokeAsync(Position);
+    }
+
+    private async Task OnHandleKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Home")
+        {
+            await OnResetPosition();
+            return;
+        }
+
+        var step = e.Key switch
+        {
+            "ArrowUp" => (0.0, -MoveStep),
+            "ArrowDown" => (0.0, MoveStep),
+            "ArrowLeft" => (-MoveStep, 0.0),
+            "ArrowRight" => (MoveStep, 0.0),
+            _ => ((double, double)?)null,
+        };
+        if (step is not null)
+        {
+            await Nudge(step.Value.Item1, step.Value.Item2);
+        }
+    }
+
+    private async Task Nudge(double deltaX, double deltaY)
+    {
+        EllaiComposerPosition next;
+        if (Placement == EllaiSurfacePlacement.Floating)
+        {
+            if (_dragModule is null)
+            {
+                return;
+            }
+
+            next = await _dragModule.InvokeAsync<EllaiComposerPosition>(
+                "moveBy", _rootElement, deltaX, deltaY);
+        }
+        else
+        {
+            next = (Position ?? EllaiComposerPosition.Default).Move(deltaX, deltaY);
+        }
+
+        Position = next;
+        await PositionChanged.InvokeAsync(next);
+    }
+
+    private async Task OnResetPosition()
+    {
+        Position = null;
+        await PositionChanged.InvokeAsync(Position);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_inputModule is not null)
+        {
+            try
+            {
+                await _inputModule.InvokeVoidAsync("detach", _rootElement);
+                await _inputModule.DisposeAsync();
+            }
+            catch (JSDisconnectedException) { }
+        }
+        if (_dragModule is not null)
+        {
+            try
+            {
+                await _dragModule.InvokeVoidAsync("detach", _rootElement, true);
+                await _dragModule.DisposeAsync();
+            }
+            catch (JSDisconnectedException)
+            {
+            }
+        }
+
+        _dotnetReference?.Dispose();
+    }
+}

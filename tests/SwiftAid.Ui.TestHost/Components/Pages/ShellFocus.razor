@@ -1,0 +1,54 @@
+@page "/shell-focus"
+@using SwiftAid.UI.Components.Surfaces.Shell
+
+<PageTitle>SwiftAid workspace shell</PageTitle>
+
+<SwiftAidApplicationShell BrandName="SwiftAid"
+                          HomeHref="/shell-focus"
+                          PageLabel="Workspace navigation"
+                          MainContentId="shell-focus-main"
+                          DesktopNavigation="@NavigationLinks"
+                          MobileNavigation="@NavigationLinks">
+    <ChildContent>
+        <div id="shell-focus-main-content" class="shell-focus-content">
+            <a data-testid="shell-focus-first-main-link" href="#shell-focus-home">Open overview</a>
+            <h1>Workspace navigation</h1>
+            <p>Choose a section to continue.</p>
+
+            <section id="shell-focus-home" aria-labelledby="shell-focus-home-heading">
+                <h2 id="shell-focus-home-heading">Home</h2>
+                <p>Workspace overview</p>
+            </section>
+
+            <section id="shell-focus-reports" aria-labelledby="shell-focus-reports-heading">
+                <h2 id="shell-focus-reports-heading">Reports</h2>
+                <p>Report workspace</p>
+            </section>
+
+            <section id="shell-focus-sessions" aria-labelledby="shell-focus-sessions-heading">
+                <h2 id="shell-focus-sessions-heading">Sessions</h2>
+                <p>Community sessions</p>
+            </section>
+
+            <section id="shell-focus-education" aria-labelledby="shell-focus-education-heading">
+                <h2 id="shell-focus-education-heading">Education</h2>
+                <p>Education library</p>
+            </section>
+
+            <section id="shell-focus-work" aria-labelledby="shell-focus-work-heading">
+                <h2 id="shell-focus-work-heading">Work</h2>
+                <p>Operations workspace</p>
+            </section>
+        </div>
+    </ChildContent>
+</SwiftAidApplicationShell>
+
+@code {
+    private RenderFragment NavigationLinks => @<div class="shell-focus-navigation">
+        <a href="#shell-focus-home">Home</a>
+        <a href="#shell-focus-reports">Reports</a>
+        <a href="#shell-focus-sessions">Sessions</a>
+        <a href="#shell-focus-education">Education</a>
+        <a href="#shell-focus-work">Work</a>
+    </div>;
+}

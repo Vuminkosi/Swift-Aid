@@ -1,0 +1,22 @@
+.mobile-auth-control {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    max-width: min(18rem, 45vw);
+}
+
+.mobile-auth-control ::deep .mud-typography-caption {
+    overflow-wrap: anywhere;
+}
+
+.mobile-auth-control ::deep .mud-button-root {
+    min-height: 2.75rem;
+    white-space: nowrap;
+}
+
+@media (max-width: 360px) {
+    .mobile-auth-control ::deep .mud-button-root {
+        padding-inline: 0.5rem;
+        min-width: 0;
+    }
+}

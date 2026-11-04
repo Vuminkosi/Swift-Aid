@@ -1,0 +1,13 @@
+.ellai-conversation {
+    min-height: 12rem;
+    overflow-wrap: anywhere;
+}
+
+.ellai-conversation__turn {
+    margin-block: 1rem;
+    white-space: pre-wrap;
+}
+
+.ellai-conversation ::deep .mudx-chat-bubble {
+    font-size: .875rem;
+}

@@ -1,0 +1,412 @@
+/* Bonboarding shares the application palette, including explicit theme overrides.
+   Root specificity also wins over the library's OS-preference media query. */
+:root[data-theme="agentic"] .bit-bonboarding-root,
+:root[data-theme="agentic"] .bit-bonboarding-themed {
+    color-scheme: inherit;
+    --bit-bonboarding-surface: var(--ais-bg-surface);
+    --bit-bonboarding-surface-subtle: var(--ais-bg-subtle);
+    --bit-bonboarding-text: var(--ais-text-primary);
+    --bit-bonboarding-text-muted: var(--ais-text-secondary);
+    --bit-bonboarding-border: var(--ais-border-default);
+    --bit-bonboarding-border-strong: var(--ais-border-control);
+    --bit-bonboarding-accent: var(--ais-action-primary);
+    --bit-bonboarding-accent-hover: var(--ais-action-hover);
+    --bit-bonboarding-accent-active: var(--ais-action-pressed);
+    --bit-bonboarding-accent-text: var(--ais-action-on-primary);
+    --bit-bonboarding-accent-soft: var(--ais-bg-selection);
+    --bit-bonboarding-danger: var(--ais-danger-fg);
+    --bit-bonboarding-danger-hover: var(--ais-danger-fg);
+    --bit-bonboarding-danger-text: var(--ais-bg-surface);
+    --bit-bonboarding-spotlight-ring: var(--ais-focus);
+    --bit-bonboarding-spotlight-glow: var(--ais-bg-selection);
+    --bit-bonboarding-font: var(--ais-font-sans);
+}
+
+:root[data-theme="agentic"] {
+    color-scheme: light;
+    /* Agentic Interface System semantic tokens (single source of truth). --sa-* names stay as compatibility aliases. */
+    --ais-bg-canvas: #FFFFFF;
+    --ais-bg-surface: #FFFFFF;
+    --ais-bg-sidebar: #F5F7F5;
+    --ais-bg-subtle: #F5F7F5;
+    --ais-bg-hover: #EDF1ED;
+    --ais-bg-selected: #DFE3DE;
+    --ais-bg-selection: #E6F5EC;
+    --ais-bg-disabled: #ECEFEB;
+    --ais-text-strong: #00120A;
+    --ais-text-primary: #212121;
+    --ais-text-secondary: #535752;
+    --ais-text-muted: #5B6558;
+    --ais-text-disabled: #798177;
+    --ais-border-subtle: #E6E9E4;
+    --ais-border-default: #C9CBC7;
+    --ais-border-control: #788178;
+    --ais-action-primary: #00804A;
+    --ais-action-hover: #006B3F;
+    --ais-action-pressed: #005632;
+    --ais-action-on-primary: #FFFFFF;
+    --ais-link: #1D4ED8;
+    --ais-focus: #2563EB;
+    --ais-overlay: rgb(0 18 10 / 40%);
+    --ais-brand-vivid: #18E76E;
+    --ais-success-fg: #006B3F;
+    --ais-success-bg: #E6F5EC;
+    --ais-success-border: #A7D8BC;
+    --ais-warning-fg: #8A4B08;
+    --ais-warning-bg: #FFF4D6;
+    --ais-warning-border: #E7C875;
+    --ais-danger-fg: #B42318;
+    --ais-danger-bg: #FEECEB;
+    --ais-danger-border: #EDB3AE;
+    --ais-info-fg: #1D4ED8;
+    --ais-info-bg: #EFF6FF;
+    --ais-info-border: #B7CDF7;
+    --ais-neutral-fg: #535752;
+    --ais-neutral-bg: #F0F2EF;
+    --ais-neutral-border: #C9CBC7;
+    --ais-chart-1: #00804A;
+    --ais-chart-2: #2563EB;
+    --ais-chart-3: #7C3AED;
+    --ais-chart-4: #B45309;
+    --ais-chart-5: #0E7490;
+    --ais-chart-6: #BE185D;
+    --ais-chart-grid: #E6E9E4;
+    --ais-font-sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+    --ais-font-mono: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+    --ais-radius-control: 6px;
+    --ais-radius-panel: 8px;
+    --ais-radius-dialog: 12px;
+    --ais-control-height: 2.25rem;
+    --ais-shadow-menu: 0 4px 16px rgb(0 18 10 / 12%);
+    --ais-shadow-dialog: 0 16px 48px rgb(0 18 10 / 20%);
+    --ais-duration-fast: 120ms;
+    --ais-duration-normal: 180ms;
+    --ais-ease: cubic-bezier(0.2, 0, 0, 1);
+    /* Brand ramp pixel-sampled from swiftaid-icon.png; logo and illustration accents only. */
+    --sa-brand-blue: #1778ec;
+    --sa-brand-navy: #102a43;
+    --sa-brand-navy-deep: #0b1f33;
+    --sa-brand-navy-muted: #193b5a;
+    --sa-brand-teal: #10a3a8;
+    --sa-brand-green: #27a961;
+    /* Compatibility aliases: resolve to the AIS tokens above (dark mode follows automatically). */
+    --sa-canvas: var(--ais-bg-canvas);
+    --sa-canvas-neutral: var(--ais-bg-canvas);
+    --sa-surface: var(--ais-bg-surface);
+    --sa-surface-elevated: var(--ais-bg-surface);
+    --sa-surface-subtle: var(--ais-bg-subtle);
+    --sa-text-primary: var(--ais-text-primary);
+    --sa-text-secondary: var(--ais-text-secondary);
+    --sa-text-muted: var(--ais-text-muted);
+    --sa-border: var(--ais-border-default);
+    --sa-action-primary: var(--ais-action-primary);
+    --sa-action-hover: var(--ais-action-hover);
+    --sa-action-active: var(--ais-action-pressed);
+    --sa-action-foreground: var(--ais-action-on-primary);
+    --sa-focus: var(--ais-focus);
+    --sa-link: var(--ais-link);
+    --sa-success: var(--ais-success-fg);
+    --sa-success-foreground: var(--ais-action-on-primary);
+    --sa-danger: var(--ais-danger-fg);
+    --sa-danger-foreground: var(--ais-action-on-primary);
+    --sa-status-info: var(--ais-info-fg);
+    --sa-status-info-soft: var(--ais-info-bg);
+    --sa-status-warning: var(--ais-warning-fg);
+    --sa-status-warning-soft: var(--ais-warning-bg);
+    --sa-status-error: var(--ais-danger-fg);
+    --sa-status-error-soft: var(--ais-danger-bg);
+    --sa-status-success: var(--ais-success-fg);
+    --sa-status-success-soft: var(--ais-success-bg);
+    --sa-radius-card: var(--ais-radius-panel);
+    --sa-radius-control: var(--ais-radius-control);
+    --sa-space-xs: 4px;
+    --sa-space-sm: 8px;
+    --sa-space-md: 16px;
+    --sa-space-lg: 24px;
+    --sa-mobile-nav-height: 68px;
+    --sa-overlay: var(--ais-overlay);
+/* Enforce zero MudBlazor elevation even when MudThemeProvider emits default shadows later. */
+    --mud-elevation-0: none !important;
+    --mud-elevation-1: none !important;
+    --mud-elevation-2: none !important;
+    --mud-elevation-3: none !important;
+    --mud-elevation-4: none !important;
+    --mud-elevation-5: none !important;
+    --mud-elevation-6: none !important;
+    --mud-elevation-7: none !important;
+    --mud-elevation-8: none !important;
+    --mud-elevation-9: none !important;
+    --mud-elevation-10: none !important;
+    --mud-elevation-11: none !important;
+    --mud-elevation-12: none !important;
+    --mud-elevation-13: none !important;
+    --mud-elevation-14: none !important;
+    --mud-elevation-15: none !important;
+    --mud-elevation-16: none !important;
+    --mud-elevation-17: none !important;
+    --mud-elevation-18: none !important;
+    --mud-elevation-19: none !important;
+    --mud-elevation-20: none !important;
+    --mud-elevation-21: none !important;
+    --mud-elevation-22: none !important;
+    --mud-elevation-23: none !important;
+    --mud-elevation-24: none !important;
+    --mud-elevation-25: none !important;
+}
+
+:root[data-theme="agentic"][data-color-mode="dark"] {
+    color-scheme: dark;
+    --ais-bg-canvas: #101612;
+    --ais-bg-surface: #151E18;
+    --ais-bg-sidebar: #121A15;
+    --ais-bg-subtle: #19231C;
+    --ais-bg-hover: #243129;
+    --ais-bg-selected: #2D3E32;
+    --ais-bg-selection: #173E28;
+    --ais-bg-disabled: #243129;
+    --ais-text-strong: #F6FAF7;
+    --ais-text-primary: #EDF2EE;
+    --ais-text-secondary: #B3BDB4;
+    --ais-text-muted: #9AA99D;
+    --ais-text-disabled: #77867B;
+    --ais-border-subtle: #29382E;
+    --ais-border-default: #3B4C40;
+    --ais-border-control: #738A79;
+    --ais-action-primary: #53D98D;
+    --ais-action-hover: #77E3A4;
+    --ais-action-pressed: #39C478;
+    --ais-action-on-primary: #06180D;
+    --ais-link: #8AB4FF;
+    --ais-focus: #8AB4FF;
+    --ais-overlay: rgb(0 0 0 / 65%);
+    --ais-success-fg: #7BE5A5;
+    --ais-success-bg: #173E28;
+    --ais-success-border: #397B51;
+    --ais-warning-fg: #F5CE75;
+    --ais-warning-bg: #3E3016;
+    --ais-warning-border: #85652C;
+    --ais-danger-fg: #FFAAA3;
+    --ais-danger-bg: #421F1D;
+    --ais-danger-border: #8A4540;
+    --ais-info-fg: #A7C8FF;
+    --ais-info-bg: #1C2D4A;
+    --ais-info-border: #476D9B;
+    --ais-neutral-fg: #B3BDB4;
+    --ais-neutral-bg: #243129;
+    --ais-neutral-border: #3B4C40;
+    --ais-chart-1: #53D98D;
+    --ais-chart-2: #8AB4FF;
+    --ais-chart-3: #C4A1FF;
+    --ais-chart-4: #F5CE75;
+    --ais-chart-5: #6ED3E6;
+    --ais-chart-6: #F3A5CC;
+    --ais-chart-grid: #3B4C40;
+}
+
+html,
+body {
+    color-scheme: inherit;
+    color: var(--sa-text-primary);
+    background: var(--sa-canvas);
+}
+
+a:focus-visible,
+button:focus-visible,
+[tabindex]:focus-visible {
+    outline: 2px solid var(--sa-focus);
+    outline-offset: 2px;
+}
+
+h1[tabindex="-1"]:focus-visible {
+    outline: none;
+}
+
+.swiftaid-section-card {
+    border: 1px solid var(--sa-border);
+    border-radius: var(--sa-radius-card);
+    background: var(--sa-surface);
+    box-shadow: none;
+}
+
+.swiftaid-section-card .mud-card-header {
+    padding: 1rem 1rem 0.5rem;
+}
+
+.swiftaid-section-card .mud-card-content {
+    padding: 0.75rem 1rem 1rem;
+}
+
+.swiftaid-stat-tile {
+    min-width: 0;
+    border: 1px solid var(--sa-border);
+    border-radius: var(--sa-radius-card);
+    background: var(--sa-surface);
+    box-shadow: none;
+}
+
+.swiftaid-stat-tile .mud-typography-h5 {
+    font-variant-numeric: tabular-nums;
+    font-weight: 700;
+}
+
+.swiftaid-status-panel {
+    min-width: 0;
+    border: 1px solid var(--sa-border);
+    border-radius: var(--sa-radius-card);
+    background: var(--sa-surface);
+}
+
+.swiftaid-status-panel__content {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+}
+
+.swiftaid-status-panel__copy {
+    min-width: 0;
+}
+
+.swiftaid-status-panel__description {
+    color: var(--sa-text-secondary);
+    overflow-wrap: anywhere;
+}
+
+.swiftaid-status-panel__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 0.75rem;
+}
+
+.swiftaid-status-panel__icon {
+    flex: 0 0 auto;
+    margin-top: 0.1rem;
+}
+
+.swiftaid-development-notice {
+    border-radius: var(--sa-radius-control);
+    font-weight: 600;
+}
+
+.swiftaid-status-panel--information .swiftaid-status-panel__icon {
+    color: var(--sa-status-info);
+}
+
+.swiftaid-status-panel--warning .swiftaid-status-panel__icon {
+    color: var(--sa-status-warning);
+}
+
+.swiftaid-status-panel--error .swiftaid-status-panel__icon {
+    color: var(--sa-status-error);
+}
+
+.swiftaid-status-panel--success .swiftaid-status-panel__icon {
+    color: var(--sa-status-success);
+}
+
+.swiftaid-status-panel--loading .swiftaid-status-panel__icon {
+    color: var(--sa-action-primary);
+}
+
+.swiftaid-status-panel--empty {
+    display: grid;
+    min-height: 10rem;
+    place-items: center;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    padding: 1.5rem 1rem;
+}
+
+.swiftaid-status-panel--empty .swiftaid-status-panel__content {
+    width: 100%;
+    max-width: 36rem;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.875rem;
+    text-align: center;
+}
+
+.swiftaid-status-panel--empty .swiftaid-status-panel__icon {
+    display: inline-flex;
+    width: 3.5rem;
+    height: 3.5rem;
+    align-items: center;
+    justify-content: center;
+    margin: 0;
+    border-radius: 50%;
+    background: var(--sa-surface-subtle);
+    color: var(--sa-action-primary);
+    font-size: 2rem;
+}
+
+.swiftaid-status-panel--empty .swiftaid-status-panel__copy {
+    width: 100%;
+}
+
+.swiftaid-status-panel--empty .mud-typography-subtitle1 {
+    color: var(--sa-text-primary);
+    font-weight: 700;
+}
+
+.swiftaid-status-panel--empty .swiftaid-status-panel__description {
+    max-width: 34rem;
+    margin-inline: auto;
+}
+
+.swiftaid-status-panel--empty .swiftaid-status-panel__actions {
+    justify-content: center;
+}
+
+.swiftaid-page-heading__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 0.25rem;
+}
+
+@media (max-width: 600px) {
+    .swiftaid-section-card .mud-card-header {
+        padding: 0.875rem 0.875rem 0.375rem;
+    }
+
+    .swiftaid-section-card .mud-card-content {
+        padding: 0.5rem 0.875rem 0.875rem;
+    }
+
+    .swiftaid-page-heading__actions {
+        width: 100%;
+    }
+
+    .swiftaid-page-heading__actions > * {
+        min-height: 44px;
+    }
+}
+
+/* Touch-sized primary calls to action on coarse pointers (mobile, touch laptops).
+   Scoped to .auth-cta so desktop density elsewhere is unchanged. */
+@media (pointer: coarse) {
+    .auth-cta.mud-button {
+        min-height: 48px;
+    }
+}
+
+/* Honor the OS reduced-motion setting and the in-app Reduce motion switch.
+   Neutralizes motion only; components are not restyled. */
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
+}
+
+html[data-motion="reduced"] *,
+html[data-motion="reduced"] *::before,
+html[data-motion="reduced"] *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+}

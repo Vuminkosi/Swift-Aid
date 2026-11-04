@@ -1,0 +1,26 @@
+.swiftaid-page-heading {
+    display: grid;
+    justify-items: start;
+    gap: 0.5rem;
+}
+
+.swiftaid-page-heading ::deep .swiftaid-page-heading__eyebrow {
+    color: var(--sa-action-primary);
+    font-weight: 700;
+}
+
+.swiftaid-page-heading ::deep .swiftaid-page-heading__title {
+    max-width: 14ch;
+    margin: 0.5rem 0 0;
+    color: var(--sa-text-primary);
+    font-weight: 700;
+    letter-spacing: -0.04em;
+    line-height: 1.05;
+}
+
+.swiftaid-page-heading ::deep .swiftaid-page-heading__description {
+    max-width: 55ch;
+    margin-top: 0.5rem;
+    color: var(--sa-text-secondary);
+    line-height: 1.65;
+}

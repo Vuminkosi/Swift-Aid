@@ -1,0 +1,233 @@
+@page "/my-cases"
+@using Microsoft.Extensions.DependencyInjection
+@using SwiftAid.Client.Presentation
+@using SwiftAid.UI.Components.Surfaces.Operations
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@inject IServiceProvider ServiceProvider
+@inject IJSRuntime JS
+
+<PageTitle>My cases | SwiftAid</PageTitle>
+<OperationsCaseQueue Title="My cases"
+                     Description="Cases your signed-in account may read. Case details remain protected by your current access."
+                     State="_state"
+                     Query="_viewQuery"
+                     FilterOptions="_filterOptions"
+                     Items="_items"
+                     TotalCount="_totalCount"
+                     StatusMessage="@_statusMessage"
+                     OnQueryChanged="ChangeQueryAsync"
+                     OnRetry="RefreshAsync"
+                     CopyReference="CopyReferenceAsync">
+    <Actions>
+        <MudButton Href="/workspace/imports" Color="Color.Primary" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.UploadFile">Import cases</MudButton>
+        <MudButton Href="/report" Color="Color.Primary" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Add">Report a concern</MudButton>
+    </Actions>
+</OperationsCaseQueue>
+
+@code {
+    private OperationsSurfaceState _state = OperationsSurfaceState.Loading;
+    private OperationsCaseQueue.FilterRequestView _viewQuery = new(1, 25, null, null, null, null, null, null, null, null, null, true);
+    private CaseWorkspaceQuery _query = new(new PageRequest(1, 25));
+    private OperationsCaseQueue.FilterOptionsView? _filterOptions;
+    private IReadOnlyList<OperationsCaseQueue.QueueViewRow> _items = Array.Empty<OperationsCaseQueue.QueueViewRow>();
+    private int _totalCount;
+    private string? _statusMessage;
+    private long _loadGeneration;
+    private static readonly TimeSpan CaseListTimeout = TimeSpan.FromSeconds(15);
+
+    private bool _interactiveLoadStarted;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && !_interactiveLoadStarted)
+        {
+            _interactiveLoadStarted = true;
+            await LoadAsync();
+        }
+    }
+
+    private async Task ChangeQueryAsync(OperationsCaseQueue.FilterRequestView query)
+    {
+        _viewQuery = query;
+        _query = new CaseWorkspaceQuery(
+            new PageRequest(Math.Max(1, query.PageNumber), Math.Clamp(query.PageSize, 1, 100)),
+            query.Search,
+            query.Sector switch
+            {
+                OperationsCaseQueue.SectorKind.Human => CaseWorkspaceSector.Human,
+                OperationsCaseQueue.SectorKind.Animal => CaseWorkspaceSector.Animal,
+                OperationsCaseQueue.SectorKind.Unknown => CaseWorkspaceSector.Unknown,
+                _ => null
+            },
+            query.WorkflowKey,
+            query.CountryCode,
+            query.RegionKey,
+            query.AssigneeKey,
+            query.ReportedCategoryKey,
+            query.UpdatedFromUtc,
+            query.UpdatedToUtc,
+            query.NewestFirst ? CaseWorkspaceSort.UpdatedNewestFirst : CaseWorkspaceSort.UpdatedOldestFirst);
+        await LoadAsync();
+    }
+
+    private Task RefreshAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        var generation = Interlocked.Increment(ref _loadGeneration);
+        _state = OperationsSurfaceState.Loading;
+        _statusMessage = null;
+        StateHasChanged();
+        using var timeout = new CancellationTokenSource(CaseListTimeout);
+        var timeoutToken = timeout.Token;
+
+        try
+        {
+            var workspaceClient = ServiceProvider.GetService<ICaseWorkspaceClient>();
+            if (workspaceClient is null)
+            {
+                _items = Array.Empty<OperationsCaseQueue.QueueViewRow>();
+                _totalCount = 0;
+                _filterOptions = null;
+                _state = OperationsSurfaceState.Unavailable;
+                _statusMessage = "The case list is not available here yet.";
+                return;
+            }
+
+            var result = await workspaceClient.ListAsync(_query, timeoutToken);
+            if (generation != Volatile.Read(ref _loadGeneration))
+            {
+                return;
+            }
+
+            if (result.Succeeded && result.Value is { } page)
+            {
+                _items = page.Items.Select(ToViewRow).ToArray();
+                _totalCount = page.TotalCount;
+                _state = _items.Count == 0 ? OperationsSurfaceState.Empty : OperationsSurfaceState.Populated;
+                _statusMessage = result.Message;
+
+                try
+                {
+                    var options = await workspaceClient.GetFilterOptionsAsync(timeoutToken);
+                    if (generation == Volatile.Read(ref _loadGeneration))
+                    {
+                        _filterOptions = options.Succeeded && options.Value is { } availableOptions
+                            ? ToViewOptions(availableOptions)
+                            : null;
+                    }
+                }
+                catch (Exception)
+                {
+                    if (generation == Volatile.Read(ref _loadGeneration))
+                    {
+                        _filterOptions = null;
+                    }
+                }
+
+                return;
+            }
+
+            _items = Array.Empty<OperationsCaseQueue.QueueViewRow>();
+            _totalCount = 0;
+            _filterOptions = null;
+            _state = result.Code switch
+            {
+                UiCapabilityResultCode.Denied => OperationsSurfaceState.Denied,
+                UiCapabilityResultCode.Unavailable => OperationsSurfaceState.Unavailable,
+                UiCapabilityResultCode.Retryable => OperationsSurfaceState.Offline,
+                _ => OperationsSurfaceState.Error
+            };
+            _statusMessage = result.Message;
+        }
+        catch (OperationCanceledException)
+        {
+            if (generation == Volatile.Read(ref _loadGeneration))
+            {
+                _items = Array.Empty<OperationsCaseQueue.QueueViewRow>();
+                _totalCount = 0;
+                _filterOptions = null;
+                _state = OperationsSurfaceState.Unavailable;
+                _statusMessage = "The case list is taking too long. Refresh to try again.";
+            }
+        }
+        catch (HttpRequestException)
+        {
+            if (generation == Volatile.Read(ref _loadGeneration))
+            {
+                _items = Array.Empty<OperationsCaseQueue.QueueViewRow>();
+                _totalCount = 0;
+                _filterOptions = null;
+                _state = OperationsSurfaceState.Offline;
+                _statusMessage = "Check your connection, then refresh the case list.";
+            }
+        }
+        catch (Exception)
+        {
+            if (generation == Volatile.Read(ref _loadGeneration))
+            {
+                _items = Array.Empty<OperationsCaseQueue.QueueViewRow>();
+                _totalCount = 0;
+                _filterOptions = null;
+                _state = OperationsSurfaceState.Error;
+                _statusMessage = "The case list could not be loaded. Refresh to try again.";
+            }
+        }
+        finally
+        {
+            // The initial load starts in OnAfterRenderAsync, where Blazor does
+            // not schedule another render when the awaited task completes.
+            if (generation == Volatile.Read(ref _loadGeneration))
+            {
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+    }
+
+    private static OperationsCaseQueue.QueueViewRow ToViewRow(CaseWorkspaceRow row) => new(
+        row.CaseId,
+        row.PublicReference,
+        row.Workflow,
+        row.CountryLabel,
+        row.Sector switch
+        {
+            CaseWorkspaceSector.Human => OperationsCaseQueue.SectorKind.Human,
+            CaseWorkspaceSector.Animal => OperationsCaseQueue.SectorKind.Animal,
+            _ => OperationsCaseQueue.SectorKind.Unknown
+        },
+        row.RegionLabel,
+        row.AssigneeLabel,
+        row.ReportedCategoryLabel,
+        row.UpdatedAtUtc, row.LocationHref, row.ObservationPreview);
+
+    private static OperationsCaseQueue.FilterOptionsView ToViewOptions(CaseWorkspaceFilterOptions options) => new(
+        options.Sectors.Select(ToViewOption).ToArray(),
+        options.Workflows.Select(ToViewOption).ToArray(),
+        options.Countries.Select(ToViewOption).ToArray(),
+        options.Regions.Select(ToViewOption).ToArray(),
+        options.Assignees.Select(ToViewOption).ToArray(),
+        options.ReportedCategories.Select(ToViewOption).ToArray(),
+        options.Capabilities.Search,
+        options.Capabilities.Sector,
+        options.Capabilities.Workflow,
+        options.Capabilities.Country,
+        options.Capabilities.Region,
+        options.Capabilities.Assignee,
+        options.Capabilities.ReportedCategory,
+        options.Capabilities.UpdatedDate);
+
+    private static OperationsCaseQueue.FilterOptionView ToViewOption(CaseWorkspaceOption option) => new(option.Key, option.Label);
+
+    private async Task<bool> CopyReferenceAsync(string reference)
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", reference);
+            return true;
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+}

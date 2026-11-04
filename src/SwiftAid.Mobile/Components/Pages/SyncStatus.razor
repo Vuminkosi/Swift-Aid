@@ -1,0 +1,188 @@
+@page "/sync"
+@using Microsoft.AspNetCore.Components
+@using SwiftAid.Client.Intake
+@using SwiftAid.UI.Components.Surfaces.Public
+@inject IGuestSubmissionStore SubmissionStore
+@inject IGuestAudioStore AudioStore
+@inject IServiceProvider ServiceProvider
+
+<PageTitle>Synchronization | SwiftAid</PageTitle>
+
+<SyncStatusSurface Loading="_loading"
+                   Error="_error"
+                   LocalReportSyncAvailable="true"
+                   Drafts="_drafts"
+                   Queued="_queued"
+                   Received="_received"
+                   NeedsAttention="_attention"
+                   Items="_items"
+                   OnRetry="LoadAsync"
+                   OnRetryQueued="RetryQueuedCallback"
+                   IsRetrying="_retrying"
+                   RetryFeedback="@_retryFeedback"
+                   RetryFeedbackIsError="_retryFeedbackIsError" />
+
+@code {
+    private bool _loading = true;
+    private bool _error;
+    private bool _retrying;
+    private bool _retryFeedbackIsError;
+    private int _drafts;
+    private int _queued;
+    private int _received;
+    private int _attention;
+    private string? _retryFeedback;
+    private IReadOnlyList<SyncStatusSurface.SyncReportItemView> _items = [];
+    private IGuestSubmissionCoordinator? _submissionCoordinator;
+
+    private EventCallback RetryQueuedCallback => _submissionCoordinator is null
+        ? default
+        : EventCallback.Factory.Create(this, RetryQueuedAsync);
+
+    protected override async Task OnInitializedAsync()
+    {
+        _submissionCoordinator = ServiceProvider.GetService(typeof(IGuestSubmissionCoordinator)) as IGuestSubmissionCoordinator;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _error = false;
+        try
+        {
+            var submissions = await SubmissionStore.GetAllAsync();
+            _drafts = submissions.Count(item => item.State == GuestSubmissionLocalState.Draft);
+            _queued = submissions.Count(item => item.State == GuestSubmissionLocalState.Queued);
+            _received = submissions.Count(item => item.State == GuestSubmissionLocalState.Received && item.Receipt is not null);
+            _attention = submissions.Count(item => item.State == GuestSubmissionLocalState.NeedsAttention) +
+                submissions.Count(item => item.State == GuestSubmissionLocalState.Received && item.Receipt is null);
+
+            var views = new List<SyncStatusSurface.SyncReportItemView>(submissions.Count);
+            foreach (var submission in submissions)
+            {
+                var status = ToViewStatus(submission);
+                var statusDescription = StatusDescription(submission);
+                var mediaStatus = await GetMediaStatusAsync(submission);
+                var receiptReference = status == SyncStatusSurface.SyncReportStatus.Received
+                    ? submission.Receipt!.ReceiptId.ToString("D")
+                    : null;
+
+                views.Add(new SyncStatusSurface.SyncReportItemView(
+                    submission.ClientSubmissionId.ToString("N")[..8].ToUpperInvariant(),
+                    status,
+                    statusDescription,
+                    submission.CreatedAtUtc,
+                    receiptReference,
+                    mediaStatus));
+            }
+
+            _items = views;
+        }
+        catch (Exception)
+        {
+            _error = true;
+            _items = [];
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task RetryQueuedAsync()
+    {
+        if (_submissionCoordinator is null || _queued == 0 || _retrying)
+            return;
+
+        _retrying = true;
+        _retryFeedback = null;
+        try
+        {
+            var result = await _submissionCoordinator.SubmitPendingAsync();
+            var messages = new List<string>();
+            if (result.Received > 0)
+                messages.Add($"The server confirmed receipt for {result.Received} report{(result.Received == 1 ? string.Empty : "s")}.");
+            if (result.NeedsAttention > 0)
+                messages.Add($"{result.NeedsAttention} report{(result.NeedsAttention == 1 ? string.Empty : "s")} need attention; the saved status does not include a reason.");
+            if (result.RetryPending > 0)
+                messages.Add($"{result.RetryPending} report{(result.RetryPending == 1 ? string.Empty : "s")} remain queued without a confirmed receipt.");
+            if (messages.Count == 0)
+                messages.Add("There were no queued reports to send.");
+
+            _retryFeedback = string.Join(" ", messages);
+            _retryFeedbackIsError = result.NeedsAttention > 0 || result.RetryPending > 0;
+            await LoadAsync();
+        }
+        catch (Exception)
+        {
+            _retryFeedback = "Queued reports could not be retried. No new receipt was confirmed by this attempt.";
+            _retryFeedbackIsError = true;
+            await LoadAsync();
+        }
+        finally
+        {
+            _retrying = false;
+        }
+    }
+
+    private async Task<string?> GetMediaStatusAsync(GuestSubmissionSummary item)
+    {
+        if (item.State is not (GuestSubmissionLocalState.Draft or GuestSubmissionLocalState.NeedsAttention))
+            return "Saved status does not include media details for this report.";
+
+        try
+        {
+            var draft = await SubmissionStore.GetDraftAsync(item.ClientSubmissionId);
+            if (draft is null)
+                return "Draft media details are not available from the saved status.";
+
+            var attachments = draft.Submission.OriginalAudioAttachmentIds;
+            if (attachments.Count == 0)
+                return "No voice note is attached to this draft.";
+
+            foreach (var attachmentId in attachments)
+            {
+                byte[]? audio = null;
+                try
+                {
+                    audio = await AudioStore.ReadOriginalAsync(item.ClientSubmissionId, attachmentId);
+                }
+                catch (Exception)
+                {
+                    return "A voice note is referenced, but its encrypted local file could not be verified. Review the draft on this device.";
+                }
+                finally
+                {
+                    if (audio is not null)
+                        System.Security.Cryptography.CryptographicOperations.ZeroMemory(audio);
+                }
+            }
+
+            return $"{attachments.Count} original voice note{(attachments.Count == 1 ? string.Empty : "s")} saved encrypted on this device; not uploaded.";
+        }
+        catch (Exception)
+        {
+            return "Draft media details are not available from the saved status.";
+        }
+    }
+
+    private static SyncStatusSurface.SyncReportStatus ToViewStatus(GuestSubmissionSummary item) => item.State switch
+    {
+        GuestSubmissionLocalState.Draft => SyncStatusSurface.SyncReportStatus.Draft,
+        GuestSubmissionLocalState.Queued => SyncStatusSurface.SyncReportStatus.Queued,
+        GuestSubmissionLocalState.Received when item.Receipt is not null => SyncStatusSurface.SyncReportStatus.Received,
+        _ => SyncStatusSurface.SyncReportStatus.NeedsAttention
+    };
+
+    private static string StatusDescription(GuestSubmissionSummary item) => item.State switch
+    {
+        GuestSubmissionLocalState.Draft => "Saved on this device. It has not been sent to the server.",
+        GuestSubmissionLocalState.Queued => "Queued locally. A server receipt has not been confirmed.",
+        GuestSubmissionLocalState.Received when item.Receipt is not null =>
+            $"Received by the server at {item.Receipt.ReceivedAtUtc.ToLocalTime():g}.",
+        GuestSubmissionLocalState.Received => "The saved status is missing receipt details. Open report tracking to verify.",
+        GuestSubmissionLocalState.NeedsAttention => "This report needs review before it can be sent again.",
+        _ => "Saved report status is unavailable."
+    };
+}

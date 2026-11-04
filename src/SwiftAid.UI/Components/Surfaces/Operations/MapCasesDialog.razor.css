@@ -1,0 +1,4 @@
+.map-cases { max-height: 60dvh; overflow-y: auto; margin-top: .75rem; }
+.map-cases__row { display: grid; grid-template-columns: 1fr auto; gap: .15rem .75rem; padding: .65rem .1rem; border-bottom: 1px solid var(--mud-palette-divider); font-size: .75rem; }
+.map-cases__row span { grid-column: 1; color: var(--mud-palette-text-secondary); }
+.map-cases__row time { grid-column: 2; grid-row: 1 / 3; align-self: center; color: var(--mud-palette-text-secondary); }

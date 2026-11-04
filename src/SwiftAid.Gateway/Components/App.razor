@@ -1,0 +1,193 @@
+@using System.Globalization
+@using System.Text.Json
+@using Microsoft.AspNetCore.Components
+@using Microsoft.AspNetCore.Hosting
+@using Microsoft.AspNetCore.Http
+@using SwiftAid.Client.Presentation
+@using SwiftAid.Client.Presentation.PublicWorkflows
+@inject IConfiguration Configuration
+@inject IWebHostEnvironment Environment
+@inject IHttpContextAccessor HttpContextAccessor
+@inject IPublicIntakeProcessingPolicyClient ProcessingPolicyClient
+@implements IDisposable
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <base href="/" />
+    <script src="_content/SwiftAid.UI/js/theme-preference-bootstrap.js"></script>
+    @if (!IsGuestEntry)
+    {
+        <ResourcePreloader />
+    }
+    <link rel="stylesheet" href="_content/MudBlazor/MudBlazor.min.css" />
+    <link rel="stylesheet" href="_content/Bit.Bonboarding/bit-bonboarding.css" />
+    <link rel="stylesheet" href="@Assets["_content/SwiftAid.UI/css/swiftaid-theme.css"]" />
+    <link rel="stylesheet" href="@Assets["_content/SwiftAid.UI/SwiftAid.UI.bundle.scp.css"]" />
+    <link rel="stylesheet" href="@Assets["app.css"]" />
+    <link rel="stylesheet" href="@Assets["SwiftAid.Gateway.styles.css"]" />
+    @if (!IsGuestEntry)
+    {
+        <ImportMap />
+    }
+    <link rel="icon" type="image/png" href="favicon.png" />
+    @if (!IsGuestEntry)
+    {
+        <HeadOutlet @rendermode="InteractiveServer" />
+    }
+</head>
+
+<body>
+    <script src="_content/SwiftAid.UI/js/swiftaid-skip-link-fallback.js"></script>
+    @if (IsGuestEntry)
+    {
+        <div id="guest-root"
+             data-authenticated="@IsAuthenticated.ToString().ToLowerInvariant()"
+             data-processing-policy-reference="@PublicPolicy?.Reference"
+             data-processing-policy-version="@PublicPolicy?.Version"
+             data-processing-policy-notice-text="@PublicPolicy?.NoticeText"
+             data-processing-policy-acknowledgement-label="@PublicPolicy?.AcknowledgementLabel"
+             data-processing-policy-provenance="@PublicPolicyMetadata?.Provenance"
+             data-processing-policy-metadata-notice="@PublicPolicyMetadata?.Notice"
+             data-processing-policy-updated-at-utc="@PublicPolicyUpdatedAt"
+             data-processing-policy-available="@PolicyAvailable.ToString().ToLowerInvariant()">
+        </div>
+        <script src="_content/MudBlazor/MudBlazor.min.js"></script>
+        <script src="_framework/blazor.webassembly.js"></script>
+    }
+    else
+    {
+        <Routes @rendermode="InteractiveServer" />
+        <ReconnectModal />
+        <script src="_content/MudBlazor/MudBlazor.min.js"></script>
+        <script src="@Assets["_framework/blazor.web.js"]"></script>
+        <script type="module">
+            const configuration = @((MarkupString)FirebaseConfiguration);
+            if (configuration.enabled) {
+                const notifications = await import('/notifications/web-notifications.js');
+                await notifications.initialize(configuration);
+                window.swiftAidNotifications = notifications;
+            }
+        </script>
+    }
+    <aside id="cookie-preference" class="cookie-preference" aria-labelledby="cookie-preference-title" hidden>
+        <div class="cookie-preference__copy">
+            <h2 id="cookie-preference-title">Cookie preferences</h2>
+            <p>SwiftAid uses essential cookies for sign-in, session security and request protection. This preference is saved on this device. See our <a href="/privacy">Privacy notice</a>.</p>
+        </div>
+        <button id="cookie-preference-accept" class="cookie-preference__button" type="button">
+            Continue with essential cookies
+        </button>
+    </aside>
+    <script>
+        (() => {
+            const storageKey = "swiftaid.cookie-preference.v1";
+            const banner = document.getElementById("cookie-preference");
+            const button = document.getElementById("cookie-preference-accept");
+            if (!banner || !button) return;
+
+            try {
+                if (window.localStorage.getItem(storageKey) === "essential-only") return;
+            } catch {
+                // Keep the notice usable when local browser storage is unavailable.
+            }
+
+            banner.hidden = false;
+            button.addEventListener("click", () => {
+                try {
+                    window.localStorage.setItem(storageKey, "essential-only");
+                } catch {
+                    // The preference applies for this page even when it cannot be persisted.
+                }
+                banner.hidden = true;
+            });
+        })();
+    </script>
+</body>
+
+</html>
+
+@code {
+    private UiCapabilityResult<PublicReportProcessingPolicy>? _policyResult;
+
+    private bool IsGuestEntry
+    {
+        get
+        {
+            var httpContext = HttpContextAccessor.HttpContext;
+            var path = httpContext?.Request.Path.Value?.TrimEnd('/');
+            if (string.Equals(path, "/report", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            var isAnonymous = httpContext?.User.Identity?.IsAuthenticated != true;
+            return isAnonymous && path is not null &&
+                (path.Length == 0 || string.Equals(path, "/sessions", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(path, "/sessions/calendar", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(path, "/ellai/about", StringComparison.OrdinalIgnoreCase));
+        }
+    }
+
+    private bool IsAuthenticated =>
+        HttpContextAccessor.HttpContext?.User.Identity?.IsAuthenticated == true;
+
+    private PublicReportProcessingPolicy? PublicPolicy =>
+        _policyResult is { Code: UiCapabilityResultCode.Success, Value: not null } result
+            ? result.Value
+            : null;
+
+    private UiCapabilityMetadata? PublicPolicyMetadata =>
+        _policyResult is { Code: UiCapabilityResultCode.Success, Value: not null } result
+            ? result.Metadata
+            : null;
+
+    private bool PolicyAvailable => PublicPolicy is not null && PublicPolicyMetadata?.IsAvailable == true;
+
+    private string? PublicPolicyUpdatedAt =>
+        PublicPolicyMetadata?.UpdatedAtUtc.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture);
+
+    private IConfigurationSection firebaseSection => Configuration.GetSection("FirebaseWeb");
+    private bool firebaseEnabled => firebaseSection.GetValue<bool>("Enabled") &&
+        !string.IsNullOrWhiteSpace(firebaseSection["ApiKey"]) &&
+        !string.IsNullOrWhiteSpace(firebaseSection["AuthDomain"]) &&
+        !string.IsNullOrWhiteSpace(firebaseSection["ProjectId"]) &&
+        !string.IsNullOrWhiteSpace(firebaseSection["MessagingSenderId"]) &&
+        !string.IsNullOrWhiteSpace(firebaseSection["AppId"]) &&
+        !string.IsNullOrWhiteSpace(firebaseSection["VapidKey"]);
+    private string FirebaseConfiguration => JsonSerializer.Serialize(new
+    {
+        enabled = firebaseEnabled,
+        apiKey = firebaseSection["ApiKey"],
+        authDomain = firebaseSection["AuthDomain"],
+        projectId = firebaseSection["ProjectId"],
+        storageBucket = firebaseSection["StorageBucket"],
+        messagingSenderId = firebaseSection["MessagingSenderId"],
+        appId = firebaseSection["AppId"],
+        measurementId = firebaseSection["MeasurementId"],
+        vapidKey = firebaseSection["VapidKey"]
+    });
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!IsGuestEntry)
+        {
+            return;
+        }
+
+        try
+        {
+            _policyResult = await ProcessingPolicyClient.GetPolicyAsync();
+        }
+        catch (Exception)
+        {
+            _policyResult = null;
+        }
+    }
+
+    public void Dispose()
+    {
+    }
+}

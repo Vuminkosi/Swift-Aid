@@ -1,0 +1,73 @@
+@page "/more"
+@inject NavigationManager Navigation
+
+<PageTitle>Settings | SwiftAid</PageTitle>
+
+<MudContainer Fixed="true" Class="mobile-work-page mobile-settings-page">
+    <div class="mobile-settings-page__heading">
+        <SwiftAidPageHeading Eyebrow="" Title="Settings" Description="Manage your account, privacy, synchronization, and app information." HeadingId="settings-heading" />
+    </div>
+
+    <MudTabs ActivePanelIndex="_activeTab"
+             ActivePanelIndexChanged="NavigateToSettingsAsync"
+             Class="mobile-settings-tabs"
+             Elevation="0"
+             Rounded="false"
+             ApplyEffectsToContainer="false"
+             aria-label="Settings sections">
+        <MudTabPanel Text="Overview" Icon="@Icons.Material.Outlined.Dashboard">
+            <div class="mobile-settings-overview">
+                <p class="mobile-settings-overview__intro">Your SwiftAid settings, together in one place.</p>
+                <div class="mobile-settings-overview__cards">
+                    <MudPaper Class="mobile-settings-card" Elevation="0">
+                        <MudIcon Icon="@Icons.Material.Outlined.ManageAccounts" Color="Color.Primary" />
+                        <div><MudText Typo="Typo.subtitle1">Account and workspace</MudText><MudText Typo="Typo.body2">Manage your profile and workspace access.</MudText></div>
+                        <MudIconButton Href="/account" Icon="@Icons.Material.Outlined.ChevronRight" aria-label="Open account and workspace settings" />
+                    </MudPaper>
+                    <MudPaper Class="mobile-settings-card" Elevation="0">
+                        <MudIcon Icon="@Icons.Material.Outlined.CloudSync" Color="Color.Primary" />
+                        <div><MudText Typo="Typo.subtitle1">Synchronization</MudText><MudText Typo="Typo.body2">Check the status of saved and submitted reports.</MudText></div>
+                        <MudIconButton Href="/sync" Icon="@Icons.Material.Outlined.ChevronRight" aria-label="Open synchronization settings" />
+                    </MudPaper>
+                    <MudPaper Class="mobile-settings-card" Elevation="0">
+                        <MudIcon Icon="@Icons.Material.Outlined.Policy" Color="Color.Primary" />
+                        <div><MudText Typo="Typo.subtitle1">Privacy and data</MudText><MudText Typo="Typo.body2">Review how SwiftAid handles your information.</MudText></div>
+                        <MudIconButton Href="/privacy" Icon="@Icons.Material.Outlined.ChevronRight" aria-label="Open privacy and data settings" />
+                    </MudPaper>
+                    <MudPaper Class="mobile-settings-card" Elevation="0">
+                        <MudIcon Icon="@Icons.Material.Outlined.Info" Color="Color.Primary" />
+                        <div><MudText Typo="Typo.subtitle1">About SwiftAid</MudText><MudText Typo="Typo.body2">Learn about the service and how to get help.</MudText></div>
+                        <MudIconButton Href="/about" Icon="@Icons.Material.Outlined.ChevronRight" aria-label="About SwiftAid" />
+                    </MudPaper>
+                    <MudPaper Class="mobile-settings-card" Elevation="0">
+                        <MudIcon Icon="@Icons.Material.Outlined.RecordVoiceOver" Color="Color.Primary" />
+                        <div><MudText Typo="Typo.subtitle1">Ellai</MudText><MudText Typo="Typo.body2">Explore Ellai information and available settings.</MudText></div>
+                        <MudIconButton Href="/ellai/about" Icon="@Icons.Material.Outlined.ChevronRight" aria-label="Open Ellai information and settings" />
+                    </MudPaper>
+                </div>
+            </div>
+        </MudTabPanel>
+        <MudTabPanel Text="Account" Icon="@Icons.Material.Outlined.ManageAccounts" />
+        <MudTabPanel Text="Sync" Icon="@Icons.Material.Outlined.CloudSync" />
+        <MudTabPanel Text="Privacy" Icon="@Icons.Material.Outlined.Policy" />
+        <MudTabPanel Text="About" Icon="@Icons.Material.Outlined.Info" />
+        <MudTabPanel Text="Ellai" Icon="@Icons.Material.Outlined.RecordVoiceOver" />
+    </MudTabs>
+</MudContainer>
+
+@code {
+    private int _activeTab;
+
+    private static readonly string[] SettingsRoutes = [
+        "/more", "/account", "/sync", "/privacy", "/about", "/ellai/about"
+    ];
+
+    private Task NavigateToSettingsAsync(int tabIndex)
+    {
+        _activeTab = tabIndex;
+        if (tabIndex > 0 && tabIndex < SettingsRoutes.Length)
+            Navigation.NavigateTo(SettingsRoutes[tabIndex]);
+
+        return Task.CompletedTask;
+    }
+}

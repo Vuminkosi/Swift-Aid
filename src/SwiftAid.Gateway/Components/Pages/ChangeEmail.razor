@@ -1,0 +1,188 @@
+@page "/change-email"
+@using SwiftAid.Client.Presentation
+@using SwiftAid.Gateway.Presentation
+@using SwiftAid.Infrastructure.Identity
+@using SwiftAid.UI.Components.Surfaces.Account
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.AspNetCore.Identity
+@inject IServiceProvider ServiceProvider
+
+<PageTitle>Change email | SwiftAid</PageTitle>
+
+<ErrorBoundary @ref="_boundary">
+    <ChildContent>
+        <ChangeEmailSurface Snapshot="_snapshot" OnRefresh="RefreshAsync" OnRequest="RequestAsync" OnConfirm="ConfirmAsync" OnStartOver="StartOver" ProfileHref="/profile" />
+    </ChildContent>
+    <ErrorContent>
+        <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" role="alert">
+            This page failed to load. Your email address is unchanged.
+        </MudAlert>
+        <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="RecoverAsync" Class="auth-cta"
+                   StartIcon="@Icons.Material.Filled.Refresh">
+            Retry
+        </MudButton>
+    </ErrorContent>
+</ErrorBoundary>
+
+@code {
+    private ErrorBoundary? _boundary;
+
+    private ChangeEmailSnapshot _snapshot = ChangeEmailSnapshot.Loading;
+    private string? _pendingEmail;
+
+    private IUserProfileClient ProfileClient =>
+        (IUserProfileClient?)ServiceProvider.GetService(typeof(IUserProfileClient))
+        ?? CreateFallback()
+        ?? new UnavailableUserProfileClient();
+
+    private IUserProfileClient? CreateFallback()
+    {
+        var auth = (AuthenticationStateProvider?)ServiceProvider.GetService(typeof(AuthenticationStateProvider));
+        var users = (UserManager<SwiftAidUser>?)ServiceProvider.GetService(typeof(UserManager<SwiftAidUser>));
+        var profiles = (IUserProfileService?)ServiceProvider.GetService(typeof(IUserProfileService));
+        var verification = (IEmailVerificationService?)ServiceProvider.GetService(typeof(IEmailVerificationService));
+        var avatars = (IProfileAvatarService?)ServiceProvider.GetService(typeof(IProfileAvatarService));
+        var signIn = (SignInManager<SwiftAidUser>?)ServiceProvider.GetService(typeof(SignInManager<SwiftAidUser>));
+        return auth is null || users is null || profiles is null || verification is null || avatars is null || signIn is null
+            ? null
+            : new GatewayUserProfileClient(auth, users, profiles, verification, avatars, signIn);
+    }
+
+    protected override async Task OnInitializedAsync() => await SafeRefreshAsync();
+
+    private async Task SafeRefreshAsync()
+    {
+        try
+        {
+            await RefreshAsync();
+        }
+        catch (Exception)
+        {
+            _snapshot = ChangeEmailSnapshot.Unavailable;
+        }
+    }
+
+    private async Task RecoverAsync()
+    {
+        _boundary?.Recover();
+        await RefreshAsync();
+    }
+
+    private async Task RefreshAsync()
+    {
+        var result = await ProfileClient.GetAsync();
+        _snapshot = Map(result, result.Value);
+    }
+
+    private async Task RequestAsync(ChangeEmailRequest request)
+    {
+        _snapshot = ChangeEmailSnapshot.Details(_snapshot.CurrentEmail) with
+        {
+            IsSaving = true,
+            StatusMessage = null,
+            StatusIsError = false
+        };
+        var result = await ProfileClient.RequestEmailChangeAsync(request.NewEmail, request.CurrentPassword);
+        if (result.Code == UiCapabilityResultCode.Unavailable || result.Value is null)
+        {
+            _snapshot = ChangeEmailSnapshot.Unavailable with
+            {
+                StatusMessage = result.Message ?? ChangeEmailSnapshot.Unavailable.StatusMessage
+            };
+            return;
+        }
+
+        if (!result.Value.IsSignedIn)
+        {
+            _snapshot = ChangeEmailSnapshot.SignedOut;
+            return;
+        }
+
+        if (result.Code == UiCapabilityResultCode.InvalidRequest)
+        {
+            _pendingEmail = null;
+            _snapshot = ChangeEmailSnapshot.Details(result.Value.Email) with
+            {
+                StatusMessage = result.Message,
+                StatusIsError = true
+            };
+            return;
+        }
+
+        _pendingEmail = request.NewEmail;
+        _snapshot = new ChangeEmailSnapshot(
+            ChangeEmailViewState.CodeSent,
+            result.Value.Email,
+            request.NewEmail,
+            IsSaving: false,
+            result.Value.StatusMessage,
+            result.Value.StatusIsError);
+    }
+
+    private async Task ConfirmAsync(string code)
+    {
+        _snapshot = _snapshot with { IsSaving = true, StatusMessage = null, StatusIsError = false };
+        var result = await ProfileClient.ConfirmEmailChangeAsync(code);
+        if (result.Code == UiCapabilityResultCode.Unavailable || result.Value is null)
+        {
+            _snapshot = ChangeEmailSnapshot.Unavailable with
+            {
+                StatusMessage = result.Message ?? ChangeEmailSnapshot.Unavailable.StatusMessage
+            };
+            return;
+        }
+
+        if (!result.Value.IsSignedIn)
+        {
+            _snapshot = ChangeEmailSnapshot.SignedOut;
+            return;
+        }
+
+        if (result.Code == UiCapabilityResultCode.InvalidRequest)
+        {
+            _snapshot = new ChangeEmailSnapshot(
+                ChangeEmailViewState.CodeSent,
+                result.Value.Email,
+                _pendingEmail,
+                IsSaving: false,
+                result.Message,
+                StatusIsError: true);
+            return;
+        }
+
+        _pendingEmail = null;
+        _snapshot = new ChangeEmailSnapshot(
+            ChangeEmailViewState.Done,
+            result.Value.Email,
+            PendingEmail: null,
+            IsSaving: false,
+            result.Value.StatusMessage ?? "Your email address has been updated.",
+            StatusIsError: false);
+    }
+
+    private void StartOver()
+    {
+        _pendingEmail = null;
+        _snapshot = ChangeEmailSnapshot.Details(_snapshot.CurrentEmail);
+    }
+
+    private static ChangeEmailSnapshot Map(UiCapabilityResult<UserProfileState> result, UserProfileState? value)
+    {
+        if (value is null)
+        {
+            return result.Code == UiCapabilityResultCode.Denied
+                ? ChangeEmailSnapshot.SignedOut
+                : ChangeEmailSnapshot.Unavailable with
+                {
+                    StatusMessage = result.Message ?? ChangeEmailSnapshot.Unavailable.StatusMessage
+                };
+        }
+
+        if (!value.IsSignedIn)
+        {
+            return ChangeEmailSnapshot.SignedOut;
+        }
+
+        return ChangeEmailSnapshot.Details(value.Email);
+    }
+}

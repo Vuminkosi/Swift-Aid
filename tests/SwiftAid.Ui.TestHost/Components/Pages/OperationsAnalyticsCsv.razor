@@ -1,0 +1,25 @@
+@page "/operations-analytics-csv"
+@using SwiftAid.UI.Components.Surfaces.Operations
+
+<PageTitle>Service report CSV</PageTitle>
+
+<OperationsAnalyticsSurface Title="Reports and analytics"
+                            Eyebrow="Operations"
+                            Description="Work summaries for selected dates. These totals describe reported work only; they do not indicate health patterns or causes."
+                            State="OperationsSurfaceState.Populated"
+                            Metrics="CsvSafetyMetrics"
+                            PeriodLabel="the last 30 days"
+                            ContractVersion="test-fixture"
+                            StatusMessage="Fixed values for CSV download verification." />
+
+@code {
+    private static readonly IReadOnlyList<OperationsMetricView> CsvSafetyMetrics =
+    [
+        new("csv-space-formula", "Whitespace-prefixed value", "1", "items", Category: " =1+1", Trend: "Stable"),
+        new("csv-tab-formula", "Tab-prefixed value", "2", "items", Category: "\t+1+1", Trend: "Stable"),
+        new("csv-crlf-formula", "Control-prefixed value", "3", "items", Category: "\r\n-1+1", Trend: "Stable"),
+        new("csv-bom-formula", "BOM-prefixed value", "4", "items", Category: "\uFEFF@SUM(A1:A2)", Trend: "Stable"),
+        new("csv-safe-text", "Routine activity", "5", "items", Category: "Community services", Trend: "Increasing"),
+        new("csv-safe-number", "Completed visits", "23", "visits", Category: "Operations", Trend: "Not reported")
+    ];
+}

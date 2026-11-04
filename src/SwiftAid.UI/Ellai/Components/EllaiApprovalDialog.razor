@@ -1,0 +1,125 @@
+@using SwiftAid.UI.Ellai
+
+<MudCard Elevation="0" Outlined="true" Class="ellai-approval-dialog" aria-label="Review Ellai's proposed actions">
+    <MudCardContent>
+        <MudText Typo="Typo.subtitle1" HtmlTag="h2">Review Ellai's proposed actions</MudText>
+        @if (!string.IsNullOrWhiteSpace(ContextText))
+        {
+            <MudText Typo="Typo.body2">Case / context: @ContextText</MudText>
+        }
+        @if (!string.IsNullOrWhiteSpace(ReasonText))
+        {
+            <MudText Typo="Typo.body2">Why: @ReasonText</MudText>
+        }
+        @foreach (var row in _model.Rows)
+        {
+            <MudCheckBox T="bool" Value="@row.Selected" ValueChanged="@(_ => Toggle(row.ActionId))"
+                         Label="@row.Label" aria-label="@row.Label" />
+            <MudText Typo="Typo.caption" Color="Color.Secondary">@row.Detail</MudText>
+        }
+        <MudText Typo="Typo.caption" Color="Color.Secondary">@EvidenceText</MudText>
+        <MudText Typo="Typo.caption" Color="Color.Secondary">Plan version @PlanVersion · Hash @PlanHash · Expires @ExpiresAtUtc.ToString("u")</MudText>
+        @if (!string.IsNullOrWhiteSpace(NextText))
+        {
+            <MudText Typo="Typo.body2">What happens next: @NextText</MudText>
+        }
+    </MudCardContent>
+    <MudCardActions>
+        <MudButton Variant="Variant.Outlined" Color="Color.Default" OnClick="Reject"
+                   Disabled="@(_rejectAttempted || _approvalAttempted)" aria-label="Reject plan">Reject</MudButton>
+        <MudButton Variant="Variant.Text" Color="Color.Default" OnClick="OnEdit" aria-label="Edit plan before approval">Edit</MudButton>
+        <MudButton Variant="Variant.Text" Color="Color.Default" OnClick="OnCancel" aria-label="Cancel this review">Cancel</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="ApproveSelected"
+                   Disabled="@(!_model.CanApprove || _approvalAttempted || _rejectAttempted)" aria-label="Approve selected actions">Approve selected</MudButton>
+    </MudCardActions>
+</MudCard>
+
+@code {
+    private EllaiApprovalDialogModel _model = new(Array.Empty<EllaiApprovalActionRow>());
+    private string? _requestId;
+    private bool _approvalAttempted;
+    private bool _rejectAttempted;
+
+    /// <summary>Review identity. When it changes (edited plan, new review),
+    /// selection resets so prior approval can never carry over.</summary>
+    [Parameter]
+    public string? RequestId { get; set; }
+
+    [Parameter]
+    public string? ContextText { get; set; }
+
+    [Parameter]
+    public string? ReasonText { get; set; }
+
+    [Parameter]
+    public string? EvidenceText { get; set; }
+
+    [Parameter]
+    public int PlanVersion { get; set; }
+
+    [Parameter]
+    public string? PlanHash { get; set; }
+
+    [Parameter]
+    public DateTimeOffset ExpiresAtUtc { get; set; }
+
+    [Parameter]
+    public string? NextText { get; set; }
+
+    [Parameter]
+    public IReadOnlyList<EllaiApprovalActionRow> Actions { get; set; } = Array.Empty<EllaiApprovalActionRow>();
+
+    [Parameter]
+    public EventCallback<IReadOnlyList<string>> OnApproveSelected { get; set; }
+
+    [Parameter]
+    public EventCallback OnReject { get; set; }
+
+    [Parameter]
+    public EventCallback OnEdit { get; set; }
+
+    [Parameter]
+    public EventCallback OnCancel { get; set; }
+
+    protected override void OnParametersSet()
+    {
+        if (!string.Equals(_requestId, RequestId, StringComparison.Ordinal))
+        {
+            _requestId = RequestId;
+            _model = new EllaiApprovalDialogModel(Actions);
+            _approvalAttempted = false;
+            _rejectAttempted = false;
+        }
+    }
+
+    private void Toggle(string actionId)
+    {
+        _model.Toggle(actionId);
+    }
+
+    private async Task ApproveSelected()
+    {
+        if (_approvalAttempted || _rejectAttempted || !_model.CanApprove)
+        {
+            return;
+        }
+
+        // Keep this latched for this review if its outcome is unknown. A
+        // second privileged request could duplicate the server-side effect.
+        _approvalAttempted = true;
+        await OnApproveSelected.InvokeAsync(_model.SelectedIds);
+    }
+
+    private async Task Reject()
+    {
+        if (_rejectAttempted || _approvalAttempted)
+        {
+            return;
+        }
+
+        // A lost response can follow a committed rejection. Do not offer a
+        // second rejection request against this same review.
+        _rejectAttempted = true;
+        await OnReject.InvokeAsync();
+    }
+}

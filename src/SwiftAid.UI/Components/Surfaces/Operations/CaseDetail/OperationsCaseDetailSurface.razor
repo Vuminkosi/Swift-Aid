@@ -1,0 +1,833 @@
+@using SwiftAid.Contracts.Ellai
+@implements IEllaiUiContextProvider
+<SwiftAid.UI.Ellai.Guidance.EllaiSemanticContext Provider="this" />
+@using SwiftAid.Contracts.Cases
+@using SwiftAid.UI.Components.Cases
+@using SwiftAid.UI.Components.Surfaces.Operations
+@using SwiftAid.UI.Components.Surfaces.Operations.WorkManagement
+@using Microsoft.AspNetCore.Components.Forms
+@inject NavigationManager Navigation
+@implements IDisposable
+
+<section class="case-detail" aria-labelledby="case-detail-title">
+    <header class="case-detail__header">
+        <MudText Typo="Typo.overline" Color="Color.Secondary">Cases</MudText>
+        @if (OverviewData?.Summary is { } summary)
+        {
+            <div class="case-detail__title-row">
+                <MudText id="case-detail-title" data-ellai-control="case-detail.heading" data-bonboarding-anchor="ellai-case-detail-heading" Typo="Typo.h5" HtmlTag="h1">Case #@summary.PublicReference</MudText>
+                <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Outlined">@WorkflowDisplayLabel(summary.Workflow)</MudChip>
+            </div>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">@summary.ClassificationLabel · @(LocationLabelOverride ?? summary.LocationLabel)</MudText>
+        }
+        else
+        {
+            <MudText id="case-detail-title" data-ellai-control="case-detail.heading" data-bonboarding-anchor="ellai-case-detail-heading" Typo="Typo.h5" HtmlTag="h1">Case details</MudText>
+        }
+        <nav class="case-detail__quick-actions" aria-label="Case quick actions">
+            <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Outlined.Event" OnClick="@(() => SelectTab(2))">Add follow-up</MudButton>
+            <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Outlined.NoteAdd" OnClick="OpenObservation">Add observation</MudButton>
+            <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Outlined.AttachFile" OnClick="@(() => SelectTab(5))">Attachments</MudButton>
+        </nav>
+    </header>
+
+    <MudTabs data-ellai-control="case-detail.tabs" data-bonboarding-anchor="ellai-case-detail-tabs" @ref="_tabs" @bind-ActivePanelIndex="_activePanelIndex" @bind-ActivePanelIndex:after="SyncActiveTabToUriAsync" Rounded="false" ApplyEffectsToContainer="false" Class="case-detail__tabs">
+        <MudTabPanel Text="Overview" data-ellai-control="case-detail.overview" data-bonboarding-anchor="ellai-case-detail-overview" Icon="@Icons.Material.Outlined.FolderOpen">
+            @ReportContent
+            @if (OverviewData is { State: CaseDetailPanelState.Populated, Summary: { } overview })
+            {
+                <section class="case-detail__section" aria-labelledby="summary-heading">
+                    <MudText Typo="Typo.subtitle1" HtmlTag="h2" id="summary-heading" data-ellai-control="case-detail.summary" data-bonboarding-anchor="ellai-case-detail-summary">Case summary</MudText>
+                    <p>@overview.Summary</p>
+                    <dl class="case-detail__facts">
+                        <div><dt>Type</dt><dd>@SubjectTypeLabel(overview.SubjectType)</dd></div>
+                        <div><dt>Clinical classification</dt><dd>@overview.ClassificationLabel</dd></div>
+                        <div><dt>Laboratory status</dt><dd>@overview.LaboratoryLabel</dd></div>
+                        <div><dt>Outcome availability</dt><dd>@overview.OutcomeStateLabel</dd></div>
+                        <div><dt>Administrative workflow</dt><dd>@overview.Workflow</dd></div>
+                        <div><dt>Operational priority</dt><dd>@overview.PriorityLabel</dd></div>
+                        <div><dt>Location</dt><dd>
+                            @if (LocationHref is not null) { <MudLink Href="@LocationHref">@(LocationLabelOverride ?? overview.LocationLabel)</MudLink> }
+                            else { @(overview.LocationLabel == overview.CountryLabel ? overview.CountryLabel : $"{overview.LocationLabel}, {overview.CountryLabel}") }
+                        </dd></div>
+                        <div><dt>Owner</dt><dd>@SafeLabel(overview.OwnerDisplayLabel)</dd></div>
+                        <div><dt>Reported</dt><dd>@overview.OpenedAtUtc.ToLocalTime().ToString("g")</dd></div>
+                        <div><dt>Updated</dt><dd>@overview.UpdatedAtUtc.ToLocalTime().ToString("g")</dd></div>
+                    </dl>
+                </section>
+            }
+            else
+            {
+                var state = OverviewData?.State ?? CaseDetailPanelState.Unavailable;
+                <CaseDetailUnavailable State="state" Title="@(PanelTitle(state, "Case summary"))" Description="@(PanelDescription(state, "case summary"))" OnRetry="OnRefreshOverview" />
+            }
+            <CaseClassificationPanel CaseId="CaseId" />
+            <CaseCollaboratorsPanel CaseId="CaseId" />
+            <EligibleHealthOfficersPanel CaseId="CaseId" />
+            <OfficerEscalationReviewPanel CaseId="CaseId" OnAssigned="RefreshAfterOfficerAssignmentAsync" />
+            <CaseTranslationPanel CaseId="CaseId" />
+            <section class="case-detail__section" aria-labelledby="correction-heading">
+                <div class="case-detail__section-heading">
+                    <MudText Typo="Typo.subtitle1" HtmlTag="h2" id="correction-heading">Report correction</MudText>
+                    @if (CorrectionData is { State: CaseDetailPanelState.Populated, CanCorrectReport: true, ReportKind: CaseDetailCorrectionKind.LegacyV1, Narrative: not null } && !_showCorrectionForm)
+                    {
+                        <MudButton @ref="_correctionTrigger" Variant="Variant.Text" Class="case-detail__correction-action" StartIcon="@Icons.Material.Outlined.EditNote" Color="Color.Primary" OnClick="OpenCorrectionForm">Correct report</MudButton>
+                    }
+                </div>
+                @if (_showCorrectionForm && CorrectionData is { State: CaseDetailPanelState.Populated, CanCorrectReport: true, ReportKind: CaseDetailCorrectionKind.LegacyV1, Narrative: not null })
+                {
+                    <div class="case-detail__form" aria-label="Correct report">
+                        <MudText Typo="Typo.body2">This records a new report revision. Earlier accepted facts are preserved.</MudText>
+                        <MudTextField @ref="_correctionNarrativeField" T="string" Label="Corrected report" Lines="6" MaxLength="20000" Required="true" @bind-Value="_correctionNarrative" @bind-Value:after="OnCorrectionDraftChanged" />
+                        <MudTextField T="string" Label="Reason for correction" Lines="3" MaxLength="2000" Required="true" @bind-Value="_correctionReason" @bind-Value:after="OnCorrectionDraftChanged" />
+                        @if (_correctionNeedsReview)
+                        {
+                            <div @ref="_correctionReviewFocusTarget" class="case-detail__correction-review" tabindex="-1" role="group" aria-label="Review the latest report before submitting">
+                                <MudTextField T="string" Label="Latest authorized report" Value="@CorrectionData.Narrative" Lines="4" ReadOnly="true" />
+                                <MudCheckBox T="bool" @bind-Value="_correctionReviewConfirmed" Label="I reviewed the latest report and want to submit this draft as a new correction." />
+                            </div>
+                        }
+                        @if (!string.IsNullOrWhiteSpace(_correctionMessage))
+                        {
+                            <MudAlert Severity="@(_correctionMessageIsError ? Severity.Error : Severity.Info)" Variant="Variant.Text" role="@(_correctionMessageIsError ? "alert" : "status")">@_correctionMessage</MudAlert>
+                        }
+                        @if (_correctionNeedsRebase)
+                        {
+                            <MudButton Variant="Variant.Outlined" Class="case-detail__touch-action" Disabled="@_savingCorrection" OnClick="ReloadCorrectionForRebaseAsync">Load latest version and keep my draft</MudButton>
+                        }
+                        <div class="case-detail__actions">
+                            <MudButton Variant="Variant.Filled" Color="Color.Primary" Class="case-detail__touch-action" Disabled="@_savingCorrection" OnClick="SubmitCorrectionAsync">@(_savingCorrection ? "Saving…" : "Submit correction")</MudButton>
+                            <MudButton Variant="Variant.Text" Class="case-detail__touch-action" Disabled="@_savingCorrection" OnClick="CancelCorrectionForm">Cancel</MudButton>
+                        </div>
+                    </div>
+                }
+                else if ((_showCorrectionForm && CorrectionData is { State: CaseDetailPanelState.Denied }) || _correctionAccessChanged)
+                {
+                    <MudAlert Severity="Severity.Warning" Variant="Variant.Text" role="status">Access or correction capability changed. The draft was cleared.</MudAlert>
+                }
+                else if (_showCorrectionForm)
+                {
+                    <MudAlert Severity="Severity.Warning" Variant="Variant.Text" role="status">
+                        The latest correction access could not be confirmed. The draft is hidden until a fresh authorized report can be loaded.
+                        <MudButton Variant="Variant.Text" Class="case-detail__touch-action" OnClick="RetryCorrectionAsync">Refresh report</MudButton>
+                    </MudAlert>
+                }
+                else if (CorrectionData is { State: CaseDetailPanelState.Populated, ReportKind: not CaseDetailCorrectionKind.LegacyV1 })
+                {
+                    <MudText Typo="Typo.body2" Color="Color.Secondary">This report type is not supported by the legacy correction workflow.</MudText>
+                }
+                else if (CorrectionData is { State: CaseDetailPanelState.Populated, CanCorrectReport: false })
+                {
+                    <MudText Typo="Typo.body2" Color="Color.Secondary">Report correction is unavailable for this case.</MudText>
+                }
+                else if (!_showCorrectionForm)
+                {
+                    var correctionState = CorrectionData?.State ?? CaseDetailPanelState.Unavailable;
+                    <CaseDetailUnavailable State="correctionState" Title="@(PanelTitle(correctionState, "report correction"))" Description="@(PanelDescription(correctionState, "report correction"))" OnRetry="RetryCorrectionAsync" />
+                }
+                @if (!_showCorrectionForm && !string.IsNullOrWhiteSpace(_correctionMessage))
+                {
+                    <div @ref="_correctionSuccessFocusTarget" tabindex="-1" aria-label="Correction result">
+                        <MudAlert Severity="@(_correctionMessageIsError ? Severity.Warning : Severity.Success)" Variant="Variant.Text" role="status">@_correctionMessage</MudAlert>
+                    </div>
+                }
+            </section>
+            <section class="case-detail__section">
+                <MudText Typo="Typo.subtitle1" HtmlTag="h2">Current work</MudText>
+                <div class="case-detail__work-summary">
+                    <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Outlined.EventNote" OnClick="@(() => SelectTab(2))">Follow-ups (@CountWork(OperationsWorkManagementSurface.OperationsWorkKind.FollowUp))</MudButton>
+                    <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Outlined.VolunteerActivism" OnClick="@(() => SelectTab(3))">Assistance (@CountWork(OperationsWorkManagementSurface.OperationsWorkKind.Assistance))</MudButton>
+                </div>
+            </section>
+        </MudTabPanel>
+        <MudTabPanel Text="History" data-ellai-control="case-detail.history" data-bonboarding-anchor="ellai-case-detail-history" Icon="@Icons.Material.Outlined.History">
+            @if (TimelineClient is not null && CaseId != Guid.Empty)
+            {
+                <CaseTimelineView @ref="_timelineView" Client="TimelineClient" CaseId="CaseId" OnReviewFollowUp="OpenRecommendedFollowUpAsync" />
+            }
+            else { <CaseDetailUnavailable Title="History unavailable" Description="Case history is not available here." /> }
+        </MudTabPanel>
+        <MudTabPanel Text="Follow-ups" data-ellai-control="case-detail.follow-ups" data-bonboarding-anchor="ellai-case-detail-follow-ups" Icon="@Icons.Material.Outlined.EventNote">
+            @if (_followUpReviewMessage is not null)
+            {
+                <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" role="status">@_followUpReviewMessage</MudAlert>
+            }
+            <OperationsWorkManagementSurface RequestedSelection="_followUpSelection" Title="Follow-ups" Description="Schedule visits, manage deadlines, and record completion outcomes." State="WorkState" Items="FollowUpItems" IsBusy="WorkIsBusy" StatusMessage="@WorkStatusMessage" StatusIsError="WorkStatusIsError" OnAction="HandleWorkActionAsync" OnRetry="OnWorkRetry" />
+        </MudTabPanel>
+        <MudTabPanel Text="Assistance" data-ellai-control="case-detail.assistance" data-bonboarding-anchor="ellai-case-detail-assistance" Icon="@Icons.Material.Outlined.VolunteerActivism">
+            <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" role="status" aria-label="Referral directory status">
+                Referral contact not configured.
+            </MudAlert>
+            <section class="case-detail__section" aria-label="Request assistance">
+                @if (!_showAssistanceRequest)
+                {
+                    <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Outlined.AddCircleOutline"
+                               Disabled="@(WorkIsBusy || WorkVersion < 2)" OnClick="OpenAssistanceRequest">
+                        Request assistance
+                    </MudButton>
+                }
+                else
+                {
+                    <MudPaper Class="case-detail__panel pa-4" Outlined="true">
+                        <MudText Typo="Typo.subtitle1" HtmlTag="h2">New assistance request</MudText>
+                        <MudSelect T="OperationsWorkManagementSurface.AssistanceNeed?" @bind-Value="_newAssistanceNeed"
+                                   Label="Assistance need" Variant="Variant.Outlined" Margin="Margin.Dense">
+                            @foreach (var need in Enum.GetValues<OperationsWorkManagementSurface.AssistanceNeed>())
+                            {
+                                <MudSelectItem T="OperationsWorkManagementSurface.AssistanceNeed?" Value="@((OperationsWorkManagementSurface.AssistanceNeed?)need)">@need</MudSelectItem>
+                            }
+                        </MudSelect>
+                        <MudTextField T="string" @bind-Value="_newAssistanceDetails" Label="Describe the requested support"
+                                      Lines="3" Variant="Variant.Outlined" Margin="Margin.Dense" MaxLength="300" />
+                        @if (!string.IsNullOrWhiteSpace(_assistanceRequestError))
+                        {
+                            <MudAlert Severity="Severity.Warning" Dense="true" role="alert">@_assistanceRequestError</MudAlert>
+                        }
+                        <MudStack Row="true" Spacing="2" Class="mt-3">
+                            <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@(WorkIsBusy || WorkVersion < 2)" OnClick="SubmitAssistanceRequestAsync">Submit request</MudButton>
+                            <MudButton Variant="Variant.Text" Disabled="@WorkIsBusy" OnClick="CancelAssistanceRequest">Cancel</MudButton>
+                        </MudStack>
+                    </MudPaper>
+                }
+            </section>
+            <OperationsWorkManagementSurface Title="Assistance" Description="Track referrals, resource requests, and receipt confirmation." State="WorkState" Items="AssistanceItems" IsBusy="WorkIsBusy" StatusMessage="@WorkStatusMessage" StatusIsError="WorkStatusIsError" OnAction="HandleWorkActionAsync" OnRetry="OnWorkRetry" />
+        </MudTabPanel>
+        <MudTabPanel Text="Discussion" data-ellai-control="case-detail.discussion" data-bonboarding-anchor="ellai-case-detail-discussion" Icon="@Icons.Material.Outlined.Forum">
+            <section class="case-detail__section" aria-label="Internal case discussion">
+                @if (DiscussionData is { State: CaseDetailPanelState.Populated } discussion)
+                {
+                    @if (discussion.Messages.Count == 0) { <MudText Typo="Typo.body2">No internal notes have been recorded.</MudText> }
+                    @foreach (var message in discussion.Messages.OrderByDescending(item => item.RecordedAtUtc))
+                    {
+                        var mentionLabels = ResolveMentionLabels(message.MentionReferences);
+                        var evidenceLabels = ResolveEvidenceLabels(message.EvidenceKeys);
+                        <article class="case-detail__message"><div class="case-detail__message-meta"><strong>@SafeLabel(message.AuthorLabel)</strong><time>@message.RecordedAtUtc.ToLocalTime().ToString("g")</time></div><p>@message.Message</p>
+                            @if (mentionLabels.Count > 0) { <small class="case-detail__message-references">Mentioned: @string.Join(", ", mentionLabels)</small> }
+                            @if (evidenceLabels.Count > 0) { <small class="case-detail__message-references">Attachments: @string.Join(", ", evidenceLabels)</small> }
+                        </article>
+                    }
+                }
+                else
+                {
+                    var state = DiscussionData?.State ?? CaseDetailPanelState.Unavailable;
+                    <CaseDetailUnavailable State="state" Title="@(PanelTitle(state, "Discussion"))" Description="@(PanelDescription(state, "internal notes"))" OnRetry="OnRefreshDiscussion" />
+                }
+                @if (_showDiscussionForm)
+                {
+                    <div class="case-detail__form">
+                        <MudTextField T="string" Label="Internal note" Lines="4" MaxLength="4000" @bind-Value="_message" aria-describedby="discussion-help" />
+                        <MudText id="discussion-help" Typo="Typo.caption">Visible to authorized case staff only.</MudText>
+                        @if (MentionTargetsData?.Targets.Count > 0)
+                        {
+                            <MudSelect T="string" Label="Mention staff (optional)" MultiSelection="true" @bind-SelectedValues="_selectedMentions">
+                                @foreach (var target in MentionTargetsData.Targets) { <MudSelectItem T="string" Value="@target.Reference">@target.DisplayLabel</MudSelectItem> }
+                            </MudSelect>
+                        }
+                        @if (EvidenceData?.Items.Count > 0)
+                        {
+                            <MudSelect T="string" Label="Attach evidence reference (optional)" MultiSelection="true" @bind-SelectedValues="_selectedEvidence">
+                                @foreach (var item in EvidenceData.Items) { <MudSelectItem T="string" Value="@item.EvidenceKey">@item.DisplayName</MudSelectItem> }
+                            </MudSelect>
+                        }
+                        @if (!string.IsNullOrWhiteSpace(_discussionError)) { <MudAlert Severity="Severity.Error" Variant="Variant.Text" role="alert">@_discussionError</MudAlert> }
+                        <div class="case-detail__actions"><MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Outlined.Send" Color="Color.Primary" Disabled="@_savingDiscussion" OnClick="SubmitDiscussionAsync">@(_savingDiscussion ? "Sending…" : "Send note")</MudButton><MudButton Variant="Variant.Text" OnClick="CloseDiscussionForm">Cancel</MudButton></div>
+                    </div>
+                }
+                else { <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Outlined.AddComment" Color="Color.Primary" OnClick="ShowDiscussionForm">Add internal note</MudButton> }
+            </section>
+        </MudTabPanel>
+        <MudTabPanel Text="Attachments" data-ellai-control="case-detail.attachments" data-bonboarding-anchor="ellai-case-detail-attachments" Icon="@Icons.Material.Outlined.AttachFile">
+            <section class="case-detail__section" aria-labelledby="attachments-heading">
+                <div class="case-detail__section-heading"><MudText Typo="Typo.subtitle1" HtmlTag="h2" id="attachments-heading">Case attachments</MudText><label class="case-detail__upload-label">Upload<InputFile OnChange="UploadEvidenceAsync" accept=".jpg,.jpeg,.png,.pdf,.txt" /></label></div>
+                @if (EvidenceData is { State: CaseDetailPanelState.Populated } evidence)
+                {
+                    var fileItems = evidence.Items.Where(item => item.Kind == CaseDetailEvidenceKind.File).ToArray();
+                    @if (fileItems.Length == 0) { <MudText Typo="Typo.body2">No attachments have been added.</MudText> }
+                    @foreach (var item in fileItems)
+                    {
+                        <div class="case-detail__evidence-row"><div><strong>@item.DisplayName</strong><small>@item.RecordedAtUtc?.ToLocalTime().ToString("g") · @UploadLabel(item.UploadState)</small></div><MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Outlined.Download" Disabled="@(!string.IsNullOrEmpty(evidence.DownloadingEvidenceKey))" OnClick="@(() => OnDownloadEvidence.InvokeAsync(item.EvidenceKey))">Download</MudButton></div>
+                    }
+                    @if (!string.IsNullOrWhiteSpace(evidence.DownloadMessage)) { <MudAlert Severity="@(evidence.DownloadFailed ? Severity.Warning : Severity.Success)" Variant="Variant.Text" role="status">@evidence.DownloadMessage</MudAlert> }
+                }
+                else { var state = EvidenceData?.State ?? CaseDetailPanelState.Unavailable; <CaseDetailUnavailable State="state" Title="@(PanelTitle(state, "Attachments"))" Description="@(PanelDescription(state, "attachments"))" OnRetry="OnRefreshEvidence" /> }
+                @if (!string.IsNullOrWhiteSpace(_uploadMessage)) { <MudAlert Severity="@(_uploadFailed ? Severity.Error : Severity.Info)" Variant="Variant.Text" role="status">@_uploadMessage</MudAlert> }
+            </section>
+        </MudTabPanel>
+        <MudTabPanel Text="Observations" data-ellai-control="case-detail.observations" data-bonboarding-anchor="ellai-case-detail-observations" Icon="@Icons.Material.Outlined.Visibility">
+            <section class="case-detail__section" aria-label="Case observations">
+                @ReportContent
+                <div class="case-detail__section-heading"><MudText Typo="Typo.subtitle1" HtmlTag="h2">Recorded observations</MudText><MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Outlined.Add" Color="Color.Primary" OnClick="OpenObservation">Add observation</MudButton></div>
+                @if (ObservationsData is { State: CaseDetailPanelState.Populated } observations)
+                {
+                    @if (observations.Records.Count == 0) { <MudText Typo="Typo.body2">No observations have been recorded.</MudText> }
+                    @foreach (var record in observations.Records.OrderByDescending(item => item.RecordedAtUtc))
+                    {
+                        <article class="case-detail__observation"><div class="case-detail__message-meta"><strong>@CategoryLabel(record.Category)</strong><time>@record.RecordedAtUtc.ToLocalTime().ToString("g")</time></div><p>@record.Observation</p><small>Source: @record.SourceLabel · Recorded by @record.ActorDisplayLabel</small></article>
+                    }
+                }
+                else { var state = ObservationsData?.State ?? CaseDetailPanelState.Unavailable; <CaseDetailUnavailable State="state" Title="@(PanelTitle(state, "Observations"))" Description="@(PanelDescription(state, "observations"))" OnRetry="OnRefreshObservations" /> }
+                @if (_showObservationForm)
+                {
+                    <div class="case-detail__form">
+                        <MudSelect T="CaseDetailObservationCategory" Label="Observation type" @bind-Value="_category"><MudSelectItem Value="@CaseDetailObservationCategory.Clinical">Clinical</MudSelectItem><MudSelectItem Value="@CaseDetailObservationCategory.Environmental">Environmental</MudSelectItem><MudSelectItem Value="@CaseDetailObservationCategory.Community">Community</MudSelectItem></MudSelect>
+                        <MudTextField T="string" Label="Observation" Lines="4" MaxLength="4000" @bind-Value="_observationText" HelperText="Record what was observed. Do not add a diagnosis or urgency assessment." />
+                        <MudTextField T="string" Label="Source" MaxLength="160" @bind-Value="_observationSource" />
+                        @if (EvidenceData?.Items.Count > 0) { <MudSelect T="string" Label="Evidence (optional)" MultiSelection="true" @bind-SelectedValues="_observationEvidence">@foreach (var item in EvidenceData.Items) { <MudSelectItem T="string" Value="@item.EvidenceKey">@item.DisplayName</MudSelectItem> }</MudSelect> }
+                        @if (!string.IsNullOrWhiteSpace(_observationError)) { <MudAlert Severity="Severity.Error" Variant="Variant.Text" role="alert">@_observationError</MudAlert> }
+                        <div class="case-detail__actions"><MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Outlined.Save" Color="Color.Primary" Disabled="@_savingObservation" OnClick="SubmitObservationAsync">@(_savingObservation ? "Saving…" : "Save observation")</MudButton><MudButton Variant="Variant.Text" OnClick="CloseObservationForm">Cancel</MudButton></div>
+                    </div>
+                }
+            </section>
+        </MudTabPanel>
+    </MudTabs>
+</section>
+
+@code {
+    public string ComponentId => EllaiCaseDetailUiManifest.Definition.ComponentId;
+    public EllaiUiManifest Describe() => EllaiCaseDetailUiManifest.Definition;
+    public EllaiUiState GetState() => new(ComponentId, OverviewData?.State == CaseDetailPanelState.Loading,
+        OverviewData?.State == CaseDetailPanelState.Error,
+        EllaiCaseDetailUiManifest.Controls.Select(control => new UiControlState(control.ControlId, SemanticControlState(control.ControlId))).ToArray());
+
+    private UiObservationState SemanticControlState(string id)
+    {
+        if (id is "case-detail.heading" or "case-detail.tabs") return UiObservationState.Ready;
+        if (id == "case-detail.summary") return _activePanelIndex == 0 &&
+            OverviewData is { State: CaseDetailPanelState.Populated, Summary: not null }
+                ? UiObservationState.Ready : UiObservationState.Unmounted;
+        var panel = id switch
+        {
+            "case-detail.overview" => 0, "case-detail.history" => 1, "case-detail.follow-ups" => 2,
+            "case-detail.assistance" => 3, "case-detail.discussion" => 4, "case-detail.attachments" => 5,
+            "case-detail.observations" => 6, _ => -1,
+        };
+        return panel == _activePanelIndex ? UiObservationState.Ready : UiObservationState.Unmounted;
+    }
+
+    [Parameter, EditorRequired] public Guid CaseId { get; set; }
+    [Parameter] public ICaseTimelineClient? TimelineClient { get; set; }
+    [Parameter] public string? LocationLabelOverride { get; set; }
+    [Parameter] public string? LocationHref { get; set; }
+    [Parameter] public RenderFragment? ReportContent { get; set; }
+    [Parameter] public CaseDetailOverviewView? OverviewData { get; set; }
+    [Parameter] public EventCallback OnRefreshOverview { get; set; }
+    [Parameter] public CaseDetailCorrectionView? CorrectionData { get; set; }
+    [Parameter] public Func<Task<CaseDetailCorrectionView?>>? RefreshCorrectionAsync { get; set; }
+    [Parameter] public Func<CaseDetailCorrectionRequest, Task<CaseDetailCorrectionOutcome>>? SubmitCorrectionAsyncCallback { get; set; }
+    [Parameter] public CaseDetailDiscussionView? DiscussionData { get; set; }
+    [Parameter] public CaseDetailMentionTargetsView? MentionTargetsData { get; set; }
+    [Parameter] public EventCallback OnRefreshDiscussion { get; set; }
+    [Parameter] public Func<CaseDetailDiscussionPostRequest, Task<CaseDetailCommandOutcome>>? AppendDiscussionAsync { get; set; }
+    [Parameter] public CaseDetailEvidenceView? EvidenceData { get; set; }
+    [Parameter] public EventCallback OnRefreshEvidence { get; set; }
+    [Parameter] public EventCallback<string> OnDownloadEvidence { get; set; }
+    [Parameter] public Func<CaseDetailEvidenceUploadRequest, Stream, Task<CaseDetailCommandOutcome>>? UploadEvidenceAsyncCallback { get; set; }
+    [Parameter] public CaseDetailObservationsView? ObservationsData { get; set; }
+    [Parameter] public EventCallback OnRefreshObservations { get; set; }
+    [Parameter] public Func<CaseDetailObservationRequest, Task<CaseDetailCommandOutcome>>? RecordObservationAsyncCallback { get; set; }
+    [Parameter] public OperationsSurfaceState WorkState { get; set; } = OperationsSurfaceState.Unavailable;
+    [Parameter] public IReadOnlyList<OperationsWorkManagementSurface.OperationsWorkItem> WorkItems { get; set; } = Array.Empty<OperationsWorkManagementSurface.OperationsWorkItem>();
+    [Parameter] public long WorkVersion { get; set; }
+    [Parameter] public bool WorkIsBusy { get; set; }
+    [Parameter] public string? WorkStatusMessage { get; set; }
+    [Parameter] public bool WorkStatusIsError { get; set; }
+    [Parameter] public EventCallback<OperationsWorkManagementSurface.OperationsWorkActionRequest> OnWorkAction { get; set; }
+    [Parameter] public EventCallback OnWorkRetry { get; set; }
+
+    private MudTabs? _tabs;
+    private OperationsWorkManagementSurface.WorkSelectionRequest? _followUpSelection;
+    private string? _followUpReviewMessage;
+    private int _activePanelIndex;
+    private MudButton? _correctionTrigger;
+    private MudTextField<string>? _correctionNarrativeField;
+    private ElementReference _correctionReviewFocusTarget;
+    private ElementReference _correctionSuccessFocusTarget;
+    private CaseTimelineView? _timelineView;
+    private long _caseVersion;
+    private bool _showDiscussionForm, _showObservationForm, _savingDiscussion, _savingObservation, _uploadFailed, _showCorrectionForm, _savingCorrection, _correctionMessageIsError, _correctionNeedsRebase, _correctionNeedsReview, _correctionReviewConfirmed, _correctionAccessChanged, _focusCorrectionFieldAfterRender, _restoreCorrectionTriggerAfterRender, _focusCorrectionReviewAfterRender, _focusCorrectionSuccessAfterRender;
+    private string? _message, _discussionError, _observationText, _observationSource, _observationError, _uploadMessage, _correctionNarrative, _correctionReason, _correctionMessage;
+    private Guid? _correctionCommandId;
+    private CorrectionPayloadKey? _correctionCommandPayload;
+    private CaseDetailObservationCategory _category = CaseDetailObservationCategory.Clinical;
+    private IReadOnlyCollection<string> _selectedMentions = Array.Empty<string>();
+    private IReadOnlyCollection<string> _selectedEvidence = Array.Empty<string>();
+    private IReadOnlyCollection<string> _observationEvidence = Array.Empty<string>();
+    private Guid _boundCaseId;
+    private bool _showAssistanceRequest;
+    private OperationsWorkManagementSurface.AssistanceNeed? _newAssistanceNeed;
+    private string? _newAssistanceDetails;
+    private string? _assistanceRequestError;
+    private Guid? _assistanceRequestId;
+
+    private static readonly string[] TabKeys = EllaiCaseDetailUiManifest.Tabs.ToArray();
+
+    protected override void OnInitialized()
+    {
+        _activePanelIndex = ReadActivePanelIndex();
+        Navigation.LocationChanged += OnLocationChanged;
+    }
+
+    private IReadOnlyList<OperationsWorkManagementSurface.OperationsWorkItem> FollowUpItems => WorkItems.Where(item => item.Kind == OperationsWorkManagementSurface.OperationsWorkKind.FollowUp).ToArray();
+    private IReadOnlyList<OperationsWorkManagementSurface.OperationsWorkItem> AssistanceItems => WorkItems.Where(item => item.Kind == OperationsWorkManagementSurface.OperationsWorkKind.Assistance).ToArray();
+    private int CountWork(OperationsWorkManagementSurface.OperationsWorkKind kind) => WorkItems.Count(item => item.Kind == kind);
+
+    protected override void OnParametersSet()
+    {
+        if (CaseId != _boundCaseId) { _followUpSelection = null; _followUpReviewMessage = null; _boundCaseId = CaseId; _caseVersion = 0; _savingCorrection = false; CloseDiscussionForm(); CloseObservationForm(); CloseCorrectionForm(); CancelAssistanceRequest(); }
+        if (_assistanceRequestId is { } assistanceId && WorkItems.Any(item => item.WorkKey == $"ast:{assistanceId:D}"))
+        {
+            CancelAssistanceRequest();
+        }
+        if (_showCorrectionForm && (CorrectionData is { State: CaseDetailPanelState.Denied } ||
+            CorrectionData is { State: CaseDetailPanelState.Populated, CanCorrectReport: false } ||
+            CorrectionData is { State: CaseDetailPanelState.Populated, ReportKind: not CaseDetailCorrectionKind.LegacyV1 }))
+        {
+            ClearCorrectionDraftAfterAuthorizationChange();
+        }
+        else if (CorrectionData is { State: CaseDetailPanelState.Populated, CanCorrectReport: true, ReportKind: CaseDetailCorrectionKind.LegacyV1, Narrative: not null })
+        {
+            _correctionAccessChanged = false;
+        }
+        _caseVersion = Math.Max(_caseVersion, Math.Max(DiscussionData?.AggregateVersion ?? 0, EvidenceData?.AggregateVersion ?? 0));
+    }
+
+    private void OpenAssistanceRequest()
+    {
+        _assistanceRequestId = Guid.NewGuid();
+        _newAssistanceNeed = null;
+        _newAssistanceDetails = null;
+        _assistanceRequestError = null;
+        _showAssistanceRequest = true;
+    }
+
+    private void CancelAssistanceRequest()
+    {
+        _showAssistanceRequest = false;
+        _assistanceRequestId = null;
+        _newAssistanceNeed = null;
+        _newAssistanceDetails = null;
+        _assistanceRequestError = null;
+    }
+
+    private async Task SubmitAssistanceRequestAsync()
+    {
+        if (!_showAssistanceRequest || _assistanceRequestId is not { } assistanceId || WorkVersion < 2 ||
+            _newAssistanceNeed is not { } need || string.IsNullOrWhiteSpace(_newAssistanceDetails) ||
+            !OnWorkAction.HasDelegate || WorkIsBusy)
+        {
+            _assistanceRequestError = "Select the support type and describe the requested assistance.";
+            return;
+        }
+
+        await OnWorkAction.InvokeAsync(new OperationsWorkManagementSurface.OperationsWorkActionRequest(
+            CaseId,
+            $"assistance:new:{assistanceId:D}",
+            WorkVersion,
+            OperationsWorkManagementSurface.OperationsWorkAction.RequestAssistance,
+            null,
+            need,
+            _newAssistanceDetails.Trim(),
+            null,
+            null,
+            null,
+            false,
+            CommandId: assistanceId));
+    }
+
+    private Task SyncActiveTabToUriAsync()
+    {
+        var tab = TabKeys.ElementAtOrDefault(_activePanelIndex);
+        if (tab is null)
+        {
+            return Task.CompletedTask;
+        }
+
+        var uri = Navigation.GetUriWithQueryParameter("tab", tab);
+        if (!string.Equals(uri, Navigation.Uri, StringComparison.Ordinal))
+        {
+            Navigation.NavigateTo(uri);
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs args)
+    {
+        var panelIndex = ReadActivePanelIndex(args.Location);
+        if (panelIndex == _activePanelIndex)
+        {
+            return;
+        }
+
+        _ = InvokeAsync(async () =>
+        {
+            _activePanelIndex = panelIndex;
+            if (_tabs is not null)
+            {
+                await _tabs.ActivatePanelAsync(panelIndex, ignoreDisabledState: false);
+            }
+
+            StateHasChanged();
+        });
+    }
+
+    private int ReadActivePanelIndex(string? uri = null)
+    {
+        var absoluteUri = Navigation.ToAbsoluteUri(uri ?? Navigation.Uri);
+        foreach (var pair in absoluteUri.Query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var separator = pair.IndexOf('=');
+            var key = Uri.UnescapeDataString((separator < 0 ? pair : pair[..separator]).Replace('+', ' '));
+            if (!string.Equals(key, "tab", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var requestedTab = separator < 0 ? string.Empty : Uri.UnescapeDataString(pair[(separator + 1)..].Replace('+', ' '));
+            var index = Array.FindIndex(TabKeys, tab => string.Equals(tab, requestedTab, StringComparison.OrdinalIgnoreCase));
+            if (index >= 0)
+            {
+                return index;
+            }
+        }
+
+        return 0;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_focusCorrectionFieldAfterRender)
+        {
+            _focusCorrectionFieldAfterRender = false;
+            try { if (_correctionNarrativeField is not null) await _correctionNarrativeField.FocusAsync(); }
+            catch (InvalidOperationException) { }
+        }
+        if (_focusCorrectionReviewAfterRender)
+        {
+            _focusCorrectionReviewAfterRender = false;
+            try { await _correctionReviewFocusTarget.FocusAsync(preventScroll: true); }
+            catch (InvalidOperationException) { }
+        }
+        if (_focusCorrectionSuccessAfterRender)
+        {
+            _focusCorrectionSuccessAfterRender = false;
+            try { await _correctionSuccessFocusTarget.FocusAsync(preventScroll: true); }
+            catch (InvalidOperationException) { }
+        }
+        if (_restoreCorrectionTriggerAfterRender)
+        {
+            _restoreCorrectionTriggerAfterRender = false;
+            try { if (_correctionTrigger is not null) await _correctionTrigger.FocusAsync(); }
+            catch (InvalidOperationException) { }
+        }
+    }
+
+    private async Task OpenRecommendedFollowUpAsync(Guid followUpId)
+    {
+        var key = $"fu:{followUpId:D}";
+        if (WorkState != OperationsSurfaceState.Populated || !FollowUpItems.Any(item => item.CaseId == CaseId && item.WorkKey == key))
+        {
+            _followUpSelection = null;
+            _followUpReviewMessage = "This follow-up is not in the current work list. Refresh the list to check its status.";
+        }
+        else
+        {
+            _followUpReviewMessage = null;
+            _followUpSelection = new(Guid.NewGuid(), CaseId, key);
+        }
+        await SelectTab(2);
+    }
+
+    private async Task HandleWorkActionAsync(OperationsWorkManagementSurface.OperationsWorkActionRequest request)
+    {
+        await OnWorkAction.InvokeAsync(request);
+        if (_timelineView is not null) await _timelineView.RefreshAsync();
+        await OnRefreshOverview.InvokeAsync();
+    }
+
+    private async Task RefreshAfterOfficerAssignmentAsync()
+    {
+        if (_timelineView is not null) await _timelineView.RefreshAsync();
+        await OnRefreshOverview.InvokeAsync();
+        await OnWorkRetry.InvokeAsync();
+    }
+
+    private async Task SelectTab(int index) { if (_tabs is not null) await _tabs.ActivatePanelAsync(index, ignoreDisabledState: false); }
+    private void OpenObservation() { _showObservationForm = true; _ = SelectTab(6); }
+    private void ShowDiscussionForm() { _discussionError = null; _showDiscussionForm = true; }
+    private void CloseDiscussionForm() { _showDiscussionForm = false; _message = null; _discussionError = null; _selectedMentions = Array.Empty<string>(); _selectedEvidence = Array.Empty<string>(); }
+    private void CloseObservationForm() { _showObservationForm = false; _observationText = null; _observationSource = null; _observationError = null; _observationEvidence = Array.Empty<string>(); }
+
+    private void OpenCorrectionForm()
+    {
+        if (CorrectionData is not { State: CaseDetailPanelState.Populated, CanCorrectReport: true, ReportKind: CaseDetailCorrectionKind.LegacyV1, Narrative: { } narrative }) return;
+        _correctionNarrative = narrative;
+        _correctionReason = null;
+        _correctionMessage = null;
+        _correctionMessageIsError = false;
+        _correctionNeedsRebase = false;
+        _correctionNeedsReview = false;
+        _correctionReviewConfirmed = false;
+        _correctionAccessChanged = false;
+        _focusCorrectionFieldAfterRender = true;
+        _showCorrectionForm = true;
+    }
+
+    private Task OnCorrectionDraftChanged()
+    {
+        _correctionReviewConfirmed = false;
+        return Task.CompletedTask;
+    }
+
+    private void CloseCorrectionForm()
+    {
+        _showCorrectionForm = false;
+        _correctionNarrative = null;
+        _correctionReason = null;
+        _correctionMessage = null;
+        _correctionMessageIsError = false;
+        _correctionNeedsRebase = false;
+        _correctionNeedsReview = false;
+        _correctionReviewConfirmed = false;
+        _correctionCommandId = null;
+        _correctionCommandPayload = null;
+        _correctionAccessChanged = false;
+        _focusCorrectionFieldAfterRender = false;
+        _restoreCorrectionTriggerAfterRender = false;
+        _focusCorrectionReviewAfterRender = false;
+        _focusCorrectionSuccessAfterRender = false;
+    }
+
+    private void CancelCorrectionForm()
+    {
+        _restoreCorrectionTriggerAfterRender = true;
+        CloseCorrectionForm();
+        _restoreCorrectionTriggerAfterRender = true;
+    }
+
+    private void ClearCorrectionDraftAfterAuthorizationChange()
+    {
+        _showCorrectionForm = false;
+        _correctionNarrative = null;
+        _correctionReason = null;
+        _correctionCommandId = null;
+        _correctionCommandPayload = null;
+        _correctionNeedsRebase = false;
+        _correctionNeedsReview = false;
+        _correctionReviewConfirmed = false;
+        _focusCorrectionFieldAfterRender = false;
+        _restoreCorrectionTriggerAfterRender = false;
+        _focusCorrectionReviewAfterRender = false;
+        _focusCorrectionSuccessAfterRender = false;
+        _correctionMessage = null;
+        _correctionMessageIsError = true;
+        _correctionAccessChanged = true;
+    }
+
+    private async Task ReloadCorrectionForRebaseAsync()
+    {
+        if (RefreshCorrectionAsync is null) return;
+        var caseId = CaseId;
+        var latest = await RefreshCorrectionAsync();
+        if (caseId != CaseId) return;
+        if (latest is not { State: CaseDetailPanelState.Populated, CanCorrectReport: true, ReportKind: CaseDetailCorrectionKind.LegacyV1, Narrative: not null })
+        {
+            _correctionMessage = "The latest report could not be loaded. Your draft is preserved.";
+            _correctionMessageIsError = true;
+            return;
+        }
+        CorrectionData = latest;
+        _correctionNeedsRebase = false;
+        _correctionNeedsReview = true;
+        _correctionReviewConfirmed = false;
+        _focusCorrectionReviewAfterRender = true;
+        _correctionMessage = "Latest revision loaded. Compare it with your draft before submitting again.";
+        _correctionMessageIsError = false;
+    }
+
+    private async Task RetryCorrectionAsync()
+    {
+        if (RefreshCorrectionAsync is null) return;
+        var caseId = CaseId;
+        var latest = await RefreshCorrectionAsync();
+        if (caseId != CaseId) return;
+        if (latest is { State: CaseDetailPanelState.Populated, CanCorrectReport: true, ReportKind: CaseDetailCorrectionKind.LegacyV1, Narrative: not null })
+        {
+            CorrectionData = latest;
+            _correctionAccessChanged = false;
+        }
+        else if (latest is { State: CaseDetailPanelState.Denied } or { State: CaseDetailPanelState.Populated, CanCorrectReport: false } or
+            { State: CaseDetailPanelState.Populated, ReportKind: not CaseDetailCorrectionKind.LegacyV1 })
+        {
+            ClearCorrectionDraftAfterAuthorizationChange();
+        }
+    }
+
+    private async Task SubmitCorrectionAsync()
+    {
+        if (_savingCorrection || SubmitCorrectionAsyncCallback is null ||
+            CorrectionData is not { State: CaseDetailPanelState.Populated, CanCorrectReport: true, ReportKind: CaseDetailCorrectionKind.LegacyV1, Narrative: not null } snapshot || CaseId == Guid.Empty)
+            return;
+        if (string.IsNullOrWhiteSpace(_correctionNarrative) || string.IsNullOrWhiteSpace(_correctionReason))
+        {
+            _correctionMessage = "Enter the corrected report and the reason for changing it.";
+            _correctionMessageIsError = true;
+            return;
+        }
+        if (_correctionNeedsReview && !_correctionReviewConfirmed)
+        {
+            _correctionMessage = "Compare the latest authorized report with your draft and confirm before submitting.";
+            _correctionMessageIsError = true;
+            return;
+        }
+
+        _savingCorrection = true;
+        _correctionMessage = null;
+        var payloadFingerprint = new CorrectionPayloadKey(snapshot.AggregateVersion, _correctionNarrative, _correctionReason);
+        if (payloadFingerprint != _correctionCommandPayload || _correctionCommandId is null)
+        {
+            _correctionCommandId = Guid.NewGuid();
+            _correctionCommandPayload = payloadFingerprint;
+        }
+        var commandId = _correctionCommandId.Value;
+        var request = new CaseDetailCorrectionRequest(CaseId, commandId, snapshot.AggregateVersion, _correctionNarrative, _correctionReason);
+        try
+        {
+            var result = await SubmitCorrectionAsyncCallback(request);
+            if (CaseId != request.CaseId) return;
+            if (result.Status == CaseDetailOperationStatus.Conflict)
+            {
+                _correctionMessage = "The report changed while you were editing. Your draft is preserved. Review it against the latest report, then submit again.";
+                _correctionMessageIsError = true;
+                _correctionNeedsRebase = true;
+                return;
+            }
+            if (result.Status is not (CaseDetailOperationStatus.Accepted or CaseDetailOperationStatus.Replayed))
+            {
+                _correctionMessage = OperationMessage(result.Status, "correction");
+                _correctionMessageIsError = true;
+                return;
+            }
+
+            var latest = RefreshCorrectionAsync is null ? null : await RefreshCorrectionAsync();
+            if (CaseId != request.CaseId) return;
+            if (latest is { State: CaseDetailPanelState.Populated, CanCorrectReport: true, ReportKind: CaseDetailCorrectionKind.LegacyV1, Narrative: not null } &&
+                latest.AggregateVersion > snapshot.AggregateVersion && latest.ReportRevision > snapshot.ReportRevision &&
+                string.Equals(latest.Narrative, request.Narrative, StringComparison.Ordinal))
+            {
+                CorrectionData = latest;
+                CloseCorrectionForm();
+                _correctionMessage = "Correction saved and the new revision is loaded.";
+                _correctionMessageIsError = false;
+                if (_timelineView is not null)
+                {
+                    await _timelineView.RefreshAsync();
+                    if (CaseId != request.CaseId) return;
+                }
+                _focusCorrectionSuccessAfterRender = true;
+            }
+            else
+            {
+                _correctionMessage = "The correction was accepted, but the updated report could not be confirmed. Your draft is preserved. Refresh to check the latest revision.";
+                _correctionMessageIsError = true;
+            }
+        }
+        catch (Exception)
+        {
+            if (CaseId != request.CaseId) return;
+            _correctionMessage = "The correction could not be confirmed. Your draft is preserved; refresh before retrying.";
+            _correctionMessageIsError = true;
+        }
+        finally { _savingCorrection = false; }
+    }
+
+    private sealed record CorrectionPayloadKey(long ExpectedVersion, string Narrative, string Reason);
+
+    private async Task SubmitDiscussionAsync()
+    {
+        if (_savingDiscussion || AppendDiscussionAsync is null || CaseId == Guid.Empty) return;
+        if (string.IsNullOrWhiteSpace(_message)) { _discussionError = "Enter a note before sending."; return; }
+        _savingDiscussion = true; _discussionError = null;
+        try
+        {
+            var result = await AppendDiscussionAsync(new CaseDetailDiscussionPostRequest(CaseId, Guid.NewGuid(), Math.Max(_caseVersion, DiscussionData?.AggregateVersion ?? 0), _message.Trim(), _selectedMentions.ToArray(), _selectedEvidence.ToArray()));
+            if (result.Status == CaseDetailOperationStatus.Accepted)
+            {
+                _caseVersion = result.AggregateVersion; CloseDiscussionForm(); await OnRefreshDiscussion.InvokeAsync();
+            }
+            else _discussionError = OperationMessage(result.Status, "note");
+        }
+        catch (Exception) { _discussionError = "The note could not be sent. Check your connection and try again."; }
+        finally { _savingDiscussion = false; }
+    }
+
+    private async Task UploadEvidenceAsync(InputFileChangeEventArgs args)
+    {
+        _uploadMessage = null; _uploadFailed = false;
+        if (UploadEvidenceAsyncCallback is null || CaseId == Guid.Empty) { _uploadMessage = "Uploads are not available here."; _uploadFailed = true; return; }
+        var file = args.File;
+        if (file.Size is <= 0 or > 10 * 1024 * 1024) { _uploadMessage = "Choose a file smaller than 10 MB."; _uploadFailed = true; return; }
+        try
+        {
+            await using var stream = file.OpenReadStream(10 * 1024 * 1024);
+            var upload = new CaseDetailEvidenceUploadRequest(CaseId, Guid.NewGuid(), Math.Max(_caseVersion, EvidenceData?.AggregateVersion ?? 0), file.Name, file.ContentType, file.Size);
+            if (!upload.IsValid) { _uploadMessage = "This file type or size is not supported."; _uploadFailed = true; return; }
+            var result = await UploadEvidenceAsyncCallback(upload, stream);
+            if (result.Status == CaseDetailOperationStatus.Accepted)
+            {
+                _caseVersion = result.AggregateVersion; _uploadMessage = "Attachment uploaded."; await OnRefreshEvidence.InvokeAsync();
+            }
+            else { _uploadMessage = OperationMessage(result.Status, "attachment"); _uploadFailed = true; }
+        }
+        catch (Exception) { _uploadMessage = "This attachment could not be uploaded. Check the file and connection, then try again."; _uploadFailed = true; }
+    }
+
+    private async Task SubmitObservationAsync()
+    {
+        if (_savingObservation || RecordObservationAsyncCallback is null || CaseId == Guid.Empty) return;
+        if (string.IsNullOrWhiteSpace(_observationText) || string.IsNullOrWhiteSpace(_observationSource)) { _observationError = "Enter the observation and its source."; return; }
+        _savingObservation = true; _observationError = null;
+        try
+        {
+            var result = await RecordObservationAsyncCallback(new CaseDetailObservationRequest(CaseId, Guid.NewGuid(), Math.Max(_caseVersion, ObservationsData?.AggregateVersion ?? 0), _category, _observationText.Trim(), _observationSource.Trim(), _observationEvidence.ToArray(), null));
+            if (result.Status == CaseDetailOperationStatus.Accepted)
+            {
+                _caseVersion = result.AggregateVersion; CloseObservationForm(); await OnRefreshObservations.InvokeAsync(); if (_timelineView is not null) await _timelineView.RefreshAsync();
+            }
+            else _observationError = OperationMessage(result.Status, "observation");
+        }
+        catch (Exception) { _observationError = "The observation could not be saved. Check your connection and try again."; }
+        finally { _savingObservation = false; }
+    }
+
+    private static string SafeLabel(string? label) => string.IsNullOrWhiteSpace(label) ? "Not assigned" : label.Trim();
+    private static string WorkflowDisplayLabel(string workflow) => workflow switch
+    {
+        "Reported" => "Reported",
+        "UnderReview" => "Under review",
+        "Active" => "Active",
+        "AwaitingFollowUp" => "Awaiting follow-up",
+        "Resolved" => "Resolved",
+        "Closed" => "Closed",
+        _ => "Status unavailable"
+    };
+    private IReadOnlyList<string> ResolveMentionLabels(IReadOnlyList<string>? references) =>
+        (references ?? Array.Empty<string>()).Select(reference => MentionTargetsData?.Targets.FirstOrDefault(target => string.Equals(target.Reference, reference, StringComparison.Ordinal))?.DisplayLabel ?? "Mention unavailable").ToArray();
+    private IReadOnlyList<string> ResolveEvidenceLabels(IReadOnlyList<string>? evidenceKeys) =>
+        (evidenceKeys ?? Array.Empty<string>()).Select(key => EvidenceData?.Items.FirstOrDefault(item => string.Equals(item.EvidenceKey, key, StringComparison.Ordinal))?.DisplayName ?? "Attachment unavailable").ToArray();
+    private static string PanelTitle(CaseDetailPanelState state, string name) => state switch { CaseDetailPanelState.Loading => $"Loading {name.ToLowerInvariant()}", CaseDetailPanelState.Empty => $"No {name.ToLowerInvariant()} yet", CaseDetailPanelState.Denied => $"You can't view {name.ToLowerInvariant()}", CaseDetailPanelState.Offline => $"{name} isn't available offline", CaseDetailPanelState.Error => $"We couldn't load {name.ToLowerInvariant()}", _ => $"{name} unavailable" };
+    private static string PanelDescription(CaseDetailPanelState state, string name) => state switch { CaseDetailPanelState.Loading => $"Checking the available {name}.", CaseDetailPanelState.Empty => $"There are no {name} to display.", CaseDetailPanelState.Denied => $"You don't have access to {name}.", CaseDetailPanelState.Offline => $"Reconnect to check {name}.", CaseDetailPanelState.Error => $"We couldn't load {name}. Try again.", _ => $"{name} is not available for this case here." };
+    private static string UploadLabel(CaseDetailUploadState state) => state switch { CaseDetailUploadState.Uploaded => "Uploaded", CaseDetailUploadState.Uploading => "Uploading", CaseDetailUploadState.Failed => "Upload failed", CaseDetailUploadState.NotStarted => "Not uploaded", _ => "Status unknown" };
+    private static string CategoryLabel(CaseDetailObservationCategory category) => category.ToString();
+    private static string SubjectTypeLabel(CaseDetailSubjectType type) => type switch { CaseDetailSubjectType.Human => "Human health", CaseDetailSubjectType.Animal => "Animal health", _ => "Not recorded" };
+    private static string OperationMessage(CaseDetailOperationStatus status, string item) => status switch
+    {
+        CaseDetailOperationStatus.Conflict => $"The case changed. Refresh and try the {item} again.",
+        CaseDetailOperationStatus.Denied => $"You don't have permission to add this {item}.",
+        CaseDetailOperationStatus.Offline => $"This {item} couldn't be sent while offline. Reconnect and try again.",
+        CaseDetailOperationStatus.Unavailable => $"This {item} action isn't available here.",
+        _ => $"This {item} couldn't be completed. Check the details and connection, then try again."
+    };
+
+    public void Dispose() => Navigation.LocationChanged -= OnLocationChanged;
+}

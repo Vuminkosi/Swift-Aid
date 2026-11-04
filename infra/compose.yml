@@ -1,0 +1,574 @@
+name: swiftaid
+
+services:
+  database-migrate:
+    build:
+      context: ..
+      dockerfile: src/SwiftAid.Gateway/Dockerfile
+    image: ${GATEWAY_IMAGE:-vuminkosimatibe/swiftaid-gateway:latest}
+    command: ["--migrate-database"]
+    environment:
+      ConnectionStrings__SwiftAid: "${SWIFTAID_MIGRATION_CONNECTION:-Host=postgres;Port=5432;Database=${POSTGRES_DB:?Set POSTGRES_DB in .env};Username=${POSTGRES_USER:?Set POSTGRES_USER in .env};Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      disable: true
+    networks: [application]
+    restart: "no"
+
+  gateway:
+    build:
+      context: ..
+      dockerfile: src/SwiftAid.Gateway/Dockerfile
+    image: ${GATEWAY_IMAGE:-vuminkosimatibe/swiftaid-gateway:latest}
+    container_name: gateway
+    env_file:
+      - path: ${SWIFTAID_NATS_OPTIONS_FILE:-../.nats-overrides.env}
+        required: false
+      - path: ${SWIFTAID_CLASSIFICATION_GATEWAY_FILE:-../.classification-gateway.env}
+        required: false
+    environment:
+      # ASP.NET Core
+      # Local Compose stack: Development unlocks the TransportSecurity plaintext-dev
+      # allowances below (redis/minio/nats/qdrant are plaintext inside this network).
+      # Production deployments must override this to Production with TLS endpoints.
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_HTTP_PORTS: "8080"
+      Logging__LogLevel__SwiftAid: Information
+      Logging__LogLevel__Microsoft.AspNetCore.Hosting: Warning
+      Logging__LogLevel__Microsoft.EntityFrameworkCore: Error
+      Logging__LogLevel__Microsoft.EntityFrameworkCore.Database.Command: Error
+      Logging__LogLevel__Microsoft.EntityFrameworkCore.Database.Transaction: Error
+      Logging__LogLevel__Npgsql: Error
+      Logging__LogLevel__System.Net.Http.HttpClient: Warning
+      Logging__Console__FormatterName: simple
+      Logging__Console__FormatterOptions__SingleLine: "true"
+      Logging__Console__FormatterOptions__TimestampFormat: "HH:mm:ss.fff "
+      Logging__Console__FormatterOptions__UseUtcTimestamp: "true"
+      AllowedHosts: "localhost;127.0.0.1;[::1];10.0.2.2;swiftaid.online"
+      # The local emulator uses HTTP. Session cookies are explicitly development-only;
+      # production keeps Secure __Host- cookies unless it overrides this setting.
+      Authentication__AllowInsecureDevelopmentCookies: "true"
+      # Versioned report-handling defaults shared by the import UI and validator.
+      Intake__Consent__ProcessingPolicyReference: "${INTAKE_PROCESSING_POLICY_REFERENCE:-/privacy#privacy-use-heading}"
+      Intake__Consent__ProcessingPolicyVersion: "${INTAKE_PROCESSING_POLICY_VERSION:-2026-11-01}"
+      Intake__Consent__RecordingPolicyReference: "${INTAKE_RECORDING_POLICY_REFERENCE:-/privacy#privacy-sensitive-heading}"
+      Intake__Consent__RecordingPolicyVersion: "${INTAKE_RECORDING_POLICY_VERSION:-2026-11-01}"
+
+      # Transport Security
+      TransportSecurity__AllowPlaintextDevelopment: "true"
+      TransportSecurity__AllowedDevelopmentHosts__0: minio
+      TransportSecurity__AllowedDevelopmentHosts__1: redis
+      TransportSecurity__AllowedDevelopmentHosts__2: nats
+      TransportSecurity__AllowedDevelopmentHosts__3: qdrant
+
+      # PostgreSQL
+      # NOTE: the port here is the in-container Postgres port (always 5432).
+      # POSTGRES_PORT only remaps the host-side published port.
+      ConnectionStrings__SwiftAid: "Host=postgres;Port=5432;Database=${POSTGRES_DB:?Set POSTGRES_DB in .env};Username=${POSTGRES_USER:?Set POSTGRES_USER in .env};Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
+
+      # Qdrant
+      Qdrant__Enabled: "true"
+      Qdrant__Endpoint: "http://qdrant:6333"
+      Qdrant__ApiKey: "${QDRANT_API_KEY:?Set QDRANT_API_KEY in .env}"
+
+      # NATS
+      Nats__Url: "nats://nats:4222"
+      Nats__Username: "${NATS_GATEWAY_USER:?Set NATS_GATEWAY_USER in .env}"
+      Nats__Password: "${NATS_GATEWAY_PASSWORD:?Set NATS_GATEWAY_PASSWORD in .env}"
+      Nats__Enabled: "true"
+      Nats__IngestionDispatchEnabled: "${SWIFTAID_INGESTION_DISPATCH_ENABLED:-false}"
+      Nats__EventStream: "SWIFTAID_EVENTS"
+      Nats__EventSubjectPrefix: "swiftaid.events.case"
+      Nats__NotificationStream: "${NATS_NOTIFICATION_STREAM:-SWIFTAID_NOTIFICATIONS}"
+      Nats__NotificationSubject: "${NATS_NOTIFICATION_SUBJECT:-swiftaid.notifications.inapp}"
+
+      # MinIO
+      Minio__Endpoint: "http://minio:9000"
+      Minio__Bucket: "${MINIO_BUCKET:?Set MINIO_BUCKET in .env}"
+      Minio__MaxObjectSizeBytes: "${MINIO_MAX_OBJECT_SIZE_BYTES:-104857600}"
+      Minio__AccessKey: "${MINIO_APP_ACCESS_KEY:-}"
+      Minio__SecretKey: "${MINIO_APP_SECRET_KEY:-}"
+      Minio__UseSsl: "false"
+      Minio__Enabled: "${MINIO_ENABLED:-false}"
+
+      # Redis
+      # Published host ports never change container-to-container addresses.
+      Redis__ConnectionString: "redis:6379,password=${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env},abortConnect=false"
+      Redis__InstanceName: "${REDIS_INSTANCE_NAME:-swiftaid:}"
+      Redis__MaximumTtlSeconds: "${REDIS_MAXIMUM_TTL_SECONDS:-3600}"
+      Redis__Enabled: "true"
+
+      # Federation
+      Federation__Enabled: "${Federation__Enabled:-false}"
+
+      # Google Federation
+      Federation__Google__Enabled: "${Federation__Google__Enabled:-false}"
+      Federation__Google__CallbackVerified: "${Federation__Google__CallbackVerified:-false}"
+      Federation__Google__ClientId: "${Federation__Google__ClientId:-}"
+      Federation__Google__ClientSecret: "${Federation__Google__ClientSecret:-}"
+      Federation__Google__CallbackPath: "${Federation__Google__CallbackPath:-/google/callback}"
+
+      # Facebook Federation
+      Federation__Facebook__Enabled: "${Federation__Facebook__Enabled:-false}"
+      Federation__Facebook__CallbackVerified: "${Federation__Facebook__CallbackVerified:-false}"
+      Federation__Facebook__ClientId: "${Federation__Facebook__ClientId:-}"
+      Federation__Facebook__ClientSecret: "${Federation__Facebook__ClientSecret:-}"
+
+      # Identity
+      Identity__Enabled: "${Identity__Enabled:-false}"
+      Identity__Issuer: "${Identity__Issuer:-https://swiftaid.online/}"
+      Identity__AuthorizationCodeLifetimeSeconds: "${Identity__AuthorizationCodeLifetimeSeconds:-120}"
+      Identity__AccessTokenLifetimeSeconds: "${Identity__AccessTokenLifetimeSeconds:-600}"
+      Identity__RefreshTokenLifetimeSeconds: "${Identity__RefreshTokenLifetimeSeconds:-2592000}"
+
+      # Identity Certificates
+      Identity__SigningCertificatePath: "${Identity__SigningCertificatePath:-}"
+      Identity__SigningCertificatePassword: "${Identity__SigningCertificatePassword:-}"
+      Identity__EncryptionCertificatePath: "${Identity__EncryptionCertificatePath:-}"
+      Identity__EncryptionCertificatePassword: "${Identity__EncryptionCertificatePassword:-}"
+
+      # Identity Public Clients
+      Identity__PublicClients__0__ClientId: "${Identity__PublicClients__0__ClientId:-swiftaid-mobile}"
+      Identity__PublicClients__0__DisplayName: "${Identity__PublicClients__0__DisplayName:-SwiftAid Mobile}"
+      Identity__PublicClients__0__RedirectUris__0: "${Identity__PublicClients__0__RedirectUris__0:-online.swiftaid.mobile:/oauth2redirect}"
+      Identity__PublicClients__0__PostLogoutRedirectUris__0: "${Identity__PublicClients__0__PostLogoutRedirectUris__0:-online.swiftaid.mobile:/signout-callback}"
+
+      # SMTP delivery for account mail (password reset). Disabled until the
+      # operator provides relay credentials in .env; reset requests fail
+      # closed without them.
+      Smtp__Enabled: "${Smtp__Enabled:-false}"
+      Smtp__Host: "${Smtp__Host:-}"
+      Smtp__Port: "${Smtp__Port:-587}"
+      Smtp__EnableSsl: "${Smtp__EnableSsl:-true}"
+      Smtp__UserName: "${Smtp__UserName:-}"
+      Smtp__Password: "${Smtp__Password:-}"
+      Smtp__FromAddress: "${Smtp__FromAddress:-}"
+      Smtp__FromDisplayName: "${Smtp__FromDisplayName:-SwiftAid}"
+
+      # Firebase Cloud Messaging
+      Fcm__Enabled: "${FCM_ENABLED:-false}"
+      Fcm__ProjectId: "${FCM_PROJECT_ID:-}"
+      Fcm__CredentialsFilePath: "/run/secrets/swiftaid-fcm-service-account.json"
+
+      # Firebase Web
+      FirebaseWeb__Enabled: "${FIREBASE_WEB_ENABLED:-false}"
+      FirebaseWeb__ApiKey: "${FIREBASE_WEB_API_KEY:-}"
+      FirebaseWeb__AuthDomain: "${FIREBASE_WEB_AUTH_DOMAIN:-}"
+      FirebaseWeb__ProjectId: "${FIREBASE_WEB_PROJECT_ID:-}"
+      FirebaseWeb__StorageBucket: "${FIREBASE_WEB_STORAGE_BUCKET:-}"
+      FirebaseWeb__MessagingSenderId: "${FIREBASE_WEB_MESSAGING_SENDER_ID:-}"
+      FirebaseWeb__AppId: "${FIREBASE_WEB_APP_ID:-}"
+      FirebaseWeb__MeasurementId: "${FIREBASE_WEB_MEASUREMENT_ID:-}"
+      FirebaseWeb__VapidKey: "${FIREBASE_WEB_VAPID_KEY:-}"
+
+      # The local stack is only useful with the pipeline on: with it off every
+      # DB-backed route (intake, sessions, commands) fails closed and the gateway
+      # serves only metadata/health. This pins the compose requirement explicitly.
+      CaseCommandProcessing__Enabled: "true"
+      CaseCommandProcessing__MaximumTransactionAttempts: "${CaseCommandProcessing__MaximumTransactionAttempts:-3}" 
+
+      # Development-only unencrypted keys persist in the dedicated Docker volume
+      # so auth cookies and protected payloads survive Gateway restarts. Production
+      # must use a certificate-protected key ring instead.
+      DataProtection__Enabled: "true"
+      DataProtection__ApplicationName: "${DataProtection__ApplicationName:-SwiftAid}"
+      DataProtection__KeysPath: "/var/swiftaid/keys"
+      DataProtection__MaximumPayloadBytes: "65536"
+      DataProtection__AllowUnencryptedDevelopmentKeys: "true"
+
+      # Ellai runtime LLM policy: attached by reference, never baked into the
+      # image. The file below is bind-mounted read-only; the gateway resolves
+      # Ellai__Policy__Path at startup and refuses guarded model calls when
+      # the pinned file is missing, empty, or leaks engineering content.
+      # Override the host source with SWIFTAID_POLICY_FILE if the repo lives
+      # elsewhere; the default is relative to this compose file (infra/).
+      Ellai__Enabled: "${Ellai_Enabled:-true}"
+      Ellai__ApiKey: "${Ellai__ApiKey:-}"
+      Ellai__ApiUrl: "${Ellai__ApiUrl:-}"
+      Ellai__ReasoningModel: "${Ellai__ReasoningModel:-}"
+      Ellai__ASR_MODEL: "${Ellai__ASR_MODEL:-}"
+      Ellai__Asr__Language: "${Ellai__Asr__Language:-en}"
+      Ellai__ASR_WSS: "${Ellai__ASR_WSS:-}"
+      Ellai__ASR_Transcription__URL: "${Ellai__ASR_Transcription__URL:-}"
+      Ellai__ASRMode: "${Ellai__ASRMode:-DIARIZATION}"
+      EllaiTts__Endpoint: "http://ellai-tts:8090/"
+      EllaiTts__InternalKey: "${ELLAI_TTS_INTERNAL_KEY:-}"
+      EllaiLanguage__Endpoint: "http://ellai-language:8091/"
+      EllaiLanguage__InternalKey: "${ELLAI_LANGUAGE_INTERNAL_KEY:-}"
+      Ellai__Policy__Path: "/etc/swiftaid/policy/ellai-system-instruction.md"
+      Ellai__Policy__Version: "${Ellai__Policy__Version:-1.6}"
+      Ellai__ReasoningBackend: "${Ellai__ReasoningBackend:-meta}"
+      Ellai__Pricing__SpendingCap: "${Ellai__Pricing__SpendingCap:-70.00}"
+      Ellai__Pricing__InputPer1K: "${Ellai__Pricing__InputPer1K:-}"
+      Ellai__Pricing__OutputPer1K: "${Ellai__Pricing__OutputPer1K:-}"
+      Ellai__Pricing__AudioPerMinute: "${Ellai__Pricing__AudioPerMinute:-}"
+
+    secrets:
+      - source: fcm-service-account
+        target: swiftaid-fcm-service-account.json
+    ports:
+      - "127.0.0.1:${GATEWAY_PORT:-8080}:8080"
+    volumes:
+      - dataprotection-keys:/var/swiftaid/keys
+      - type: bind
+        source: ${SWIFTAID_POLICY_FILE:-../docs/ellai/ellai-system-instruction.md}
+        target: /etc/swiftaid/policy/ellai-system-instruction.md
+        read_only: true
+      - type: bind
+        source: ${SWIFTAID_TECHNICAL_FILE:-../docs/TECHNICAL.md}
+        target: /etc/swiftaid/docs/TECHNICAL.md
+        read_only: true
+    depends_on:
+      database-migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      nats-notification-bootstrap:
+        condition: service_completed_successfully
+      qdrant:
+        condition: service_started
+      minio:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - application
+    restart: unless-stopped
+
+  ellai-tts:
+    build:
+      context: ./ellai-tts
+      dockerfile: Dockerfile.kokoro
+    image: swiftaid/ellai-tts:kokoro-mms-local
+    profiles: ["ellai-voice"]
+    environment:
+      ELLAI_TTS_MODEL_PATH: /models
+      ELLAI_TTS_ENGLISH_PROVIDER: kokoro
+      ELLAI_KOKORO_MODEL_PATH: /kokoro
+      ELLAI_TTS_INTERNAL_KEY: ${ELLAI_TTS_INTERNAL_KEY:-}
+      ELLAI_TTS_CLARITY_PROFILES: ${ELLAI_TTS_CLARITY_PROFILES:-{}}
+      OMP_NUM_THREADS: "4"
+    volumes:
+      - ellai-tts-model-data:/models:ro
+      - ../.codex/models/kokoro:/kokoro:ro
+      - ../.codex/models:/native:ro
+    healthcheck:
+      test: ["CMD", "/app/.venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/health/ready', timeout=3).read()"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 90s
+    networks:
+      - application
+    restart: unless-stopped
+
+  ellai-language:
+    build:
+      context: ..
+      dockerfile: infra/ellai-tts/Dockerfile.language
+    image: swiftaid/ellai-language:pinned
+    profiles: ["ellai-native"]
+    environment:
+      ELLAI_LANGUAGE_INTERNAL_KEY: ${ELLAI_LANGUAGE_INTERNAL_KEY:-}
+      ELLAI_LANGUAGE_MODEL_PATH: /models
+      ELLAI_LANGUAGE_THREADS: "4"
+    volumes:
+      - ../.codex/models:/models:ro
+    healthcheck:
+      test: ["CMD", "/app/.venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8091/health/ready', timeout=3).read()"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 120s
+    networks:
+      - application
+    restart: unless-stopped
+
+  postgres:
+    image: postgis/postgis:17-3.6-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB in .env}
+      POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - application
+    restart: unless-stopped
+
+  qdrant:
+    image: qdrant/qdrant:v1.19.0@sha256:6c0652f8d6925b22f2f6f0e0a5365a6c9dbc8768bd6e70ccc1cdc14847e452a0
+    environment:
+      QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY:?Set QDRANT_API_KEY in .env}
+      QDRANT__TELEMETRY_DISABLED: "true"
+    volumes:
+      - qdrant-data:/qdrant/storage
+    # Intentionally no host port: only application-network services can reach it.
+    networks:
+      - application
+    restart: unless-stopped
+
+  nats:
+    image: nats:2.15.1-alpine3.22
+    command: ["--config", "/etc/nats/nats.conf"]
+    environment:
+      NATS_GATEWAY_USER: ${NATS_GATEWAY_USER:?Set NATS_GATEWAY_USER in .env}
+      NATS_GATEWAY_PASSWORD: ${NATS_GATEWAY_PASSWORD:?Set NATS_GATEWAY_PASSWORD in .env}
+      NATS_WORKER_USER: ${NATS_WORKER_USER:?Set NATS_WORKER_USER in .env}
+      NATS_WORKER_PASSWORD: ${NATS_WORKER_PASSWORD:?Set NATS_WORKER_PASSWORD in .env}
+      NATS_BOOTSTRAP_USER: ${NATS_BOOTSTRAP_USER:?Set NATS_BOOTSTRAP_USER in .env}
+      NATS_BOOTSTRAP_PASSWORD: ${NATS_BOOTSTRAP_PASSWORD:?Set NATS_BOOTSTRAP_PASSWORD in .env}
+    ports:
+      - "127.0.0.1:${NATS_CLIENT_PORT:-4222}:4222"
+    volumes:
+      - ./nats.conf:/etc/nats/nats.conf:ro
+      - nats-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8222/healthz >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - application
+    restart: unless-stopped
+
+  nats-notification-bootstrap:
+    image: natsio/nats-box:0.19.7@sha256:ffce8bd103383f179f8c7f11cf645726acf5d17280706c530c3b342dbe16334c
+    entrypoint: ["/bin/sh", "/opt/swiftaid/bootstrap-notification-stream.sh"]
+    env_file:
+      - path: ${SWIFTAID_NATS_OPTIONS_FILE:-../.nats-overrides.env}
+        required: false
+    volumes:
+      - ./scripts/bootstrap-notification-stream.sh:/opt/swiftaid/bootstrap-notification-stream.sh:ro
+      - ../src/SwiftAid.Gateway/appsettings.json:/etc/swiftaid/appsettings.json:ro
+    environment:
+      - NATS_URL=nats://nats:4222
+      - "NATS_USER=${NATS_BOOTSTRAP_USER:?Set NATS_BOOTSTRAP_USER in .env}"
+      - "NATS_PASSWORD=${NATS_BOOTSTRAP_PASSWORD:?Set NATS_BOOTSTRAP_PASSWORD in .env}"
+      - "NATS_BOOTSTRAP_USER=${NATS_BOOTSTRAP_USER:?Set NATS_BOOTSTRAP_USER in .env}"
+      - "NATS_BOOTSTRAP_PASSWORD=${NATS_BOOTSTRAP_PASSWORD:?Set NATS_BOOTSTRAP_PASSWORD in .env}"
+      - "NATS_NOTIFICATION_STREAM=${NATS_NOTIFICATION_STREAM:-SWIFTAID_NOTIFICATIONS}"
+      - "NATS_NOTIFICATION_SUBJECT=${NATS_NOTIFICATION_SUBJECT:-swiftaid.notifications.inapp}"
+      - APPSETTINGS_PATH=/etc/swiftaid/appsettings.json
+    depends_on:
+      nats:
+        condition: service_healthy
+    networks:
+      - application
+    restart: "no"
+  nats-ingestion-bootstrap:
+    image: natsio/nats-box:0.19.7@sha256:ffce8bd103383f179f8c7f11cf645726acf5d17280706c530c3b342dbe16334c
+    profiles: ["ingestion", "classification"]
+    entrypoint: ["/bin/sh", "/opt/swiftaid/bootstrap-ingestion-stream.sh"]
+    volumes:
+      - ./scripts/bootstrap-ingestion-stream.sh:/opt/swiftaid/bootstrap-ingestion-stream.sh:ro
+    environment:
+      NATS_URL: "nats://nats:4222"
+      NATS_USER: "${NATS_BOOTSTRAP_USER:?Set NATS_BOOTSTRAP_USER in .env}"
+      NATS_PASSWORD: "${NATS_BOOTSTRAP_PASSWORD:?Set NATS_BOOTSTRAP_PASSWORD in .env}"
+    depends_on:
+      nats:
+        condition: service_healthy
+    networks:
+      - application
+    restart: "no"
+
+  classification-bootstrap:
+    profiles: ["classification"]
+    image: swiftaid/classification-worker:local
+    build:
+      context: ../workers
+      args:
+        CLASSIFICATION: "true"
+    entrypoint: ["/app/.venv/bin/python", "-m", "swiftaid_workers.classification.provision"]
+    environment:
+      NATS_URL: "nats://nats:4222"
+      NATS_USER: "${NATS_BOOTSTRAP_USER:?Set NATS_BOOTSTRAP_USER in .env}"
+      NATS_PASSWORD: "${NATS_BOOTSTRAP_PASSWORD:?Set NATS_BOOTSTRAP_PASSWORD in .env}"
+    depends_on:
+      nats-ingestion-bootstrap:
+        condition: service_completed_successfully
+    networks: [application]
+    restart: "no"
+
+  classification-worker:
+    profiles: ["classification"]
+    image: swiftaid/classification-worker:local
+    build:
+      context: ../workers
+      args:
+        CLASSIFICATION: "true"
+    command: ["--classification"]
+    env_file:
+      - path: ${SWIFTAID_CLASSIFICATION_WORKER_FILE:-../.classification-worker.env}
+        required: false
+    environment:
+      CLASSIFICATION_NATS_URL: "nats://nats:4222"
+      CLASSIFICATION_NATS_USER: "${NATS_WORKER_USER:?Set NATS_WORKER_USER in .env}"
+      CLASSIFICATION_NATS_PASSWORD: "${NATS_WORKER_PASSWORD:?Set NATS_WORKER_PASSWORD in .env}"
+      # Share Gateway's network namespace: credentials remain on loopback, not bridge HTTP.
+      CLASSIFICATION_GATEWAY_URL: "http://127.0.0.1:8080"
+      CLASSIFICATION_ALLOW_LOOPBACK_HTTP: "true"
+      CLASSIFICATION_DEVICE: cpu
+      SWIFTAID_LOG_LEVEL: INFO
+      PYTHONUNBUFFERED: "1"
+      CLASSIFICATION_HEALTH_FILE: /tmp/classification-ready
+      HF_HOME: /models
+      HF_HUB_DISABLE_TELEMETRY: "1"
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+    network_mode: "service:gateway"
+    volumes:
+      - classification-model-data:/models
+    depends_on:
+      gateway:
+        condition: service_healthy
+        restart: true
+      classification-bootstrap:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "/app/.venv/bin/python", "-m", "swiftaid_workers.classification.health"]
+      interval: 15s
+      timeout: 5s
+      start_period: 10m
+      retries: 4
+    mem_limit: 6g
+    cpus: 4
+    restart: unless-stopped
+
+  minio:
+    image: swiftaid/minio:RELEASE.2025-10-15T17-29-55Z-source
+    platform: linux/amd64
+    build:
+      context: ..
+      dockerfile: infra/containers/minio/Dockerfile
+      args:
+        GOMAXPROCS: "2"
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?Set MINIO_ROOT_USER in .env}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in .env}
+      MINIO_BROWSER: "off"
+    ports:
+      - "127.0.0.1:${MINIO_API_PORT:-9000}:9000"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:9000/minio/health/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - application
+    restart: unless-stopped
+
+  minio-bootstrap:
+    image: swiftaid/minio-bootstrap:RELEASE.2025-08-13T08-35-41Z-source
+    platform: linux/amd64
+    build:
+      context: ..
+      dockerfile: infra/containers/minio-bootstrap/Dockerfile
+      args:
+        GOMAXPROCS: "2"
+    profiles: ["local-bootstrap"]
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        test -n "$$MINIO_APP_ACCESS_KEY" || { echo "MINIO_APP_ACCESS_KEY is required for local bootstrap" >&2; exit 1; }
+        test -n "$$MINIO_APP_SECRET_KEY" || { echo "MINIO_APP_SECRET_KEY is required for local bootstrap" >&2; exit 1; }
+        mc alias set swiftaid http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD"
+        mc admin info swiftaid >/dev/null
+        if mc stat "swiftaid/$$MINIO_BUCKET" >/dev/null 2>&1; then
+          echo "Refusing to modify an existing bucket: $$MINIO_BUCKET" >&2
+          exit 1
+        fi
+        if mc admin policy info swiftaid swiftaid-private-objects >/dev/null 2>&1; then
+          echo "Refusing to modify an existing policy: swiftaid-private-objects" >&2
+          exit 1
+        fi
+        if mc admin user info swiftaid "$$MINIO_APP_ACCESS_KEY" >/dev/null 2>&1; then
+          echo "Refusing to modify an existing app user" >&2
+          exit 1
+        fi
+        cat > /tmp/swiftaid-private-objects.json <<JSON
+        {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Action": ["s3:GetBucketLocation", "s3:ListBucket", "s3:ListBucketMultipartUploads"],
+              "Resource": ["arn:aws:s3:::$$MINIO_BUCKET"]
+            },
+            {
+              "Effect": "Allow",
+              "Action": ["s3:AbortMultipartUpload", "s3:GetObject", "s3:ListMultipartUploadParts", "s3:PutObject"],
+              "Resource": ["arn:aws:s3:::$$MINIO_BUCKET/*"]
+            }
+          ]
+        }
+        JSON
+        mc mb "swiftaid/$$MINIO_BUCKET"
+        mc admin policy create swiftaid swiftaid-private-objects /tmp/swiftaid-private-objects.json
+        mc admin user add swiftaid "$$MINIO_APP_ACCESS_KEY" "$$MINIO_APP_SECRET_KEY"
+        mc admin policy attach swiftaid swiftaid-private-objects --user "$$MINIO_APP_ACCESS_KEY"
+        echo "Created a new private local bucket and bucket-scoped app identity."
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?Set MINIO_ROOT_USER in .env}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in .env}
+      MINIO_BUCKET: ${MINIO_BUCKET:?Set MINIO_BUCKET in .env}
+      MINIO_APP_ACCESS_KEY: ${MINIO_APP_ACCESS_KEY:-}
+      MINIO_APP_SECRET_KEY: ${MINIO_APP_SECRET_KEY:-}
+    depends_on:
+      minio:
+        condition: service_healthy
+    networks:
+      - application
+    restart: "no"
+
+  redis:
+    image: redis:8.4.7-alpine3.22
+    command: ["sh", "-c", "exec redis-server --appendonly no --requirepass \"$${REDIS_PASSWORD}\""]
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}
+    ports:
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$${REDIS_PASSWORD}\" redis-cli ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    networks:
+      - application
+    restart: unless-stopped
+
+networks:
+  application:
+    driver: bridge
+
+volumes:
+  postgres-data:
+  dataprotection-keys:
+  qdrant-data:
+  nats-data:
+  minio-data:
+  ellai-tts-model-data:
+  classification-model-data:
+
+secrets:
+  fcm-service-account:
+    file: ${FCM_CREDENTIALS_FILE_PATH:-${FCM_CredentialsFilePath:-../secrets/swiftaid-fcm-service-account.json}}

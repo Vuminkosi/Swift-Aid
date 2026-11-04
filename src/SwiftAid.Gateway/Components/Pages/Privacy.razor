@@ -1,0 +1,58 @@
+@page "/privacy"
+@page "/privay"
+@using SwiftAid.UI.Components.Surfaces.Public
+@inject Microsoft.Extensions.Configuration.IConfiguration Configuration
+
+<PageTitle>Privacy | @ServiceName</PageTitle>
+
+<HeadContent>
+    <link rel="canonical" href="@CanonicalUrl" />
+    <meta name="description" content="How @ServiceName handles reports and account access." />
+</HeadContent>
+
+<MudContainer MaxWidth="MaxWidth.Medium" Class="py-8 px-4">
+    <MudStack Spacing="4">
+        <PrivacyNoticeSurface ServiceName="@ServiceName"
+                              PrivacyContactEmail="@PrivacyContactEmail"
+                              SupportContactEmail="@SupportContactEmail"
+                              DataDeletionHref="/terms#data-deletion" />
+    </MudStack>
+</MudContainer>
+
+@code {
+    private string ServiceName => Configuration["PublicSite:ServiceName"] ?? "SwiftAid";
+
+    private string? PrivacyContactEmail => GetValidEmail(Configuration["PublicSite:PrivacyContactEmail"]);
+
+    private string? SupportContactEmail => GetValidEmail(Configuration["PublicSite:SupportContactEmail"]);
+
+    private string CanonicalUrl => BuildCanonicalUrl("privacy");
+
+    private string BuildCanonicalUrl(string page)
+    {
+        var configuredBaseUrl = Configuration["PublicSite:BaseUrl"];
+        if (!Uri.TryCreate(configuredBaseUrl, UriKind.Absolute, out var baseUri) ||
+            !string.Equals(baseUri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) ||
+            !string.IsNullOrEmpty(baseUri.UserInfo) ||
+            !string.Equals(baseUri.AbsolutePath, "/", StringComparison.Ordinal) ||
+            !string.IsNullOrEmpty(baseUri.Query) ||
+            !string.IsNullOrEmpty(baseUri.Fragment))
+        {
+            return "/privacy";
+        }
+
+        return new Uri(baseUri, page).AbsoluteUri;
+    }
+
+    private static string? GetValidEmail(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value) ||
+            !System.Net.Mail.MailAddress.TryCreate(value, out var address) ||
+            !string.Equals(address.Address, value, StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        return address.Address;
+    }
+}

@@ -1,0 +1,21 @@
+# Reuse the existing speech runtime and cached English linguistic assets.
+# These images must be provisioned locally; build with --pull=false.
+ARG KOKORO_ASSET_IMAGE=vuminkosimatibe/anthill:latest
+ARG MMS_RUNTIME_IMAGE=swiftaid/ellai-tts:mms-eng-pinned
+FROM ${KOKORO_ASSET_IMAGE} AS english-assets
+FROM ${MMS_RUNTIME_IMAGE}
+
+USER root
+WORKDIR /app
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-dev --extra kokoro \
+    && chown -R swiftaid:swiftaid /app
+COPY app.py voice_pool.py audio_processing.py kokoro_voice.py native-profiles.json ./
+
+# Misaki uses this installed model in trf=False mode. Never let its fallback
+# downloader provision linguistic model files during a speech request.
+COPY --from=english-assets /opt/venv/lib/python3.12/site-packages/en_core_web_sm /app/.venv/lib/python3.12/site-packages/en_core_web_sm
+COPY --from=english-assets /opt/venv/lib/python3.12/site-packages/en_core_web_sm-3.8.0.dist-info /app/.venv/lib/python3.12/site-packages/en_core_web_sm-3.8.0.dist-info
+ENV ELLAI_TTS_ENGLISH_PROVIDER=kokoro
+ENV ELLAI_TTS_NATIVE_PROFILES_FILE=/app/native-profiles.json
+USER swiftaid

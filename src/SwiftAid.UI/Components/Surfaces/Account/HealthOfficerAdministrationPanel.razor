@@ -1,0 +1,137 @@
+@using System.Globalization
+@using Microsoft.Extensions.DependencyInjection
+@using SwiftAid.Contracts.Cases
+@inject IServiceProvider Services
+
+<section aria-labelledby="officer-administration-title" class="pa-4 mb-4" aria-busy="@_busy.ToString().ToLowerInvariant()">
+    <MudText Typo="Typo.subtitle1" HtmlTag="h2" id="officer-administration-title">Health officer designations</MudText>
+    <MudText Typo="Typo.body2">A designation is an organizational role. It does not verify a professional licence or assign a case.</MudText>
+    <MudTextField T="string" Label="Organization reference" @bind-Value="_organization" @bind-Value:after="ScopeChanged" Immediate="true" MaxLength="256" Disabled="@Locked" />
+    <MudTextField T="string" Label="Officer reference" @bind-Value="_target" @bind-Value:after="ScopeChanged" Immediate="true" MaxLength="256" Disabled="@Locked" />
+    <MudTextField T="string" Label="Country code" @bind-Value="_country" @bind-Value:after="ScopeChanged" Immediate="true" MaxLength="2" Disabled="@Locked" HelperText="Two uppercase letters, for example SZ." />
+    <MudSelect T="string" Label="Sector" @bind-Value="_sector" @bind-Value:after="ScopeChanged" Disabled="@Locked">
+        <MudSelectItem Value="@("HumanHealth")">Human health</MudSelectItem>
+        <MudSelectItem Value="@("AnimalHealth")">Animal health</MudSelectItem>
+    </MudSelect>
+    <MudButton Variant="Variant.Outlined" Disabled="@Locked" OnClick="LookupAsync">Look up designation</MudButton>
+    @if (_loaded)
+    {
+        <MudText Typo="Typo.body2">@(_current is null ? "No designation recorded for this scope." : $"Current status: {_current.Status}; version {_current.Version}; valid until {_current.ExpiresAtUtc:u}.")</MudText>
+        <MudSelect T="string" Label="New status" @bind-Value="_status" Disabled="@Locked">
+            <MudSelectItem Value="@("Active")">Active</MudSelectItem>
+            <MudSelectItem Value="@("Suspended")">Suspended</MudSelectItem>
+            <MudSelectItem Value="@("Revoked")">Revoked</MudSelectItem>
+        </MudSelect>
+        <MudTextField T="string" Label="Valid from (UTC)" @bind-Value="_validFrom" Disabled="@Locked" HelperText="Format: YYYY-MM-DD HH:MM" />
+        <MudTextField T="string" Label="Expires (UTC)" @bind-Value="_expires" Disabled="@Locked" HelperText="Format: YYYY-MM-DD HH:MM" />
+        @if (_pending is null)
+        {
+            <MudButton Variant="Variant.Outlined" Color="Color.Primary" Disabled="@_busy" OnClick="Review">Review change</MudButton>
+        }
+    }
+    @if (_pending is { } pending)
+    {
+        <div role="group" aria-label="Review designation change">
+            <MudText Typo="Typo.body2">@pending.Status designation for @pending.TargetActorId in @pending.OrganizationId, @pending.CountryCode, @pending.Sector, from @pending.ValidFromUtc.ToString("u") until @pending.ExpiresAtUtc.ToString("u"). Current version: @pending.ExpectedVersion.</MudText>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@_busy" OnClick="SubmitAsync">@(_uncertain ? "Retry same change" : "Confirm change")</MudButton>
+            @if (!_uncertain)
+            {
+                <MudButton Variant="Variant.Text" Disabled="@_busy" OnClick="CancelReview">Back to editing</MudButton>
+            }
+        </div>
+    }
+    @if (_message is not null)
+    {
+        <MudText role="status" aria-live="polite">@_message</MudText>
+    }
+</section>
+
+@code {
+    [Parameter] public IHealthOfficerAdministrationClient? Client { get; set; }
+    private string _organization = "", _target = "", _country = "", _sector = "HumanHealth", _status = "Active", _validFrom = "", _expires = "";
+    private bool _busy, _loaded, _uncertain;
+    private string? _message;
+    private HealthOfficerDesignationView? _current;
+    private HealthOfficerDesignationChangeRequest? _pending;
+    private bool Locked => _busy || _pending is not null;
+    private IHealthOfficerAdministrationClient? ResolveClient() => Client ?? Services.GetService<IHealthOfficerAdministrationClient>();
+
+    private void ScopeChanged() { _loaded = false; _current = null; _message = null; }
+
+    private async Task LookupAsync()
+    {
+        if (Locked) return;
+        var client = ResolveClient();
+        if (client is null) { _message = "Designation administration is unavailable."; return; }
+        _busy = true; _loaded = false; _current = null; _message = null;
+        try
+        {
+            var result = await client.LookupAsync(new() { TargetActorId = _target, OrganizationId = _organization, CountryCode = _country, Sector = _sector });
+            if (result.Status == HealthOfficerAdministrationStatus.Available)
+            {
+                _current = result.Current; _loaded = true;
+                if (_current is not null)
+                {
+                    _validFrom = _current.ValidFromUtc.ToUniversalTime().ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
+                    _expires = _current.ExpiresAtUtc.ToUniversalTime().ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
+                }
+            }
+            else _message = result.Status == HealthOfficerAdministrationStatus.Denied
+                ? "This designation scope is unavailable for your account." : "Could not look up this designation. Check the references and try again.";
+        }
+        catch (Exception error) when (error is not OutOfMemoryException) { _message = "Could not look up this designation. Try again."; }
+        finally { _busy = false; }
+    }
+
+    private void Review()
+    {
+        if (!_loaded || Locked) return;
+        if (!DateTimeOffset.TryParseExact(_validFrom, "yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var from) ||
+            !DateTimeOffset.TryParseExact(_expires, "yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var expires) ||
+            _status is not ("Active" or "Suspended" or "Revoked") || _current is null && _status != "Active")
+        { _message = "Enter valid UTC dates, with expiry after the start. A new designation must be active."; return; }
+        // Preserve sub-minute precision when an existing value was not edited.
+        if (_current is not null)
+        {
+            if (_validFrom == _current.ValidFromUtc.ToUniversalTime().ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)) from = _current.ValidFromUtc;
+            if (_expires == _current.ExpiresAtUtc.ToUniversalTime().ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)) expires = _current.ExpiresAtUtc;
+        }
+        if (expires <= from) { _message = "Expiry must be after the start."; return; }
+        _message = null; _uncertain = false;
+        _pending = new() { CommandId = Guid.NewGuid(), TargetActorId = _target, OrganizationId = _organization, CountryCode = _country,
+            Sector = _sector, Status = _status, ValidFromUtc = from, ExpiresAtUtc = expires, ExpectedVersion = _current?.Version ?? 0 };
+    }
+
+    private void CancelReview() { if (!_uncertain && !_busy) _pending = null; }
+
+    private async Task SubmitAsync()
+    {
+        if (_busy || _pending is not { } request) return;
+        var client = ResolveClient();
+        if (client is null) { _message = "Designation administration is unavailable."; return; }
+        _busy = true;
+        try
+        {
+            var result = await client.ChangeAsync(request);
+            if (result.Status is HealthOfficerAdministrationStatus.Recorded or HealthOfficerAdministrationStatus.Replayed && result.Receipt is { } receipt)
+            {
+                _current = new(receipt.DesignationId, receipt.Version, request.Status, request.ValidFromUtc, request.ExpiresAtUtc);
+                _pending = null; _uncertain = false; _message = "Designation change recorded.";
+            }
+            else if (result.Status == HealthOfficerAdministrationStatus.OutcomeUnknown)
+            { _uncertain = true; _message = "The result is not yet known. Retry the same change to check safely."; }
+            else if (_uncertain)
+            { _message = "The earlier result is still unknown. Retry the same change when access is available."; }
+            else
+            {
+                _pending = null; _loaded = false; _uncertain = false;
+                _message = result.Status == HealthOfficerAdministrationStatus.Conflict
+                    ? "The designation changed. Look it up again before reviewing a new change."
+                    : "The change was not recorded. Look up the designation and try again.";
+            }
+        }
+        catch (Exception error) when (error is not OutOfMemoryException)
+        { _uncertain = true; _message = "The result is not yet known. Retry the same change to check safely."; }
+        finally { _busy = false; }
+    }
+}

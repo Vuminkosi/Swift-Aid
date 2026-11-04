@@ -1,0 +1,33 @@
+{
+  "name": "swiftaidv2",
+  "version": "1.0.0",
+  "description": "SwiftAid is being implemented against the root-level product specification v1.4 and implementation plan v2.4. The current repository contains the .NET 10 solution and gateway shell, a MAUI Android project, Python worker package, and local Compose service definitions. This is an implementation in progress: buildable scaffolding and individual checks do not establish complete product acceptance.",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs",
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Vuminkosi/Swift-Aid.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/Vuminkosi/Swift-Aid/issues"
+  },
+  "homepage": "https://github.com/Vuminkosi/Swift-Aid#readme",
+  "dependencies": {
+    "@ricky0123/vad-web": "0.0.31",
+    "interactjs": "1.10.28",
+    "onnxruntime-web": "1.22.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  }
+}

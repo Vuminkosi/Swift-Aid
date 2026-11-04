@@ -1,0 +1,116 @@
+@using SwiftAid.Contracts.Ellai
+@implements IEllaiUiContextProvider
+<SwiftAid.UI.Ellai.Guidance.EllaiSemanticContext Provider="this" />
+@using SwiftAid.Contracts.Surveillance
+@inject IJSRuntime JavaScript
+@inject IDialogService Dialogs
+@implements IAsyncDisposable
+
+<div class="street-map">
+    <div class="street-map__canvas" data-ellai-control="surveillance-map.canvas" data-bonboarding-anchor="ellai-map-canvas" @ref="_element" role="region" aria-label="Interactive surveillance map. Scroll or pinch to zoom; drag or use arrow keys to pan." tabindex="0"></div>
+    <div class="street-map__reset"><span>@(_zoom * 100)&#37;</span><MudButton Size="Size.Small" OnClick="ResetAsync" data-ellai-control="surveillance-map.reset" data-bonboarding-anchor="ellai-map-reset">Reset view</MudButton></div>
+    <div class="street-map__legend" role="group" aria-label="Map layers">
+        <button type="button" aria-pressed="@(ShowHuman ? "true" : "false")" @onclick="ToggleHumanAsync" data-ellai-control="surveillance-map.human" data-bonboarding-anchor="ellai-map-human"><i class="human" aria-hidden="true"></i>Human</button>
+        <button type="button" aria-pressed="@(ShowAnimal ? "true" : "false")" @onclick="ToggleAnimalAsync" data-ellai-control="surveillance-map.animal" data-bonboarding-anchor="ellai-map-animal"><i class="animal" aria-hidden="true"></i>Animal</button>
+        <button type="button" aria-pressed="@(ShowHuman && ShowAnimal ? "true" : "false")" @onclick="ToggleBothAsync" data-ellai-control="surveillance-map.both" data-bonboarding-anchor="ellai-map-both"><i class="mixed" aria-hidden="true"></i>Both</button>
+        <button type="button" aria-pressed="@(_showMedicalCenters ? "true" : "false")" @onclick="ToggleMedicalCenters" data-ellai-control="surveillance-map.facilities" data-bonboarding-anchor="ellai-map-facilities"><i class="medical" aria-hidden="true">H</i>Medical centers &amp; clinics</button>
+        <small>Report groups, not risk levels</small>
+    </div>
+    @if (_showMedicalCenters)
+    {
+        <p role="status">@(_medicalCentersUnavailable ? "Medical-center locations could not be loaded." : _medicalCenterCount is null ? "Loading medical-center locations…" : _medicalCenterCount == 0 ? "No mapped medical centers or clinics are available for this country." : $"{_medicalCenterCount} mapped medical centers and clinics. Services and opening hours are not verified.")
+            <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap contributors</a>
+        </p>
+    }
+    @if (_unavailable)
+    {
+        <p role="status">The street map could not be loaded. Area totals remain available below.</p>
+    }
+    else if (_tilesUnavailable)
+    {
+        <p role="status">Street detail is unavailable. Country boundaries and report markers remain visible.</p>
+    }
+</div>
+
+@code {
+    private bool _mapReady;
+    public string ComponentId => EllaiSurveillanceUiManifest.Map.ComponentId;
+    public EllaiUiManifest Describe() => EllaiSurveillanceUiManifest.Map;
+    public EllaiUiState GetState() => new(ComponentId, !_mapReady && !_unavailable, _unavailable,
+        EllaiSurveillanceUiManifest.MapControls.Select(control => new UiControlState(control.ControlId,
+            _unavailable ? UiObservationState.Disabled : _mapReady ? UiObservationState.Ready : UiObservationState.Unknown)).ToArray());
+
+    [Parameter] public string Country { get; set; } = "SZ";
+    [Parameter] public IReadOnlyList<SurveillanceMapPoint> Points { get; set; } = [];
+    [Parameter] public bool ShowHuman { get; set; } = true;
+    [Parameter] public bool ShowAnimal { get; set; } = true;
+    [Parameter] public EventCallback<bool> ShowHumanChanged { get; set; }
+    [Parameter] public EventCallback<bool> ShowAnimalChanged { get; set; }
+    [Parameter] public OperationsMapSurface.MapFocus? Focus { get; set; }
+    private ElementReference _element;
+    private IJSObjectReference? _module;
+    private DotNetObjectReference<OperationsStreetMap>? _reference;
+    private bool _dirty = true, _unavailable, _tilesUnavailable;
+    private double _zoom = 1;
+    private bool _showMedicalCenters = true, _medicalCentersUnavailable;
+    private int? _medicalCenterCount;
+
+    private async Task ToggleHumanAsync() { ShowHuman = !ShowHuman; _dirty = true; await ShowHumanChanged.InvokeAsync(ShowHuman); }
+    private async Task ToggleAnimalAsync() { ShowAnimal = !ShowAnimal; _dirty = true; await ShowAnimalChanged.InvokeAsync(ShowAnimal); }
+    private async Task ToggleBothAsync()
+    {
+        var show = !(ShowHuman && ShowAnimal);
+        ShowHuman = ShowAnimal = show;
+        _dirty = true;
+        await ShowHumanChanged.InvokeAsync(show);
+        await ShowAnimalChanged.InvokeAsync(show);
+    }
+    private void ToggleMedicalCenters() { _showMedicalCenters = !_showMedicalCenters; _dirty = true; }
+    [JSInvokable] public Task MedicalCentersStatus(int count, bool unavailable)
+    {
+        _medicalCenterCount = count;
+        _medicalCentersUnavailable = unavailable;
+        return InvokeAsync(StateHasChanged);
+    }
+
+    protected override void OnParametersSet() => _dirty = true;
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!_dirty || _unavailable) return;
+        _dirty = false;
+        try
+        {
+            if (_module is null)
+            {
+                _module = await JavaScript.InvokeAsync<IJSObjectReference>("import", "./_content/SwiftAid.UI/maps/street-map.js");
+                _reference = DotNetObjectReference.Create(this);
+                await _module.InvokeVoidAsync("initialize", _element, _reference);
+            }
+            await _module.InvokeVoidAsync("update", _element, Country, Points, ShowHuman, ShowAnimal, Focus, _showMedicalCenters);
+            if (!_mapReady) { _mapReady = true; StateHasChanged(); }
+        }
+        catch (JSDisconnectedException) { }
+        catch (JSException) { _unavailable = true; await InvokeAsync(StateHasChanged); }
+    }
+
+    [JSInvokable] public Task ZoomChanged(double value) { _zoom = Math.Round(value, 2); return InvokeAsync(StateHasChanged); }
+    [JSInvokable]
+    public Task ViewCases(string pointId) => InvokeAsync(async () =>
+    {
+        var point = Points.FirstOrDefault(item => item.Id == pointId);
+        if (point?.Cases is not { Count: > 0 } cases) return;
+        var selected = cases.Where(item => item.Animal ? ShowAnimal : ShowHuman).ToArray();
+        if (selected.Length == 0) return;
+        await Dialogs.ShowAsync<MapCasesDialog>(point.Label,
+            new DialogParameters<MapCasesDialog> { { dialog => dialog.Cases, selected } },
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = true, CloseOnEscapeKey = true });
+    });
+    [JSInvokable] public Task TilesUnavailable() { if (_tilesUnavailable) return Task.CompletedTask; _tilesUnavailable = true; return InvokeAsync(StateHasChanged); }
+    private async Task ResetAsync() { if (_module is not null) await _module.InvokeVoidAsync("reset", _element); }
+    public async ValueTask DisposeAsync()
+    {
+        try { if (_module is not null) { await _module.InvokeVoidAsync("dispose", _element); await _module.DisposeAsync(); } }
+        catch (JSDisconnectedException) { }
+        _reference?.Dispose();
+    }
+}

@@ -1,0 +1,513 @@
+@using SwiftAid.Contracts.Sessions
+@inject Microsoft.JSInterop.IJSRuntime Js
+
+<section class="session-public-list" aria-label="Published community sessions">
+    @if (Loading)
+    {
+        <div class="session-public-list__state" role="status" aria-live="polite">
+            <MudProgressCircular Indeterminate="true" Size="Size.Small" aria-label="Loading community sessions" />
+            <MudText Typo="Typo.body2">Loading sessions…</MudText>
+        </div>
+    }
+    else if (ErrorMessage is not null)
+    {
+        <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" role="alert">
+            @ErrorMessage
+            <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Refresh" Color="Color.Error" OnClick="OnRetry" aria-label="Retry loading community sessions">Retry</MudButton>
+        </MudAlert>
+    }
+    else if (Sessions.Count == 0)
+    {
+        <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" role="status">
+            No public sessions are published yet.
+        </MudAlert>
+    }
+    else
+    {
+        <MudStack Spacing="3">
+            @foreach (var session in Sessions)
+            {
+                <MudCard Elevation="0" Outlined="true" Class="session-public-list__card" aria-label="@($"Community session: {session.Title}")">
+                    <MudCardContent>
+                        <MudHidden Breakpoint="Breakpoint.MdAndUp">
+                            <div class="session-public-list__mobile">
+                                <div class="session-public-list__mobile-heading">
+                                    <MudText Typo="Typo.subtitle1" HtmlTag="h2">@session.Title</MudText>
+                                    @if (IsCancelled(session))
+                                    {
+                                        <MudText Typo="Typo.caption" Color="Color.Error">Cancelled</MudText>
+                                    }
+                                    else if (IsCompleted(session))
+                                    {
+                                        <MudText Typo="Typo.caption" Color="Color.Secondary">Completed</MudText>
+                                    }
+                                </div>
+
+                                <div class="session-public-list__mobile-facts">
+                                    <div>
+                                        <MudIcon Icon="@Icons.Material.Filled.Event" aria-hidden="true" />
+                                        <span>@FormatWhenCompact(session)</span>
+                                    </div>
+                                    <div>
+                                        <MudIcon Icon="@Icons.Material.Filled.Place" aria-hidden="true" />
+                                        <span>@FormatLocation(session)</span>
+                                    </div>
+                                </div>
+
+                                @if (IsCancelled(session))
+                                {
+                                    <p class="session-public-list__mobile-cancelled">This session was cancelled.</p>
+                                }
+
+                                <div class="session-public-list__mobile-actions">
+                                    <a class="session-public-list__mobile-action" href="@DetailHref(session.SessionId)"
+                                       aria-label="@($"View details for {session.Title}")">
+                                        <MudIcon Icon="@Icons.Material.Filled.Info" aria-hidden="true" />
+                                        View details
+                                    </a>
+                                    @if (IsScheduled(session) && !string.IsNullOrWhiteSpace(session.ChannelLink) && !string.IsNullOrWhiteSpace(PublicBasePath))
+                                    {
+                                        <a class="session-public-list__mobile-action session-public-list__mobile-action--destination"
+                                           href="@DestinationHref(session)" target="_blank" rel="noopener noreferrer">
+                                            <MudIcon Icon="@Icons.Material.Filled.OpenInNew" aria-hidden="true" />
+                                            @ChannelLabel(session.ChannelType)
+                                        </a>
+                                    }
+                                    @if (IsScheduled(session) && ShareTextAsync is not null && LoadInvitationTextAsync is not null)
+                                    {
+                                        <MudButton Variant="Variant.Text" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Share"
+                                                   OnClick="() => ShareInvitationAsync(session)" aria-label="@($"Share invitation for {session.Title}")">
+                                            Share
+                                        </MudButton>
+                                    }
+                                    @if (IsScheduled(session) && LoadInvitationTextAsync is not null)
+                                    {
+                                        <MudButton Variant="Variant.Text" Color="Color.Primary" StartIcon="@Icons.Material.Filled.ContentCopy"
+                                                   OnClick="() => CopyInvitationAsync(session)" aria-label="@($"Copy invitation for {session.Title}")">
+                                            @(IsCopiedVersion(session) ? "Copied" : "Copy invitation")
+                                        </MudButton>
+                                    }
+                                    @if (OpenCalendarAsync is not null)
+                                    {
+                                        <MudButton Variant="Variant.Text" Color="Color.Primary" StartIcon="@Icons.Material.Filled.CalendarMonth"
+                                                   OnClick="() => OpenCalendarFileAsync(session)" Disabled="@(_openingCalendarId is not null)"
+                                                   aria-label="@CalendarActionLabel(session)">
+                                            @(_openingCalendarId == session.SessionId ? "Opening…" : IsCancelled(session) ? "Open cancellation file" : "Open calendar file")
+                                        </MudButton>
+                                    }
+                                    else if (!string.IsNullOrWhiteSpace(PublicBasePath))
+                                    {
+                                        <a class="session-public-list__mobile-action" href="@CalendarHref(session.SessionId)"
+                                           download="@($"session-{session.SessionId:D}.ics")" aria-label="@CalendarActionLabel(session)">
+                                            <MudIcon Icon="@Icons.Material.Filled.CalendarMonth" aria-hidden="true" />
+                                            @(IsCancelled(session) ? "Download cancellation" : "Add to calendar")
+                                        </a>
+                                    }
+                                </div>
+
+                                @if (_calendarErrorId == session.SessionId)
+                                {
+                                    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" role="alert">@_calendarError</MudAlert>
+                                }
+
+                                @if (_shareRequestSessionId == session.SessionId && _shareRequestVersion == session.Version)
+                                {
+                                    <MudText Typo="Typo.caption" role="status">Share request finished. Delivery is not confirmed.</MudText>
+                                }
+
+                                @if (IsOpenInvitationVersion(session))
+                                {
+                                    <MudPaper Elevation="0" Outlined="true" Class="session-public-list__invitation">
+                                        <MudText Typo="Typo.caption" Color="Color.Secondary">Copy this text to invite someone. Opening this panel does not send anything.</MudText>
+                                        <pre class="session-public-list__invitation-text">@_openInvitationText</pre>
+                                    </MudPaper>
+                                }
+                                @if (_openInvitationId == session.SessionId && _invitationError is not null)
+                                {
+                                    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true">
+                                        @_invitationError
+                                        @if (CanRefresh)
+                                        {
+                                            <MudButton Variant="Variant.Text" Color="Color.Error" OnClick="RefreshInvitationSessionAsync">Refresh sessions</MudButton>
+                                        }
+                                    </MudAlert>
+                                }
+                            </div>
+                        </MudHidden>
+
+                        <MudHidden Breakpoint="Breakpoint.SmAndDown">
+                        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Class="session-public-list__heading">
+                            <MudText Typo="Typo.h6" HtmlTag="h2">@session.Title</MudText>
+                            @if (IsCancelled(session))
+                            {
+                                <MudChip T="string" Size="Size.Small" Color="Color.Error">Cancelled</MudChip>
+                            }
+                            else if (IsCompleted(session))
+                            {
+                                <MudChip T="string" Size="Size.Small" Color="Color.Default">Completed</MudChip>
+                            }
+                            else
+                            {
+                                <MudChip T="string" Size="Size.Small" Color="Color.Success">Scheduled</MudChip>
+                            }
+                        </MudStack>
+
+                        <MudText Typo="Typo.body2" Color="Color.Secondary">@FormatWhen(session)</MudText>
+                        <MudText Typo="Typo.body2">Presented by @session.Presenter (@session.Language)</MudText>
+                        <MudText Typo="Typo.body1" Class="mt-2">@session.Summary</MudText>
+                        <MudText Typo="Typo.body2" Color="Color.Secondary">For: @session.AudienceDescription</MudText>
+
+                        @if (session.TopicTags.Count > 0)
+                        {
+                            <div class="session-public-list__tags">
+                                @foreach (var tag in session.TopicTags)
+                                {
+                                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">@tag</MudChip>
+                                }
+                            </div>
+                        }
+
+                        @if (IsCancelled(session))
+                        {
+                            <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true" Class="mt-2">
+                                This session was cancelled.
+                            </MudAlert>
+                        }
+
+                        @if (IsScheduled(session) && !string.IsNullOrWhiteSpace(session.ChannelLink) && !string.IsNullOrWhiteSpace(PublicBasePath))
+                        {
+                            <MudText Typo="Typo.body2" Class="mt-2">
+                                <MudLink Href="@DestinationHref(session)" Target="_blank" rel="noopener noreferrer">Open configured destination</MudLink>
+                            </MudText>
+                        }
+
+                        <div class="session-public-list__actions">
+                            <a class="mud-button-root mud-button mud-button-text mud-button-text-primary mud-button-text-size-medium mud-ripple"
+                               href="@DetailHref(session.SessionId)" aria-label="@($"View details for {session.Title}")">
+                                <span class="mud-button-label">View details</span>
+                            </a>
+                            @if (OpenCalendarAsync is not null)
+                            {
+                                <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.CalendarMonth" OnClick="() => OpenCalendarFileAsync(session)"
+                                           Disabled="@(_openingCalendarId is not null)" aria-label="@CalendarActionLabel(session)">
+                                    @(_openingCalendarId == session.SessionId ? "Opening…" : IsCancelled(session) ? "Open cancellation file" : "Open calendar file")
+                                </MudButton>
+                            }
+                            else if (!string.IsNullOrWhiteSpace(PublicBasePath))
+                            {
+                                <a class="mud-button-root mud-button mud-button-text mud-button-text-default mud-button-text-size-medium mud-ripple"
+                                   href="@CalendarHref(session.SessionId)"
+                                   download="@($"session-{session.SessionId:D}.ics")" aria-label="@CalendarActionLabel(session)">
+                                    <span class="mud-button-label">@(IsCancelled(session) ? "Download cancellation" : "Download calendar file")</span>
+                                </a>
+                            }
+                            @if (IsScheduled(session))
+                            {
+                                @if (LoadInvitationTextAsync is not null)
+                                {
+                                    <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.ContentCopy" Color="Color.Primary" OnClick="() => CopyInvitationAsync(session)" aria-label="@($"Copy invitation for {session.Title}")">
+                                        @(IsCopiedVersion(session) ? "Copied" : "Copy invitation")
+                                    </MudButton>
+                                }
+                                @if (ShareTextAsync is not null && LoadInvitationTextAsync is not null)
+                                {
+                                    <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Share" Color="Color.Primary" OnClick="() => ShareInvitationAsync(session)" aria-label="@($"Share invitation for {session.Title}")">
+                                        Share
+                                    </MudButton>
+                                }
+                            }
+                        </div>
+
+                        @if (_calendarErrorId == session.SessionId)
+                        {
+                            <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" role="alert">@_calendarError</MudAlert>
+                        }
+
+                        @if (_shareRequestSessionId == session.SessionId && _shareRequestVersion == session.Version)
+                        {
+                            <MudText Typo="Typo.caption" role="status">Share request finished. Delivery is not confirmed.</MudText>
+                        }
+
+                        @if (IsOpenInvitationVersion(session))
+                        {
+                            <MudPaper Elevation="0" Outlined="true" Class="session-public-list__invitation">
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">Copy this text to invite someone. Opening this panel does not send anything.</MudText>
+                                <pre class="session-public-list__invitation-text">@_openInvitationText</pre>
+                            </MudPaper>
+                        }
+                        @if (_openInvitationId == session.SessionId && _invitationError is not null)
+                        {
+                            <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true">
+                                @_invitationError
+                                @if (CanRefresh)
+                                {
+                                    <MudButton Variant="Variant.Text" Color="Color.Error" OnClick="RefreshInvitationSessionAsync">Refresh sessions</MudButton>
+                                }
+                            </MudAlert>
+                        }
+                        </MudHidden>
+                    </MudCardContent>
+                </MudCard>
+            }
+        </MudStack>
+        <MudText Typo="Typo.caption" Color="Color.Secondary" Class="session-public-list__notice">
+            If the schedule changes, download an updated calendar file and check the event in your calendar app.
+            Copying an invitation never marks it delivered.
+        </MudText>
+    }
+</section>
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<PublicSessionView> Sessions { get; set; } = Array.Empty<PublicSessionView>();
+
+    [Parameter] public bool Loading { get; set; }
+
+    [Parameter] public string? ErrorMessage { get; set; }
+
+    [Parameter] public EventCallback OnRetry { get; set; }
+
+    [Parameter] public bool CanRefresh { get; set; }
+
+    /// <summary>Loads the plain-text invitation for a session. Absent when copying is unavailable.</summary>
+    [Parameter] public Func<Guid, long, Task<string?>>? LoadInvitationTextAsync { get; set; }
+
+    /// <summary>Opens the device share sheet with the given text. Web hosts leave this unset.</summary>
+    [Parameter] public Func<string, Task>? ShareTextAsync { get; set; }
+
+    /// <summary>Opens a current public calendar file on hosts with a native file handler.</summary>
+    [Parameter] public Func<Guid, Task<bool>>? OpenCalendarAsync { get; set; }
+
+    /// <summary>Base path of the public session endpoints.</summary>
+    [Parameter] public string? PublicBasePath { get; set; } = "/public/v1/sessions";
+
+    private Guid? _openInvitationId;
+    private long _openInvitationVersion;
+    private string? _openInvitationText;
+    private string? _invitationError;
+    private Guid? _copiedSessionId;
+    private long _copiedSessionVersion;
+    private Guid? _shareRequestSessionId;
+    private long _shareRequestVersion;
+    private Guid? _calendarErrorId;
+    private string? _calendarError;
+    private Guid? _openingCalendarId;
+
+    private string CalendarActionLabel(PublicSessionView session) =>
+        $"{(OpenCalendarAsync is null ? "Download" : "Open")} {(IsCancelled(session) ? "cancellation calendar file" : "calendar file")} for {session.Title}";
+
+    private async Task OpenCalendarFileAsync(PublicSessionView session)
+    {
+        if (_openingCalendarId is not null || OpenCalendarAsync is null) return;
+        _openingCalendarId = session.SessionId;
+        _calendarErrorId = null;
+        _calendarError = null;
+        try
+        {
+            if (await OpenCalendarAsync(session.SessionId)) return;
+        }
+        catch (Exception)
+        {
+            // The device may have no application able to open calendar files.
+        }
+        finally
+        {
+            _openingCalendarId = null;
+        }
+        _calendarErrorId = session.SessionId;
+        _calendarError = "The calendar file could not be opened. Check your connection and calendar app, then try again.";
+    }
+
+    private bool IsCurrentScheduledVersion(PublicSessionView session) => Sessions.Any(current =>
+        current.SessionId == session.SessionId && current.Version == session.Version && IsScheduled(current));
+
+    private bool IsOpenInvitationVersion(PublicSessionView session) =>
+        _openInvitationId == session.SessionId && _openInvitationVersion == session.Version &&
+        _openInvitationText is not null && IsScheduled(session);
+
+    private bool IsCopiedVersion(PublicSessionView session) =>
+        _copiedSessionId == session.SessionId && _copiedSessionVersion == session.Version && IsScheduled(session);
+
+    protected override void OnParametersSet()
+    {
+        if (_openInvitationText is not null && !Sessions.Any(IsOpenInvitationVersion))
+        {
+            _openInvitationId = null;
+            _openInvitationText = null;
+        }
+        if (_copiedSessionId is not null && !Sessions.Any(IsCopiedVersion))
+            _copiedSessionId = null;
+    }
+
+    private string CalendarHref(Guid sessionId) => $"{PublicBasePath?.TrimEnd('/')}/{sessionId:D}/calendar";
+
+    private string DestinationHref(PublicSessionView session) => $"{PublicBasePath?.TrimEnd('/')}/{session.SessionId:D}/destination?version={session.Version.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
+
+    private static string DetailHref(Guid sessionId) => $"/sessions?sessionId={sessionId:D}";
+
+    private async Task RefreshInvitationSessionAsync()
+    {
+        _invitationError = null;
+        _openInvitationId = null;
+        _openInvitationText = null;
+        _copiedSessionId = null;
+        _shareRequestSessionId = null;
+        await OnRetry.InvokeAsync();
+    }
+
+    private static string FormatLocation(PublicSessionView session)
+    {
+        if (string.IsNullOrWhiteSpace(session.RegionId) && string.IsNullOrWhiteSpace(session.CountryCode))
+        {
+            return "Location not provided";
+        }
+
+        return string.IsNullOrWhiteSpace(session.RegionId)
+            ? session.CountryCode
+            : string.IsNullOrWhiteSpace(session.CountryCode)
+                ? session.RegionId
+                : $"{session.RegionId}, {session.CountryCode}";
+    }
+
+    private static string ChannelLabel(SessionChannelType channelType) => channelType switch
+    {
+        SessionChannelType.FacebookPage => "Open Facebook",
+        SessionChannelType.WhatsAppGroup => "Open WhatsApp",
+        _ => "Open session destination"
+    };
+
+    private static bool IsCancelled(PublicSessionView session) =>
+        string.Equals(session.Status, "Cancelled", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsCompleted(PublicSessionView session) =>
+        string.Equals(session.Status, "Completed", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsScheduled(PublicSessionView session) =>
+        string.Equals(session.Status, "Scheduled", StringComparison.OrdinalIgnoreCase);
+
+    private static string FormatWhen(PublicSessionView session)
+    {
+        try
+        {
+            var zone = TimeZoneInfo.FindSystemTimeZoneById(session.TimeZoneId);
+            var local = TimeZoneInfo.ConvertTime(session.StartUtc, zone);
+            return $"{local:dddd, d MMMM yyyy h:mm tt} ({session.TimeZoneId}, UTC{local:zzz}) · {session.DurationMinutes} minutes";
+        }
+        catch (Exception ex) when (ex is TimeZoneNotFoundException or InvalidTimeZoneException or ArgumentException)
+        {
+            return $"{session.StartUtc:dddd, d MMMM yyyy HH:mm} UTC · {session.DurationMinutes} minutes";
+        }
+    }
+
+    private static string FormatWhenCompact(PublicSessionView session)
+    {
+        try
+        {
+            var zone = TimeZoneInfo.FindSystemTimeZoneById(session.TimeZoneId);
+            var localStart = TimeZoneInfo.ConvertTime(session.StartUtc, zone);
+            var localEnd = TimeZoneInfo.ConvertTime(session.StartUtc.AddMinutes(session.DurationMinutes), zone);
+            var end = localStart.Date == localEnd.Date
+                ? $"{localEnd:HH:mm zzz}"
+                : $"{localEnd:d MMM yyyy, HH:mm zzz}";
+            return $"{localStart:d MMM yyyy, HH:mm zzz}–{end} · {session.TimeZoneId}";
+        }
+        catch (Exception ex) when (ex is TimeZoneNotFoundException or InvalidTimeZoneException or ArgumentException)
+        {
+            var startUtc = session.StartUtc.UtcDateTime;
+            var endUtc = startUtc.AddMinutes(session.DurationMinutes);
+            var end = startUtc.Date == endUtc.Date ? $"{endUtc:HH:mm}" : $"{endUtc:d MMM yyyy, HH:mm}";
+            return $"{startUtc:d MMM yyyy, HH:mm}–{end} UTC";
+        }
+    }
+
+    private async Task CopyInvitationAsync(PublicSessionView session)
+    {
+        _invitationError = null;
+        _copiedSessionId = null;
+        var text = await LoadTextAsync(session);
+        if (text is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await Js.InvokeVoidAsync("navigator.clipboard.writeText", text);
+            if (!IsCurrentScheduledVersion(session)) return;
+            _copiedSessionId = session.SessionId;
+            _copiedSessionVersion = session.Version;
+            _openInvitationId = null;
+            _openInvitationText = null;
+        }
+        catch (Exception)
+        {
+            // Clipboard access is unavailable (for example a device web view without
+            // clipboard permission): show the text so it can be selected manually.
+            if (IsCurrentScheduledVersion(session))
+            {
+                _openInvitationId = session.SessionId;
+                _openInvitationVersion = session.Version;
+                _openInvitationText = text;
+            }
+        }
+    }
+
+    private async Task ShareInvitationAsync(PublicSessionView session)
+    {
+        _invitationError = null;
+        _shareRequestSessionId = null;
+        var text = await LoadTextAsync(session);
+        if (text is null || ShareTextAsync is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await ShareTextAsync(text);
+            if (IsCurrentScheduledVersion(session))
+            {
+                _shareRequestSessionId = session.SessionId;
+                _shareRequestVersion = session.Version;
+            }
+        }
+        catch (Exception)
+        {
+            if (IsCurrentScheduledVersion(session))
+            {
+                _openInvitationId = session.SessionId;
+                _openInvitationVersion = session.Version;
+                _openInvitationText = text;
+                _invitationError = "Sharing is unavailable right now. The invitation text is shown below instead.";
+            }
+        }
+    }
+
+    private async Task<string?> LoadTextAsync(PublicSessionView session)
+    {
+        if (LoadInvitationTextAsync is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            var text = await LoadInvitationTextAsync(session.SessionId, session.Version);
+            if (string.IsNullOrWhiteSpace(text) || !IsCurrentScheduledVersion(session))
+            {
+                _openInvitationId = session.SessionId;
+                _openInvitationText = null;
+                _invitationError = "The invitation is unavailable or the session changed. Refresh the session and try again.";
+                return null;
+            }
+
+            return text;
+        }
+        catch (Exception)
+        {
+            _openInvitationId = session.SessionId;
+            _openInvitationText = null;
+            _invitationError = "The invitation is unavailable or the session changed. Refresh the session and try again.";
+            return null;
+        }
+    }
+}

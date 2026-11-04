@@ -1,0 +1,26 @@
+<MudPaper Elevation="0" Class="swiftaid-stat-tile pa-4">
+    <MudText Typo="Typo.caption" Color="Color.Secondary">@Label</MudText>
+    <MudText Typo="Typo.h5">@Value</MudText>
+    @if (!string.IsNullOrWhiteSpace(Delta))
+    {
+        <MudText Typo="Typo.caption" Color="@(DeltaUp ? Color.Success : Color.Error)">@Delta</MudText>
+    }
+</MudPaper>
+
+@code {
+    /// <summary>Tile label, for example "Total Cases".</summary>
+    [Parameter, EditorRequired]
+    public string Label { get; set; } = string.Empty;
+
+    /// <summary>Tile value, for example "1,248".</summary>
+    [Parameter, EditorRequired]
+    public string Value { get; set; } = string.Empty;
+
+    /// <summary>Optional trend text, for example "+12%".</summary>
+    [Parameter]
+    public string? Delta { get; set; }
+
+    /// <summary>True renders the delta as positive (green).</summary>
+    [Parameter]
+    public bool DeltaUp { get; set; } = true;
+}

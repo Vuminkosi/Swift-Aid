@@ -1,0 +1,504 @@
+@using SwiftAid.UI.Components.Surfaces.Account
+@using SwiftAid.UI.Components.Theme
+
+<div class="public-resource-surface account-surface">
+    <SwiftAidPageHeading Eyebrow="Account" Title="Your account"
+                         Description="@AccountDescription"
+                         HeadingId="account-heading" />
+
+    @if (Snapshot.ViewState == AccountViewState.Loading)
+    {
+        <SwiftAidStatePanel State="SwiftAidViewState.Loading" Title="Loading account details"
+                            Description="Checking your sign-in and workspace." />
+    }
+    else if (Snapshot.ViewState == AccountViewState.Denied)
+    {
+        <SwiftAidStatePanel State="SwiftAidViewState.Denied" Title="Account details are unavailable"
+                            Description="You cannot view these account details right now. Your saved reports remain on this device." />
+    }
+    else if (Snapshot.ViewState == AccountViewState.Unavailable)
+    {
+        <SwiftAidStatePanel State="SwiftAidViewState.Information" Title="Account details are unavailable"
+                            Description="Try again when your connection is available. Your saved reports remain on this device."
+                            OnRetry="OnRefresh" />
+    }
+    else
+    {
+        @if (Snapshot.IsSignedIn)
+        {
+            <MudPaper Class="account-card account-hero" Elevation="0">
+                <MudAvatar Color="Color.Primary" Variant="Variant.Filled" Size="Size.Large" aria-hidden="true">
+                    @AvatarInitials
+                </MudAvatar>
+                <div class="account-hero__identity">
+                    <MudText Typo="Typo.subtitle1" HtmlTag="h2">@DisplayTitle</MudText>
+                    <MudText Typo="Typo.body2">@DisplaySubtitle</MudText>
+                </div>
+                <div class="account-hero__side">
+                    <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Outlined">Signed in</MudChip>
+                </div>
+                @if (OnSignOut.HasDelegate)
+                {
+                    <MudButton Variant="Variant.Text" Color="Color.Primary" Disabled="@_actionInProgress"
+                               OnClick="SignOutAsync" StartIcon="@Icons.Material.Filled.Logout"
+                               Class="account-hero__action">
+                        @(_actionInProgress ? "Please wait…" : "Sign out")
+                    </MudButton>
+                }
+                else
+                {
+                    <MudText Typo="Typo.caption">Sign-out is unavailable right now.</MudText>
+                }
+            </MudPaper>
+        }
+
+        @if (!Snapshot.IsSignedIn && (!string.IsNullOrWhiteSpace(SignInHref)
+            || !string.IsNullOrWhiteSpace(RegisterHref)
+            || !string.IsNullOrWhiteSpace(GuestReportHref)))
+        {
+            <MudPaper Class="account-card account-guest-panel" Elevation="0">
+                <div class="account-guest-panel__identity">
+                    <MudAvatar Color="Color.Primary" Variant="Variant.Filled" Size="Size.Large" aria-hidden="true">G</MudAvatar>
+                    <div>
+                        <MudText Typo="Typo.subtitle1" HtmlTag="h2">Guest access</MudText>
+                        <MudText Typo="Typo.body2">Reports saved on this device stay here.</MudText>
+                    </div>
+                </div>
+                <div class="account-guest-panel__next">
+                    <MudText Typo="Typo.subtitle2" HtmlTag="h3">Choose how to continue</MudText>
+                    <div class="account-guest-panel__primary-actions">
+                        @if (!string.IsNullOrWhiteSpace(SignInHref))
+                        {
+                            <MudButton Href="@SignInHref" Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Login">
+                                Sign in
+                            </MudButton>
+                        }
+                        @if (!string.IsNullOrWhiteSpace(RegisterHref))
+                        {
+                            <MudButton Href="@RegisterHref" Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Outlined.PersonAdd">
+                                Create account
+                            </MudButton>
+                        }
+                    </div>
+                    @if (!string.IsNullOrWhiteSpace(GuestReportHref))
+                    {
+                        <MudButton Href="@GuestReportHref" Variant="Variant.Text" Color="Color.Primary"
+                                   StartIcon="@Icons.Material.Outlined.Assignment">
+                            Continue to a guest report
+                        </MudButton>
+                    }
+                </div>
+            </MudPaper>
+        }
+        else if (!Snapshot.IsSignedIn)
+        {
+            <MudPaper Class="account-card account-hero" Elevation="0">
+                <MudAvatar Color="Color.Primary" Variant="Variant.Filled" Size="Size.Large" aria-hidden="true">G</MudAvatar>
+                <div class="account-hero__identity">
+                    <MudText Typo="Typo.subtitle1" HtmlTag="h2">Guest access</MudText>
+                    <MudText Typo="Typo.body2">Reports saved on this device stay here.</MudText>
+                </div>
+            </MudPaper>
+        }
+
+        <MudMessageBox @ref="_signOutBox" Title="Sign out?">
+            <MessageContent>
+                You will be signed out on this device. Reports and voice notes saved here stay here.
+                Anything still waiting on a connection can finish after you sign back in.
+            </MessageContent>
+            <YesButton>
+                <MudButton Variant="Variant.Filled" Color="Color.Primary">Sign out</MudButton>
+            </YesButton>
+            <NoButton>
+                <MudButton Variant="Variant.Text" Color="Color.Primary">Stay signed in</MudButton>
+            </NoButton>
+        </MudMessageBox>
+
+        @if (Snapshot.IsSignedIn)
+        {
+        <SwiftAidSettingsGroup Label="Sign-in methods" HeadingId="account-signin-heading">
+            @if (Snapshot.Providers.Count == 0)
+            {
+                <li class="account-status-item">
+                    <SwiftAidSettingsStatus Title="Couldn't load sign-in methods."
+                                            Message="Check your connection and try again."
+                                            OnRetry="OnRefresh" />
+                </li>
+            }
+            else
+            {
+                @foreach (var provider in Snapshot.Providers)
+                {
+                    <SwiftAidSettingsRow @key="provider.Id"
+                                         Title="@provider.Name"
+                                         Description="@provider.StatusMessage"
+                                         Icon="@Icons.Material.Outlined.AccountCircle">
+                        <Trailing>
+                            @if (!Snapshot.IsSignedIn && provider.State == AccountProviderState.NotConnected && OnSignIn.HasDelegate)
+                            {
+                                <MudButton Variant="Variant.Text" Color="Color.Primary" Disabled="@_actionInProgress"
+                                           OnClick="@(() => SignInAsync(provider.Id))">
+                                    Sign in
+                                </MudButton>
+                            }
+                            else
+                            {
+                                <MudChip T="string" Size="Size.Small" Color="ProviderColor(provider.State)" Variant="Variant.Outlined">
+                                    @ProviderStatus(provider)
+                                </MudChip>
+                            }
+                        </Trailing>
+                    </SwiftAidSettingsRow>
+                }
+            }
+        </SwiftAidSettingsGroup>
+        <MudText Typo="Typo.body2">Signing in never grants workspace access by itself.</MudText>
+        }
+
+        <SwiftAidSettingsGroup Label="Workspace" HeadingId="account-workspace-heading">
+            @if (!Snapshot.IsSignedIn)
+            {
+                <SwiftAidSettingsRow Title="Sign-in required"
+                                     Description="Sign in to see available workspaces. Access still depends on your verified permissions."
+                                     Icon="@Icons.Material.Outlined.Lock" />
+            }
+            else if (!Snapshot.WorkspacesAvailable)
+            {
+                <li class="account-status-item">
+                    <SwiftAidSettingsStatus Title="Couldn't load workspaces."
+                                            Message="@WorkspaceUnavailableMessage"
+                                            OnRetry="OnRefresh" />
+                </li>
+            }
+            else if (Snapshot.Workspaces.Count == 0)
+            {
+                <SwiftAidSettingsRow Title="No workspaces yet"
+                                     Description="If you join one, it will appear here."
+                                     Icon="@Icons.Material.Outlined.Groups" />
+            }
+            else
+            {
+                @if (!string.IsNullOrWhiteSpace(Snapshot.SelectedWorkspaceName))
+                {
+                    <SwiftAidSettingsRow Title="@Snapshot.SelectedWorkspaceName"
+                                         Description="The workspace you are viewing now."
+                                         Icon="@Icons.Material.Outlined.Groups">
+                        <Trailing>
+                            <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined">Current</MudChip>
+                        </Trailing>
+                    </SwiftAidSettingsRow>
+                }
+                @foreach (var workspace in Snapshot.Workspaces.Where(workspace => !workspace.IsSelected))
+                {
+                    <SwiftAidSettingsRow @key="workspace.Id"
+                                         Title="@workspace.Name"
+                                         Icon="@Icons.Material.Outlined.Groups">
+                        <Trailing>
+                            @if (OnSelectWorkspace.HasDelegate)
+                            {
+                                <MudButton Variant="Variant.Text" Color="Color.Primary" Disabled="@_actionInProgress"
+                                           OnClick="@(() => SelectWorkspaceAsync(workspace.Id))">
+                                    Switch
+                                </MudButton>
+                            }
+                        </Trailing>
+                    </SwiftAidSettingsRow>
+                }
+            }
+            @if (Snapshot.IsSignedIn && !string.IsNullOrWhiteSpace(OrganizationsHref))
+            {
+                <SwiftAidSettingsRow Title="Organizations and invitations" Href="@OrganizationsHref"
+                                     Description="View your organizations, create a workspace or invite people."
+                                     AriaLabel="Manage organizations and invitations"
+                                     Icon="@Icons.Material.Outlined.Groups" />
+            }
+        </SwiftAidSettingsGroup>
+        @if (Snapshot.IsSignedIn)
+        {
+            <MudText Typo="Typo.body2">Switching changes only what you view, never what you can access.</MudText>
+        }
+
+        @if (Snapshot.IsSignedIn)
+        {
+            <SwiftAidSettingsGroup Label="Account" HeadingId="account-account-heading">
+                @if (!string.IsNullOrWhiteSpace(EditProfileHref))
+                {
+                    <SwiftAidSettingsRow Title="Personal information" Href="@EditProfileHref"
+                                         AriaLabel="View and edit profile"
+                                         Icon="@Icons.Material.Outlined.Person" />
+                }
+                @if (!string.IsNullOrWhiteSpace(SecurityHref))
+                {
+                    <SwiftAidSettingsRow Title="Security &amp; sign-in" Href="@SecurityHref"
+                                         AriaLabel="Security and sign-in"
+                                         Icon="@Icons.Material.Outlined.Lock" />
+                }
+                @if (!string.IsNullOrWhiteSpace(ManageMethodsHref))
+                {
+                    <SwiftAidSettingsRow Title="Connected sign-in methods" Href="@ManageMethodsHref"
+                                         AriaLabel="Manage sign-in methods"
+                                         Icon="@Icons.Material.Outlined.Link" />
+                }
+                @if (!string.IsNullOrWhiteSpace(ParticipationHref))
+                {
+                    <SwiftAidSettingsRow Title="Participation preference" Href="@ParticipationHref"
+                                         AriaLabel="Participation preference"
+                                         Icon="@Icons.Material.Outlined.Badge" />
+                }
+                @if (!string.IsNullOrWhiteSpace(NotificationsHref))
+                {
+                    <SwiftAidSettingsRow Title="Notification preferences" Href="@NotificationsHref"
+                                         AriaLabel="Notification preferences"
+                                         Icon="@Icons.Material.Outlined.Notifications" />
+                }
+            </SwiftAidSettingsGroup>
+        }
+
+        <SwiftAidSettingsGroup Label="Preferences" HeadingId="account-preferences-heading">
+            <li class="account-status-item">
+                <ThemePreferenceControl />
+            </li>
+            <li class="account-status-item">
+                <AccessibilityPreferenceControl />
+            </li>
+        </SwiftAidSettingsGroup>
+
+        <SwiftAidSettingsGroup Label="Data &amp; sync" HeadingId="account-data-heading">
+            @if (!string.IsNullOrWhiteSpace(SyncHref))
+            {
+                <SwiftAidSettingsRow Title="Offline reports &amp; sync" Href="@SyncHref"
+                                     AriaLabel="Offline reports and sync"
+                                     Icon="@Icons.Material.Outlined.CloudSync" />
+            }
+            @if (!string.IsNullOrWhiteSpace(PrivacyHref))
+            {
+                <SwiftAidSettingsRow Title="Privacy &amp; data" Href="@PrivacyHref"
+                                     AriaLabel="Privacy and data"
+                                     Icon="@Icons.Material.Outlined.Policy" />
+            }
+        </SwiftAidSettingsGroup>
+
+        <SwiftAidSettingsGroup Label="Help" HeadingId="account-help-heading">
+            @if (!string.IsNullOrWhiteSpace(AboutHref))
+            {
+                <SwiftAidSettingsRow Title="About SwiftAid" Href="@AboutHref"
+                                     AriaLabel="About SwiftAid"
+                                     Icon="@Icons.Material.Outlined.Info" />
+            }
+            <SwiftAidSettingsRow Title="Education" Href="/education"
+                                 AriaLabel="Community education"
+                                 Icon="@Icons.Material.Outlined.School" />
+        </SwiftAidSettingsGroup>
+
+        @if (!string.IsNullOrWhiteSpace(Snapshot.StatusMessage) || !string.IsNullOrWhiteSpace(_actionError))
+        {
+            <MudAlert Severity="@(Snapshot.StatusIsError || !string.IsNullOrWhiteSpace(_actionError) ? Severity.Warning : Severity.Info)"
+                      Variant="Variant.Outlined" Dense="true" role="status" aria-live="polite">
+                @(_actionError ?? Snapshot.StatusMessage)
+            </MudAlert>
+        }
+    }
+</div>
+
+@code {
+    private bool _actionInProgress;
+    private string? _actionError;
+
+    [Parameter] public AccountPresentationSnapshot Snapshot { get; set; } = AccountPresentationSnapshot.Unavailable;
+    [Parameter] public EventCallback<string> OnSignIn { get; set; }
+    [Parameter] public EventCallback OnSignOut { get; set; }
+    [Parameter] public EventCallback<string> OnSelectWorkspace { get; set; }
+    [Parameter] public EventCallback OnRefresh { get; set; }
+
+    /// <summary>Optional web sign-in entry point for signed-out visitors.</summary>
+    [Parameter] public string? SignInHref { get; set; }
+
+    /// <summary>Optional account registration entry point.</summary>
+    [Parameter] public string? RegisterHref { get; set; }
+
+    /// <summary>Optional guest report entry point.</summary>
+    [Parameter] public string? GuestReportHref { get; set; }
+
+    /// <summary>
+    /// Optional deep link to a dedicated sign-in methods page (web). When null
+    /// or empty no link renders, so native hosts without that route stay clean.
+    /// </summary>
+    [Parameter] public string? ManageMethodsHref { get; set; }
+
+    /// <summary>
+    /// Optional deep link to the profile editor. When null or empty no link
+    /// renders, so hosts without that route stay clean.
+    /// </summary>
+    [Parameter] public string? EditProfileHref { get; set; }
+
+    /// <summary>
+    /// Optional deep link to the organizations page. When null or empty no
+    /// link renders, so hosts without that route stay clean.
+    /// </summary>
+    [Parameter] public string? OrganizationsHref { get; set; }
+
+    /// <summary>
+    /// Optional deep link to the participation preference page. When null
+    /// or empty no link renders, so hosts without that route stay clean.
+    /// </summary>
+    [Parameter] public string? ParticipationHref { get; set; }
+
+    /// <summary>
+    /// Optional deep link to the notifications page. When null or empty no
+    /// link renders, so hosts without that route stay clean.
+    /// </summary>
+    [Parameter] public string? NotificationsHref { get; set; }
+
+    /// <summary>
+    /// Optional deep link to the security page. When null or empty no link
+    /// renders, so hosts without that route stay clean.
+    /// </summary>
+    [Parameter] public string? SecurityHref { get; set; }
+
+    /// <summary>
+    /// Optional deep link to the offline reports and sync page. When null
+    /// or empty no link renders, so hosts without that route stay clean.
+    /// </summary>
+    [Parameter] public string? SyncHref { get; set; }
+
+    /// <summary>
+    /// Optional deep link to the privacy page. When null or empty no link
+    /// renders, so hosts without that route stay clean.
+    /// </summary>
+    [Parameter] public string? PrivacyHref { get; set; }
+
+    /// <summary>
+    /// Optional deep link to the about page. When null or empty no link
+    /// renders, so hosts without that route stay clean.
+    /// </summary>
+    [Parameter] public string? AboutHref { get; set; }
+
+    /// <summary>
+    /// Optional sign-out confirmation hook. Defaults to the shared
+    /// <see cref="MudBlazor.MudMessageBox" /> below. Tests supply a stub.
+    /// </summary>
+    [Parameter] public Func<Task<bool>>? ConfirmSignOutAsync { get; set; }
+
+    private MudBlazor.MudMessageBox? _signOutBox;
+
+    private string AccountDescription => Snapshot.IsSignedIn
+        ? "Manage your account, workspace access, and preferences."
+        : "Manage preferences and local reports, or sign in to view workspace access.";
+
+    private string DisplayTitle => Snapshot.IsSignedIn
+        ? (string.IsNullOrWhiteSpace(Snapshot.DisplayName) ? "Signed in" : Snapshot.DisplayName)
+        : "Guest";
+
+    private string DisplaySubtitle => Snapshot.IsSignedIn
+        ? "Signed in on this device."
+        : "Not signed in — your reports stay on this device.";
+
+    private string WorkspaceUnavailableMessage => string.IsNullOrWhiteSpace(Snapshot.SelectedWorkspaceName)
+        ? "Refresh to try again. If the problem continues, sign in again."
+        : $"Still showing {Snapshot.SelectedWorkspaceName}. Refresh to try again.";
+
+    private string AvatarInitials
+    {
+        get
+        {
+            if (!Snapshot.IsSignedIn || string.IsNullOrWhiteSpace(Snapshot.DisplayName))
+            {
+                return Snapshot.IsSignedIn ? "S" : "G";
+            }
+
+            var parts = Snapshot.DisplayName.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length == 1)
+            {
+                return parts[0].Substring(0, 1).ToUpperInvariant();
+            }
+
+            return string.Concat(parts[0].AsSpan(0, 1), parts[1].AsSpan(0, 1)).ToUpperInvariant();
+        }
+    }
+
+    private async Task SignInAsync(string providerId) =>
+        await RunActionAsync(() => OnSignIn.InvokeAsync(providerId));
+
+    private async Task SignOutAsync()
+    {
+        if (_actionInProgress)
+        {
+            return;
+        }
+
+        bool confirmed;
+        try
+        {
+            confirmed = await (ConfirmSignOutAsync ?? ConfirmSignOutWithDialogAsync)();
+        }
+        catch (Exception)
+        {
+            confirmed = false;
+        }
+
+        if (!confirmed)
+        {
+            return;
+        }
+
+        await RunActionAsync(() => OnSignOut.InvokeAsync());
+    }
+
+    private async Task<bool> ConfirmSignOutWithDialogAsync()
+    {
+        try
+        {
+            if (_signOutBox is null)
+            {
+                return false;
+            }
+
+            return await _signOutBox.ShowAsync() == true;
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
+    private async Task SelectWorkspaceAsync(string workspaceId) =>
+        await RunActionAsync(() => OnSelectWorkspace.InvokeAsync(workspaceId));
+
+    private async Task RunActionAsync(Func<Task> action)
+    {
+        if (_actionInProgress)
+        {
+            return;
+        }
+
+        _actionInProgress = true;
+        _actionError = null;
+        try
+        {
+            await action();
+        }
+        catch (Exception)
+        {
+            _actionError = "That change could not be completed. Your saved reports remain on this device.";
+        }
+        finally
+        {
+            _actionInProgress = false;
+        }
+    }
+
+    private static string ProviderStatus(AccountProviderView provider) => provider.State switch
+    {
+        AccountProviderState.Connected => "Connected",
+        AccountProviderState.NotConnected => "Not connected",
+        AccountProviderState.Pending => "Waiting for a response",
+        _ => "Unavailable"
+    };
+
+    private static Color ProviderColor(AccountProviderState state) => state switch
+    {
+        AccountProviderState.Connected => Color.Success,
+        AccountProviderState.Pending => Color.Warning,
+        _ => Color.Default
+    };
+}

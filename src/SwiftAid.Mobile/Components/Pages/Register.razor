@@ -1,0 +1,270 @@
+@page "/register"
+@using System.ComponentModel.DataAnnotations
+@using SwiftAid.Client.Authentication
+@using SwiftAid.Client.Navigation
+@using SwiftAid.Mobile.Services.Account
+@using SwiftAid.Mobile.Services.Http
+@using SwiftAid.Mobile.Services.Authentication
+@inject IServiceProvider ServiceProvider
+@inject NavigationManager Navigation
+
+<PageTitle>Create account | SwiftAid</PageTitle>
+
+<div class="mobile-auth-page">
+    <AccountEntrySurface>
+    <MudPaper Class="mobile-auth-panel" Elevation="0">
+        <SwiftAidPageHeading Eyebrow="Your SwiftAid account"
+                             Title="Create an account"
+                             Description="Join SwiftAid to support healthier communities."
+                             HeadingId="register-heading" />
+
+        @if (!string.IsNullOrWhiteSpace(_error))
+        {
+            <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" role="alert">
+                @_error
+            </MudAlert>
+        }
+
+        @if (_loadingOptions)
+        {
+            <MudProgressLinear Indeterminate="true" Color="Color.Primary" aria-label="Loading registration requirements" />
+        }
+        else if (_optionsError is not null)
+        {
+            <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" role="alert">
+                @_optionsError
+            </MudAlert>
+            <MudButton Variant="Variant.Outlined" Color="Color.Primary" FullWidth="true"
+                       OnClick="LoadRegistrationOptionsAsync" Disabled="@_busy">
+                Try again
+            </MudButton>
+        }
+        else if (!_passwordSignInAvailable || _passwordPolicy is null)
+        {
+            <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" role="status">
+                Account registration is unavailable right now. You can sign in or continue without an account.
+            </MudAlert>
+        }
+        else
+        {
+            <EditForm Model="_registrationForm" OnSubmit="HandleRegistrationSubmitAsync">
+                <DataAnnotationsValidator />
+                <ValidationSummary class="mobile-auth-validation-summary" />
+                <div class="mobile-auth-password" role="group" aria-label="Create an account">
+                <MudTextField T="string" Label="Full name" @bind-Value="_registrationForm.DisplayName"
+                              For="@(() => _registrationForm.DisplayName)"
+                              Variant="Variant.Outlined" Required="true" Disabled="@_busy"
+                              Immediate="true" MaxLength="128" autocomplete="name"
+                              aria-label="Full name" />
+                <MudTextField T="string" Label="Email address" @bind-Value="_registrationForm.Email"
+                              For="@(() => _registrationForm.Email)"
+                              Variant="Variant.Outlined" Required="true" Disabled="@_busy"
+                              InputType="InputType.Email" Immediate="true" autocomplete="email"
+                              aria-label="Email address" />
+                <MudTextField T="string" Label="Password" @bind-Value="_registrationForm.Password"
+                              For="@(() => _registrationForm.Password)"
+                              Variant="Variant.Outlined" Required="true" Disabled="@_busy"
+                              InputType="@(_showPassword ? InputType.Text : InputType.Password)"
+                              Adornment="Adornment.End" AdornmentIcon="@(_showPassword ? Icons.Material.Filled.VisibilityOff : Icons.Material.Filled.Visibility)"
+                              OnAdornmentClick="() => _showPassword = !_showPassword"
+                              Immediate="true" MaxLength="256" autocomplete="new-password"
+                              aria-label="Password" />
+                <MudText Typo="Typo.caption">@_policyHint</MudText>
+                <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Filled" Color="Color.Primary" FullWidth="true"
+                           Disabled="@(!CanSubmit)" Class="auth-cta" StartIcon="@Icons.Material.Filled.PersonAdd">
+                    @(_busy ? "Creating account…" : "Sign up")
+                </MudButton>
+                </div>
+            </EditForm>
+        }
+
+        <MudDivider Class="mobile-auth-divider" />
+        <nav aria-label="Legal information">
+            <MudStack Row="true" Spacing="2" Justify="Justify.Center">
+                <MudLink Href="/privacy">Privacy</MudLink>
+                <MudLink Href="/terms">Terms</MudLink>
+            </MudStack>
+        </nav>
+        <MudButton Href="@SignInHref" Variant="Variant.Text" Color="Color.Primary" FullWidth="true">
+            Already have an account? Sign in
+        </MudButton>
+        <MudButton Href="/report" Variant="Variant.Text" Color="Color.Primary" FullWidth="true">
+            Continue without an account
+        </MudButton>
+    </MudPaper>
+    </AccountEntrySurface>
+</div>
+
+@code {
+    private readonly RegistrationForm _registrationForm = new();
+    private bool _showPassword;
+    private bool _busy;
+    private bool _loadingOptions = true;
+    private bool _passwordSignInAvailable;
+    private PasswordPolicyInfo? _passwordPolicy;
+    private string? _optionsError;
+    private string? _error;
+    private string _policyHint = string.Empty;
+    [SupplyParameterFromQuery(Name = "returnUrl")]
+    private string? ReturnUrl { get; set; }
+    private string SafeReturnUrl => LocalReturnUrlPolicy.Resolve(ReturnUrl, "/");
+    private string SignInHref => $"/sign-in?returnUrl={Uri.EscapeDataString(SafeReturnUrl)}";
+
+    private CookieSessionHttpClient GatewayClient =>
+        CookieSessionHttpClient.Shared(
+            ((NativeSessionHttpOptions?)ServiceProvider.GetService(typeof(NativeSessionHttpOptions)))
+            ?.GatewayBaseAddress?.ToString());
+
+    private HttpPasswordAuthClient AuthClient =>
+        (HttpPasswordAuthClient?)ServiceProvider.GetService(typeof(HttpPasswordAuthClient))
+        ?? new HttpPasswordAuthClient(GatewayClient);
+
+    protected override Task OnInitializedAsync() => LoadRegistrationOptionsAsync();
+
+    private async Task LoadRegistrationOptionsAsync()
+    {
+        _loadingOptions = true;
+        _optionsError = null;
+        _passwordSignInAvailable = false;
+        _passwordPolicy = null;
+        try
+        {
+            using var response = await GatewayClient.GetAsync("/auth/capabilities");
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new HttpRequestException("The gateway did not return registration capabilities.");
+            }
+
+            var capabilities = await response.Content.ReadFromJsonAsync<IdentityCapabilitiesResponse>();
+            if (capabilities is null)
+            {
+                throw new HttpRequestException("The gateway returned invalid registration capabilities.");
+            }
+
+            _passwordSignInAvailable = capabilities.PasswordSignInAvailable;
+            if (!_passwordSignInAvailable)
+            {
+                return;
+            }
+
+            var policy = await AuthClient.GetPolicyAsync();
+            if (policy is null || policy.MinimumLength is < 1 or > 256)
+            {
+                _passwordSignInAvailable = false;
+                _optionsError = "We couldn't load the password requirements. Check your connection and try again.";
+                return;
+            }
+
+            _passwordPolicy = policy;
+            _policyHint = BuildPolicyHint(policy);
+        }
+        catch (Exception)
+        {
+            _passwordSignInAvailable = false;
+            _passwordPolicy = null;
+            _optionsError = "We couldn't load registration options. Check your connection and try again.";
+        }
+        finally
+        {
+            _loadingOptions = false;
+        }
+    }
+
+    private Task RefreshShellAsync()
+    {
+        // Password sessions live in the gateway cookie jar; notify the shell
+        // so the gate and overview refresh without an app restart.
+        var session = (IMobileAuthenticationSession?)ServiceProvider.GetService(typeof(IMobileAuthenticationSession));
+        return session is null ? Task.CompletedTask : session.RefreshAsync();
+    }
+
+    private bool CanSubmit =>
+        !_busy &&
+        _passwordSignInAvailable &&
+        _passwordPolicy is not null &&
+        !string.IsNullOrWhiteSpace(_registrationForm.DisplayName) &&
+        _registrationForm.DisplayName.Trim().Length <= 128 &&
+        !string.IsNullOrWhiteSpace(_registrationForm.Email) &&
+        !string.IsNullOrWhiteSpace(_registrationForm.Password);
+
+    private Task HandleRegistrationSubmitAsync(EditContext editContext) =>
+        editContext.Validate() ? RegisterAsync() : Task.CompletedTask;
+
+    private static string BuildPolicyHint(PasswordPolicyInfo policy)
+    {
+        var requirements = new List<string> { $"at least {policy.MinimumLength} characters" };
+        if (policy.RequireDigit)
+        {
+            requirements.Add("a number");
+        }
+
+        if (policy.RequireLowercase)
+        {
+            requirements.Add("a lowercase letter");
+        }
+
+        if (policy.RequireUppercase)
+        {
+            requirements.Add("an uppercase letter");
+        }
+
+        if (policy.RequireSymbol)
+        {
+            requirements.Add("a symbol");
+        }
+
+        return $"Use {string.Join(", ", requirements)}.";
+    }
+
+    private async Task RegisterAsync()
+    {
+        if (!CanSubmit)
+        {
+            return;
+        }
+
+        _busy = true;
+        _error = null;
+        try
+        {
+            var result = await AuthClient.RegisterAsync(
+                _registrationForm.DisplayName!.Trim(),
+                _registrationForm.Email!.Trim(),
+                _registrationForm.Password!);
+            if (result.Status == PasswordAuthStatus.Succeeded)
+            {
+                await RefreshShellAsync();
+                Navigation.NavigateTo($"/welcome-complete?returnUrl={Uri.EscapeDataString(SafeReturnUrl)}");
+                return;
+            }
+
+            _error = result.Message ?? "Registration failed. Please try again.";
+        }
+        catch (Exception)
+        {
+            _error = "Registration is temporarily unavailable.";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private sealed record IdentityCapabilitiesResponse(bool PasswordSignInAvailable);
+
+    private sealed class RegistrationForm
+    {
+        [Required(ErrorMessage = "Enter your full name.")]
+        [StringLength(128, ErrorMessage = "Your name must be 128 characters or fewer.")]
+        public string? DisplayName { get; set; }
+
+        [Required(ErrorMessage = "Enter your email address.")]
+        [EmailAddress(ErrorMessage = "Enter a valid email address.")]
+        [StringLength(256)]
+        public string? Email { get; set; }
+
+        [Required(ErrorMessage = "Enter a password.")]
+        [StringLength(256)]
+        public string? Password { get; set; }
+    }
+}

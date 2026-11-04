@@ -1,0 +1,192 @@
+.operations-map {
+    display: grid;
+    gap: 1rem;
+    min-width: 0;
+}
+
+.operations-map--compact ::deep .street-map__canvas {
+    height: 17rem;
+    min-height: 12rem;
+}
+
+.operations-map__signals { min-width: 0; }
+.operations-map__signals h2 { font-size: 1rem; margin-bottom: .75rem; }
+.operations-map__signal-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 19rem), 1fr)); gap: .75rem; }
+.operations-map__signal { display: grid; gap: .4rem; padding: .85rem; border: 1px solid var(--mud-palette-divider); border-left: 3px solid var(--mud-palette-primary); border-radius: .5rem; background: var(--mud-palette-surface); }
+.operations-map__signal small, .operations-map__signals > small { display: block; font-size: .75rem; color: var(--mud-palette-text-secondary); }
+.operations-map__signal span { font-size: .75rem; }
+
+.operations-map__header,
+.operations-map__geography-heading,
+.operations-map__mobile-heading {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+    min-width: 0;
+}
+
+.operations-map__filters,
+.operations-map__tools {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    min-width: 0;
+}
+
+.operations-map__filters > * {
+    flex: 1 1 12rem;
+    min-width: 0;
+}
+
+.operations-map__geography,
+.operations-map__data,
+.operations-map__selection {
+    display: grid;
+    gap: 0.75rem;
+    min-width: 0;
+    padding: 1rem;
+    border: 1px solid var(--mud-palette-divider);
+    border-radius: var(--sa-radius-card, 0.75rem);
+    background: var(--mud-palette-surface);
+}
+
+::deep .operations-map__data .mud-table-container {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+}
+
+::deep .operations-map__totals-table table {
+    width: 100%;
+    table-layout: fixed;
+}
+
+::deep .operations-map__totals-table th,
+::deep .operations-map__totals-table td {
+    min-width: 0;
+    padding-inline: 0.5rem;
+    overflow-wrap: anywhere;
+    white-space: normal;
+}
+
+.operations-map__compact-totals {
+    display: grid;
+    gap: 0.5rem;
+}
+
+.operations-map__compact-total {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.75rem;
+    min-width: 0;
+    padding-block: 0.35rem;
+    border-bottom: 1px solid var(--mud-palette-divider);
+}
+
+.operations-map__compact-total > * {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.operations-map--compact .operations-map__geography-heading {
+    display: none;
+}
+
+.operations-map--compact .operations-map__viewport {
+    min-height: 11rem;
+    background-image: none;
+}
+
+::deep .operations-map--compact .operations-country-map__svg {
+    max-height: 13rem;
+}
+
+.operations-map--compact .operations-map__geography,
+.operations-map--compact .operations-map__data {
+    padding: 0.75rem;
+}
+
+.operations-map__zoom-label {
+    min-width: 3.5rem;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+}
+
+.operations-map__viewport {
+    width: 100%;
+    min-height: 19rem;
+    overflow: hidden;
+    border: 1px solid var(--mud-palette-divider);
+    border-radius: var(--sa-radius-control, 0.5rem);
+    background-color: var(--sa-surface-subtle);
+    background-image: none;
+    cursor: grab;
+    touch-action: none;
+    user-select: none;
+}
+
+.operations-map__viewport:active {
+    cursor: grabbing;
+}
+
+.operations-map__viewport:focus-within {
+    outline: 3px solid var(--mud-palette-primary);
+    outline-offset: 2px;
+}
+
+.operations-map__canvas {
+    width: 100%;
+    min-width: 0;
+    min-height: 0;
+    transform-origin: center;
+    will-change: transform;
+}
+
+.operations-map__mobile-table {
+    display: grid;
+    gap: 0.5rem;
+}
+
+.operations-map__mobile-row {
+    display: grid;
+    gap: 0.25rem;
+    min-width: 0;
+    padding: 0.75rem;
+    border: 1px solid var(--mud-palette-divider);
+    border-radius: var(--sa-radius-control, 0.5rem);
+    background: var(--sa-surface-subtle);
+}
+
+@media (max-width: 600px) {
+    .operations-map__header,
+    .operations-map__geography-heading {
+        flex-direction: column;
+    }
+
+    .operations-map__tools {
+        width: 100%;
+        justify-content: flex-start;
+    }
+
+    .operations-map__filters {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .operations-map__geography,
+    .operations-map__data,
+    .operations-map__selection {
+        padding: 0.75rem;
+    }
+
+    .operations-map__viewport {
+        min-height: 16rem;
+    }
+}
+
+.operations-map--compact { gap: .65rem; }
+.operations-map--compact .operations-map__geography,
+.operations-map--compact .operations-map__data { padding: 0; border: 0; }

@@ -1,0 +1,17 @@
+@page "/monitoring"
+@using SwiftAid.Contracts.Cases
+@using SwiftAid.UI.Components.Cases
+@inject IMonitoringQueueClient MonitoringClient
+
+<PageTitle>Monitoring | SwiftAid</PageTitle>
+
+<div class="monitoring-page">
+    <h1>Monitoring</h1>
+    <p>Open follow-ups and unacknowledged escalations for cases you can access. Overdue work is highlighted.</p>
+
+    <h2>Assigned to me</h2>
+    <MonitoringQueue Client="MonitoringClient" Scope="MonitoringQueueScope.Assigned" />
+
+    <h2>All open work</h2>
+    <MonitoringQueue Client="MonitoringClient" Scope="MonitoringQueueScope.Open" />
+</div>

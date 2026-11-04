@@ -1,0 +1,153 @@
+@using SwiftAid.UI.Components.Theme
+@using SwiftAid.UI.Components
+
+<MudContainer Fixed="true" Class="public-resource-surface">
+    <SwiftAidPageHeading Eyebrow="Offline work" Title="Synchronization" Description="Saved reports stay on this device until SwiftAid confirms receiving them." HeadingId="sync-heading" />
+
+    @if (!string.IsNullOrWhiteSpace(RetryFeedback))
+    {
+        <MudAlert Severity="@(RetryFeedbackIsError ? Severity.Warning : Severity.Info)"
+                  Variant="Variant.Outlined" Dense="true" role="status" aria-live="polite">
+            @RetryFeedback
+        </MudAlert>
+    }
+
+    @if (Loading)
+    {
+        <SwiftAidStatePanel State="SwiftAidViewState.Loading" Title="Checking saved work" Description="Reading report status from this device." />
+    }
+    else if (Error)
+    {
+        <SwiftAidStatePanel State="SwiftAidViewState.Error" Title="Saved status is unavailable" Description="Your saved reports could not be read. Try again to reload their local status." OnRetry="OnRetry" />
+    }
+    else if (!LocalReportSyncAvailable)
+    {
+        <SwiftAidStatePanel State="SwiftAidViewState.Information" Title="Saved reports are not available here" Description="Open reports on the device where you saved them to review their status." />
+    }
+    else
+    {
+        <MudPaper Class="sync-summary" Elevation="0">
+            <MudText Typo="Typo.subtitle1" HtmlTag="h2">On this device</MudText>
+            <ul class="sync-count-list" aria-label="Saved report synchronization counts">
+                <li><MudIcon Icon="@Icons.Material.Filled.EditNote" aria-hidden="true" /> <span>Drafts</span><MudChip T="string" Size="Size.Small">@Drafts</MudChip></li>
+                <li><MudIcon Icon="@Icons.Material.Filled.CloudUpload" aria-hidden="true" /> <span>Waiting to send</span><MudChip T="string" Size="Size.Small" Color="@(Queued > 0 ? Color.Warning : Color.Default)">@Queued</MudChip></li>
+                <li><MudIcon Icon="@Icons.Material.Filled.CloudDone" aria-hidden="true" /> <span>Received by SwiftAid</span><MudChip T="string" Size="Size.Small" Color="Color.Success">@Received</MudChip></li>
+                <li><MudIcon Icon="@Icons.Material.Filled.ErrorOutline" aria-hidden="true" /> <span>Needs attention</span><MudChip T="string" Size="Size.Small" Color="@(NeedsAttention > 0 ? Color.Error : Color.Default)">@NeedsAttention</MudChip></li>
+            </ul>
+        </MudPaper>
+
+        @if (Items.Count == 0)
+        {
+            <SwiftAidStatePanel State="SwiftAidViewState.Empty" Title="No saved reports on this device" Description="Drafts appear after you save them. A received report appears after SwiftAid confirms it." />
+        }
+        else
+        {
+            <section class="sync-reports" aria-labelledby="sync-reports-heading">
+                <MudText id="sync-reports-heading" Typo="Typo.subtitle1" HtmlTag="h2">Report status</MudText>
+                <ul class="sync-report-list" aria-label="Individual saved report statuses">
+                    @foreach (var item in Items)
+                    {
+                        <li @key="item.LocalReference">
+                            <MudPaper Class="sync-report" Elevation="0">
+                                <div class="sync-report__heading">
+                                    <div>
+                                        <MudText Typo="Typo.subtitle2">@(item.Status == SyncReportStatus.Received ? "Received report" : "Saved report")</MudText>
+                                    </div>
+                                    <MudChip T="string" Size="Size.Small" Color="StatusColor(item.Status)" Variant="Variant.Outlined">
+                                        @StatusLabel(item.Status)
+                                    </MudChip>
+                                </div>
+                                <MudText Typo="Typo.body2">@StatusDescription(item.Status)</MudText>
+                                @if (!string.IsNullOrWhiteSpace(item.MediaStatus))
+                                {
+                                    <MudText Typo="Typo.caption" Class="sync-report__detail">@item.MediaStatus</MudText>
+                                }
+                                @if (item.Status == SyncReportStatus.NeedsAttention)
+                                {
+                                    <MudText Typo="Typo.caption" Class="sync-report__detail">
+                                        The saved status does not explain why. Review this report after an account change or if you cannot send it.
+                                    </MudText>
+                                }
+                                <MudText Typo="Typo.caption" Class="sync-report__timestamp">Saved @item.SavedAt.ToLocalTime().ToString("g")</MudText>
+                            </MudPaper>
+                        </li>
+                    }
+                </ul>
+            </section>
+        }
+
+        @if (Queued > 0)
+        {
+            <SwiftAidStatePanel State="SwiftAidViewState.Offline" Title="Some reports are still waiting" Description="SwiftAid has not confirmed receiving these reports. Retry sends only queued reports; saving a draft does not mean it was received." />
+            @if (OnRetryQueued.HasDelegate)
+            {
+                <MudButton Variant="Variant.Text" Color="Color.Primary" StartIcon="@Icons.Material.Filled.CloudUpload"
+                           Disabled="@IsRetrying" OnClick="OnRetryQueued">
+                    @(IsRetrying ? "Sending queued reports…" : "Retry queued reports")
+                </MudButton>
+            }
+        }
+        else
+        {
+            <SwiftAidStatePanel State="SwiftAidViewState.Information" Title="No reports are waiting to send" Description="This status covers public reports saved on this device. Staff case updates follow the access and offline rules for your account." />
+        }
+        <MudButton Href="/report" Variant="Variant.Text" Color="Color.Primary" StartIcon="@Icons.Material.Filled.ReceiptLong">Open reports and receipts</MudButton>
+    }
+</MudContainer>
+
+@code {
+    [Parameter] public bool Loading { get; set; }
+    [Parameter] public bool Error { get; set; }
+    [Parameter] public bool LocalReportSyncAvailable { get; set; } = true;
+    [Parameter] public int Drafts { get; set; }
+    [Parameter] public int Queued { get; set; }
+    [Parameter] public int Received { get; set; }
+    [Parameter] public int NeedsAttention { get; set; }
+    [Parameter] public IReadOnlyList<SyncReportItemView> Items { get; set; } = Array.Empty<SyncReportItemView>();
+    [Parameter] public EventCallback OnRetry { get; set; }
+    [Parameter] public EventCallback OnRetryQueued { get; set; }
+    [Parameter] public bool IsRetrying { get; set; }
+    [Parameter] public string? RetryFeedback { get; set; }
+    [Parameter] public bool RetryFeedbackIsError { get; set; }
+    public enum SyncReportStatus
+    {
+        Draft,
+        Queued,
+        Received,
+        NeedsAttention
+    }
+
+    public sealed record SyncReportItemView(
+        string LocalReference,
+        SyncReportStatus Status,
+        string StatusDescription,
+        DateTimeOffset SavedAt,
+        string? ReceiptReference = null,
+        string? MediaStatus = null);
+
+    private static string StatusLabel(SyncReportStatus status) => status switch
+    {
+        SyncReportStatus.Draft => "Draft · not sent",
+        SyncReportStatus.Queued => "Waiting for SwiftAid to confirm receipt",
+        SyncReportStatus.Received => "Received by SwiftAid",
+        SyncReportStatus.NeedsAttention => "Needs attention",
+        _ => "Status unavailable"
+    };
+
+    private static string StatusDescription(SyncReportStatus status) => status switch
+    {
+        SyncReportStatus.Draft => "Saved on this device. It has not been sent.",
+        SyncReportStatus.Queued => "Waiting to send. SwiftAid has not confirmed receiving it.",
+        SyncReportStatus.Received => "SwiftAid confirmed receiving this report.",
+        SyncReportStatus.NeedsAttention => "Review this report before trying to send it again.",
+        _ => "The report status is unavailable."
+    };
+
+    private static Color StatusColor(SyncReportStatus status) => status switch
+    {
+        SyncReportStatus.Received => Color.Success,
+        SyncReportStatus.Queued => Color.Warning,
+        SyncReportStatus.NeedsAttention => Color.Error,
+        _ => Color.Default
+    };
+}

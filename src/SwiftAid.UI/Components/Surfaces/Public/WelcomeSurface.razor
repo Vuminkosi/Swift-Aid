@@ -1,0 +1,205 @@
+@using SwiftAid.UI.Components.Public
+
+<section class="welcome-surface" aria-labelledby="welcome-surface-heading">
+    <header class="welcome-surface__header">
+        <img class="welcome-surface__brand-mark" src="_content/SwiftAid.UI/assets/swiftaid-icon.png" alt="" />
+        <h1 id="welcome-surface-heading">SwiftAid</h1>
+    </header>
+
+    <div class="welcome-surface__card">
+        <fieldset class="welcome-surface__field-group">
+            <legend>How will you use SwiftAid?</legend>
+            <div class="welcome-surface__choices" role="group" aria-label="Choose how to continue">
+                <button type="button"
+                        class="welcome-surface__choice @(_selectedIntent == WelcomeNavigationIntent.CommunityHealthWorker ? "is-selected" : null)"
+                        disabled="@WelcomeInteractionDisabled"
+                        aria-pressed="@(_selectedIntent == WelcomeNavigationIntent.CommunityHealthWorker)"
+                        @onclick="() => SelectIntent(WelcomeNavigationIntent.CommunityHealthWorker)">
+                    <MudIcon Icon="@Icons.Material.Filled.Groups" aria-hidden="true" />
+                    <span class="welcome-surface__choice-title">Community Health Worker</span>
+                </button>
+                <button type="button"
+                        class="welcome-surface__choice @(_selectedIntent == WelcomeNavigationIntent.HealthOfficer ? "is-selected" : null)"
+                        disabled="@WelcomeInteractionDisabled"
+                        aria-pressed="@(_selectedIntent == WelcomeNavigationIntent.HealthOfficer)"
+                        @onclick="() => SelectIntent(WelcomeNavigationIntent.HealthOfficer)">
+                    <MudIcon Icon="@Icons.Material.Filled.HealthAndSafety" aria-hidden="true" />
+                    <span class="welcome-surface__choice-title">Health Officer</span>
+                </button>
+                <button type="button"
+                        class="welcome-surface__choice @(_selectedIntent == WelcomeNavigationIntent.PublicUser ? "is-selected" : null)"
+                        disabled="@WelcomeInteractionDisabled"
+                        aria-pressed="@(_selectedIntent == WelcomeNavigationIntent.PublicUser)"
+                        @onclick="() => SelectIntent(WelcomeNavigationIntent.PublicUser)">
+                    <MudIcon Icon="@Icons.Material.Filled.PersonOutline" aria-hidden="true" />
+                    <span class="welcome-surface__choice-title">Public User</span>
+                </button>
+            </div>
+            <MudText Typo="Typo.caption" Class="welcome-surface__preference-note">
+                Your choice only personalizes how you start. It does not grant access to any
+                organization's records or staff tools; those need an approved membership.
+            </MudText>
+        </fieldset>
+
+        <div class="welcome-surface__country">
+            @if (IsCountryLoading)
+            {
+                <MudText Typo="Typo.body2" role="status">Loading country choices…</MudText>
+                <MudProgressLinear Indeterminate="true" Color="Color.Primary" aria-label="Loading countries" />
+            }
+            else if (!string.IsNullOrWhiteSpace(CountryErrorMessage))
+            {
+                <MudText Typo="Typo.caption" Color="Color.Secondary" role="status">
+                    Country selection is unavailable right now. You can leave it blank and continue.
+                </MudText>
+            }
+            else if (SafeCountryOptions.Count == 0)
+            {
+                <MudText Typo="Typo.caption" Color="Color.Secondary" role="status">
+                    Country selection is unavailable right now. You can leave it blank and continue.
+                </MudText>
+            }
+            else
+            {
+                <MudSelect T="string"
+                           Label="Country"
+                           Variant="Variant.Outlined"
+                           Margin="Margin.Dense"
+                           Value="@_selectedCountryCode"
+                           ValueChanged="SelectCountry"
+                           Disabled="@(IsCountryLoading || WelcomeInteractionDisabled)">
+                    @foreach (var country in SafeCountryOptions)
+                    {
+                        <MudSelectItem T="string" Value="@country.Code">@country.Name</MudSelectItem>
+                    }
+                </MudSelect>
+            }
+        </div>
+
+        <div class="welcome-surface__actions">
+            <MudButton Variant="Variant.Text"
+                       Color="Color.Primary"
+                       Disabled="@(!CanContinue || WelcomeInteractionDisabled)"
+                       OnClick="ContinueAsync">
+                <MudIcon Icon="@Icons.Material.Filled.ArrowForward" aria-hidden="true" />
+                <span>Continue</span>
+            </MudButton>
+        </div>
+    </div>
+</section>
+
+@code {
+    [Parameter, EditorRequired]
+    public IReadOnlyList<PublicCountryOption> CountryOptions { get; set; } = Array.Empty<PublicCountryOption>();
+
+    [Parameter]
+    public string? SelectedCountryCode { get; set; }
+
+    [Parameter]
+    public WelcomeNavigationIntent? SelectedIntent { get; set; }
+
+    [Parameter]
+    public bool IsCountryLoading { get; set; }
+
+    [Parameter]
+    public bool WelcomeInteractionDisabled { get; set; }
+
+    [Parameter]
+    public string? CountryErrorMessage { get; set; }
+
+    [Parameter, EditorRequired]
+    public EventCallback<WelcomeContinueRequest> OnContinue { get; set; }
+
+    [Parameter]
+    public EventCallback<WelcomeContinueRequest> OnSelectionChanged { get; set; }
+
+    private WelcomeNavigationIntent? _selectedIntent = WelcomeNavigationIntent.CommunityHealthWorker;
+    private string _selectedCountryCode = string.Empty;
+    private WelcomeNavigationIntent? _observedHostIntent;
+    private string? _observedHostCountryCode;
+    private bool _hasObservedHostIntent;
+    private bool _hasObservedHostCountryCode;
+    private IReadOnlyList<PublicCountryOption> SafeCountryOptions =>
+        CountryOptions ?? Array.Empty<PublicCountryOption>();
+
+    private bool HasCountryCatalogue =>
+        !IsCountryLoading &&
+        string.IsNullOrWhiteSpace(CountryErrorMessage) &&
+        SafeCountryOptions.Count > 0;
+
+    private bool CanContinue =>
+        OnContinue.HasDelegate &&
+        !WelcomeInteractionDisabled &&
+        _selectedIntent.HasValue;
+
+    protected override void OnParametersSet()
+    {
+        if (!_hasObservedHostCountryCode || !string.Equals(_observedHostCountryCode, SelectedCountryCode, StringComparison.Ordinal))
+        {
+            _observedHostCountryCode = SelectedCountryCode;
+            _selectedCountryCode = SelectedCountryCode ?? string.Empty;
+            _hasObservedHostCountryCode = true;
+        }
+
+        if (!_hasObservedHostIntent || _observedHostIntent != SelectedIntent)
+        {
+            _observedHostIntent = SelectedIntent;
+            _selectedIntent = SelectedIntent ?? WelcomeNavigationIntent.CommunityHealthWorker;
+            _hasObservedHostIntent = true;
+        }
+
+        if (HasCountryCatalogue)
+        {
+            _selectedCountryCode = SafeCountryOptions
+                .FirstOrDefault(country => string.Equals(country.Code, _selectedCountryCode, StringComparison.OrdinalIgnoreCase))?
+                .Code ?? string.Empty;
+        }
+    }
+
+    private async Task SelectIntent(WelcomeNavigationIntent intent)
+    {
+        if (WelcomeInteractionDisabled)
+        {
+            return;
+        }
+
+        _selectedIntent = intent;
+        await NotifySelectionChangedAsync();
+    }
+
+    private async Task SelectCountry(string countryCode)
+    {
+        if (WelcomeInteractionDisabled)
+        {
+            return;
+        }
+
+        var selected = SafeCountryOptions.FirstOrDefault(country => string.Equals(country.Code, countryCode, StringComparison.Ordinal));
+        _selectedCountryCode = selected?.Code ?? string.Empty;
+        await NotifySelectionChangedAsync();
+    }
+
+    private Task ContinueAsync()
+    {
+        if (!CanContinue || _selectedIntent is not { } intent)
+        {
+            return Task.CompletedTask;
+        }
+
+        return OnContinue.InvokeAsync(new WelcomeContinueRequest(intent, GetCurrentCountryCode()));
+    }
+
+    private Task NotifySelectionChangedAsync()
+    {
+        if (!OnSelectionChanged.HasDelegate || _selectedIntent is not { } intent)
+        {
+            return Task.CompletedTask;
+        }
+
+        return OnSelectionChanged.InvokeAsync(new WelcomeContinueRequest(intent, GetCurrentCountryCode()));
+    }
+
+    private string? GetCurrentCountryCode() => HasCountryCatalogue
+        ? SafeCountryOptions.FirstOrDefault(country => string.Equals(country.Code, _selectedCountryCode, StringComparison.OrdinalIgnoreCase))?.Code
+        : null;
+}

@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "eventId": "53ebf286-8017-e95a-ae43-2fd807b00bb3",
+  "eventType": "CaseAssigned",
+  "caseId": "10000000-0000-0000-0000-000000000001",
+  "aggregateVersion": 4,
+  "reportRevision": 1,
+  "commandId": "20000000-0000-0000-0000-000000000003",
+  "actorId": "officer-1",
+  "occurredAtUtc": null,
+  "recordedAtUtc": "2026-10-26T08:01:00+00:00",
+  "payload": {
+    "accountableOwnerId": "worker-2"
+  }
+}

@@ -1,0 +1,89 @@
+.sign-in-page {
+    padding: 0.5rem;
+}
+
+.sign-in-panel {
+    display: grid;
+    width: 100%;
+    gap: 1.25rem;
+    padding: clamp(0.5rem, 2vw, 1rem);
+    background: transparent;
+}
+
+.sign-in-privacy-note,
+.sign-in-provider-note {
+    color: var(--sa-text-secondary);
+}
+
+.sign-in-provider-list {
+    display: grid;
+    gap: 0.875rem;
+}
+
+.sign-in-provider-option {
+    display: grid;
+    gap: 0.5rem;
+}
+
+.sign-in-provider-option form {
+    width: 100%;
+}
+
+.sign-in-refresh-button {
+    min-height: 2.75rem;
+}
+
+.sign-in-provider-button,
+.sign-in-secondary-button {
+    min-height: 3rem;
+}
+
+.sign-in-provider-button:focus-visible,
+.sign-in-secondary-button:focus-visible,
+.sign-in-refresh-button:focus-visible {
+    outline: 3px solid var(--sa-focus, var(--sa-primary));
+    outline-offset: 3px;
+}
+
+.sign-in-provider-list ::deep .sign-in-provider-button.mud-button-root:disabled {
+    color: var(--sa-text-secondary) !important;
+    font-weight: 600;
+}
+
+.sign-in-divider {
+    margin-block: 0.25rem;
+}
+
+.sign-in-alert {
+    align-items: start;
+}
+
+.sign-in-live-status {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+.sign-in-privacy-note {
+    padding: 0.8rem 0.9rem;
+    border-inline-start: 3px solid var(--sa-border);
+    color: var(--sa-text-muted);
+    font-size: 0.88rem;
+}
+
+@media (max-width: 850px) {
+    .sign-in-page {
+        padding: 0;
+    }
+
+    .sign-in-panel {
+        gap: 1rem;
+        padding: 0.5rem;
+    }
+}

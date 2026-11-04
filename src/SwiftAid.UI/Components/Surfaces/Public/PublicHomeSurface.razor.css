@@ -1,0 +1,395 @@
+.public-home-surface {
+    display: grid;
+    justify-items: start;
+    gap: 1rem;
+    padding-block: 1.25rem;
+}
+
+.public-home-surface ::deep .mobile-home-quick-links {
+    width: 100%;
+    min-width: 0;
+}
+
+.public-home-surface ::deep .mobile-home-quick-links__rail {
+    display: flex;
+    gap: 0.5rem;
+    max-width: 100%;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    padding: 0.25rem 0.125rem 0.75rem;
+    scroll-snap-type: inline proximity;
+    scrollbar-width: thin;
+}
+
+.public-home-surface ::deep .mobile-home-quick-link {
+    display: flex;
+    flex: 0 0 5.75rem;
+    min-height: 5.5rem;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    padding: 0.5rem 0.375rem;
+    border: 1px solid var(--sa-border);
+    border-radius: 0.875rem;
+    background: var(--sa-surface);
+    color: var(--sa-text-primary);
+    font-size: 0.75rem;
+    line-height: 1.15;
+    text-align: center;
+    text-decoration: none;
+    scroll-snap-align: start;
+}
+
+.public-home-surface ::deep .mobile-home-quick-link .mud-icon-root {
+    color: var(--sa-action-primary);
+    font-size: 1.375rem;
+}
+
+.public-home-surface ::deep .mobile-home-quick-link:focus-visible {
+    outline: 3px solid var(--sa-focus);
+    outline-offset: 2px;
+}
+
+@media (min-width: 768px) {
+    .public-home-surface ::deep .mobile-home-quick-links {
+        display: none;
+    }
+}
+
+.public-home-fab-menu {
+    position: fixed;
+    z-index: 15;
+    inset-block-end: 1.25rem;
+    inset-inline-end: max(1rem, env(safe-area-inset-right));
+}
+
+.public-home-fab-menu ::deep .mud-fab {
+    box-shadow: none;
+}
+
+.public-home-fab-menu ::deep .public-home-fab-menu__button {
+    inline-size: 2.75rem;
+    min-inline-size: 2.75rem;
+    block-size: 2.75rem;
+    min-block-size: 2.75rem;
+    padding: 0;
+}
+
+.public-home-fab-menu ::deep .mud-fab-menu-item {
+    inline-size: max-content;
+    min-inline-size: 3rem;
+    block-size: 3rem;
+    min-block-size: 3rem;
+    padding-inline: 0.5rem;
+    white-space: nowrap;
+    box-shadow: none;
+}
+
+.public-home-fab-menu ::deep .mud-fab-menu-open .mud-fab-menu-item {
+    opacity: 1 !important;
+    transform: translate(0) !important;
+    transition: none !important;
+}
+
+.public-home-fab-menu ::deep .mud-fab-menu-item .mud-icon-root {
+    color: inherit;
+}
+
+.public-home-fab-menu ::deep .public-home-fab-menu__button:focus-visible,
+.public-home-fab-menu ::deep .mud-fab-menu-item:focus-visible {
+    outline: 3px solid var(--sa-focus);
+    outline-offset: 2px;
+}
+
+.public-home-surface ::deep .swiftaid-page-heading__title {
+    font-size: clamp(1.75rem, 3.5vw, 2.35rem);
+    line-height: 1.15;
+    letter-spacing: -0.02em;
+}
+
+.public-home-surface ::deep .status-card {
+    display: grid;
+    gap: 0.75rem;
+    width: 100%;
+    padding: 1.25rem;
+    border: 1px solid var(--sa-border);
+    border-radius: 1rem;
+    background: var(--sa-surface);
+}
+
+.worker-home-content {
+    display: grid;
+    grid-template-columns: minmax(0, 1.1fr) minmax(20rem, 0.9fr);
+    align-items: start;
+    gap: 0.75rem;
+    width: 100%;
+}
+
+.worker-home-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.625rem;
+}
+
+.public-home-surface ::deep .worker-home-card {
+    display: grid;
+    align-content: start;
+    justify-items: start;
+    gap: 0.375rem;
+    min-width: 0;
+    padding: 0.75rem;
+    border: 1px solid var(--sa-border);
+    border-radius: 0.875rem;
+    background: var(--sa-surface);
+}
+
+.public-home-surface ::deep .worker-home-card .mud-button-root {
+    min-height: 2.75rem;
+    padding-inline: 0.5rem;
+}
+
+.worker-home-summary__heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+}
+
+.mobile-home-actions {
+    display: grid;
+    gap: 1rem;
+    width: 100%;
+}
+
+.mobile-home-primary {
+    min-height: 3.25rem;
+    border-radius: 0.9rem;
+    font-weight: 700;
+}
+
+.mobile-home-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.75rem;
+}
+
+.public-home-surface ::deep .mobile-home-card {
+    display: grid;
+    align-content: start;
+    gap: 0.5rem;
+    min-width: 0;
+    padding: 1rem;
+    border: 1px solid var(--sa-border);
+    border-radius: 1rem;
+    background: var(--sa-surface);
+}
+
+.public-home-surface ::deep .mobile-home-card .mud-button-root {
+    justify-self: start;
+    min-height: 2.75rem;
+    padding-inline: 0.5rem;
+}
+
+@media (min-width: 1024px) {
+    .mobile-home-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .public-home-surface ::deep .mobile-home-primary {
+        width: min(100%, 24rem);
+    }
+}
+
+@media (max-width: 767px) {
+    .worker-home-content {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
+@media (max-width: 960px) {
+    .public-home-surface:not(.public-home-surface--welcome) {
+        padding-block-end: calc(var(--sa-mobile-nav-height, 4.25rem) + 5rem + env(safe-area-inset-bottom));
+    }
+
+    .public-home-fab-menu {
+        inset-block-end: calc(var(--sa-mobile-nav-height, 4.25rem) + env(safe-area-inset-bottom) + 0.75rem);
+    }
+}
+
+@media (min-width: 768px) and (max-width: 1023px) {
+    .worker-home-content {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+@media (max-width: 767px) {
+    .public-home-surface {
+        gap: 0.75rem;
+        padding-block: 0.5rem;
+    }
+
+    .public-home-surface ::deep .swiftaid-page-heading {
+        /* MudMainContent reserves app-bar space even though this shell's header sits outside MudLayout. */
+        margin-block-start: calc(0px - var(--mud-appbar-height, 4rem));
+        margin-block-end: 0;
+    }
+
+    .public-home-surface ::deep .swiftaid-page-heading__title {
+        font-size: clamp(1.4rem, 6vw, 1.75rem);
+        line-height: 1.12;
+        letter-spacing: -0.025em;
+    }
+
+    .mobile-home-actions {
+        gap: 0.75rem;
+    }
+
+    .mobile-home-grid {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 0.625rem;
+    }
+
+    .public-home-surface ::deep .mobile-home-card {
+        gap: 0.375rem;
+        padding: 0.75rem;
+        border-radius: 0.875rem;
+    }
+
+    .public-home-surface ::deep .mobile-home-card .mud-typography-subtitle1 {
+        font-size: 0.95rem;
+        line-height: 1.25;
+    }
+
+    .public-home-surface ::deep .mobile-home-card .mud-typography-body2 {
+        font-size: 0.8rem;
+        line-height: 1.35;
+    }
+}
+
+.signed-home-mobile {
+    display: grid;
+    gap: 0.85rem;
+    width: 100%;
+    min-width: 0;
+}
+
+.signed-home-greeting {
+    display: grid;
+    gap: 0.15rem;
+    padding-inline: 0.15rem;
+}
+
+.signed-home-context,
+.signed-home-freshness,
+.signed-home-empty-activity {
+    color: var(--sa-text-muted, var(--mud-palette-text-secondary));
+}
+
+.signed-home-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.65rem;
+}
+
+.public-home-surface ::deep .signed-home-action {
+    position: relative;
+    display: grid;
+    align-content: start;
+    justify-items: start;
+    gap: 0.35rem;
+    min-width: 0;
+    min-height: 7.1rem;
+    padding: 0.7rem;
+    border: 1px solid var(--ais-border-default);
+    border-radius: var(--ais-radius-panel);
+    background: var(--ais-bg-surface);
+    color: var(--ais-text-primary);
+    box-shadow: none;
+}
+
+.public-home-surface ::deep .signed-home-action .mud-typography {
+    color: var(--ais-text-primary);
+}
+
+.public-home-surface ::deep .signed-home-action .mud-icon-root {
+    color: var(--ais-action-primary);
+}
+
+.public-home-surface ::deep .signed-home-action .mud-typography-subtitle2 {
+    font-weight: 700;
+    line-height: 1.2;
+}
+
+.public-home-surface ::deep .signed-home-action .mud-typography-caption {
+    font-weight: 600;
+}
+
+.public-home-surface ::deep .signed-home-action-link {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    min-height: 100%;
+    opacity: 0;
+}
+
+.public-home-surface ::deep .signed-home-action:focus-within {
+    outline: 3px solid var(--ais-focus);
+    outline-offset: 2px;
+}
+
+.public-home-surface ::deep .signed-home-action .mud-icon-root {
+    width: 1.5rem;
+    height: 1.5rem;
+}
+
+.signed-home-activity {
+    display: grid;
+    gap: 0.3rem;
+    padding-block: 0.2rem 0.4rem;
+}
+
+.public-home-surface ::deep .signed-home-activity-list {
+    padding: 0;
+}
+
+.public-home-surface ::deep .signed-home-activity-list .mud-list-item {
+    min-height: 2.75rem;
+    padding-inline: 0;
+}
+
+.signed-home-activity-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    width: 100%;
+}
+
+.signed-home-activity-row .mud-typography-caption {
+    flex: 0 0 auto;
+    color: var(--sa-text-muted, var(--mud-palette-text-secondary));
+}
+
+@media (max-width: 359px) {
+    .signed-home-actions {
+        gap: 0.45rem;
+    }
+
+    .public-home-surface ::deep .signed-home-action {
+        min-height: 6.5rem;
+        padding: 0.6rem;
+    }
+}
+
+@media (min-width: 360px) and (max-width: 1023px) {
+    .public-home-surface:not(.public-home-surface--welcome) .mobile-home-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.5rem;
+    }
+
+    .public-home-surface:not(.public-home-surface--welcome) ::deep .mobile-home-card {
+        padding: 0.625rem;
+    }
+}
+@media (max-width: 767px) { .public-home-container { padding-inline: 0.5rem; } }

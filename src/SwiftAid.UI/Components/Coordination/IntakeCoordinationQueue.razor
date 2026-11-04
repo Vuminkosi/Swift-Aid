@@ -1,0 +1,571 @@
+@using SwiftAid.Contracts.Intake
+@using SwiftAid.UI.Components.Theme
+
+<section class="intake-coordination" aria-label="Intake coordination queue">
+    <div class="intake-coordination__filters" role="group" aria-label="Filter unrouted reports">
+        <MudChipSet T="IntakeRoutingStatus?" SelectedValue="_filter" SelectedValueChanged="OnFilterChangedAsync"
+                    SelectionMode="SelectionMode.SingleSelection" CheckMark="false">
+            <MudChip T="IntakeRoutingStatus?" Value="@((IntakeRoutingStatus?)null)" Color="Color.Primary">All unrouted</MudChip>
+            <MudChip T="IntakeRoutingStatus?" Value="IntakeRoutingStatus.NeedsRouting" Color="Color.Warning">Needs routing</MudChip>
+            <MudChip T="IntakeRoutingStatus?" Value="IntakeRoutingStatus.NoServiceCoverage" Color="Color.Default">No service coverage</MudChip>
+        </MudChipSet>
+        <MudButton Variant="Variant.Text" Color="Color.Primary" Size="Size.Small" StartIcon="@Icons.Material.Filled.Refresh"
+                   OnClick="RefreshAsync" Disabled="_loading" aria-label="Refresh coordination queue">
+            Refresh
+        </MudButton>
+    </div>
+
+    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" Class="intake-coordination__notice">
+        Coordination shows routing details only. Report narratives, precise locations, and original audio stay with organization reviewers.
+    </MudAlert>
+
+    @if (_handoffMessage is not null)
+    {
+        <MudAlert Severity="Severity.Success" Variant="Variant.Outlined" Dense="true" role="status">
+            @_handoffMessage
+            <MudButton Variant="Variant.Text" Color="Color.Success" StartIcon="@Icons.Material.Filled.Close" OnClick="DismissHandoff"
+                       aria-label="Dismiss organization review handoff">Dismiss</MudButton>
+        </MudAlert>
+    }
+
+    @if (_loading)
+    {
+        <div class="intake-coordination__state" role="status" aria-live="polite">
+            <MudProgressCircular Indeterminate="true" Size="Size.Small" aria-label="Loading coordination queue" />
+            <MudText Typo="Typo.body2">Loading unrouted reports…</MudText>
+        </div>
+    }
+    else if (_denied)
+    {
+        <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" role="status">
+            The intake coordination queue is restricted to authorized platform coordinators.
+        </MudAlert>
+    }
+    else if (_error is not null)
+    {
+        <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" role="alert">
+            @_error
+            <MudButton Variant="Variant.Text" Color="Color.Error" StartIcon="@Icons.Material.Filled.Refresh" OnClick="RefreshAsync" aria-label="Retry loading coordination queue">Retry</MudButton>
+        </MudAlert>
+    }
+    else if (_entries.Count == 0)
+    {
+        <MudAlert Severity="Severity.Success" Variant="Variant.Outlined" role="status">
+            No unrouted reports are waiting for coordination review.
+        </MudAlert>
+    }
+    else
+    {
+        <MudTable Items="_entries" Hover="true" Dense="true" aria-label="Unrouted intake reports">
+            <HeaderContent>
+                <MudTh>Received</MudTh>
+                <MudTh>Status</MudTh>
+                <MudTh>Routing</MudTh>
+                <MudTh>Country</MudTh>
+                <MudTh>Area</MudTh>
+                <MudTh>Reviewer</MudTh>
+                <MudTh>Review</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd DataLabel="Received">@context.ReceivedAtUtc.ToLocalTime().ToString("g")</MudTd>
+                <MudTd DataLabel="Status"><MudChip T="string" Size="Size.Small" Color="Color.Default">@context.Status</MudChip></MudTd>
+                <MudTd DataLabel="Routing"><MudChip T="string" Size="Size.Small" Color="Color.Warning">@FriendlyRouting(context.RoutingStatus)</MudChip></MudTd>
+                <MudTd DataLabel="Country">@context.CountryCode</MudTd>
+                <MudTd DataLabel="Area">@AreaLabel(context)</MudTd>
+                <MudTd DataLabel="Reviewer">@ShortActor(context.CoordinatorActorId)</MudTd>
+                <MudTd><MudButton Variant="Variant.Text" Size="Size.Small" Color="Color.Primary" StartIcon="@Icons.Material.Filled.RateReview" Disabled="@(_loading || _acting)" OnClick="() => SelectAsync(context)" aria-label="@RowAccessibleName(context)">Review</MudButton></MudTd>
+            </RowTemplate>
+        </MudTable>
+    }
+
+    @if (_selectedReceiptId is not null)
+    {
+        <MudPaper Outlined="true" Class="intake-coordination__detail" aria-label="Coordination detail">
+            <div class="intake-coordination__detail-head">
+                @if (_detail is not null)
+                {
+                    <MudText Typo="Typo.subtitle1">Selected report</MudText>
+                }
+                else
+                {
+                    <MudText Typo="Typo.subtitle1">Report details</MudText>
+                }
+                <MudIconButton Icon="@Icons.Material.Outlined.Close" Size="Size.Small"
+                               OnClick="CloseDetail" aria-label="Close coordination detail" />
+            </div>
+            @if (_detailLoading)
+            {
+                <MudProgressCircular Indeterminate="true" Size="Size.Small" aria-label="Loading coordination detail" />
+            }
+            else if (_detailError is not null)
+            {
+                <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" role="alert">
+                    @_detailError
+                    <MudButton Variant="Variant.Text" Color="Color.Error" StartIcon="@Icons.Material.Filled.Refresh" OnClick="RetrySelectedDetailAsync" aria-label="Retry loading selected coordination report">Retry</MudButton>
+                </MudAlert>
+            }
+            else if (_detail is null || !CanActOnSelectedDetail)
+            {
+                <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" role="status">
+                    Select a report from the current queue to view its coordination details.
+                </MudAlert>
+            }
+            else
+            {
+                <MudGrid Spacing="1">
+                    <MudItem xs="6" sm="3"><MudText Typo="Typo.caption" Color="Color.Secondary">Status</MudText><MudText Typo="Typo.body2">@_detail.Report.Status</MudText></MudItem>
+                    <MudItem xs="6" sm="3"><MudText Typo="Typo.caption" Color="Color.Secondary">Routing</MudText><MudText Typo="Typo.body2">@FriendlyRouting(_detail.Report.RoutingStatus)</MudText></MudItem>
+                    <MudItem xs="6" sm="3"><MudText Typo="Typo.caption" Color="Color.Secondary">Country</MudText><MudText Typo="Typo.body2">@_detail.Report.CountryCode</MudText></MudItem>
+                    <MudItem xs="6" sm="3"><MudText Typo="Typo.caption" Color="Color.Secondary">Region / area</MudText><MudText Typo="Typo.body2">@AreaLabel(_detail.Report)</MudText></MudItem>
+                    <MudItem xs="6" sm="3"><MudText Typo="Typo.caption" Color="Color.Secondary">Subject</MudText><MudText Typo="Typo.body2">@_detail.Report.SubjectScope</MudText></MudItem>
+                    <MudItem xs="6" sm="3"><MudText Typo="Typo.caption" Color="Color.Secondary">Received</MudText><MudText Typo="Typo.body2">@_detail.Report.ReceivedAtUtc.ToLocalTime().ToString("g")</MudText></MudItem>
+                    <MudItem xs="6" sm="3"><MudText Typo="Typo.caption" Color="Color.Secondary">Reviewer</MudText><MudText Typo="Typo.body2">@ShortActor(_detail.Report.CoordinatorActorId)</MudText></MudItem>
+                    <MudItem xs="6" sm="3"><MudText Typo="Typo.caption" Color="Color.Secondary">Clarification</MudText><MudText Typo="Typo.body2">@(_detail.Report.ClarificationRequested ? "Requested" : "Not requested")</MudText></MudItem>
+                </MudGrid>
+
+                <MudText Typo="Typo.subtitle2" Class="intake-coordination__history-title">Coordination history</MudText>
+                @if (_detail.History.Count == 0)
+                {
+                    <MudText Typo="Typo.body2" Color="Color.Secondary">No coordination actions recorded yet.</MudText>
+                }
+                else
+                {
+                    <MudTimeline TimelineAlign="TimelineAlign.Start" Class="intake-coordination__timeline" aria-label="Coordination history">
+                        @foreach (var record in _detail.History)
+                        {
+                            <MudTimelineItem Color="@HistoryColor(record.Action)" Size="Size.Small" Elevation="0">
+                                <ItemContent>
+                                    <MudText Typo="Typo.body2"><strong>@FriendlyAction(record.Action)</strong> by @ShortActor(record.ActorId)</MudText>
+                                    <MudText Typo="Typo.body2">@record.Reason</MudText>
+                                    <MudText Typo="Typo.caption" Color="Color.Secondary">@record.ActedAtUtc.ToLocalTime().ToString("g") · @FriendlyResult(record)</MudText>
+                                </ItemContent>
+                            </MudTimelineItem>
+                        }
+                    </MudTimeline>
+                }
+
+                @if (_actionMessage is not null)
+                {
+                    <MudAlert Severity="@(_actionSucceeded ? Severity.Success : Severity.Error)" Variant="Variant.Outlined" Dense="true" role="status">
+                        @_actionMessage
+                    </MudAlert>
+                }
+
+                @if (_pendingAction is null)
+                {
+                    <div class="intake-coordination__actions">
+                        <MudButton Variant="Variant.Text" Size="Size.Small" Color="Color.Primary" StartIcon="@Icons.Material.Filled.AssignmentTurnedIn"
+                                   OnClick="() => BeginAction(IntakeCoordinationAction.ClaimForReview)"
+                                   Disabled="_acting" aria-label="Claim this report for review">Claim</MudButton>
+                        <MudButton Variant="Variant.Text" Size="Size.Small" Color="Color.Primary" StartIcon="@Icons.Material.Filled.MoveToInbox"
+                                   OnClick="BeginAssignAsync"
+                                   Disabled="_acting" aria-label="Assign this report to an organization queue">Assign queue</MudButton>
+                        <MudButton Variant="Variant.Text" Size="Size.Small" Color="Color.Primary" StartIcon="@Icons.Material.Filled.HelpOutline"
+                                   OnClick="() => BeginAction(IntakeCoordinationAction.RequestClarification)"
+                                   Disabled="_acting" aria-label="Request factual clarification">Request clarification</MudButton>
+                        <MudButton Variant="Variant.Text" Size="Size.Small" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Block"
+                                   OnClick="() => BeginAction(IntakeCoordinationAction.RecordNoServiceCoverage)"
+                                   Disabled="_acting" aria-label="Record no service coverage">No coverage</MudButton>
+                    </div>
+                }
+                else
+                {
+                    <div class="intake-coordination__confirm">
+                        <MudText Typo="Typo.subtitle2">@PendingTitle()</MudText>
+                        @if (_pendingAction == IntakeCoordinationAction.AssignQueue)
+                        {
+                            <MudSelect T="string" Label="Organization queue" @bind-Value="_targetQueue"
+                                       Dense="true" Variant="Variant.Outlined" Required="true"
+                                       HelperText="Only currently eligible configured queues are listed.">
+                                @foreach (var queue in _queues)
+                                {
+                                    <MudSelectItem T="string" Value="@queue.QueueId">@queue.QueueId (@queue.CountryCode)</MudSelectItem>
+                                }
+                            </MudSelect>
+                        }
+                        <MudTextField T="string" Label="Reason" @bind-Value="_reason" Lines="2"
+                                      Margin="Margin.Dense" Variant="Variant.Outlined" Required="true"
+                                      HelperText="Recorded in the audit trail (required)." />
+                        <div class="intake-coordination__confirm-actions">
+                            <MudButton Variant="Variant.Text" Color="Color.Primary" Size="Size.Small" StartIcon="@Icons.Material.Filled.CheckCircle"
+                                       OnClick="ConfirmActionAsync" Disabled="_acting" aria-label="Confirm coordination action">
+                                @(_acting ? "Recording…" : "Confirm")
+                            </MudButton>
+                            <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.Close" OnClick="CancelAction"
+                                       Disabled="_acting" aria-label="Cancel coordination action">Cancel</MudButton>
+                        </div>
+                    </div>
+                }
+            }
+        </MudPaper>
+    }
+</section>
+
+@code {
+    [Parameter] public IIntakeCoordinationClient? Client { get; set; }
+
+    private IReadOnlyList<IntakeCoordinationQueueEntry> _entries = Array.Empty<IntakeCoordinationQueueEntry>();
+    private IReadOnlyList<IntakeCoordinationQueueOption> _queues = Array.Empty<IntakeCoordinationQueueOption>();
+    private IntakeCoordinationDetail? _detail;
+    private IntakeRoutingStatus? _filter;
+    private bool _loading = true;
+    private bool _detailLoading;
+    private bool _denied;
+    private bool _acting;
+    private bool _actionSucceeded;
+    private string? _error;
+    private string? _actionMessage;
+    private IntakeCoordinationAction? _pendingAction;
+    private Guid? _selectedReceiptId;
+    private string? _detailError;
+    private long _queueRequestGeneration;
+    private long _detailRequestGeneration;
+    private string? _targetQueue;
+    private string? _reason;
+    private string? _handoffMessage;
+    protected override async Task OnInitializedAsync()
+    {
+        if (Client is null)
+        {
+            _error = "The coordination service is not available.";
+            _loading = false;
+            return;
+        }
+
+        await RefreshAsync();
+    }
+
+    private async Task OnFilterChangedAsync(IntakeRoutingStatus? routing)
+    {
+        _filter = routing;
+        await RefreshAsync();
+    }
+
+    private async Task RefreshAsync()
+    {
+        var requestGeneration = ++_queueRequestGeneration;
+        InvalidateDetail();
+        _loading = true;
+        _error = null;
+        _denied = false;
+        var client = Client;
+        if (client is null)
+        {
+            _error = "The coordination service is not connected.";
+            _entries = Array.Empty<IntakeCoordinationQueueEntry>();
+            _loading = false;
+            return;
+        }
+
+        StateHasChanged();
+        try
+        {
+            var (access, entries) = await client.GetQueueAsync(_filter, 100);
+            if (requestGeneration != _queueRequestGeneration)
+            {
+                return;
+            }
+
+            if (access == CoordinationQueueAccess.Denied)
+            {
+                _denied = true;
+                _entries = Array.Empty<IntakeCoordinationQueueEntry>();
+                InvalidateDetail();
+            }
+            else if (access == CoordinationQueueAccess.Unavailable)
+            {
+                _error = "The coordination queue is temporarily unavailable. Try again.";
+                _entries = Array.Empty<IntakeCoordinationQueueEntry>();
+                InvalidateDetail();
+            }
+            else
+            {
+                _entries = entries;
+            }
+        }
+        catch
+        {
+            if (requestGeneration == _queueRequestGeneration)
+            {
+                _error = "The coordination queue is temporarily unavailable. Try again.";
+                _entries = Array.Empty<IntakeCoordinationQueueEntry>();
+                InvalidateDetail();
+            }
+        }
+        finally
+        {
+            if (requestGeneration == _queueRequestGeneration)
+            {
+                _loading = false;
+            }
+        }
+    }
+
+    private async Task SelectAsync(IntakeCoordinationQueueEntry entry)
+    {
+        var client = Client;
+        if (client is null || _loading || _denied || _error is not null ||
+            !_entries.Any(item => item.ReceiptId == entry.ReceiptId))
+        {
+            return;
+        }
+
+        var requestGeneration = ++_detailRequestGeneration;
+        _selectedReceiptId = entry.ReceiptId;
+        _detail = null;
+        _detailError = null;
+        _detailLoading = true;
+        _actionMessage = null;
+        _pendingAction = null;
+        _reason = null;
+        _targetQueue = null;
+        StateHasChanged();
+        try
+        {
+            var detail = await client.GetDetailAsync(entry.ReceiptId);
+            if (requestGeneration != _detailRequestGeneration || _selectedReceiptId != entry.ReceiptId)
+            {
+                return;
+            }
+
+            if (detail is null || detail.Report.ReceiptId != entry.ReceiptId)
+            {
+                _detailError = "The selected report details are unavailable. Try again.";
+                return;
+            }
+
+            _detail = detail;
+        }
+        catch
+        {
+            if (requestGeneration == _detailRequestGeneration && _selectedReceiptId == entry.ReceiptId)
+            {
+                _detailError = "The selected report details are unavailable. Try again.";
+            }
+        }
+        finally
+        {
+            if (requestGeneration == _detailRequestGeneration)
+            {
+                _detailLoading = false;
+            }
+        }
+    }
+
+    private void CloseDetail()
+    {
+        InvalidateDetail();
+    }
+
+    private async Task RetrySelectedDetailAsync()
+    {
+        var selectedEntry = _entries.FirstOrDefault(entry => entry.ReceiptId == _selectedReceiptId);
+        if (selectedEntry is not null)
+        {
+            await SelectAsync(selectedEntry);
+        }
+        else
+        {
+            InvalidateDetail();
+        }
+    }
+
+    private void InvalidateDetail()
+    {
+        _detailRequestGeneration++;
+        _selectedReceiptId = null;
+        _detail = null;
+        _detailError = null;
+        _detailLoading = false;
+        _pendingAction = null;
+        _reason = null;
+        _targetQueue = null;
+        _actionMessage = null;
+        _actionSucceeded = false;
+    }
+
+    private void DismissHandoff() => _handoffMessage = null;
+
+    private void BeginAction(IntakeCoordinationAction action)
+    {
+        if (!CanActOnSelectedDetail)
+        {
+            return;
+        }
+
+        _pendingAction = action;
+        _reason = null;
+        _targetQueue = null;
+        _actionMessage = null;
+        _actionSucceeded = false;
+    }
+
+    private async Task BeginAssignAsync()
+    {
+        BeginAction(IntakeCoordinationAction.AssignQueue);
+        var client = Client;
+        if (client is null)
+        {
+            _queues = Array.Empty<IntakeCoordinationQueueOption>();
+            return;
+        }
+
+        try
+        {
+            _queues = await client.GetQueuesAsync();
+        }
+        catch
+        {
+            _queues = Array.Empty<IntakeCoordinationQueueOption>();
+        }
+    }
+
+    private void CancelAction()
+    {
+        _pendingAction = null;
+        _reason = null;
+        _targetQueue = null;
+    }
+
+    private string PendingTitle() => _pendingAction switch
+    {
+        IntakeCoordinationAction.ClaimForReview => "Claim this report for your review",
+        IntakeCoordinationAction.AssignQueue => "Assign this report to an organization queue",
+        IntakeCoordinationAction.RequestClarification => "Request factual clarification",
+        IntakeCoordinationAction.RecordNoServiceCoverage => "Record no service coverage",
+        _ => "Confirm coordination action"
+    };
+
+    private async Task ConfirmActionAsync()
+    {
+        var client = Client;
+        if (!CanActOnSelectedDetail || _detail is null || _pendingAction is null || client is null || string.IsNullOrWhiteSpace(_reason))
+        {
+            _actionMessage = "A reason is required before recording the action.";
+            _actionSucceeded = false;
+            return;
+        }
+
+        if (_pendingAction == IntakeCoordinationAction.AssignQueue && string.IsNullOrWhiteSpace(_targetQueue))
+        {
+            _actionMessage = "Select an eligible organization queue.";
+            _actionSucceeded = false;
+            return;
+        }
+
+        _acting = true;
+        var actedOnReport = _detail.Report;
+        var action = _pendingAction.Value;
+        StateHasChanged();
+        try
+        {
+            var outcome = await client.ActAsync(
+                actedOnReport.ReceiptId, actedOnReport.Version, action, _targetQueue, _reason.Trim());
+            if (_selectedReceiptId != actedOnReport.ReceiptId || _detail?.Report.ReceiptId != actedOnReport.ReceiptId ||
+                _detail.Report.Version != actedOnReport.Version || _loading || _denied || _error is not null)
+            {
+                return;
+            }
+
+            switch (outcome)
+            {
+                case CoordinationActionOutcome.Applied:
+                    _actionSucceeded = true;
+                    if (action == IntakeCoordinationAction.AssignQueue)
+                    {
+                        _handoffMessage = "The report is now awaiting organization review. It has left the coordination queue.";
+                        _pendingAction = null;
+                        _reason = null;
+                        _targetQueue = null;
+                        _detail = null;
+                        _actionMessage = null;
+                        await RefreshAsync();
+                        break;
+                    }
+
+                    _actionMessage = "The coordination action was recorded.";
+                    _pendingAction = null;
+                    _reason = null;
+                    _targetQueue = null;
+                    await RefreshAsync();
+                    var refreshedReport = _entries.FirstOrDefault(item => item.ReceiptId == actedOnReport.ReceiptId);
+                    if (refreshedReport is not null && !_loading && !_denied && _error is null)
+                    {
+                        await SelectAsync(refreshedReport);
+                    }
+                    break;
+                case CoordinationActionOutcome.Conflict:
+                    _actionMessage = "The report changed before the action was recorded. Refresh and try again.";
+                    _actionSucceeded = false;
+                    break;
+                case CoordinationActionOutcome.Invalid:
+                    _actionMessage = "The action is not valid for this report.";
+                    _actionSucceeded = false;
+                    break;
+                case CoordinationActionOutcome.NotFound:
+                    InvalidateDetail();
+                    await RefreshAsync();
+                    break;
+                default:
+                    _actionMessage = "The action is temporarily unavailable. Try again.";
+                    _actionSucceeded = false;
+                    break;
+            }
+        }
+        catch
+        {
+            if (_selectedReceiptId == actedOnReport.ReceiptId && _detail?.Report.Version == actedOnReport.Version)
+            {
+                _actionMessage = "The action is temporarily unavailable. Try again.";
+                _actionSucceeded = false;
+            }
+        }
+        finally
+        {
+            _acting = false;
+        }
+    }
+
+    private static string FriendlyRouting(IntakeRoutingStatus routing) => routing switch
+    {
+        IntakeRoutingStatus.NeedsRouting => "Needs routing",
+        IntakeRoutingStatus.NoServiceCoverage => "No service coverage",
+        IntakeRoutingStatus.RoutedForReview => "Routed for review",
+        _ => routing.ToString()
+    };
+
+    private static string FriendlyAction(IntakeCoordinationAction action) => action switch
+    {
+        IntakeCoordinationAction.ClaimForReview => "Claimed for review",
+        IntakeCoordinationAction.AssignQueue => "Queue assigned",
+        IntakeCoordinationAction.RequestClarification => "Clarification requested",
+        IntakeCoordinationAction.RecordNoServiceCoverage => "No coverage recorded",
+        _ => action.ToString()
+    };
+
+    private static string FriendlyResult(IntakeCoordinationActionRecord record) =>
+        $"{record.FromRouting} → {record.ToRouting} (v{record.ResultingVersion})";
+
+    private bool CanActOnSelectedDetail => !_loading && !_denied && _error is null && !_detailLoading &&
+        _selectedReceiptId is Guid selected && _detail is not null && _detail.Report.ReceiptId == selected;
+
+    private static string RowAccessibleName(IntakeCoordinationQueueEntry entry) =>
+        $"Review {FriendlyRouting(entry.RoutingStatus)} report from {entry.CountryCode}, received {entry.ReceivedAtUtc.ToLocalTime():g}";
+
+    private static Color HistoryColor(IntakeCoordinationAction action) => action switch
+    {
+        IntakeCoordinationAction.ClaimForReview => Color.Info,
+        IntakeCoordinationAction.AssignQueue => Color.Success,
+        IntakeCoordinationAction.RequestClarification => Color.Warning,
+        IntakeCoordinationAction.RecordNoServiceCoverage => Color.Default,
+        _ => Color.Default
+    };
+
+    private static string AreaLabel(IntakeCoordinationQueueEntry entry) =>
+        string.IsNullOrWhiteSpace(entry.AreaId)
+            ? entry.RegionId ?? "—"
+            : string.IsNullOrWhiteSpace(entry.RegionId) ? entry.AreaId : $"{entry.RegionId} / {entry.AreaId}";
+
+    private static string ShortActor(string? actorId) =>
+        string.IsNullOrWhiteSpace(actorId) ? "Unassigned" : actorId.Length <= 12 ? actorId : actorId[..12] + "…";
+}

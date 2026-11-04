@@ -1,0 +1,163 @@
+@using System.Globalization
+@using Microsoft.Extensions.DependencyInjection
+@using SwiftAid.Contracts.Cases
+@inject IServiceProvider Services
+
+@if (ResolveClient() is not null)
+{
+    <section class="case-detail__section" aria-labelledby="officer-escalation-review-title" aria-busy="@_busy.ToString().ToLowerInvariant()">
+        <MudText Typo="Typo.subtitle1" HtmlTag="h2" id="officer-escalation-review-title">Assign an officer to an escalation</MudText>
+        <MudText Typo="Typo.body2">Review the escalation, officer and deadlines before approving. Assignment creates follow-up work; it does not send a notification or change the case owner.</MudText>
+        <MudButton Variant="Variant.Outlined" Disabled="@Locked" OnClick="LoadAsync">Load available escalations and officers</MudButton>
+        @if (_context is { } context && _pending is null)
+        {
+            @if (context.Escalations.Count == 0 || context.Officers.Count == 0)
+            {
+                <MudText role="status">@(context.Escalations.Count == 0 && context.Officers.Count == 0
+                    ? "No unassigned raised escalations or eligible officers are available for this case."
+                    : context.Escalations.Count == 0 ? "No unassigned raised escalation is available for this case."
+                    : "No eligible officer is available for this case.")</MudText>
+            }
+            else
+            {
+                <MudSelect T="Guid?" Label="Raised escalation" @bind-Value="_escalation" Disabled="@_busy">
+                    @foreach (var item in context.Escalations)
+                    {
+                        <MudSelectItem T="Guid?" Value="@((Guid?)item.EscalationId)">Raised @item.RaisedAtUtc.ToLocalTime().ToString("g") · @item.EscalationId</MudSelectItem>
+                    }
+                </MudSelect>
+                <MudSelect T="Guid?" Label="Eligible officer" @bind-Value="_designation" Disabled="@_busy">
+                    @foreach (var officer in context.Officers)
+                    {
+                        <MudSelectItem T="Guid?" Value="@((Guid?)officer.DesignationId)">@OfficerLabel(officer) · @officer.ActorId</MudSelectItem>
+                    }
+                </MudSelect>
+                <MudTextField T="string" Label="Acknowledgment deadline (UTC)" @bind-Value="_ackDue" Disabled="@_busy" HelperText="Format: YYYY-MM-DD HH:MM" />
+                <MudTextField T="string" Label="Follow-up deadline (UTC)" @bind-Value="_followUpDue" Disabled="@_busy" HelperText="Format: YYYY-MM-DD HH:MM" />
+                <MudButton Variant="Variant.Outlined" Color="Color.Primary" Disabled="@_busy" OnClick="Review">Review assignment</MudButton>
+            }
+            @if (context.MoreEscalations || context.MoreOfficers)
+            {
+                <MudText Typo="Typo.caption">Only the first 20 results in each list are shown.</MudText>
+            }
+        }
+        @if (_pending is { } pending)
+        {
+            <div role="group" aria-label="Review officer escalation assignment">
+                <MudText Typo="Typo.body2">Escalation @pending.EscalationId; officer @_officerLabel (@pending.OfficerActorId); case version @pending.CaseVersion.</MudText>
+                <MudText Typo="Typo.body2">Acknowledgment due @pending.AcknowledgementDueUtc.ToString("u"); follow-up due @pending.FollowUpDueUtc.ToString("u").</MudText>
+                @if (!_approved)
+                {
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@_busy" OnClick="ApproveAsync">@(_uncertain ? "Retry approval" : "Approve reviewed assignment")</MudButton>
+                    @if (!_uncertain) { <MudButton Variant="Variant.Text" Disabled="@_busy" OnClick="Back">Back to editing</MudButton> }
+                }
+                else
+                {
+                    <MudText Typo="Typo.body2">Approval recorded. It expires after 15 minutes and does not itself assign the officer.</MudText>
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@_busy" OnClick="AssignAsync">@(_uncertain ? "Retry assignment" : "Assign approved officer")</MudButton>
+                }
+            </div>
+        }
+        @if (_message is not null) { <MudText role="status" aria-live="polite">@_message</MudText> }
+    </section>
+}
+
+@code {
+    [Parameter] public Guid CaseId { get; set; }
+    [Parameter] public IOfficerEscalationReviewClient? Client { get; set; }
+    [Parameter] public EventCallback OnAssigned { get; set; }
+    private Guid _caseId;
+    private long _generation;
+    private bool _busy, _approved, _uncertain;
+    private Guid? _escalation, _designation;
+    private string _ackDue = "", _followUpDue = "", _officerLabel = "";
+    private string? _message;
+    private OfficerEscalationReviewContext? _context;
+    private OfficerEscalationReviewedSelection? _pending;
+    private bool Locked => _busy || _pending is not null || CaseId == Guid.Empty;
+    private IOfficerEscalationReviewClient? ResolveClient() => Client ?? Services.GetService<IOfficerEscalationReviewClient>();
+    private static string OfficerLabel(EligibleHealthOfficerCandidate item) => item.DisplayLabel is { Length: > 0 and <= 120 } label && !label.Any(char.IsControl) ? label : "Name unavailable";
+
+    protected override void OnParametersSet()
+    {
+        if (_caseId == CaseId) return;
+        _caseId = CaseId; _generation++; _busy = false; _approved = false; _uncertain = false;
+        _context = null; _pending = null; _message = null; _escalation = null; _designation = null;
+        _ackDue = ""; _followUpDue = "";
+    }
+
+    private async Task LoadAsync()
+    {
+        if (Locked || ResolveClient() is not { } client) return;
+        var generation = ++_generation;
+        _busy = true; _context = null; _message = null; _escalation = null; _designation = null;
+        try
+        {
+            var result = await client.GetAsync(CaseId);
+            if (generation != _generation) return;
+            _context = result;
+            if (result is null) _message = "Review is unavailable for this case or account.";
+        }
+        catch (Exception error) when (error is not OutOfMemoryException)
+        { if (generation == _generation) _message = "Could not load escalation review. Try again."; }
+        finally { if (generation == _generation) _busy = false; }
+    }
+
+    private void Review()
+    {
+        if (_busy || _pending is not null || _context is not { } context) return;
+        var officer = context.Officers.SingleOrDefault(item => item.DesignationId == _designation);
+        if (_escalation is not { } escalation || !context.Escalations.Any(item => item.EscalationId == escalation))
+        { _message = "Choose the raised escalation."; return; }
+        if (officer is null) { _message = "Choose an eligible officer."; return; }
+        if (!DateTimeOffset.TryParseExact(_ackDue, "yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var ack) || ack <= DateTimeOffset.UtcNow)
+        { _message = "Enter a future acknowledgment deadline in UTC."; return; }
+        if (!DateTimeOffset.TryParseExact(_followUpDue, "yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var due) || due < ack)
+        { _message = "Enter a follow-up deadline in UTC that is not before acknowledgment."; return; }
+        _pending = new(CaseId, context.CaseVersion, escalation, officer.ActorId, officer.DesignationId, officer.DesignationVersion,
+            Guid.NewGuid(), ack, due, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        _officerLabel = OfficerLabel(officer); _approved = false; _uncertain = false; _message = null;
+    }
+
+    private void Back() { if (!_busy && !_uncertain && !_approved) _pending = null; }
+
+    private async Task ApproveAsync() => await PerformAsync(false);
+    private async Task AssignAsync() => await PerformAsync(true);
+
+    private async Task PerformAsync(bool assign)
+    {
+        if (_busy || _pending is not { } selection || assign != _approved || ResolveClient() is not { } client) return;
+        var generation = _generation; _busy = true; _message = null;
+        try
+        {
+            var result = assign ? await client.AssignAsync(selection) : await client.ApproveAsync(selection);
+            if (generation != _generation) return;
+            if (result.Status is OfficerEscalationActionStatus.Recorded or OfficerEscalationActionStatus.Replayed &&
+                (!assign || result.EventId is { } eventId && eventId != Guid.Empty && result.CaseVersion > selection.CaseVersion))
+            {
+                _uncertain = false;
+                if (!assign) { _approved = true; _message = "Approval recorded. Review and assign when ready."; }
+                else
+                {
+                    _pending = null; _context = null; _approved = false;
+                    _message = "Officer assignment and follow-up recorded. No notification was sent.";
+                    try { await OnAssigned.InvokeAsync(); }
+                    catch (Exception error) when (error is not OutOfMemoryException)
+                    { _message = "Officer assignment and follow-up recorded. Refresh the case to see the latest work."; }
+                }
+            }
+            else if (result.Status is OfficerEscalationActionStatus.OutcomeUnknown or OfficerEscalationActionStatus.Recorded or OfficerEscalationActionStatus.Replayed || _uncertain)
+            { _uncertain = true; _message = "The result is not yet known. Retry the same action to check safely."; }
+            else
+            {
+                _pending = null; _context = null; _approved = false;
+                _message = result.Status == OfficerEscalationActionStatus.Conflict
+                    ? "The case, approval or eligibility changed. Load the current details and review again."
+                    : "The action was not recorded. Load the current details and try again.";
+            }
+        }
+        catch (Exception error) when (error is not OutOfMemoryException)
+        { if (generation == _generation) { _uncertain = true; _message = "The result is not yet known. Retry the same action to check safely."; } }
+        finally { if (generation == _generation) _busy = false; }
+    }
+}

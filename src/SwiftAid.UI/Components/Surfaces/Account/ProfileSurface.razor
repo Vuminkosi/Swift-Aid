@@ -1,0 +1,234 @@
+@using Microsoft.AspNetCore.Components.Forms
+@using SwiftAid.UI.Components.Surfaces.Account
+
+@if (Snapshot.ViewState == ProfileViewState.Loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" aria-label="Loading your profile" />
+}
+else if (Snapshot.ViewState == ProfileViewState.SignedOut)
+{
+    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" role="status">
+        Sign in to view your profile.
+    </MudAlert>
+    <MudButton Href="/sign-in" Variant="Variant.Filled" Color="Color.Primary"
+               StartIcon="@Icons.Material.Filled.Login">
+        Sign in
+    </MudButton>
+}
+else if (Snapshot.ViewState == ProfileViewState.Unavailable)
+{
+    <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" role="alert">
+        @(Snapshot.StatusMessage ?? "Your profile is temporarily unavailable.")
+    </MudAlert>
+    <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="OnRefresh"
+               StartIcon="@Icons.Material.Filled.Refresh">
+        Retry
+    </MudButton>
+}
+else
+{
+    @if (!string.IsNullOrWhiteSpace(Snapshot.StatusMessage))
+    {
+        <MudAlert Severity="@(Snapshot.StatusIsError ? Severity.Warning : Severity.Success)"
+                  Variant="Variant.Outlined" role="@(Snapshot.StatusIsError ? "alert" : "status")">
+            @Snapshot.StatusMessage
+        </MudAlert>
+    }
+    <MudPaper Class="pa-4 mb-4" Elevation="0">
+        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="3">
+            @if (!string.IsNullOrWhiteSpace(Snapshot.AvatarUrl))
+            {
+                <MudAvatar Size="Size.Large">
+                    <MudImage Src="@Snapshot.AvatarUrl" Alt="Your profile photo" />
+                </MudAvatar>
+            }
+            else
+            {
+                <MudAvatar Color="Color.Primary" Size="Size.Large" aria-hidden="true">@AvatarInitials</MudAvatar>
+            }
+            <MudStack Spacing="1">
+                <MudText Typo="Typo.subtitle1">Profile photo</MudText>
+                <MudText Typo="Typo.caption">Optional. Only you can see it here.</MudText>
+                @if (!string.IsNullOrWhiteSpace(_photoError))
+                {
+                    <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" role="alert" Dense="true">
+                        @_photoError
+                    </MudAlert>
+                }
+                <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center">
+                    <MudButton HtmlTag="label" Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small"
+                               Disabled="@Snapshot.IsSavingAvatar" for="profile-photo-picker">
+                        @(Snapshot.IsSavingAvatar ? "Uploading…" : "Choose photo")
+                        <InputFile id="profile-photo-picker" hidden accept="image/jpeg,image/png,image/webp" OnChange="UploadAvatarAsync" />
+                    </MudButton>
+                    @if (!string.IsNullOrWhiteSpace(Snapshot.AvatarUrl))
+                    {
+                        <MudButton Variant="Variant.Text" Color="Color.Primary" Size="Size.Small"
+                                   OnClick="OnDeleteAvatar" Disabled="@Snapshot.IsSavingAvatar">
+                            Remove
+                        </MudButton>
+                    }
+                </MudStack>
+                <MudText Typo="Typo.caption">JPEG, PNG, or WebP up to 2 MB, chosen from your device.</MudText>
+            </MudStack>
+        </MudStack>
+    </MudPaper>
+    <MudPaper Class="pa-4 mb-4" Elevation="0">
+        <MudText Typo="Typo.subtitle1">Personal information</MudText>
+        <MudGrid Spacing="2">
+            <MudItem xs="12" md="6">
+                <MudTextField T="string" Label="Full name" @bind-Value="_displayName"
+                              Variant="Variant.Outlined" Required="true" RequiredError="Enter a display name."
+                              Disabled="@Snapshot.IsSaving" Immediate="true" MaxLength="128"
+                              autocomplete="name" aria-label="Full name" />
+            </MudItem>
+            <MudItem xs="12" md="6">
+                <MudTextField T="string" Label="Email address" Value="@(Snapshot.Email ?? "No email address")"
+                              Variant="Variant.Outlined" ReadOnly="true" Disabled="@Snapshot.IsSaving"
+                              autocomplete="email" aria-label="Email address (verified contact, read-only)" />
+                <MudText Typo="Typo.caption" Color="@(Snapshot.EmailVerified ? Color.Success : Color.Warning)">
+                    @(Snapshot.EmailVerified ? "Verified" : "Verification required")
+                </MudText>
+                @if (!Snapshot.EmailVerified)
+                {
+                    <MudButton Href="/verify-email" Variant="Variant.Text" Color="Color.Primary">
+                        Verify email address
+                    </MudButton>
+                }
+                <MudButton Href="/change-email" Variant="Variant.Text" Color="Color.Primary">
+                    Change email address
+                </MudButton>
+            </MudItem>
+            <MudItem xs="12" md="6">
+                <MudTextField T="string" Label="Phone number (optional)" @bind-Value="_phone"
+                              Variant="Variant.Outlined" Disabled="@Snapshot.IsSaving" Immediate="true" MaxLength="24"
+                              autocomplete="tel" InputMode="InputMode.tel"
+                              HelperText="Starts with + and your country code." aria-label="Phone number" />
+            </MudItem>
+            <MudItem xs="12" md="6">
+                <MudTextField T="string" Label="Country (optional)" @bind-Value="_country"
+                              Variant="Variant.Outlined" Disabled="@Snapshot.IsSaving" Immediate="true" MaxLength="2"
+                              autocomplete="country"
+                              HelperText="Two-letter code." aria-label="Country" />
+            </MudItem>
+            <MudItem xs="12" md="6">
+                <MudTextField T="string" Label="Region (optional)" @bind-Value="_region"
+                              Variant="Variant.Outlined" Disabled="@Snapshot.IsSaving" Immediate="true" MaxLength="128"
+                              autocomplete="address-level1" aria-label="Region" />
+            </MudItem>
+            <MudItem xs="12" md="6">
+                <MudTextField T="string" Label="Locality (optional)" @bind-Value="_locality"
+                              Variant="Variant.Outlined" Disabled="@Snapshot.IsSaving" Immediate="true" MaxLength="128"
+                              autocomplete="address-level2" aria-label="Locality" />
+            </MudItem>
+            <MudItem xs="12">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveAsync"
+                           Disabled="@(!CanSave)" StartIcon="@Icons.Material.Filled.Save"
+                           Class="auth-cta">
+                    @(Snapshot.IsSaving ? "Saving…" : "Save changes")
+                </MudButton>
+            </MudItem>
+        </MudGrid>
+    </MudPaper>
+}
+
+@code {
+    [Parameter] public ProfileSnapshot Snapshot { get; set; } = ProfileSnapshot.Loading;
+
+    [Parameter] public EventCallback OnRefresh { get; set; }
+
+    [Parameter] public EventCallback<ProfileEditRequest> OnSave { get; set; }
+
+    [Parameter] public EventCallback<ProfileAvatarUploadRequest> OnUploadAvatar { get; set; }
+
+    [Parameter] public EventCallback OnDeleteAvatar { get; set; }
+
+    private string? _displayName;
+    private string? _phone;
+    private string? _country;
+    private string? _region;
+    private string? _locality;
+    private string? _loadedFor;
+    private string? _photoError;
+
+    protected override void OnParametersSet()
+    {
+        var key = string.Join("|",
+            Snapshot.DisplayName, Snapshot.Phone, Snapshot.Country,
+            Snapshot.Region, Snapshot.Locality, Snapshot.ViewState);
+        if (!string.Equals(key, _loadedFor, StringComparison.Ordinal))
+        {
+            _loadedFor = key;
+            _displayName = Snapshot.DisplayName;
+            _phone = Snapshot.Phone;
+            _country = Snapshot.Country;
+            _region = Snapshot.Region;
+            _locality = Snapshot.Locality;
+        }
+    }
+
+    private bool CanSave =>
+        Snapshot.ViewState == ProfileViewState.Ready &&
+        !Snapshot.IsSaving &&
+        !string.IsNullOrWhiteSpace(_displayName);
+
+    private string AvatarInitials
+    {
+        get
+        {
+            var parts = (Snapshot.DisplayName ?? string.Empty).Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length == 0)
+            {
+                return "?";
+            }
+
+            var initials = parts[0][0].ToString();
+            if (parts.Length > 1)
+            {
+                initials += parts[1][0].ToString();
+            }
+
+            return initials.ToUpperInvariant();
+        }
+    }
+
+    private async Task UploadAvatarAsync(InputFileChangeEventArgs args)
+    {
+        const long maxBytes = 2 * 1024 * 1024;
+        _photoError = null;
+        var file = args.File;
+        if (file is null)
+        {
+            return;
+        }
+
+        if (file.Size > maxBytes)
+        {
+            _photoError = "Use a JPEG, PNG, or WebP photo up to 2 MB.";
+            return;
+        }
+
+        try
+        {
+            var buffer = new MemoryStream();
+            await using (var source = file.OpenReadStream(maxBytes))
+            {
+                await source.CopyToAsync(buffer).ConfigureAwait(false);
+            }
+
+            buffer.Position = 0;
+            await OnUploadAvatar.InvokeAsync(new ProfileAvatarUploadRequest(file.ContentType, buffer)).ConfigureAwait(false);
+        }
+        catch
+        {
+            _photoError = "Choosing your photo failed. Try again.";
+        }
+    }
+
+    private Task SaveAsync() => OnSave.InvokeAsync(new ProfileEditRequest(
+        _displayName?.Trim(),
+        string.IsNullOrWhiteSpace(_phone) ? null : _phone.Trim(),
+        string.IsNullOrWhiteSpace(_country) ? null : _country.Trim(),
+        string.IsNullOrWhiteSpace(_region) ? null : _region.Trim(),
+        string.IsNullOrWhiteSpace(_locality) ? null : _locality.Trim()));
+}

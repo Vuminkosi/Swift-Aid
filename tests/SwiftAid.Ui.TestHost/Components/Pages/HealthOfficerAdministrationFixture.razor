@@ -1,0 +1,35 @@
+@page "/officer-administration-fixture"
+@using SwiftAid.Contracts.Cases
+@using SwiftAid.UI.Components.Surfaces.Account
+@using SwiftAid.UI.Components.Theme
+
+<SwiftAidThemeProvider />
+<MudPopoverProvider />
+<main data-fixture-ready="@_ready.ToString().ToLowerInvariant()">
+    <h1>Officer administration fixture</h1>
+    <HealthOfficerAdministrationPanel Client="_client" />
+    <output id="write-count">@_client.Count</output>
+</main>
+
+@code {
+    private bool _ready;
+    private FixtureClient _client = default!;
+    protected override void OnInitialized() => _client = new FixtureClient(() => _ = InvokeAsync(StateHasChanged));
+    protected override void OnAfterRender(bool firstRender) { if (firstRender) { _ready = true; StateHasChanged(); } }
+    private sealed class FixtureClient(Action changed) : IHealthOfficerAdministrationClient
+    {
+        public int Count { get; private set; }
+        private Guid? _command;
+        public Task<HealthOfficerAdministrationLookupResult> LookupAsync(HealthOfficerDesignationLookupRequest request, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new HealthOfficerAdministrationLookupResult(HealthOfficerAdministrationStatus.Available));
+        public Task<HealthOfficerAdministrationChangeResult> ChangeAsync(HealthOfficerDesignationChangeRequest request, CancellationToken cancellationToken = default)
+        {
+            Count++;
+            changed();
+            if (Count == 1) { _command = request.CommandId; return Task.FromResult(new HealthOfficerAdministrationChangeResult(HealthOfficerAdministrationStatus.OutcomeUnknown)); }
+            if (_command != request.CommandId) return Task.FromResult(new HealthOfficerAdministrationChangeResult(HealthOfficerAdministrationStatus.Conflict));
+            if (Count == 2) return Task.FromResult(new HealthOfficerAdministrationChangeResult(HealthOfficerAdministrationStatus.Denied));
+            return Task.FromResult(new HealthOfficerAdministrationChangeResult(HealthOfficerAdministrationStatus.Replayed, new(Guid.NewGuid(), 1, true)));
+        }
+    }
+}

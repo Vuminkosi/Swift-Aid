@@ -1,0 +1,109 @@
+@page "/welcome"
+@using Microsoft.AspNetCore.Components.Authorization
+@using SwiftAid.UI.Components.Surfaces.Public
+@inject AuthenticationStateProvider AuthenticationStateProvider
+@inject NavigationManager Navigation
+
+<PageTitle>Welcome to SwiftAid</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.Large" Class="web-welcome">
+    <div class="web-welcome__split">
+    <MudHidden Breakpoint="Breakpoint.SmAndDown">
+        <aside class="web-welcome__brand-panel" aria-label="About SwiftAid">
+            <img class="web-welcome__brand-mark" src="_content/SwiftAid.UI/assets/swiftaid-icon.png" alt="" width="72" height="72" />
+            <p class="web-welcome__tagline">Healthier People.<br />Safer Communities.<br />Brighter Tomorrows.</p>
+            <p class="web-welcome__lede">Report concerns, support communities and coordinate accountable follow-through.</p>
+        </aside>
+    </MudHidden>
+    <div class="web-welcome__main">
+    <MudCarousel TData="object" Class="web-welcome__carousel"
+                 ShowBullets="true"
+                 ShowArrows="true"
+                 EnableSwipeGesture="true"
+                 AutoCycle="false"
+                 Style="height: 26rem;"
+                 aria-roledescription="carousel"
+                 aria-label="Introduction to SwiftAid">
+        <MudCarouselItem Transition="Transition.Slide" aria-roledescription="slide" aria-label="1 of 4">
+            <div class="web-welcome__slide">
+                <img class="web-welcome__brand-mark" src="_content/SwiftAid.UI/assets/swiftaid-icon.png" alt="" width="64" height="64" />
+                <SwiftAidPageHeading Eyebrow="Healthier People. Safer Communities. Brighter Tomorrows."
+                                     Title="Community health. Stronger together."
+                                     HeadingId="welcome-heading" />
+            </div>
+        </MudCarouselItem>
+        <MudCarouselItem Transition="Transition.Slide" aria-roledescription="slide" aria-label="2 of 4">
+            <div class="web-welcome__slide">
+                <span class="web-welcome__medallion" aria-hidden="true">
+                    <MudIcon Icon="@Icons.Material.Filled.FolderOpen" Size="Size.Large" Color="Color.Primary" />
+                </span>
+                <SwiftAidPageHeading Title="Manage Cases"
+                                     Description="Track, follow up and coordinate community cases."
+                                     HeadingId="welcome-manage-heading" />
+            </div>
+        </MudCarouselItem>
+        <MudCarouselItem Transition="Transition.Slide" aria-roledescription="slide" aria-label="3 of 4">
+            <div class="web-welcome__slide">
+                <span class="web-welcome__medallion" aria-hidden="true">
+                    <MudIcon Icon="@Icons.Material.Filled.School" Size="Size.Large" Color="Color.Primary" />
+                </span>
+                <SwiftAidPageHeading Title="Educate Communities"
+                                     Description="Learn, share and join community health sessions."
+                                     HeadingId="welcome-educate-heading" />
+            </div>
+        </MudCarouselItem>
+        <MudCarouselItem Transition="Transition.Slide" aria-roledescription="slide" aria-label="4 of 4">
+            <div class="web-welcome__slide">
+                <span class="web-welcome__medallion" aria-hidden="true">
+                    <MudIcon Icon="@Icons.Material.Filled.AddCircleOutline" Size="Size.Large" Color="Color.Primary" />
+                </span>
+                <SwiftAidPageHeading Title="Report health concerns"
+                                     Description="Share a human or animal concern. No account required."
+                                     HeadingId="welcome-report-heading" />
+            </div>
+        </MudCarouselItem>
+    </MudCarousel>
+
+    <div class="web-welcome__actions">
+        <MudButton Href="/"
+                   Variant="Variant.Filled"
+                   Color="Color.Primary"
+                   Class="auth-cta"
+                   StartIcon="@Icons.Material.Filled.ArrowForward">
+            Get Started
+        </MudButton>
+        <MudButton Href="/report"
+                   Variant="Variant.Text"
+                   Color="Color.Primary">
+            Continue as guest
+        </MudButton>
+        <MudButton Href="/sign-in"
+                   Variant="Variant.Text"
+                   Color="Color.Primary">
+            Sign in
+        </MudButton>
+    </div>
+    </div>
+    </div>
+</MudContainer>
+
+@code {
+    protected override async Task OnInitializedAsync()
+    {
+        bool signedIn;
+        try
+        {
+            var state = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+            signedIn = state.User.Identity?.IsAuthenticated == true;
+        }
+        catch (Exception)
+        {
+            signedIn = false;
+        }
+
+        if (signedIn)
+        {
+            Navigation.NavigateTo("/");
+        }
+    }
+}

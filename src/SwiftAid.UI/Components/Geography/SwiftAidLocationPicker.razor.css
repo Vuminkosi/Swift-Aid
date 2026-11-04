@@ -1,0 +1,38 @@
+.geo-picker {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.geo-picker__feedback {
+    margin-top: -0.25rem;
+}
+
+.geo-picker__selection {
+    display: flex;
+    flex-wrap: wrap;
+}
+
+.geo-picker__browse {
+    border-top: 1px solid var(--sa-border, #dce2ea);
+    padding-top: 0.5rem;
+}
+
+.geo-picker__browse > summary {
+    cursor: pointer;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    font-weight: 600;
+}
+
+.geo-picker__cascade {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    padding: 0.5rem 0;
+}
+
+.geo-picker__provisional {
+    align-self: flex-start;
+}

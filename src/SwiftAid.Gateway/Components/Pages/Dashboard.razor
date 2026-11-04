@@ -1,0 +1,312 @@
+@page "/dashboard"
+@using SwiftAid.Client.Presentation
+@using SwiftAid.UI.Components.Surfaces.Operations
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@inject IDashboardOverviewClient DashboardClient
+@inject IMapAggregateClient MapAggregateClient
+@inject ISurveillanceMapDetailsClient MapDetailsClient
+
+<PageTitle>Dashboard | SwiftAid</PageTitle>
+<OperationsDashboard Overview="_overview"
+                     OverviewState="_overviewState"
+                     MapState="_mapState"
+                     MapAreas="_mapAreas" MapDetails="_mapDetails"
+                     RegionOptions="_regionOptions"
+                     Period="_period"
+                     Sector="_sector"
+                     RegionCode="@(_regionCode ?? string.Empty)"
+                     PeriodLabel="@PeriodDescription"
+                     UpdatedAtUtc="_updatedAtUtc"
+                     OnPeriodChanged="PeriodChangedAsync"
+                     OnSectorChanged="SectorChangedAsync"
+                     OnRegionChanged="RegionChangedAsync"
+                     OnRetryAll="LoadAsync">
+    <Actions>
+        <MudButton Href="/my-cases" Color="Color.Primary" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.FolderOpen">
+            Open my cases
+        </MudButton>
+    </Actions>
+</OperationsDashboard>
+
+@code {
+    private static readonly TimeSpan DashboardRequestTimeout = TimeSpan.FromSeconds(15);
+    private DashboardPeriodView _period = DashboardPeriodView.Days30;
+    private DashboardSectorView _sector = DashboardSectorView.Human;
+    private string? _regionCode = "SZ";
+    private DashboardOverviewView? _overview;
+    private IReadOnlyList<OperationsMapSurface.AreaAggregateView> _mapAreas = Array.Empty<OperationsMapSurface.AreaAggregateView>();
+    private IReadOnlyList<OperationsMapSurface.AreaAggregateView> _regionOptions = Array.Empty<OperationsMapSurface.AreaAggregateView>();
+    private OperationsSurfaceState _overviewState = OperationsSurfaceState.Loading;
+    private OperationsSurfaceState _mapState = OperationsSurfaceState.Loading;
+    private DateTimeOffset? _updatedAtUtc;
+    private long _overviewRequestGeneration;
+    private long _mapRequestGeneration;
+    private long _detailsRequestGeneration;
+    private SwiftAid.Contracts.Surveillance.SurveillanceMapDetails? _mapDetails;
+
+    private string PeriodDescription => _period == DashboardPeriodView.Days90 ? "Last 90 days" : "Last 30 days";
+
+    private bool _interactiveLoadStarted;
+
+    /// <summary>Loads after the first interactive render so the prerendered
+    /// shell and navigation stream immediately with loading states.</summary>
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && !_interactiveLoadStarted)
+        {
+            _interactiveLoadStarted = true;
+            await LoadAsync();
+        }
+    }
+
+    private Task PeriodChangedAsync(DashboardPeriodView period)
+    {
+        if (!Enum.IsDefined(period) || period == _period)
+            return Task.CompletedTask;
+
+        _period = period;
+        return LoadAsync();
+    }
+
+    private Task SectorChangedAsync(DashboardSectorView sector)
+    {
+        if (!Enum.IsDefined(sector) || sector == _sector)
+            return Task.CompletedTask;
+
+        _sector = sector;
+        return LoadAsync();
+    }
+
+    private Task RegionChangedAsync(string? regionCode)
+    {
+        _regionCode = string.IsNullOrWhiteSpace(regionCode) ? null : regionCode;
+        return LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        var generation = ++_detailsRequestGeneration;
+        var country = _regionCode ?? "SZ";
+        var period = _period == DashboardPeriodView.Days90 ? MapAggregatePeriod.Days90 : MapAggregatePeriod.Days30;
+        _mapDetails = null;
+        _overviewState = OperationsSurfaceState.Loading;
+        _mapState = OperationsSurfaceState.Loading;
+        _overview = null;
+        _updatedAtUtc = null;
+        await InvokeAsync(StateHasChanged);
+        await Task.WhenAll(LoadOverviewAsync(), LoadMapAsync());
+        if (generation != _detailsRequestGeneration) return;
+        var details = await MapDetailsClient.GetAsync(country, period);
+        if (generation != _detailsRequestGeneration) return;
+        _mapDetails = details.Succeeded ? details.Value : null;
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task LoadOverviewAsync()
+    {
+        var generation = Interlocked.Increment(ref _overviewRequestGeneration);
+        var query = new DashboardOverviewQuery(ToClientPeriod(_period), _regionCode, ToClientSector(_sector));
+        try
+        {
+            using var timeout = new CancellationTokenSource(DashboardRequestTimeout);
+            var result = await DashboardClient.GetAsync(query, timeout.Token);
+            if (generation != Volatile.Read(ref _overviewRequestGeneration))
+                return;
+
+            if (!result.Succeeded)
+            {
+                _overviewState = MapState(result.Code);
+                return;
+            }
+
+            if (result.Value is not { IsValid: true } overview ||
+                overview.Period != ToClientPeriod(_period) || overview.Sector != ToClientSector(_sector))
+            {
+                _overviewState = OperationsSurfaceState.Error;
+                return;
+            }
+
+            _overview = ToView(overview);
+            _overviewState = OperationsSurfaceState.Populated;
+            _updatedAtUtc = overview.AsOfUtc;
+        }
+        catch (OperationCanceledException)
+        {
+            if (generation == Volatile.Read(ref _overviewRequestGeneration))
+                _overviewState = OperationsSurfaceState.Unavailable;
+        }
+        catch
+        {
+            if (generation == Volatile.Read(ref _overviewRequestGeneration))
+                _overviewState = OperationsSurfaceState.Error;
+        }
+        finally
+        {
+            if (generation == Volatile.Read(ref _overviewRequestGeneration))
+                await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task LoadMapAsync()
+    {
+        var generation = Interlocked.Increment(ref _mapRequestGeneration);
+        var period = _period == DashboardPeriodView.Days90 ? MapAggregatePeriod.Days90 : MapAggregatePeriod.Days30;
+        try
+        {
+            using var timeout = new CancellationTokenSource(DashboardRequestTimeout);
+            var result = await MapAggregateClient.GetAsync(
+                new MapAggregateQuery(new PageRequest(1, 100), null, period), timeout.Token);
+            if (generation != Volatile.Read(ref _mapRequestGeneration))
+                return;
+
+            if (!result.Succeeded)
+            {
+                _mapState = MapState(result.Code);
+                return;
+            }
+
+            if (result.Value is not { IsValid: true } page)
+            {
+                _mapState = OperationsSurfaceState.Error;
+                return;
+            }
+
+            _mapAreas = page.Areas.Items.Where(area => string.IsNullOrWhiteSpace(_regionCode) || area.AreaCode == _regionCode)
+                .Select(area => ToMapView(area, _sector)).ToArray();
+            _mapState = _mapAreas.Count > 0 ? OperationsSurfaceState.Populated : OperationsSurfaceState.Empty;
+                _regionOptions = page.Areas.Items.Select(area => ToMapView(area, DashboardSectorView.OneHealth))
+                    .OrderBy(area => area.AreaLabel, StringComparer.CurrentCultureIgnoreCase)
+                    .ToArray();
+
+            _updatedAtUtc = _updatedAtUtc is null || page.AsOfUtc > _updatedAtUtc ? page.AsOfUtc : _updatedAtUtc;
+        }
+        catch (OperationCanceledException)
+        {
+            if (generation == Volatile.Read(ref _mapRequestGeneration))
+                _mapState = OperationsSurfaceState.Unavailable;
+        }
+        catch
+        {
+            if (generation == Volatile.Read(ref _mapRequestGeneration))
+                _mapState = OperationsSurfaceState.Error;
+        }
+        finally
+        {
+            if (generation == Volatile.Read(ref _mapRequestGeneration))
+                await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private static OperationsMapSurface.AreaAggregateView ToMapView(MapAreaAggregate area, DashboardSectorView sector)
+    {
+        var humanCount = sector == DashboardSectorView.Animal ? null : area.HumanCount;
+        var animalCount = sector == DashboardSectorView.Human ? null : area.AnimalCount;
+        var denominator = area.IsSuppressed
+            ? null
+            : sector switch
+            {
+                DashboardSectorView.Human => area.HumanCount,
+                DashboardSectorView.Animal => area.AnimalCount,
+                _ => area.Denominator
+            };
+
+        return new OperationsMapSurface.AreaAggregateView(
+            area.AreaCode,
+            area.AreaLabel,
+            area.Precision == MapAggregateAreaPrecision.Country
+                ? OperationsMapSurface.AggregatePrecision.Country
+                : OperationsMapSurface.AggregatePrecision.Region,
+            humanCount,
+            animalCount,
+            denominator,
+            area.IsSuppressed,
+            area.SuppressionReason,
+            area.AsOfUtc);
+    }
+
+    private static DashboardOverviewView ToView(DashboardOverview overview) => new(
+        overview.AuthorizedScopeLabel,
+        ToView(overview.Sector),
+        overview.Completeness == DashboardDataCompleteness.Complete
+            ? DashboardCompletenessView.Complete
+            : DashboardCompletenessView.Partial,
+        overview.EvaluateFreshness(DateTimeOffset.UtcNow) switch
+        {
+            DashboardFreshnessState.Current => DashboardFreshnessView.Current,
+            DashboardFreshnessState.Stale => DashboardFreshnessView.Stale,
+            _ => DashboardFreshnessView.Unknown
+        },
+        overview.AsOfUtc,
+        overview.FreshnessExpiresAtUtc,
+        overview.Kpis.Select(item => new DashboardKpiView(
+            (DashboardKpiViewKind)item.Kind,
+            item.State switch
+            {
+                DashboardValueState.Available => DashboardValueViewState.Available,
+                DashboardValueState.Suppressed => DashboardValueViewState.Suppressed,
+                _ => DashboardValueViewState.Unavailable
+            },
+            item.Value,
+            item.Definition)).ToArray(),
+        overview.Categories.Select(item => new DashboardCategoryView(
+            ToView(item.Sector),
+            item.CategoryLabel,
+            item.ClassificationLabel,
+            item.HumanCaseCount,
+            item.AnimalReportCount,
+            item.AnimalsAffected,
+            item.Denominator,
+            item.IsSuppressed)).ToArray(),
+        overview.RecentCases.Select(item => new DashboardCaseView(
+            item.CaseId,
+            item.DisplayReference,
+            ToView(item.SubjectSector),
+            item.ReportedConditionLabel,
+            item.ClassificationLabel,
+            item.RegionLabel,
+            (DashboardWorkflowViewState)item.WorkflowState,
+            (DashboardPriorityView)item.AdministrativePriority,
+            item.ReportedAtUtc, item.LocationHref, item.ObservationPreview)).ToArray(),
+        overview.RecentOperationalAlerts.Select(item => new DashboardAlertView(
+            (DashboardAlertViewKind)item.Kind,
+            ToView(item.Sector),
+            AlertLabel(item.Label),
+            item.RegionLabel,
+            item.OccurredAtUtc)).ToArray());
+
+    private static DashboardSectorView ToView(DashboardOverviewSector sector) => sector switch
+    {
+        DashboardOverviewSector.Human => DashboardSectorView.Human,
+        DashboardOverviewSector.Animal => DashboardSectorView.Animal,
+        _ => DashboardSectorView.OneHealth
+    };
+
+    private static DashboardOverviewSector ToClientSector(DashboardSectorView sector) => sector switch
+    {
+        DashboardSectorView.Human => DashboardOverviewSector.Human,
+        DashboardSectorView.Animal => DashboardOverviewSector.Animal,
+        _ => DashboardOverviewSector.OneHealth
+    };
+
+    private static DashboardOverviewPeriod ToClientPeriod(DashboardPeriodView period) => period switch
+    {
+        DashboardPeriodView.Days90 => DashboardOverviewPeriod.Days90,
+        _ => DashboardOverviewPeriod.Days30
+    };
+
+    private static string AlertLabel(DashboardOperationalAlertLabel label) => label switch
+    {
+        DashboardOperationalAlertLabel.NewCaseReportReceived => "New case report received",
+        DashboardOperationalAlertLabel.AdministrativePriorityReviewRequested => "Administrative priority review requested",
+        DashboardOperationalAlertLabel.ScheduledFollowUpDue => "Scheduled follow-up due",
+        _ => "Administrative event"
+    };
+
+    private static OperationsSurfaceState MapState(UiCapabilityResultCode code) => code switch
+    {
+        UiCapabilityResultCode.Denied => OperationsSurfaceState.Denied,
+        UiCapabilityResultCode.Unavailable or UiCapabilityResultCode.Retryable or UiCapabilityResultCode.Cancelled => OperationsSurfaceState.Unavailable,
+        UiCapabilityResultCode.Success => OperationsSurfaceState.Empty,
+        _ => OperationsSurfaceState.Error
+    };
+}

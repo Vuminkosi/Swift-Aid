@@ -1,0 +1,15 @@
+.monitoring-page__queues {
+    width: 100%;
+    min-width: 0;
+}
+
+::deep .monitoring-page__queues > .mud-grid-item {
+    min-width: 0;
+}
+
+@media (min-width: 1200px) and (max-width: 1599.98px) {
+    ::deep .monitoring-page__queues .monitoring-page__queue-item {
+        flex: 0 0 100%;
+        max-width: 100%;
+    }
+}

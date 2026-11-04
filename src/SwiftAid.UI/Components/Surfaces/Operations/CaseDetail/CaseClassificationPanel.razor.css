@@ -1,0 +1,9 @@
+.classification-panel { padding: 1rem 0; border-top: 1px solid var(--mud-palette-lines-default); min-width: 0; }
+.classification-panel__heading, .classification-panel__status, .classification-panel__patterns { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem; }
+.classification-panel__heading { justify-content: space-between; }
+.classification-panel__heading ::deep button { min-height: 44px; }
+.classification-panel__status { margin-bottom: .5rem; }
+.classification-panel__patterns { margin: .25rem 0; }
+.classification-panel__findings { margin: .5rem 0 0; padding-inline-start: 1.25rem; font-size: .8125rem; line-height: 1.5; }
+.classification-panel__findings li { margin-bottom: .25rem; overflow-wrap: anywhere; }
+.classification-panel__patterns ::deep .mud-chip { max-width: 100%; height: auto; min-height: 24px; white-space: normal; overflow-wrap: anywhere; }

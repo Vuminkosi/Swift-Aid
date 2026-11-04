@@ -1,0 +1,123 @@
+@inherits LayoutComponentBase
+@using SwiftAid.UI.Ellai
+@using SwiftAid.UI.Ellai.Components
+@using SwiftAid.UI.Ellai.Guidance
+@using SwiftAid.UI.Components.Layout
+@using SwiftAid.UI.Theme
+@implements IAsyncDisposable
+@inject IBrowserViewportService BrowserViewport
+
+<SwiftAidThemeProvider />
+<MudPopoverProvider />
+<MudDialogProvider />
+<MudSnackbarProvider />
+
+<div class="swiftaid-authorized-layout-root">
+<MudLayout>
+    <MudAppBar Elevation="1" Color="Color.Transparent" Dense="true" Class="swiftaid-authorized-appbar">
+        <MudIconButton Icon="@(_drawerOpen ? Icons.Material.Filled.MenuOpen : Icons.Material.Filled.Menu)"
+                       Color="Color.Inherit"
+                       Size="Size.Medium"
+                       Edge="Edge.Start"
+                       Variant="Variant.Text"
+                       Class="swiftaid-authorized-navigation-toggle"
+                       OnClick="DrawerToggle"
+                       aria-label="@(_drawerOpen ? "Close navigation" : "Open navigation")"
+                       title="@(_drawerOpen ? "Close navigation" : "Open navigation")"
+                       aria-expanded="@(_drawerOpen ? "true" : "false")"
+                       aria-controls="swiftaid-authorized-navigation" />
+        <img class="swiftaid-authorized-brand-mark" src="_content/SwiftAid.UI/assets/swiftaid-icon.png" alt="" />
+        <MudText Typo="Typo.h6" Class="ml-2">SwiftAid</MudText>
+        <MudSpacer />
+        @HeaderActions
+        <MudIconButton Href="/account" Icon="@Icons.Material.Filled.AccountCircle" Color="Color.Inherit"
+                       aria-label="Account and settings" />
+    </MudAppBar>
+    <MudDrawer @bind-Open="_drawerOpen" Breakpoint="Breakpoint.Md" ClipMode="DrawerClipMode.Always"
+               Elevation="0" Variant="DrawerVariant.Responsive" Class="swiftaid-authorized-drawer"
+               id="swiftaid-authorized-navigation">
+        <div class="swiftaid-authorized-navigation">
+            <SwiftAidNavMenu RevealVersion="_navigationRevealVersion" IsNavigationVisible="_drawerOpen" />
+        </div>
+    </MudDrawer>
+    <MudMainContent Class="swiftaid-authorized-main">
+        <MudContainer MaxWidth="MaxWidth.Large" Class="swiftaid-authorized-body">
+            @(ChildContent ?? Body)
+        </MudContainer>
+    </MudMainContent>
+</MudLayout>
+</div>
+
+<EllaiGuidanceHost RevealNavigation="RevealNavigationAsync" />
+<EllaiLauncherMenu OnModeSelected="RequestEllaiMode" />
+
+@code {
+    private readonly Guid _viewportObserverId = Guid.NewGuid();
+    private bool _drawerOpen;
+    private long _navigationRevealVersion;
+    private bool? _isMobileViewport;
+    private bool _viewportSubscribed;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await BrowserViewport.SubscribeAsync(
+                _viewportObserverId,
+                OnBrowserViewportChangedAsync,
+                options: null,
+                fireImmediately: true);
+            _viewportSubscribed = true;
+        }
+    }
+
+    private Task OnBrowserViewportChangedAsync(BrowserViewportEventArgs args) => InvokeAsync(() =>
+    {
+        var isMobileViewport = args.Breakpoint is Breakpoint.Xs or Breakpoint.Sm;
+
+        // Initialize from the actual viewport, then update only when crossing
+        // the desktop/mobile boundary so a user's toggle choice is preserved
+        // while resizing within the same layout range.
+        if (_isMobileViewport is null || _isMobileViewport != isMobileViewport)
+        {
+            _drawerOpen = !isMobileViewport;
+            _isMobileViewport = isMobileViewport;
+            StateHasChanged();
+        }
+    });
+
+    [Inject]
+    private EllaiLauncher EllaiLauncher { get; set; } = default!;
+
+    private void RequestEllaiMode(SwiftAid.Contracts.Ellai.EllaiMode mode) => EllaiLauncher.Request(mode);
+
+    private Task RevealNavigationAsync() => InvokeAsync(() =>
+    {
+        _drawerOpen = true;
+        _navigationRevealVersion++;
+        StateHasChanged();
+    });
+
+    private void DrawerToggle()
+    {
+        _drawerOpen = !_drawerOpen;
+    }
+
+    /// <summary>Body content. Set explicitly when this layout is composed
+    /// inside <see cref="StartupLayout" />; otherwise the router fills
+    /// <see cref="LayoutComponentBase.Body" />.</summary>
+    [Parameter]
+    public RenderFragment? ChildContent { get; set; }
+
+    /// <summary>Optional actions supplied by the hosting application.</summary>
+    [Parameter]
+    public RenderFragment? HeaderActions { get; set; }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_viewportSubscribed)
+        {
+            await BrowserViewport.UnsubscribeAsync(_viewportObserverId);
+        }
+    }
+}

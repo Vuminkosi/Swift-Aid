@@ -1,0 +1,73 @@
+.mobile-work-page {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    padding-block: 1.25rem;
+}
+
+.mobile-settings-page__heading ::deep .swiftaid-page-heading__eyebrow {
+    display: none;
+}
+
+.mobile-settings-tabs {
+    min-width: 0;
+    border: 1px solid var(--sa-border);
+    border-radius: 1rem;
+    background: var(--sa-surface);
+}
+
+.mobile-settings-tabs ::deep .mud-tabs-tabbar {
+    overflow-x: auto;
+    scrollbar-width: none;
+    border-bottom: 1px solid var(--sa-border);
+}
+
+.mobile-settings-tabs ::deep .mud-tabs-tabbar::-webkit-scrollbar {
+    display: none;
+}
+
+.mobile-settings-tabs ::deep .mud-tab {
+    min-width: max-content;
+    padding-inline: .85rem;
+}
+
+.mobile-settings-overview {
+    display: grid;
+    gap: .75rem;
+    padding: 1rem;
+}
+
+.mobile-settings-overview__intro {
+    margin: 0;
+    color: var(--sa-text-muted);
+}
+
+.mobile-settings-overview__cards {
+    display: grid;
+    gap: .65rem;
+}
+
+.mobile-settings-card {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: .8rem;
+    padding: .8rem;
+    border: 1px solid var(--sa-border);
+    border-radius: .8rem;
+    background: var(--sa-surface);
+}
+
+.mobile-settings-card ::deep .mud-typography-body2 {
+    color: var(--sa-text-muted);
+}
+
+.mobile-settings-card ::deep .mud-icon-root {
+    flex: none;
+}
+
+@media (min-width: 600px) {
+    .mobile-settings-overview__cards {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}

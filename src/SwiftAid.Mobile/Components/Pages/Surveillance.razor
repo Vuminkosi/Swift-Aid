@@ -1,0 +1,131 @@
+@page "/surveillance"
+@using SwiftAid.Client.Presentation
+@using SwiftAid.UI.Components.Surfaces.Operations
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@inject IMapAggregateClient MapAggregateClient
+
+<PageTitle>Surveillance | SwiftAid</PageTitle>
+<OperationsMapSurface Title="Regional activity"
+                      Eyebrow="Operations"
+                      Description="Totals for cases assigned to you that you may still read, grouped by country and region. The map places country totals only; it does not show report locations or health patterns."
+                      State="_state" Areas="_areas"
+                      UpdatedAtUtc="_updatedAtUtc" ContractVersion="_contractVersion"
+                      PeriodLabel="@PeriodDescription" StatusMessage="@_message"
+                      OnRetry="LoadAsync">
+    <FilterContent>
+        <MudTextField T="string" Label="Country or region code" Value="@_regionCode"
+                      ValueChanged="RegionChangedAsync" Placeholder="All areas" Clearable="true" />
+        <MudSelect T="MapAggregatePeriod" Label="Time window" Value="_period"
+                   ValueChanged="PeriodChangedAsync" Dense="true">
+            <MudSelectItem Value="@ThirtyDays">Last 30 days</MudSelectItem>
+            <MudSelectItem Value="@NinetyDays">Last 90 days</MudSelectItem>
+        </MudSelect>
+    </FilterContent>
+</OperationsMapSurface>
+
+@code {
+    private static readonly MapAggregatePeriod ThirtyDays = MapAggregatePeriod.Days30;
+    private static readonly MapAggregatePeriod NinetyDays = MapAggregatePeriod.Days90;
+
+    private string _regionCode = string.Empty;
+    private MapAggregatePeriod _period = MapAggregatePeriod.Days30;
+    private IReadOnlyList<OperationsMapSurface.AreaAggregateView> _areas = Array.Empty<OperationsMapSurface.AreaAggregateView>();
+    private OperationsSurfaceState _state = OperationsSurfaceState.Loading;
+    private DateTimeOffset? _updatedAtUtc;
+    private string _contractVersion = "Unknown";
+    private string? _message;
+    private long _requestGeneration;
+
+    private string PeriodDescription => _period == MapAggregatePeriod.Days90 ? "the last 90 days (by record creation)" : "the last 30 days (by record creation)";
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private Task RegionChangedAsync(string value)
+    {
+        _regionCode = value;
+        return LoadAsync();
+    }
+
+    private Task PeriodChangedAsync(MapAggregatePeriod value)
+    {
+        _period = value;
+        return LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        var requestGeneration = ++_requestGeneration;
+        _state = OperationsSurfaceState.Loading;
+        _areas = Array.Empty<OperationsMapSurface.AreaAggregateView>();
+        _updatedAtUtc = null;
+        _message = null;
+
+        try
+        {
+            var query = new MapAggregateQuery(
+                new PageRequest(1, 100),
+                NullIfEmpty(_regionCode),
+                _period);
+            var result = await MapAggregateClient.GetAsync(query);
+            if (requestGeneration != _requestGeneration)
+            {
+                return;
+            }
+
+            _contractVersion = result.Metadata.ContractVersion;
+            _message = null;
+
+            if (!result.Succeeded)
+            {
+                _state = result.Code switch
+                {
+                    UiCapabilityResultCode.Denied => OperationsSurfaceState.Denied,
+                    UiCapabilityResultCode.Unavailable => OperationsSurfaceState.Unavailable,
+                    UiCapabilityResultCode.Cancelled or UiCapabilityResultCode.Retryable => OperationsSurfaceState.Offline,
+                    _ => OperationsSurfaceState.Error
+                };
+                return;
+            }
+
+            if (result.Value is not { IsValid: true } aggregatePage)
+            {
+                _state = OperationsSurfaceState.Error;
+                _message = "Map totals could not be checked. Refresh to try again.";
+                return;
+            }
+
+            _areas = aggregatePage.Areas.Items.Select(ToView).ToArray();
+            _updatedAtUtc = result.Metadata.UpdatedAtUtc;
+            _state = _areas.Count == 0 ? OperationsSurfaceState.Empty : OperationsSurfaceState.Populated;
+        }
+        catch (Exception)
+        {
+            if (requestGeneration != _requestGeneration)
+            {
+                return;
+            }
+
+            _areas = Array.Empty<OperationsMapSurface.AreaAggregateView>();
+            _state = OperationsSurfaceState.Error;
+            _message = "Map totals could not be loaded. Try again when your connection is available.";
+        }
+    }
+
+    private static OperationsMapSurface.AreaAggregateView ToView(MapAreaAggregate area) => new(
+        area.AreaCode,
+        area.AreaLabel,
+        area.Precision switch
+        {
+            MapAggregateAreaPrecision.Country => OperationsMapSurface.AggregatePrecision.Country,
+            MapAggregateAreaPrecision.Region => OperationsMapSurface.AggregatePrecision.Region,
+            _ => OperationsMapSurface.AggregatePrecision.Region
+        },
+        area.HumanCount,
+        area.AnimalCount,
+        area.Denominator,
+        area.IsSuppressed,
+        area.SuppressionReason,
+        area.AsOfUtc);
+
+    private static string? NullIfEmpty(string value) => string.IsNullOrWhiteSpace(value) ? null : value;
+}

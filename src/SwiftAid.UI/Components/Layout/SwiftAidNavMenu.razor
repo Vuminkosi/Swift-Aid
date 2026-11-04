@@ -1,0 +1,69 @@
+@using SwiftAid.Contracts.Ellai
+@implements IEllaiUiContextProvider
+
+<SwiftAid.UI.Ellai.Guidance.EllaiSemanticContext Provider="this" />
+<MudNavMenu Class="swiftaid-nav-menu">
+    @foreach (var destination in EllaiNavigationManifest.Destinations.Where(item => item.Group == "Main"))
+    {
+        <MudNavLink @key="destination.Id" Href="@destination.Route" Match="NavLinkMatch.Prefix" Icon="@NavigationIcon(destination.Id)"
+                    data-ellai-control="@destination.ControlId" data-bonboarding-anchor="@destination.Anchor">@destination.Label</MudNavLink>
+    }
+    <MudNavGroup Title="Workspace" Icon="@Icons.Material.Filled.Work" @bind-Expanded="_workspaceExpanded">
+        @foreach (var destination in EllaiNavigationManifest.Destinations.Where(item => item.Group == "Workspace"))
+        {
+            <MudNavLink @key="destination.Id" Href="@destination.Route" Match="NavLinkMatch.Prefix" Icon="@NavigationIcon(destination.Id)"
+                        data-ellai-control="@destination.ControlId" data-bonboarding-anchor="@destination.Anchor">@destination.Label</MudNavLink>
+        }
+    </MudNavGroup>
+    @foreach (var destination in EllaiNavigationManifest.Destinations.Where(item => item.Group == "Secondary"))
+    {
+        <MudNavLink @key="destination.Id" Href="@destination.Route" Match="NavLinkMatch.Prefix" Icon="@NavigationIcon(destination.Id)"
+                    data-ellai-control="@destination.ControlId" data-bonboarding-anchor="@destination.Anchor">@destination.Label</MudNavLink>
+    }
+</MudNavMenu>
+
+@code {
+    [Parameter]
+    public long RevealVersion { get; set; }
+
+    [Parameter]
+    public bool IsNavigationVisible { get; set; } = true;
+
+    private long _lastRevealVersion;
+    private bool _workspaceExpanded;
+
+    protected override void OnParametersSet()
+    {
+        if (RevealVersion == _lastRevealVersion) return;
+        _lastRevealVersion = RevealVersion;
+        _workspaceExpanded = true;
+    }
+
+    public string ComponentId => EllaiNavigationManifest.Definition.ComponentId;
+    public EllaiUiManifest Describe() => EllaiNavigationManifest.Definition;
+    public EllaiUiState GetState() => new(ComponentId, false, false,
+        EllaiNavigationManifest.Destinations.Select(destination => new UiControlState(destination.ControlId,
+            IsNavigationVisible && (destination.Group != "Workspace" || _workspaceExpanded)
+                ? UiObservationState.Ready : UiObservationState.Hidden)).ToArray());
+
+    private static string NavigationIcon(string id) => id switch
+    {
+        "home" => Icons.Material.Filled.Home,
+        "dashboard" => Icons.Material.Filled.Dashboard,
+        "cases" => Icons.Material.Filled.FolderOpen,
+        "assignments" => Icons.Material.Filled.AssignmentInd,
+        "surveillance" => Icons.Material.Filled.Map,
+        "reports" => Icons.Material.Filled.Assessment,
+        "monitoring" => Icons.Material.Filled.MonitorHeart,
+        "organizations" => Icons.Material.Filled.Groups,
+        "imports" => Icons.Material.Filled.UploadFile,
+        "assistance" => Icons.Material.Filled.VolunteerActivism,
+        "follow-ups" => Icons.Material.Filled.Schedule,
+        "escalations" => Icons.Material.Filled.WarningAmber,
+        "intake-coordination" => Icons.Material.Filled.Inbox,
+        "investigations" => Icons.Material.Filled.Search,
+        "sessions" => Icons.Material.Filled.Event,
+        "account" => Icons.Material.Filled.Settings,
+        _ => Icons.Material.Filled.Link,
+    };
+}

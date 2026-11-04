@@ -1,0 +1,44 @@
+@page "/officer-escalation-review-fixture"
+@using SwiftAid.Contracts.Cases
+@using SwiftAid.UI.Components.Surfaces.Operations.CaseDetail
+@using SwiftAid.UI.Components.Theme
+
+<SwiftAidThemeProvider />
+<MudPopoverProvider />
+<main data-fixture-ready="@_ready.ToString().ToLowerInvariant()">
+    <h1>Officer escalation review fixture</h1>
+    <OfficerEscalationReviewPanel CaseId="_caseId" Client="_client" OnAssigned="OnAssigned" />
+    <output id="approvals">@_client.Approvals</output>
+    <output id="assignments">@_client.Assignments</output>
+    <output id="refreshed">@_refreshed</output>
+</main>
+
+@code {
+    private bool _ready, _refreshed;
+    private Guid _caseId = Guid.NewGuid();
+    private FixtureClient _client = default!;
+    protected override void OnInitialized() => _client = new FixtureClient(() => _ = InvokeAsync(StateHasChanged));
+    protected override void OnAfterRender(bool firstRender) { if (firstRender) { _ready = true; StateHasChanged(); } }
+    private void OnAssigned() => _refreshed = true;
+    private sealed class FixtureClient(Action changed) : IOfficerEscalationReviewClient
+    {
+        public int Approvals { get; private set; }
+        public int Assignments { get; private set; }
+        private readonly Guid _escalation = Guid.NewGuid(), _designation = Guid.NewGuid();
+        private Guid _approvalCommand, _assignmentCommand;
+        public Task<OfficerEscalationReviewContext?> GetAsync(Guid caseId, CancellationToken ct = default) => Task.FromResult<OfficerEscalationReviewContext?>(
+            new(8, [new(_escalation, DateTimeOffset.UtcNow)], false, [new(_designation, 3, "synthetic-officer", "Synthetic Officer")], false));
+        public Task<OfficerEscalationActionResult> ApproveAsync(OfficerEscalationReviewedSelection selection, CancellationToken ct = default)
+        {
+            Approvals++; changed();
+            if (Approvals == 1) { _approvalCommand = selection.ApprovalCommandId; return Task.FromResult(new OfficerEscalationActionResult(OfficerEscalationActionStatus.OutcomeUnknown)); }
+            return Task.FromResult(new OfficerEscalationActionResult(_approvalCommand == selection.ApprovalCommandId ? OfficerEscalationActionStatus.Replayed : OfficerEscalationActionStatus.Conflict));
+        }
+        public Task<OfficerEscalationActionResult> AssignAsync(OfficerEscalationReviewedSelection selection, CancellationToken ct = default)
+        {
+            Assignments++; changed();
+            if (Assignments == 1) { _assignmentCommand = selection.AssignmentCommandId; return Task.FromResult(new OfficerEscalationActionResult(OfficerEscalationActionStatus.OutcomeUnknown)); }
+            return Task.FromResult(new OfficerEscalationActionResult(_assignmentCommand == selection.AssignmentCommandId ? OfficerEscalationActionStatus.Replayed : OfficerEscalationActionStatus.Conflict, Guid.NewGuid(), 9));
+        }
+    }
+}

@@ -1,0 +1,52 @@
+<Router AppAssembly="typeof(MauiProgram).Assembly"
+        AdditionalAssemblies="@(new[] { typeof(SwiftAid.UI.Ellai.Pages.EllaiSettingsAbout).Assembly })"
+        NotFoundPage="typeof(Pages.NotFound)"
+        OnNavigateAsync="OnNavigateAsync">
+    <Found Context="routeData">
+        <RouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)" />
+        <FocusOnNavigate RouteData="routeData" Selector="h1" />
+    </Found>
+</Router>
+
+@code {
+    private bool _firstRunEvaluated;
+
+    [Inject] private NavigationManager Navigation { get; set; } = null!;
+
+    [Inject] private SwiftAid.Mobile.Services.Authentication.IMobileAuthenticationSession AuthenticationSession { get; set; } = null!;
+
+    private readonly SwiftAid.Mobile.Services.Welcome.IIntroCompletionStore IntroCompletion =
+        new SwiftAid.Mobile.Services.Welcome.IntroCompletionStore();
+
+    private async Task OnNavigateAsync(Microsoft.AspNetCore.Components.Routing.NavigationContext args)
+    {
+        if (_firstRunEvaluated)
+        {
+            return;
+        }
+
+        _firstRunEvaluated = true;
+        if (!IsApplicationRoot(args.Path))
+        {
+            return;
+        }
+
+        bool signedIn;
+        try
+        {
+            signedIn = await AuthenticationSession.IsSignedInAsync();
+        }
+        catch (Exception)
+        {
+            signedIn = false;
+        }
+
+        if (!signedIn && !IntroCompletion.IsCompleted())
+        {
+            Navigation.NavigateTo("/welcome");
+        }
+    }
+
+    private static bool IsApplicationRoot(string path) =>
+        string.IsNullOrWhiteSpace(path) || path.Trim('/').Length == 0;
+}

@@ -1,0 +1,21 @@
+@page "/Error"
+@inject NavigationManager Navigation
+
+<PageTitle>Something went wrong | SwiftAid</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.Small" Class="py-8">
+    <MudPaper Class="pa-5" Outlined="true">
+        <MudText Typo="Typo.h5" HtmlTag="h1" GutterBottom="true">We couldn't open this page</MudText>
+        <MudText Typo="Typo.body1" Class="mb-4">
+            Something went wrong. You can try again or return to the SwiftAid home page.
+        </MudText>
+        <MudStack Row="true" Spacing="2">
+            <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="Retry" StartIcon="@Icons.Material.Filled.Refresh">Try again</MudButton>
+            <MudButton Variant="Variant.Text" Href="/" StartIcon="@Icons.Material.Filled.Home">Go to home</MudButton>
+        </MudStack>
+    </MudPaper>
+</MudContainer>
+
+@code {
+    private void Retry() => Navigation.NavigateTo(Navigation.Uri, forceLoad: true);
+}

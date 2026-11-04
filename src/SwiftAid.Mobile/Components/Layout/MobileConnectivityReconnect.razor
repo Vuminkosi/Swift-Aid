@@ -1,0 +1,258 @@
+@using SwiftAid.Mobile.Services.Connectivity
+@implements IDisposable
+@inject IMobileConnectivityStatusService ConnectivityStatus
+@inject IDialogService Dialogs
+
+@if (_snapshot.Status == MobileConnectivityStatus.CheckingGateway && _showReconnectModal)
+{
+    <SwiftAidReconnectPanel StatusText="@_snapshot.Message" />
+}
+
+@code {
+    private static readonly TimeSpan[] GatewayRetryDelays =
+    [
+        TimeSpan.FromSeconds(3),
+        TimeSpan.FromSeconds(12)
+    ];
+
+    private MobileConnectivitySnapshot _snapshot = new(
+        MobileConnectivityStatus.Offline,
+        DateTimeOffset.MinValue,
+        "Checking connection status.");
+    private bool _disposed;
+    private bool _initialProbeCompleted;
+    private bool _showReconnectModal;
+    private MobileConnectivityStatus? _dismissedStatus;
+    private MobileConnectivityStatus? _networkDialogStatus;
+    private IDialogReference? _networkDialog;
+    private int _gatewayCheckInProgress;
+    private readonly CancellationTokenSource _lifetime = new();
+
+    private string OfflineStatusText => _snapshot.Status switch
+    {
+        MobileConnectivityStatus.Offline => "Offline. Drafts stay on this device until a connection returns.",
+        MobileConnectivityStatus.GatewayUnavailable => "SwiftAid is unavailable. Drafts stay on this device and have not been received.",
+        _ => string.Empty
+    };
+
+    protected override void OnInitialized()
+    {
+        _snapshot = ConnectivityStatus.Current;
+        ConnectivityStatus.StateChanged += OnConnectivityChanged;
+
+        if (_snapshot.Status is MobileConnectivityStatus.InternetAvailable or MobileConnectivityStatus.GatewayUnavailable)
+        {
+            _ = CheckGatewayAsync();
+        }
+        else if (_snapshot.Status == MobileConnectivityStatus.Offline)
+        {
+            _initialProbeCompleted = true;
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        if (_snapshot.Status is not (MobileConnectivityStatus.Offline or MobileConnectivityStatus.GatewayUnavailable))
+        {
+            CloseNetworkDialog();
+            return;
+        }
+
+        if (_networkDialog is not null && _networkDialogStatus != _snapshot.Status)
+        {
+            CloseNetworkDialog();
+        }
+
+        if (_networkDialog is not null || _dismissedStatus == _snapshot.Status)
+        {
+            return;
+        }
+
+        var dialogStatus = _snapshot.Status;
+        var parameters = new DialogParameters
+        {
+            [nameof(MobileConnectivityAlertDialog.StatusText)] = OfflineStatusText
+        };
+        var options = new DialogOptions
+        {
+            CloseOnEscapeKey = true,
+            BackdropClick = true,
+            FullWidth = true,
+            MaxWidth = MaxWidth.Small
+        };
+
+        try
+        {
+            var dialog = await Dialogs.ShowAsync<MobileConnectivityAlertDialog>(
+                "Network status", parameters, options);
+            _networkDialog = dialog;
+            _networkDialogStatus = dialogStatus;
+            _ = ObserveDialogClosedAsync(dialog, dialogStatus);
+        }
+        catch (InvalidOperationException)
+        {
+            // Leave the screen usable if a dialog host is being torn down.
+        }
+    }
+
+    private async Task ObserveDialogClosedAsync(IDialogReference dialog, MobileConnectivityStatus dialogStatus)
+    {
+        try
+        {
+            await dialog.Result;
+        }
+        catch (Exception)
+        {
+            // Dialog dismissal is informational and must not interrupt navigation.
+        }
+
+        if (_disposed)
+        {
+            return;
+        }
+
+        try
+        {
+            await InvokeAsync(() =>
+            {
+                if (!ReferenceEquals(_networkDialog, dialog))
+                {
+                    return;
+                }
+
+                _networkDialog = null;
+                _networkDialogStatus = null;
+                if (_snapshot.Status == dialogStatus)
+                {
+                    _dismissedStatus = dialogStatus;
+                }
+
+                StateHasChanged();
+            });
+        }
+        catch (Exception) when (_disposed)
+        {
+        }
+    }
+
+    private void CloseNetworkDialog()
+    {
+        _networkDialog?.Close();
+        _networkDialog = null;
+        _networkDialogStatus = null;
+    }
+
+    private void UpdateSnapshot(MobileConnectivitySnapshot snapshot)
+    {
+        if (_snapshot.Status != snapshot.Status)
+        {
+            _dismissedStatus = null;
+        }
+
+        _snapshot = snapshot;
+    }
+
+    private async Task CheckGatewayAsync()
+    {
+        if (_disposed || Interlocked.CompareExchange(ref _gatewayCheckInProgress, 1, 0) != 0)
+        {
+            return;
+        }
+
+        var isInitialProbe = !_initialProbeCompleted;
+        _showReconnectModal = !isInitialProbe;
+
+        try
+        {
+            for (var attempt = 0; attempt <= GatewayRetryDelays.Length; attempt++)
+            {
+                var checkFailed = false;
+                try
+                {
+                    UpdateSnapshot(await ConnectivityStatus.CheckGatewayAsync(_lifetime.Token));
+                }
+                catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
+                {
+                    break;
+                }
+                catch (Exception)
+                {
+                    checkFailed = true;
+                    UpdateSnapshot(new(
+                        MobileConnectivityStatus.GatewayUnavailable,
+                        DateTimeOffset.UtcNow,
+                        "SwiftAid could not be reached. Drafts stay on this device and have not been received."));
+                }
+
+                if (!_disposed)
+                {
+                    await InvokeAsync(StateHasChanged);
+                }
+
+                if (_lifetime.IsCancellationRequested ||
+                    (!checkFailed && _snapshot.Status != MobileConnectivityStatus.GatewayUnavailable) ||
+                    attempt == GatewayRetryDelays.Length)
+                {
+                    break;
+                }
+
+                await Task.Delay(GatewayRetryDelays[attempt], _lifetime.Token);
+            }
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
+        {
+        }
+        finally
+        {
+            if (isInitialProbe)
+            {
+                _initialProbeCompleted = true;
+            }
+
+            _showReconnectModal = false;
+            Interlocked.Exchange(ref _gatewayCheckInProgress, 0);
+            if (!_disposed)
+            {
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+    }
+
+    private void OnConnectivityChanged(object? sender, MobileConnectivitySnapshot snapshot)
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _ = InvokeAsync(() =>
+        {
+            UpdateSnapshot(snapshot);
+            StateHasChanged();
+
+            if (snapshot.Status == MobileConnectivityStatus.InternetAvailable)
+            {
+                _ = CheckGatewayAsync();
+            }
+        });
+    }
+
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+        ConnectivityStatus.StateChanged -= OnConnectivityChanged;
+        CloseNetworkDialog();
+        _lifetime.Cancel();
+        _lifetime.Dispose();
+    }
+}

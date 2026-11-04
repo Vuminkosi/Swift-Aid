@@ -1,0 +1,129 @@
+@using SwiftAid.Mobile.Services.Authentication
+@implements IDisposable
+@inject IMobileAuthenticationSession AuthenticationSession
+
+<div class="mobile-auth-control" aria-live="polite">
+    @if (_checking)
+    {
+        <MudProgressCircular Indeterminate="true" Size="Size.Small" aria-label="Checking sign-in" />
+    }
+    else if (_signedIn || _signOutPending)
+    {
+        <MudButton Variant="Variant.Text" Color="Color.Inherit" OnClick="SignOutAsync"
+                   Disabled="_working" aria-label="Sign out of SwiftAid" StartIcon="@Icons.Material.Filled.Logout">
+            @if (_working)
+            {
+                <MudProgressCircular Indeterminate="true" Size="Size.Small" Class="me-2" aria-label="Signing out" />
+            }
+            @(_signOutPending ? "Finish signing out" : "Sign out")
+        </MudButton>
+    }
+    else
+    {
+        <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="SignInAsync"
+                   Disabled="_working" aria-label="Sign in to SwiftAid" StartIcon="@Icons.Material.Filled.Login">
+            @if (_working)
+            {
+                <MudProgressCircular Indeterminate="true" Size="Size.Small" Class="me-2" aria-label="Opening sign-in" />
+            }
+            Sign in
+        </MudButton>
+    }
+
+    @if (_message is not null)
+    {
+        <MudText Typo="Typo.caption" Color="Color.Warning" role="status">@_message</MudText>
+    }
+</div>
+
+@code {
+    private bool _checking = true;
+    private bool _working;
+    private bool _signedIn;
+    private bool _signOutPending;
+    private string? _message;
+    private readonly CancellationTokenSource _lifetime = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _signedIn = await AuthenticationSession.IsSignedInAsync(_lifetime.Token);
+            _signOutPending = await AuthenticationSession.HasPendingSignOutAsync(_lifetime.Token);
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
+        {
+        }
+        catch (Exception)
+        {
+            _message = "Sign-in status is unavailable. Try again.";
+        }
+        finally
+        {
+            _checking = false;
+        }
+    }
+
+    private async Task SignInAsync()
+    {
+        _working = true;
+        _message = null;
+        try
+        {
+            _signedIn = await AuthenticationSession.SignInAsync(_lifetime.Token);
+            _signOutPending = await AuthenticationSession.HasPendingSignOutAsync(_lifetime.Token);
+            if (!_signedIn)
+            {
+                _message = "Sign-in was not completed. You can continue as a guest.";
+            }
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
+        {
+        }
+        catch (Exception)
+        {
+            _message = "Sign-in could not be completed. Try again or continue as a guest.";
+        }
+        finally
+        {
+            _working = false;
+        }
+    }
+
+    private async Task SignOutAsync()
+    {
+        _working = true;
+        _message = null;
+        try
+        {
+            var result = await AuthenticationSession.SignOutAsync(_lifetime.Token);
+            _signedIn = !result.SignedOut;
+            _signOutPending = !result.SignedOut;
+            if (result.SignedOut && !result.DeviceNotificationsStopped)
+            {
+                _message = "You are signed out. Device notifications could not be turned off; retry from notification settings.";
+            }
+            else if (!result.SignedOut)
+            {
+                _message = "Sign-out is not complete. Try again when you are back online.";
+            }
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
+        {
+        }
+        catch (Exception)
+        {
+            _message = "Sign-out could not be confirmed. Try again.";
+        }
+        finally
+        {
+            _working = false;
+        }
+    }
+
+    public void Dispose()
+    {
+        _lifetime.Cancel();
+        _lifetime.Dispose();
+    }
+}

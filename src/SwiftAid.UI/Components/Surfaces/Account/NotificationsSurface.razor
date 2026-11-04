@@ -1,0 +1,191 @@
+@using SwiftAid.UI.Components.Surfaces.Account
+@using SwiftAid.Contracts.Sessions
+
+@if (Snapshot.ViewState == NotificationsViewState.Loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" aria-label="Loading notification preferences" />
+}
+else if (Snapshot.ViewState == NotificationsViewState.SignedOut)
+{
+    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" role="status">
+        Sign in to view notification preferences.
+    </MudAlert>
+    <MudButton Href="/sign-in" Variant="Variant.Filled" Color="Color.Primary"
+               StartIcon="@Icons.Material.Filled.Login">
+        Sign in
+    </MudButton>
+}
+else if (Snapshot.ViewState == NotificationsViewState.Unavailable)
+{
+    <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" role="alert">
+        @(Snapshot.StatusMessage ?? "Notification preferences are temporarily unavailable.")
+    </MudAlert>
+    <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="OnRefresh"
+               StartIcon="@Icons.Material.Filled.Refresh">
+        Retry
+    </MudButton>
+}
+else
+{
+    @if (!string.IsNullOrWhiteSpace(Snapshot.StatusMessage))
+    {
+        <MudAlert Severity="@(Snapshot.StatusIsError ? Severity.Warning : Severity.Success)"
+                  Variant="Variant.Outlined" role="@(Snapshot.StatusIsError ? "alert" : "status")">
+            @Snapshot.StatusMessage
+        </MudAlert>
+    }
+    <MudPaper Class="pa-4 mb-4" Elevation="0">
+        <MudText Typo="Typo.subtitle1">In-app preferences</MudText>
+        <MudSwitch T="bool" @bind-Value="_workReminders" Color="Color.Primary"
+                   Label="Work reminders" Disabled="@Snapshot.IsSaving"
+                   aria-label="Work reminders" />
+        <MudSwitch T="bool" @bind-Value="_sessionUpdates" Color="Color.Primary"
+                   Label="Session updates" Disabled="@Snapshot.IsSaving"
+                   aria-label="Session updates" />
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveAsync"
+                   Disabled="@Snapshot.IsSaving" StartIcon="@Icons.Material.Filled.Save">
+            @(Snapshot.IsSaving ? "Saving…" : "Save preferences")
+        </MudButton>
+        <MudText Typo="Typo.caption">External channels follow your device settings.</MudText>
+    </MudPaper>
+}
+
+@if (Snapshot.ViewState is NotificationsViewState.Ready or NotificationsViewState.Unavailable)
+{
+    <MudPaper Class="pa-4 mb-4" Elevation="0">
+        <MudText Typo="Typo.subtitle1">My subscriptions</MudText>
+        @if (Subscriptions is null)
+        {
+            <MudText Typo="Typo.body2" role="status">Your session subscriptions could not be loaded. Retry to check again.</MudText>
+            <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="OnRefresh" StartIcon="@Icons.Material.Filled.Refresh">Retry</MudButton>
+        }
+        else if (Subscriptions.Count == 0)
+        {
+            <MudText Typo="Typo.body2">You have no active session subscriptions.</MudText>
+        }
+        else
+        {
+            <MudList T="SessionSubscriptionSummary" aria-label="My session subscriptions">
+                @foreach (var subscription in Subscriptions)
+                {
+                    <MudListItem T="SessionSubscriptionSummary" Class="px-0">
+                        <div class="d-flex flex-column flex-sm-row align-center justify-space-between gap-2 w-100">
+                            <div>
+                                <MudText Typo="Typo.body1">@(subscription.Title ?? "Session details unavailable")</MudText>
+                                @if (subscription.Title is not null && !string.IsNullOrWhiteSpace(SessionsHref))
+                                {
+                                    <MudLink Href="@($"{SessionsHref}?sessionId={subscription.SessionId:D}")">View session</MudLink>
+                                }
+                                <MudText Typo="Typo.caption">
+                                    @FormatStart(subscription)
+                                    @if (!string.IsNullOrWhiteSpace(subscription.ChannelLabel))
+                                    {
+                                        <span> · @subscription.ChannelLabel</span>
+                                    }
+                                </MudText>
+                                @if (subscription.HasInactiveStoredConsent)
+                                {
+                                    <MudText Typo="Typo.caption">Reminders are inactive. You can remove your saved subscription.</MudText>
+                                }
+                            </div>
+                            <MudButton Variant="Variant.Outlined" Color="Color.Primary"
+                                       Disabled="@(_unsubscribingSessionId == subscription.SessionId)"
+                                       OnClick="() => UnsubscribeAsync(subscription)">
+                                @(_unsubscribingSessionId == subscription.SessionId ? "Updating…" : "Unsubscribe")
+                            </MudButton>
+                        </div>
+                    </MudListItem>
+                }
+            </MudList>
+        }
+        @if (!string.IsNullOrWhiteSpace(SubscriptionMessage))
+        {
+            <MudText Typo="Typo.caption" role="status">@SubscriptionMessage</MudText>
+        }
+        @if (!string.IsNullOrWhiteSpace(SessionsHref))
+        {
+            <MudButton Href="@SessionsHref" Variant="Variant.Text" Color="Color.Primary"
+                       StartIcon="@Icons.Material.Filled.EventNote">
+                Browse community sessions
+            </MudButton>
+        }
+    </MudPaper>
+}
+
+@code {
+    [Parameter] public NotificationsSnapshot Snapshot { get; set; } = NotificationsSnapshot.Loading;
+
+    [Parameter] public EventCallback OnRefresh { get; set; }
+
+    [Parameter] public EventCallback<NotificationPreferenceChange> OnSave { get; set; }
+
+    /// <summary>
+    /// Optional deep link to community sessions. When null or empty no link
+    /// renders, so hosts without that route stay clean.
+    /// </summary>
+    [Parameter] public string? SessionsHref { get; set; }
+
+    [Parameter] public IReadOnlyList<SessionSubscriptionSummary>? Subscriptions { get; set; }
+
+    [Parameter] public string? SubscriptionMessage { get; set; }
+
+    [Parameter] public EventCallback<SessionSubscriptionSummary> OnUnsubscribe { get; set; }
+
+    private bool _workReminders = true;
+    private bool _sessionUpdates = true;
+    private string? _loadedFor;
+    private Guid? _unsubscribingSessionId;
+
+    protected override void OnParametersSet()
+    {
+        var key = string.Join("|", Snapshot.WorkReminders, Snapshot.SessionUpdates, Snapshot.ViewState);
+        if (!string.Equals(key, _loadedFor, StringComparison.Ordinal))
+        {
+            _loadedFor = key;
+            _workReminders = Snapshot.WorkReminders;
+            _sessionUpdates = Snapshot.SessionUpdates;
+        }
+    }
+
+    private Task SaveAsync() => OnSave.InvokeAsync(
+        new NotificationPreferenceChange(_workReminders, _sessionUpdates));
+
+    private async Task UnsubscribeAsync(SessionSubscriptionSummary subscription)
+    {
+        _unsubscribingSessionId = subscription.SessionId;
+        try
+        {
+            await OnUnsubscribe.InvokeAsync(subscription);
+        }
+        finally
+        {
+            _unsubscribingSessionId = null;
+        }
+    }
+
+    private static string FormatStart(SessionSubscriptionSummary subscription)
+    {
+        if (subscription.StartsAtUtc is not { } startsAt)
+        {
+            return "Session details are currently unavailable.";
+        }
+
+        if (!string.IsNullOrWhiteSpace(subscription.TimeZoneId))
+        {
+            try
+            {
+                var timeZone = TimeZoneInfo.FindSystemTimeZoneById(subscription.TimeZoneId);
+                return $"{TimeZoneInfo.ConvertTime(startsAt, timeZone):f} ({subscription.TimeZoneId})";
+            }
+            catch (TimeZoneNotFoundException)
+            {
+            }
+            catch (InvalidTimeZoneException)
+            {
+            }
+        }
+
+        return $"{startsAt.ToUniversalTime():f} UTC";
+    }
+
+}

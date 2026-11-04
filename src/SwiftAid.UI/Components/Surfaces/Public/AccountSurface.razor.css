@@ -1,0 +1,120 @@
+.public-resource-surface {
+    display: grid;
+    width: 100%;
+    gap: 1.5rem;
+    padding-block: 1.25rem 2rem;
+}
+
+.account-surface ::deep .account-card {
+    padding: 1.25rem;
+    border: 1px solid var(--sa-border);
+    border-radius: 1rem;
+    background: var(--sa-surface);
+}
+
+.account-surface ::deep .account-hero {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    flex-wrap: wrap;
+}
+
+.account-surface ::deep .account-hero__identity {
+    display: grid;
+    gap: 0.25rem;
+    min-width: 0;
+    flex: 1 1 12rem;
+    overflow-wrap: anywhere;
+}
+
+.account-surface ::deep .account-hero__side {
+    margin-left: auto;
+}
+
+.account-surface ::deep .account-hero__action {
+    flex-basis: 100%;
+    justify-content: flex-start;
+    padding-left: 0;
+}
+
+.account-surface ::deep .account-guest-panel {
+    display: grid;
+    grid-template-columns: minmax(13rem, 0.85fr) minmax(0, 1.15fr);
+    align-items: stretch;
+    gap: 1.5rem;
+    padding: 1.5rem;
+}
+
+.account-surface ::deep .account-guest-panel__identity {
+    display: flex;
+    align-items: flex-start;
+    gap: 1rem;
+    min-width: 0;
+    padding: 0.5rem 1.25rem 0.5rem 0;
+    border-right: 1px solid var(--sa-border);
+}
+
+.account-surface ::deep .account-guest-panel__identity > div {
+    display: grid;
+    gap: 0.375rem;
+    min-width: 0;
+}
+
+.account-surface ::deep .account-guest-panel__next {
+    display: grid;
+    align-content: center;
+    justify-items: start;
+    gap: 0.75rem;
+    min-width: 0;
+}
+
+.account-surface ::deep .account-guest-panel__primary-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.625rem;
+}
+
+.account-surface ::deep .account-status-item {
+    list-style: none;
+}
+
+.account-surface ::deep .swiftaid-settings-group {
+    display: grid;
+    gap: 0.625rem;
+    padding: 1rem 1.125rem;
+    border: 1px solid var(--sa-border);
+    border-radius: 0.875rem;
+    background: var(--sa-surface);
+}
+
+.account-surface ::deep .swiftaid-settings-group__label {
+    color: var(--sa-text-primary);
+}
+
+.account-surface ::deep .swiftaid-settings-row__text .mud-typography-caption {
+    color: var(--sa-text-secondary);
+}
+
+.account-surface ::deep .mud-button-root {
+    min-height: 2.75rem;
+}
+
+@media (max-width: 720px) {
+    .account-surface ::deep .account-guest-panel {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 1rem;
+        padding: 1rem;
+    }
+
+    .account-surface ::deep .account-guest-panel__identity {
+        padding: 0 0 1rem;
+        border-right: 0;
+        border-bottom: 1px solid var(--sa-border);
+    }
+
+    .account-surface ::deep .account-guest-panel__primary-actions {
+        width: 100%;
+        align-items: stretch;
+        flex-direction: column;
+    }
+}

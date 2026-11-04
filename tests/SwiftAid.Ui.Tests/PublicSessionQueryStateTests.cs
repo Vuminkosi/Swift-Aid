@@ -1,0 +1,1038 @@
+using System.Reflection;
+using System.Globalization;
+using Microsoft.AspNetCore.Components;
+using Microsoft.AspNetCore.Components.Web;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Microsoft.JSInterop;
+using MudBlazor.Services;
+using SwiftAid.Contracts.Sessions;
+using SwiftAid.UI.Components.Surfaces.Public;
+using SwiftAid.UI.Components.Sessions;
+
+namespace SwiftAid.Ui.Tests;
+
+public sealed class PublicSessionQueryStateTests
+{
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task RecoveredStaffSessionOpensEditorOnlyWithCurrentCapability(bool allowed)
+    {
+        var component = new PublicSessionsSurface();
+        var type = typeof(PublicSessionsSurface);
+        var id = Guid.NewGuid();
+        type.GetProperty(nameof(component.LoadManagementCapabilitiesAsync))!.SetValue(component,
+            (Func<Guid?, long?, Task<SessionManagementPresentation>>)((_, _) => Task.FromResult(SessionManagementPresentation.Unavailable())));
+        type.GetProperty(nameof(component.OnManageSession))!.SetValue(component, EventCallback.Factory.Create<Guid?>(new object(), _ => { }));
+        type.GetProperty(nameof(component.StaffSessionEditorContent))!.SetValue(component,
+            (RenderFragment<SessionManagementPresentation>)(_ => _ => { }));
+        type.GetProperty(nameof(component.StaffEditorCapabilities))!.SetValue(component,
+            allowed ? new SessionManagementPresentation(true, true, id, 1, "Draft", false, true, false, false, false, false)
+                : SessionManagementPresentation.Unavailable());
+        type.GetProperty(nameof(component.StaffEditorOpenRequest))!.SetValue(component, 1L);
+
+        await InvokeAsync(component, "OnParametersSetAsync");
+
+        Assert.Equal(allowed, Field<bool>(component, "_editorRequested"));
+        Assert.Equal(allowed, Property<bool>(component, "HasStaffEditor"));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task HistoryOnlySessionOpensOnlyWithExplicitCapability(bool canViewHistory)
+    {
+        var component = new PublicSessionsSurface();
+        var type = typeof(PublicSessionsSurface);
+        var id = Guid.NewGuid();
+        type.GetProperty(nameof(component.LoadManagementCapabilitiesAsync))!.SetValue(component,
+            (Func<Guid?, long?, Task<SessionManagementPresentation>>)((_, _) => Task.FromResult(SessionManagementPresentation.Unavailable())));
+        type.GetProperty(nameof(component.OnManageSession))!.SetValue(component, EventCallback.Factory.Create<Guid?>(new object(), _ => { }));
+        type.GetProperty(nameof(component.StaffSessionEditorContent))!.SetValue(component,
+            (RenderFragment<SessionManagementPresentation>)(_ => _ => { }));
+        type.GetProperty(nameof(component.StaffEditorCapabilities))!.SetValue(component,
+            new SessionManagementPresentation(true, true, id, 1, "Draft", false, false, false, false, false, false,
+                CanViewHistory: canViewHistory));
+        type.GetProperty(nameof(component.StaffEditorOpenRequest))!.SetValue(component, 1L);
+
+        await InvokeAsync(component, "OnParametersSetAsync");
+
+        Assert.Equal(canViewHistory, Property<bool>(component, "HasStaffEditor"));
+    }
+
+    [Fact]
+    public async Task OpeningAnotherEditorRequiresDiscardConfirmation()
+    {
+        var component = new PublicSessionsSurface();
+        var type = typeof(PublicSessionsSurface);
+        var calls = 0;
+        type.GetProperty(nameof(component.LoadManagementCapabilitiesAsync))!.SetValue(component,
+            (Func<Guid?, long?, Task<SessionManagementPresentation>>)((_, _) => Task.FromResult(SessionManagementPresentation.Unavailable())));
+        type.GetProperty(nameof(component.StaffSessionEditorContent))!.SetValue(component,
+            (RenderFragment<SessionManagementPresentation>)(capability => builder => { }));
+        type.GetProperty(nameof(component.HasPendingEditorInput))!.SetValue(component, (Func<bool>)(() => true));
+        type.GetProperty(nameof(component.OnManageSession))!.SetValue(component,
+            EventCallback.Factory.Create<Guid?>(new object(), _ => calls++));
+        type.GetField("_createCapabilities", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(component,
+            new SessionManagementPresentation(true, true, null, null, null, true, false, false, false, false, false));
+        type.GetField("_createCapabilitiesLoaded", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(component, true);
+
+        await (Task)type.GetMethod("ManageSessionAsync", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(component, [null])!;
+        Assert.Equal(0, calls);
+        Assert.True(Field<bool>(component, "_confirmingEditorSwitch"));
+        type.GetMethod("StayOnCurrentEditor", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(component, null);
+        Assert.Equal(0, calls);
+        await (Task)type.GetMethod("ManageSessionAsync", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(component, [null])!;
+        type.GetField("_createCapabilities", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(component,
+            SessionManagementPresentation.Unavailable());
+        await InvokeAsync(component, "ConfirmEditorSwitchAsync");
+        Assert.Equal(0, calls);
+        type.GetField("_createCapabilities", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(component,
+            new SessionManagementPresentation(true, true, null, null, null, true, false, false, false, false, false));
+        await (Task)type.GetMethod("ManageSessionAsync", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(component, [null])!;
+        await InvokeAsync(component, "ConfirmEditorSwitchAsync");
+        Assert.Equal(1, calls);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ActiveReminderShowsChangeActionOnlyWithCurrentConsentOptions(bool current)
+    {
+        var session = Session(Guid.NewGuid());
+        var options = new PublicSessionsSurface.SessionSubscriptionOptions(session.SessionId, "consent", session.Version,
+            "Reminder consent", [PublicSessionsSurface.SessionReminderChannel.Email], current);
+        var state = new PublicSessionsSurface.SessionSubscriptionPanelState(session.SessionId,
+            PublicSessionsSurface.SessionSubscriptionStatus.Active, 1, options, null,
+            CurrentChannel: PublicSessionsSurface.SessionReminderChannel.MobilePush);
+        var registrations = new ServiceCollection();
+        registrations.AddLogging();
+        registrations.AddMudServices();
+        registrations.AddSingleton<IJSRuntime>(new UnavailableClipboard());
+        registrations.AddSingleton<NavigationManager>(new TestNavigationManager());
+        await using var services = registrations.BuildServiceProvider();
+        await using var renderer = new HtmlRenderer(services, services.GetRequiredService<ILoggerFactory>());
+        var markup = await renderer.Dispatcher.InvokeAsync(async () =>
+        {
+            var component = await renderer.RenderComponentAsync<PublicSessionsSurface>(ParameterView.FromDictionary(
+                new Dictionary<string, object?>
+                {
+                    [nameof(PublicSessionsSurface.Sessions)] = new[] { session },
+                    [nameof(PublicSessionsSurface.InitialSessionId)] = session.SessionId,
+                    [nameof(PublicSessionsSurface.InitialRemindersView)] = true,
+                    [nameof(PublicSessionsSurface.LoadSubscriptionStateAsync)] =
+                        (Func<Guid, Task<PublicSessionsSurface.SessionSubscriptionPanelState?>>)(_ => Task.FromResult<PublicSessionsSurface.SessionSubscriptionPanelState?>(state))
+                }));
+            return component.ToHtmlString();
+        });
+
+        Assert.Contains("Turn off reminders", markup, StringComparison.Ordinal);
+        Assert.Contains("Your reminder preference is saved", markup, StringComparison.Ordinal);
+        Assert.Contains("Saving a preference does not confirm delivery", markup, StringComparison.Ordinal);
+        Assert.Contains("Current method: Mobile notification", markup, StringComparison.Ordinal);
+        Assert.Equal(current, markup.Contains("Change reminder method", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task ReminderChangeStartsWithTheCurrentMethod()
+    {
+        var session = Session(Guid.NewGuid());
+        var component = new PublicSessionsSurface();
+        var type = typeof(PublicSessionsSurface);
+        var options = new PublicSessionsSurface.SessionSubscriptionOptions(session.SessionId, "consent", session.Version,
+            "Reminder consent", [PublicSessionsSurface.SessionReminderChannel.Email, PublicSessionsSurface.SessionReminderChannel.MobilePush], true);
+        var state = new PublicSessionsSurface.SessionSubscriptionPanelState(session.SessionId,
+            PublicSessionsSurface.SessionSubscriptionStatus.Active, 1, options, null,
+            CurrentChannel: PublicSessionsSurface.SessionReminderChannel.MobilePush);
+        type.GetProperty(nameof(component.Sessions))!.SetValue(component, new[] { session });
+        type.GetProperty(nameof(component.InitialSessionId))!.SetValue(component, session.SessionId);
+        type.GetProperty(nameof(component.LoadSubscriptionStateAsync))!.SetValue(component,
+            (Func<Guid, Task<PublicSessionsSurface.SessionSubscriptionPanelState?>>)(_ => Task.FromResult<PublicSessionsSurface.SessionSubscriptionPanelState?>(state)));
+
+        await InvokeAsync(component, "OnParametersSetAsync");
+
+        Assert.Equal(PublicSessionsSurface.SessionReminderChannel.MobilePush,
+            Field<PublicSessionsSurface.SessionReminderChannel?>(component, "_selectedReminderChannel"));
+        Assert.False(Field<bool>(component, "_reminderConsentAccepted"));
+    }
+
+    [Fact]
+    public async Task ChangedReminderTermsRequireConsentAgainAfterConflict()
+    {
+        var component = new PublicSessionsSurface();
+        var type = typeof(PublicSessionsSurface);
+        var id = Guid.NewGuid();
+        type.GetProperty(nameof(component.Sessions))!.SetValue(component, new[] { Session(id) with { Version = 7 } });
+        var oldOptions = new PublicSessionsSurface.SessionSubscriptionOptions(id, "old-consent", 7,
+            "Old terms", [PublicSessionsSurface.SessionReminderChannel.Email], true);
+        var freshOptions = oldOptions with { ConsentReference = "new-consent", ConsentText = "New terms" };
+        var state = new PublicSessionsSurface.SessionSubscriptionPanelState(id,
+            PublicSessionsSurface.SessionSubscriptionStatus.Active, 3, oldOptions, null);
+        type.GetField("_selectedSessionId", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(component, id);
+        type.GetField("_subscriptionSessionId", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(component, id);
+        type.GetField("_subscriptionState", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(component, state);
+        type.GetField("_selectedReminderChannel", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .SetValue(component, PublicSessionsSurface.SessionReminderChannel.Email);
+        var calls = 0;
+        type.GetProperty(nameof(component.ExecuteSubscriptionActionAsync))!.SetValue(component,
+            (Func<PublicSessionsSurface.SessionSubscriptionAction, Task<PublicSessionsSurface.SessionSubscriptionPanelState?>>)(_ =>
+            {
+                calls++;
+                return Task.FromResult<PublicSessionsSurface.SessionSubscriptionPanelState?>(state with
+                {
+                    Options = freshOptions, IsError = true, Message = "Terms changed"
+                });
+            }));
+
+        type.GetMethod("BeginReminderChange", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(component, null);
+        type.GetField("_reminderConsentAccepted", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(component, true);
+        await InvokeAsync(component, "SubscribeAsync");
+        await InvokeAsync(component, "SubscribeAsync");
+
+        Assert.Equal(1, calls);
+        Assert.False(Field<bool>(component, "_reminderConsentAccepted"));
+        Assert.Equal("new-consent", Field<PublicSessionsSurface.SessionSubscriptionPanelState>(component, "_subscriptionState").Options!.ConsentReference);
+    }
+
+    [Fact]
+    public async Task ChangingReminderMethodRequiresFreshConsentAndSubmitsCurrentOptions()
+    {
+        var component = new PublicSessionsSurface();
+        var type = typeof(PublicSessionsSurface);
+        var id = Guid.NewGuid();
+        type.GetProperty(nameof(component.Sessions))!.SetValue(component, new[] { Session(id) with { Version = 7 } });
+        var options = new PublicSessionsSurface.SessionSubscriptionOptions(id, "current-consent", 7,
+            "Consent text", [PublicSessionsSurface.SessionReminderChannel.Email, PublicSessionsSurface.SessionReminderChannel.MobilePush], true);
+        var state = new PublicSessionsSurface.SessionSubscriptionPanelState(id,
+            PublicSessionsSurface.SessionSubscriptionStatus.Active, 3, options, null);
+        type.GetField("_selectedSessionId", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(component, id);
+        type.GetField("_subscriptionSessionId", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(component, id);
+        type.GetField("_subscriptionState", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(component, state);
+        type.GetField("_selectedReminderChannel", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .SetValue(component, PublicSessionsSurface.SessionReminderChannel.MobilePush);
+        PublicSessionsSurface.SessionSubscriptionAction? captured = null;
+        type.GetProperty(nameof(component.ExecuteSubscriptionActionAsync))!.SetValue(component,
+            (Func<PublicSessionsSurface.SessionSubscriptionAction, Task<PublicSessionsSurface.SessionSubscriptionPanelState?>>)(action =>
+            {
+                captured = action;
+                return Task.FromResult<PublicSessionsSurface.SessionSubscriptionPanelState?>(state);
+            }));
+
+        type.GetMethod("BeginReminderChange", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(component, null);
+        await InvokeAsync(component, "SubscribeAsync");
+        Assert.Null(captured);
+
+        type.GetField("_reminderConsentAccepted", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(component, true);
+        await InvokeAsync(component, "SubscribeAsync");
+        Assert.NotNull(captured);
+        Assert.Equal(id, captured.SessionId);
+        Assert.Equal(7, captured.ExpectedVersion);
+        Assert.Equal("current-consent", captured.ConsentReference);
+        Assert.Equal(PublicSessionsSurface.SessionReminderChannel.MobilePush, captured.Channel);
+        Assert.False(Field<bool>(component, "_editingReminder"));
+        Assert.False(Field<bool>(component, "_reminderConsentAccepted"));
+    }
+
+    [Fact]
+    public async Task ReminderConsentCannotBeSubmittedForADifferentDisplayedSessionVersion()
+    {
+        var component = new PublicSessionsSurface();
+        var type = typeof(PublicSessionsSurface);
+        var id = Guid.NewGuid();
+        type.GetProperty(nameof(component.Sessions))!.SetValue(component, new[] { Session(id) with { Version = 3 } });
+        var options = new PublicSessionsSurface.SessionSubscriptionOptions(id, "consent", 4,
+            "Consent text", [PublicSessionsSurface.SessionReminderChannel.Email], true);
+        type.GetField("_selectedSessionId", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(component, id);
+        type.GetField("_subscriptionState", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(component,
+            new PublicSessionsSurface.SessionSubscriptionPanelState(id, PublicSessionsSurface.SessionSubscriptionStatus.Unsubscribed, 0, options, null));
+        type.GetField("_selectedReminderChannel", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(component, PublicSessionsSurface.SessionReminderChannel.Email);
+        type.GetField("_reminderConsentAccepted", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(component, true);
+        var calls = 0;
+        type.GetProperty(nameof(component.ExecuteSubscriptionActionAsync))!.SetValue(component,
+            (Func<PublicSessionsSurface.SessionSubscriptionAction, Task<PublicSessionsSurface.SessionSubscriptionPanelState?>>)(_ =>
+            {
+                calls++;
+                return Task.FromResult<PublicSessionsSurface.SessionSubscriptionPanelState?>(null);
+            }));
+        await InvokeAsync(component, "SubscribeAsync");
+        Assert.Equal(0, calls);
+    }
+
+    [Fact]
+    public async Task CalendarNavigationRestoresLibraryDateRangeAndOtherFilters()
+    {
+        var component = new PublicSessionsSurface();
+        var type = typeof(PublicSessionsSurface);
+        var period = type.GetField("_periodFilter", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        period.SetValue(component, Enum.Parse(period.FieldType, "CustomDates"));
+        type.GetField("_dateFrom", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(component, new DateTime(2027, 1, 4));
+        type.GetField("_dateTo", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(component, new DateTime(2027, 1, 9));
+        type.GetField("_searchText", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(component, "workshop");
+        var queries = new List<PublicSessionQuery>();
+        SetQuery(component, query =>
+        {
+            queries.Add(query);
+            return Task.FromResult<PublicSessionPage?>(new PublicSessionPage([], null));
+        });
+
+        await InvokeAsync(component, "ShowCalendarAsync");
+        await (Task)type.GetMethod("SelectCalendarDayAsync", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(component, [new DateTime(2027, 2, 15)])!;
+        await InvokeAsync(component, "ShowLibraryAsync");
+
+        var restored = queries[^1];
+        Assert.Equal(new DateOnly(2027, 1, 4), restored.LocalDateFrom);
+        Assert.Equal(new DateOnly(2027, 1, 9), restored.LocalDateTo);
+        Assert.Equal("workshop", restored.Search);
+
+        await InvokeAsync(component, "ShowCalendarAsync");
+        Assert.Equal(new DateOnly(2027, 2, 15), queries[^1].LocalDateFrom);
+        Assert.Equal(new DateOnly(2027, 2, 15), queries[^1].LocalDateTo);
+    }
+
+    [Fact]
+    public async Task UnknownClientTimeZoneDoesNotInventAMonthDateOrDiscardServerFilteredResults()
+    {
+        var session = Session(Guid.NewGuid()) with { TimeZoneId = "Unavailable/Zone" };
+        var component = new PublicSessionsSurface();
+        var period = typeof(PublicSessionsSurface).GetField("_periodFilter", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        period.SetValue(component, Enum.Parse(period.FieldType, "CustomDates"));
+        typeof(PublicSessionsSurface).GetField("_dateFrom", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(component, session.StartUtc.UtcDateTime.Date);
+        typeof(PublicSessionsSurface).GetProperty(nameof(component.Sessions))!.SetValue(component, new[] { session });
+        Assert.Empty(Property<IReadOnlyList<PublicSessionView>>(component, "FilteredSessions"));
+
+        SetQuery(component, _ => Task.FromResult<PublicSessionPage?>(new PublicSessionPage([session], null)));
+        await InvokeAsync(component, "RefreshQueryAsync");
+        Assert.Equal(session.SessionId, Assert.Single(Property<IReadOnlyList<PublicSessionView>>(component, "FilteredSessions")).SessionId);
+
+        await InvokeAsync(component, "RefreshCalendarMonthAsync");
+        Assert.Empty(Field<HashSet<DateOnly>>(component, "_monthDates"));
+        Assert.True(Field<bool>(component, "_monthHasUnknownLocalDates"));
+    }
+
+    [Theory]
+    [InlineData("Completed")]
+    [InlineData("Cancelled")]
+    public async Task DirectLinkShowsAPastSessionRegardlessOfTheDefaultUpcomingFilter(string status)
+    {
+        var session = Session(Guid.NewGuid()) with
+        {
+            Title = "Past public session",
+            Status = status,
+            StartUtc = DateTimeOffset.UtcNow.AddDays(-7)
+        };
+        var registrations = new ServiceCollection();
+        registrations.AddLogging();
+        registrations.AddMudServices();
+        registrations.AddSingleton<IJSRuntime>(new UnavailableClipboard());
+        registrations.AddSingleton<NavigationManager>(new TestNavigationManager());
+        await using var services = registrations.BuildServiceProvider();
+        await using var renderer = new HtmlRenderer(services, services.GetRequiredService<ILoggerFactory>());
+        var markup = await renderer.Dispatcher.InvokeAsync(async () =>
+        {
+            var component = await renderer.RenderComponentAsync<PublicSessionsSurface>(ParameterView.FromDictionary(
+                new Dictionary<string, object?>
+                {
+                    [nameof(PublicSessionsSurface.Sessions)] = new[] { session },
+                    [nameof(PublicSessionsSurface.InitialSessionId)] = session.SessionId
+                }));
+            return component.ToHtmlString();
+        });
+
+        Assert.Contains("Past public session", markup, StringComparison.Ordinal);
+        Assert.Contains(status, markup, StringComparison.Ordinal);
+        Assert.Contains("About this session", markup, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DirectLinkDoesNotSubstituteADifferentSession()
+    {
+        var component = new PublicSessionsSurface();
+        typeof(PublicSessionsSurface).GetProperty(nameof(component.InitialSessionId))!.SetValue(component, Guid.NewGuid());
+        typeof(PublicSessionsSurface).GetProperty(nameof(component.Sessions))!.SetValue(component, new[] { Session(Guid.NewGuid()) });
+
+        Assert.Empty(Property<IReadOnlyList<PublicSessionView>>(component, "FilteredSessions"));
+    }
+
+    [Theory]
+    [InlineData("en-US", "Sun", 11, 1)]
+    [InlineData("en-GB", "Mon", 10, 26)]
+    public void CalendarWeekHeadingsAndGridUseTheSameLocaleFirstDay(string cultureName, string firstHeading, int firstMonth, int firstDate)
+    {
+        var previous = CultureInfo.CurrentCulture;
+        try
+        {
+            CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo(cultureName);
+            var component = new PublicSessionsSurface();
+            typeof(PublicSessionsSurface).GetField("_calendarMonth", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .SetValue(component, new DateTime(2026, 11, 1));
+            var headings = (IReadOnlyList<string>)typeof(PublicSessionsSurface)
+                .GetProperty("CalendarWeekdays", BindingFlags.Static | BindingFlags.NonPublic)!.GetValue(null)!;
+            var days = Property<IEnumerable<DateTime>>(component, "CalendarDays").ToArray();
+
+            Assert.Equal(firstHeading, headings[0]);
+            Assert.Equal(new DateTime(2026, firstMonth, firstDate), days[0]);
+            Assert.Equal(42, days.Length);
+            Assert.Equal(CultureInfo.CurrentCulture.DateTimeFormat.FirstDayOfWeek, days[0].DayOfWeek);
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = previous;
+        }
+    }
+
+    [Fact]
+    public async Task CompletedSessionIsLabeledAndDoesNotOfferNewInvitations()
+    {
+        var session = Session(Guid.NewGuid()) with { Status = "Completed", ChannelType = SessionChannelType.Other, ChannelLink = "https://example.test/join" };
+        var registrations = new ServiceCollection();
+        registrations.AddLogging();
+        registrations.AddMudServices();
+        registrations.AddSingleton<IJSRuntime>(new UnavailableClipboard());
+        registrations.AddSingleton<NavigationManager>(new TestNavigationManager());
+        await using var services = registrations.BuildServiceProvider();
+        await using var renderer = new HtmlRenderer(services, services.GetRequiredService<ILoggerFactory>());
+        var markup = await renderer.Dispatcher.InvokeAsync(async () =>
+        {
+            var component = await renderer.RenderComponentAsync<PublicSessionsSurface>(ParameterView.FromDictionary(
+                new Dictionary<string, object?>
+                {
+                    [nameof(PublicSessionsSurface.Sessions)] = new[] { session },
+                    [nameof(PublicSessionsSurface.InitialSessionId)] = session.SessionId,
+                    [nameof(PublicSessionsSurface.LoadInvitationTextAsync)] = (Func<Guid, long, Task<string?>>)((_, _) => Task.FromResult<string?>("invitation"))
+                }));
+            return component.ToHtmlString();
+        });
+
+        Assert.Contains("Completed", markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("Copy invitation", markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("https://example.test/join", markup, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("/notifications", true)]
+    [InlineData(null, false)]
+    public async Task SubscriptionNavigationIsShownOnlyWhenHostProvidesIt(string? href, bool expected)
+    {
+        var registrations = new ServiceCollection();
+        registrations.AddLogging();
+        registrations.AddMudServices();
+        registrations.AddSingleton<IJSRuntime>(new UnavailableClipboard());
+        registrations.AddSingleton<NavigationManager>(new TestNavigationManager());
+        await using var services = registrations.BuildServiceProvider();
+        await using var renderer = new HtmlRenderer(services, services.GetRequiredService<ILoggerFactory>());
+        var markup = await renderer.Dispatcher.InvokeAsync(async () =>
+        {
+            var component = await renderer.RenderComponentAsync<PublicSessionsSurface>(ParameterView.FromDictionary(
+                new Dictionary<string, object?> { [nameof(PublicSessionsSurface.SubscriptionsHref)] = href }));
+            return component.ToHtmlString();
+        });
+
+        Assert.Equal(expected, markup.Contains("My subscriptions", StringComparison.Ordinal));
+        if (expected) Assert.Contains("/notifications", markup, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SessionDetailsDisambiguateRepeatedLocalTime()
+    {
+        var session = Session(Guid.NewGuid()) with
+        {
+            StartUtc = new DateTimeOffset(2026, 11, 1, 5, 30, 0, TimeSpan.Zero),
+            TimeZoneId = "America/New_York"
+        };
+        var format = typeof(PublicSessionsSurface).GetMethod("FormatDetailsWhen", BindingFlags.Static | BindingFlags.NonPublic)!;
+        var first = (string)format.Invoke(null, [session])!;
+        var second = (string)format.Invoke(null, [session with { StartUtc = session.StartUtc.AddHours(1) }])!;
+
+        Assert.Contains("UTC-04:00", first, StringComparison.Ordinal);
+        Assert.Contains("UTC-05:00", second, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReminderReturnSelectsTheRequestedSessionAndReloadsItsState()
+    {
+        var session = Session(Guid.NewGuid());
+        Guid? loadedSession = null;
+        var component = new PublicSessionsSurface();
+        typeof(PublicSessionsSurface).GetProperty(nameof(component.Sessions))!.SetValue(component, new[] { session });
+        typeof(PublicSessionsSurface).GetProperty(nameof(component.InitialSessionId))!.SetValue(component, session.SessionId);
+        typeof(PublicSessionsSurface).GetProperty(nameof(component.InitialRemindersView))!.SetValue(component, true);
+        typeof(PublicSessionsSurface).GetProperty(nameof(component.LoadSubscriptionStateAsync))!.SetValue(component,
+            (Func<Guid, Task<PublicSessionsSurface.SessionSubscriptionPanelState?>>)(id =>
+            {
+                loadedSession = id;
+                return Task.FromResult<PublicSessionsSurface.SessionSubscriptionPanelState?>(null);
+            }));
+
+        await InvokeAsync(component, "OnParametersSetAsync");
+
+        Assert.Equal(session.SessionId, Field<Guid>(component, "_selectedSessionId"));
+        Assert.Equal(1, Field<int>(component, "_activeTabIndex"));
+        Assert.Equal(session.SessionId, loadedSession);
+    }
+
+    [Fact]
+    public void AnonymousCalendarRouteUsesTheGuestEntry()
+    {
+        var app = new SwiftAid.Gateway.Components.App();
+        var context = new DefaultHttpContext();
+        context.Request.Path = "/sessions/calendar";
+        typeof(SwiftAid.Gateway.Components.App).GetProperty("HttpContextAccessor", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .SetValue(app, new HttpContextAccessor { HttpContext = context });
+
+        Assert.True(Property<bool>(app, "IsGuestEntry"));
+    }
+
+    [Fact]
+    public async Task CalendarEntryRendersTheCalendarAndQueriesTheSelectedDay()
+    {
+        var requests = new List<PublicSessionQuery>();
+        var cancelled = Session(Guid.NewGuid()) with { Status = "Cancelled", StartUtc = DateTimeOffset.UtcNow, TimeZoneId = "UTC" };
+        var registrations = new ServiceCollection();
+        registrations.AddLogging();
+        registrations.AddMudServices();
+        registrations.AddSingleton<IJSRuntime>(new UnavailableClipboard());
+        registrations.AddSingleton<NavigationManager>(new TestNavigationManager());
+        await using var services = registrations.BuildServiceProvider();
+        await using var renderer = new HtmlRenderer(services, services.GetRequiredService<ILoggerFactory>());
+
+        var markup = await renderer.Dispatcher.InvokeAsync(async () =>
+        {
+            var component = await renderer.RenderComponentAsync<PublicSessionsSurface>(ParameterView.FromDictionary(
+                new Dictionary<string, object?>
+                {
+                    [nameof(PublicSessionsSurface.InitialCalendarView)] = true,
+                    [nameof(PublicSessionsSurface.QuerySessionsAsync)] = (Func<PublicSessionQuery, Task<PublicSessionPage?>>)(query =>
+                    {
+                        requests.Add(query);
+                        return Task.FromResult<PublicSessionPage?>(new PublicSessionPage([cancelled], null));
+                    })
+                }));
+            return component.ToHtmlString();
+        });
+
+        Assert.Contains("Community calendar", markup, StringComparison.Ordinal);
+        Assert.Contains("sessions listed", markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("sessions available", markup, StringComparison.Ordinal);
+        Assert.Contains(requests, query => query.LocalDateFrom is not null && query.LocalDateFrom == query.LocalDateTo);
+        Assert.Contains(requests, query => query.LocalDateFrom is not null && query.LocalDateTo > query.LocalDateFrom);
+    }
+
+    [Fact]
+    public async Task DetailRendersThePublicTitleSummaryAndStatus()
+    {
+        var session = Session(Guid.NewGuid()) with { Title = "Community water session", Summary = "Public session summary" };
+        var registrations = new ServiceCollection();
+        registrations.AddLogging();
+        registrations.AddMudServices();
+        registrations.AddSingleton<IJSRuntime>(new UnavailableClipboard());
+        registrations.AddSingleton<NavigationManager>(new TestNavigationManager());
+        await using var services = registrations.BuildServiceProvider();
+        await using var renderer = new HtmlRenderer(services, services.GetRequiredService<ILoggerFactory>());
+
+        var markup = await renderer.Dispatcher.InvokeAsync(async () =>
+        {
+            var component = await renderer.RenderComponentAsync<PublicSessionsSurface>(ParameterView.FromDictionary(
+                new Dictionary<string, object?>
+                {
+                    [nameof(PublicSessionsSurface.Sessions)] = new[] { session },
+                    [nameof(PublicSessionsSurface.InitialSessionId)] = session.SessionId
+                }));
+            return component.ToHtmlString();
+        });
+
+        Assert.Contains("Community water session", markup, StringComparison.Ordinal);
+        Assert.Contains("Public session summary", markup, StringComparison.Ordinal);
+        Assert.Contains("Scheduled", markup, StringComparison.Ordinal);
+        Assert.Contains("About this session", markup, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task MonthOverviewUsesFiltersAndContinuesFromTheServerCursor()
+    {
+        var first = Session(Guid.NewGuid()) with { StartUtc = new DateTimeOffset(2026, 11, 2, 12, 0, 0, TimeSpan.Zero) };
+        var second = Session(Guid.NewGuid()) with { StartUtc = new DateTimeOffset(2026, 11, 19, 12, 0, 0, TimeSpan.Zero) };
+        var position = new PublicSessionPosition(first.StartUtc, first.SessionId);
+        var requests = new List<PublicSessionQuery>();
+        var component = new PublicSessionsSurface();
+        typeof(PublicSessionsSurface).GetField("_calendarMonth", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(component, new DateTime(2026, 11, 1));
+        typeof(PublicSessionsSurface).GetField("_searchText", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(component, "water");
+        typeof(PublicSessionsSurface).GetField("_languageFilter", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(component, "en");
+        typeof(PublicSessionsSurface).GetField("_countryFilter", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(component, "SZ");
+        typeof(PublicSessionsSurface).GetField("_regionFilter", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(component, "hhohho");
+        typeof(PublicSessionsSurface).GetField("_sectorFilter", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(component, "Education");
+        typeof(PublicSessionsSurface).GetField("_topicFilter", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(component, "Water");
+        typeof(PublicSessionsSurface).GetField("_statusFilter", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(component, "Completed");
+        SetQuery(component, query =>
+        {
+            requests.Add(query);
+            return Task.FromResult<PublicSessionPage?>(query.AfterSessionId is null
+                ? new PublicSessionPage([first], position)
+                : new PublicSessionPage([second], null));
+        });
+
+        await InvokeAsync(component, "RefreshCalendarMonthAsync");
+        await InvokeAsync(component, "LoadMoreCalendarMonthAsync");
+
+        Assert.Equal(new DateOnly(2026, 11, 1), requests[0].LocalDateFrom);
+        Assert.Equal(new DateOnly(2026, 11, 30), requests[0].LocalDateTo);
+        Assert.Equal("water", requests[0].Search);
+        Assert.Equal("en", requests[0].Language);
+        Assert.Equal("SZ", requests[0].CountryCode);
+        Assert.Equal("hhohho", requests[0].RegionId);
+        Assert.Equal("Education", requests[0].Sector);
+        Assert.Equal("Water", requests[0].Topic);
+        Assert.Equal("Completed", requests[0].Status);
+        Assert.Equal(position.SessionId, requests[1].AfterSessionId);
+        Assert.Equal(new[] { new DateOnly(2026, 11, 2), new DateOnly(2026, 11, 19) }, Field<HashSet<DateOnly>>(component, "_monthDates").Order().ToArray());
+        Assert.Null(Field<PublicSessionPosition?>(component, "_monthNext"));
+    }
+
+    [Fact]
+    public async Task OlderMonthOverviewCannotReplaceTheCurrentMonth()
+    {
+        var older = new TaskCompletionSource<PublicSessionPage?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var component = new PublicSessionsSurface();
+        var calls = 0;
+        var current = Session(Guid.NewGuid()) with { StartUtc = new DateTimeOffset(2026, 12, 5, 12, 0, 0, TimeSpan.Zero) };
+        SetQuery(component, _ => ++calls == 1 ? older.Task : Task.FromResult<PublicSessionPage?>(new PublicSessionPage([current], null)));
+
+        var previousRequest = InvokeAsync(component, "RefreshCalendarMonthAsync");
+        await InvokeAsync(component, "RefreshCalendarMonthAsync");
+        older.SetResult(new PublicSessionPage([Session(Guid.NewGuid())], null));
+        await previousRequest;
+
+        Assert.Equal(new DateOnly(2026, 12, 5), Assert.Single(Field<HashSet<DateOnly>>(component, "_monthDates")));
+    }
+
+    [Fact]
+    public async Task CopyInvitationFallsBackToSelectableTextWhenClipboardIsUnavailable()
+    {
+        var session = Session(Guid.NewGuid());
+        var list = new PublicSessionList();
+        typeof(PublicSessionList).GetProperty(nameof(list.Sessions))!.SetValue(list, new[] { session });
+        typeof(PublicSessionList).GetProperty(nameof(list.LoadInvitationTextAsync))!.SetValue(list,
+            (Func<Guid, long, Task<string?>>)((_, _) => Task.FromResult<string?>("Public invitation")));
+        typeof(PublicSessionList).GetProperty("Js", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .SetValue(list, new UnavailableClipboard());
+        var copy = typeof(PublicSessionList).GetMethod("CopyInvitationAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
+
+        await (Task)copy.Invoke(list, [session])!;
+
+        Assert.Equal(session.SessionId, typeof(PublicSessionList).GetField("_openInvitationId", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(list));
+        Assert.Equal("Public invitation", typeof(PublicSessionList).GetField("_openInvitationText", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(list));
+    }
+
+    [Fact]
+    public async Task NativeCalendarFailureReportsAnErrorAndCanBeRetried()
+    {
+        var session = Session(Guid.NewGuid());
+        var list = new PublicSessionList();
+        var type = typeof(PublicSessionList);
+        var succeeds = false;
+        type.GetProperty(nameof(list.OpenCalendarAsync))!.SetValue(list, (Func<Guid, Task<bool>>)(_ => Task.FromResult(succeeds)));
+        var open = type.GetMethod("OpenCalendarFileAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        await (Task)open.Invoke(list, [session])!;
+        Assert.Equal(session.SessionId, type.GetField("_calendarErrorId", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(list));
+        succeeds = true;
+        await (Task)open.Invoke(list, [session])!;
+        Assert.Null(type.GetField("_calendarErrorId", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(list));
+    }
+
+    [Fact]
+    public async Task NativeCalendarOpeningDoesNotStartOverlappingRequests()
+    {
+        var session = Session(Guid.NewGuid());
+        var list = new PublicSessionList();
+        var type = typeof(PublicSessionList);
+        var pending = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var calls = 0;
+        type.GetProperty(nameof(list.OpenCalendarAsync))!.SetValue(list, (Func<Guid, Task<bool>>)(_ => { calls++; return pending.Task; }));
+        var open = type.GetMethod("OpenCalendarFileAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        var first = (Task)open.Invoke(list, [session])!;
+        await (Task)open.Invoke(list, [session])!;
+        Assert.Equal(1, calls);
+        pending.SetResult(true);
+        await first;
+        Assert.Null(type.GetField("_openingCalendarId", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(list));
+        var label = (string)type.GetMethod("CalendarActionLabel", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(list, [session])!;
+        Assert.Contains(session.Title, label, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SelectableInvitationIsClearedWhenSessionChangesOrIsCancelled(bool cancelled)
+    {
+        var session = Session(Guid.NewGuid());
+        var list = new PublicSessionList();
+        var type = typeof(PublicSessionList);
+        type.GetProperty(nameof(list.Sessions))!.SetValue(list, new[] { session });
+        type.GetProperty(nameof(list.LoadInvitationTextAsync))!.SetValue(list,
+            (Func<Guid, long, Task<string?>>)((_, _) => Task.FromResult<string?>("Old invitation")));
+        type.GetProperty("Js", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(list, new UnavailableClipboard());
+        await (Task)type.GetMethod("CopyInvitationAsync", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(list, [session])!;
+        Assert.NotNull(type.GetField("_openInvitationText", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(list));
+
+        var updated = cancelled ? session with { Status = "Cancelled" } : session with { Version = session.Version + 1 };
+        type.GetProperty(nameof(list.Sessions))!.SetValue(list, new[] { updated });
+        type.GetMethod("OnParametersSet", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(list, null);
+        Assert.Null(type.GetField("_openInvitationText", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(list));
+    }
+
+    [Fact]
+    public async Task FailedShareDoesNotExposeOldTextAfterSessionChanges()
+    {
+        var session = Session(Guid.NewGuid());
+        var list = new PublicSessionList();
+        var type = typeof(PublicSessionList);
+        var pending = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        type.GetProperty(nameof(list.Sessions))!.SetValue(list, new[] { session });
+        type.GetProperty(nameof(list.LoadInvitationTextAsync))!.SetValue(list,
+            (Func<Guid, long, Task<string?>>)((_, _) => Task.FromResult<string?>("Old invitation")));
+        type.GetProperty(nameof(list.ShareTextAsync))!.SetValue(list, (Func<string, Task>)(_ => pending.Task));
+        var request = (Task)type.GetMethod("ShareInvitationAsync", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(list, [session])!;
+        type.GetProperty(nameof(list.Sessions))!.SetValue(list, new[] { session with { Version = session.Version + 1 } });
+        pending.SetException(new InvalidOperationException());
+        await request;
+        Assert.Null(type.GetField("_openInvitationText", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(list));
+    }
+
+    [Fact]
+    public async Task InvitationIsNotSharedIfTheDisplayedSessionChangesWhileLoading()
+    {
+        var session = Session(Guid.NewGuid());
+        var list = new PublicSessionList();
+        var pending = new TaskCompletionSource<string?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var shared = false;
+        typeof(PublicSessionList).GetProperty(nameof(list.Sessions))!.SetValue(list, new[] { session });
+        typeof(PublicSessionList).GetProperty(nameof(list.LoadInvitationTextAsync))!.SetValue(list,
+            (Func<Guid, long, Task<string?>>)((_, _) => pending.Task));
+        typeof(PublicSessionList).GetProperty(nameof(list.ShareTextAsync))!.SetValue(list,
+            (Func<string, Task>)(_ => { shared = true; return Task.CompletedTask; }));
+        var share = typeof(PublicSessionList).GetMethod("ShareInvitationAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        var request = (Task)share.Invoke(list, [session])!;
+        typeof(PublicSessionList).GetProperty(nameof(list.Sessions))!.SetValue(list, new[] { session with { Version = session.Version + 1 } });
+        pending.SetResult("Old invitation");
+        await request;
+
+        Assert.False(shared);
+        Assert.Contains("session changed", (string)typeof(PublicSessionList).GetField("_invitationError", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(list)!, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ShareFeedbackReflectsWhetherTheDeviceRequestReturned(bool fails)
+    {
+        var session = Session(Guid.NewGuid());
+        var list = new PublicSessionList();
+        typeof(PublicSessionList).GetProperty(nameof(list.Sessions))!.SetValue(list, new[] { session });
+        typeof(PublicSessionList).GetProperty(nameof(list.LoadInvitationTextAsync))!.SetValue(list,
+            (Func<Guid, long, Task<string?>>)((_, _) => Task.FromResult<string?>("Invitation")));
+        typeof(PublicSessionList).GetProperty(nameof(list.ShareTextAsync))!.SetValue(list,
+            (Func<string, Task>)(_ => fails ? Task.FromException(new InvalidOperationException()) : Task.CompletedTask));
+        var share = typeof(PublicSessionList).GetMethod("ShareInvitationAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
+
+        await (Task)share.Invoke(list, [session])!;
+
+        var id = typeof(PublicSessionList).GetField("_shareRequestSessionId", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(list);
+        Assert.Equal(fails ? null : session.SessionId, id);
+        var error = typeof(PublicSessionList).GetField("_invitationError", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(list);
+        Assert.Equal(fails, error is not null);
+    }
+
+    [Fact]
+    public async Task CopyInvitationRequestsTheDisplayedVersionAndDoesNotCopyAnUnavailableResult()
+    {
+        var session = Session(Guid.NewGuid());
+        var list = new PublicSessionList();
+        (Guid Id, long Version)? requested = null;
+        typeof(PublicSessionList).GetProperty(nameof(list.LoadInvitationTextAsync))!.SetValue(list,
+            (Func<Guid, long, Task<string?>>)((id, version) =>
+            {
+                requested = (id, version);
+                return Task.FromResult<string?>(null);
+            }));
+        var copy = typeof(PublicSessionList).GetMethod("CopyInvitationAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
+
+        await (Task)copy.Invoke(list, [session])!;
+
+        Assert.Equal((session.SessionId, session.Version), requested);
+        Assert.Null(typeof(PublicSessionList).GetField("_copiedSessionId", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(list));
+        Assert.Contains("session changed", (string)typeof(PublicSessionList).GetField("_invitationError", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(list)!, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task InvitationRefreshInvokesTheHostAndClearsStaleFeedback()
+    {
+        var list = new PublicSessionList();
+        var refreshed = 0;
+        typeof(PublicSessionList).GetProperty(nameof(list.OnRetry))!.SetValue(list,
+            EventCallback.Factory.Create(new object(), () => { refreshed++; }));
+        typeof(PublicSessionList).GetField("_invitationError", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(list, "Session changed");
+        typeof(PublicSessionList).GetField("_openInvitationId", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(list, Guid.NewGuid());
+        var refresh = typeof(PublicSessionList).GetMethod("RefreshInvitationSessionAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
+
+        await (Task)refresh.Invoke(list, null)!;
+
+        Assert.Equal(1, refreshed);
+        Assert.Null(typeof(PublicSessionList).GetField("_invitationError", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(list));
+        Assert.Null(typeof(PublicSessionList).GetField("_openInvitationId", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(list));
+    }
+
+    [Fact]
+    public async Task RetryRefreshesTheListAndMonthWithTheExistingFilters()
+    {
+        var component = new PublicSessionsSurface();
+        var requests = new List<PublicSessionQuery>();
+        typeof(PublicSessionsSurface).GetField("_calendarVisible", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(component, true);
+        typeof(PublicSessionsSurface).GetField("_topicFilter", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(component, "Water");
+        SetQuery(component, query =>
+        {
+            requests.Add(query);
+            return Task.FromResult<PublicSessionPage?>(new PublicSessionPage([], null));
+        });
+
+        await InvokeAsync(component, "RetryAsync");
+
+        Assert.Equal(2, requests.Count);
+        Assert.All(requests, query => Assert.Equal("Water", query.Topic));
+        Assert.Contains(requests, query => query.LocalDateFrom is not null && query.LocalDateTo is not null);
+    }
+
+    [Fact]
+    public async Task EmptyBoundedSearchOffersContinuationBeforeReportingNoMatches()
+    {
+        var position = new PublicSessionPosition(DateTimeOffset.UtcNow, Guid.NewGuid());
+        var component = new PublicSessionsSurface();
+        SetQuery(component, query => Task.FromResult<PublicSessionPage?>(
+            new PublicSessionPage([], query.AfterSessionId is null ? position : null)));
+
+        await InvokeAsync(component, "RefreshQueryAsync");
+        Assert.Equal("No matches in this batch", Property<string>(component, "EmptyResultsTitle"));
+        Assert.Equal("Load more sessions to continue searching.", Property<string>(component, "EmptyResultsDescription"));
+
+        await InvokeAsync(component, "LoadMoreAsync");
+        Assert.Equal("No upcoming sessions found", Property<string>(component, "EmptyResultsTitle"));
+    }
+
+    [Fact]
+    public void CalendarLinkUsesTheProvidedGatewayBasePath()
+    {
+        var list = new PublicSessionList();
+        typeof(PublicSessionList).GetProperty(nameof(list.PublicBasePath))!.SetValue(list, "https://gateway.example/public/v1/sessions/");
+        var method = typeof(PublicSessionList).GetMethod("CalendarHref", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        var id = Guid.Parse("d0c00001-2222-4a44-9aa9-123456789abc");
+
+        var href = (string)method.Invoke(list, [id])!;
+
+        Assert.Equal($"https://gateway.example/public/v1/sessions/{id:D}/calendar", href);
+    }
+
+    [Fact]
+    public void DestinationLinkUsesGatewayAndBindsTheDisplayedVersion()
+    {
+        var list = new PublicSessionList();
+        typeof(PublicSessionList).GetProperty(nameof(list.PublicBasePath))!.SetValue(list, "https://gateway.example/public/v1/sessions/");
+        var method = typeof(PublicSessionList).GetMethod("DestinationHref", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        var session = Session(Guid.NewGuid());
+
+        var href = (string)method.Invoke(list, [session])!;
+
+        Assert.Equal($"https://gateway.example/public/v1/sessions/{session.SessionId:D}/destination?version={session.Version}", href);
+    }
+
+    [Fact]
+    public void CompactTimeShowsTheEndDateForAnOvernightSession()
+    {
+        var session = Session(Guid.NewGuid()) with
+        {
+            StartUtc = new DateTimeOffset(2026, 11, 1, 23, 30, 0, TimeSpan.Zero),
+            DurationMinutes = 120
+        };
+        var method = typeof(PublicSessionList).GetMethod("FormatWhenCompact", BindingFlags.Static | BindingFlags.NonPublic)!;
+
+        var display = (string)method.Invoke(null, [session])!;
+
+        Assert.Contains(new DateTime(2026, 11, 2).ToString("d MMM yyyy"), display);
+        Assert.Contains("01:30", display);
+        Assert.Contains("UTC", display);
+    }
+
+    [Fact]
+    public async Task CalendarSelectionQueriesTheChosenLocalDayAndPreservesFilters()
+    {
+        PublicSessionQuery? observed = null;
+        var component = new PublicSessionsSurface();
+        SetQuery(component, query =>
+        {
+            observed = query;
+            return Task.FromResult<PublicSessionPage?>(new PublicSessionPage([], null));
+        });
+        typeof(PublicSessionsSurface).GetField("_searchText", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(component, "water");
+        typeof(PublicSessionsSurface).GetField("_languageFilter", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(component, "en");
+        var select = typeof(PublicSessionsSurface).GetMethod("SelectCalendarDayAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
+
+        await (Task)select.Invoke(component, [new DateTime(2026, 11, 1)])!;
+
+        Assert.Equal(new DateOnly(2026, 11, 1), observed!.LocalDateFrom);
+        Assert.Equal(observed.LocalDateFrom, observed.LocalDateTo);
+        Assert.Equal("water", observed.Search);
+        Assert.Equal("en", observed.Language);
+    }
+
+    [Fact]
+    public async Task CustomDatesAreSentAsLocalCalendarDates()
+    {
+        PublicSessionQuery? observed = null;
+        var component = new PublicSessionsSurface();
+        SetQuery(component, query =>
+        {
+            observed = query;
+            return Task.FromResult<PublicSessionPage?>(new PublicSessionPage([], null));
+        });
+        var period = typeof(PublicSessionsSurface).GetField("_periodFilter", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        period.SetValue(component, Enum.Parse(period.FieldType, "CustomDates"));
+        typeof(PublicSessionsSurface).GetField("_dateFrom", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(component, new DateTime(2026, 11, 1));
+        typeof(PublicSessionsSurface).GetField("_dateTo", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(component, new DateTime(2026, 11, 2));
+
+        await InvokeAsync(component, "RefreshQueryAsync");
+
+        Assert.Equal(new DateOnly(2026, 11, 1), observed!.LocalDateFrom);
+        Assert.Equal(new DateOnly(2026, 11, 2), observed.LocalDateTo);
+    }
+
+    [Fact]
+    public async Task CategoryAndLanguageAreSentWithTheServerQuery()
+    {
+        PublicSessionQuery? observed = null;
+        var component = new PublicSessionsSurface();
+        SetQuery(component, query =>
+        {
+            observed = query;
+            return Task.FromResult<PublicSessionPage?>(new PublicSessionPage([], null));
+        });
+        typeof(PublicSessionsSurface).GetField("_categoryFilter", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(component, "Nutrition");
+        typeof(PublicSessionsSurface).GetField("_languageFilter", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(component, "en");
+        typeof(PublicSessionsSurface).GetField("_countryFilter", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(component, "ZW");
+        typeof(PublicSessionsSurface).GetField("_regionFilter", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(component, "harare");
+        typeof(PublicSessionsSurface).GetField("_sectorFilter", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(component, "HumanHealth");
+        typeof(PublicSessionsSurface).GetField("_topicFilter", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(component, "Malaria");
+        typeof(PublicSessionsSurface).GetField("_statusFilter", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(component, "Completed");
+
+        await InvokeAsync(component, "RefreshQueryAsync");
+
+        Assert.Equal("Nutrition", observed!.Category);
+        Assert.Equal("en", observed.Language);
+        Assert.Equal("ZW", observed.CountryCode);
+        Assert.Equal("harare", observed.RegionId);
+        Assert.Equal("HumanHealth", observed.Sector);
+        Assert.Equal("Malaria", observed.Topic);
+        Assert.Equal("Completed", observed.Status);
+        Assert.Equal(7, Property<int>(component, "ActiveFilterCount"));
+        await InvokeAsync(component, "ClearFiltersAsync");
+        Assert.Null(observed!.CountryCode);
+        Assert.Null(observed.RegionId);
+        Assert.Null(observed.Sector);
+        Assert.Null(observed.Topic);
+        Assert.Null(observed.Status);
+        Assert.Equal(0, Property<int>(component, "ActiveFilterCount"));
+    }
+
+    [Fact]
+    public async Task LoadMore_UsesReturnedPositionAndKeepsPreviouslyLoadedSessions()
+    {
+        var first = Session(Guid.NewGuid());
+        var second = Session(Guid.NewGuid());
+        var position = new PublicSessionPosition(first.StartUtc, first.SessionId);
+        var requests = new List<PublicSessionQuery>();
+        var component = new PublicSessionsSurface();
+        SetQuery(component, query =>
+        {
+            requests.Add(query);
+            return Task.FromResult<PublicSessionPage?>(query.AfterSessionId is null
+                ? new PublicSessionPage([first], position)
+                : new PublicSessionPage([second], null));
+        });
+
+        await InvokeAsync(component, "RefreshQueryAsync");
+        await InvokeAsync(component, "LoadMoreAsync");
+
+        Assert.Equal(position.SessionId, requests[1].AfterSessionId);
+        Assert.Equal(position.StartUtc, requests[1].AfterStartUtc);
+        Assert.Equal(new[] { first.SessionId, second.SessionId }, Field<IReadOnlyList<PublicSessionView>>(component, "_querySessions").Select(item => item.SessionId));
+        Assert.Null(Field<PublicSessionPosition?>(component, "_nextPage"));
+    }
+
+    [Fact]
+    public async Task FailedSearchCanBeRetriedWithoutReportingAnEmptyCatalog()
+    {
+        var current = Session(Guid.NewGuid());
+        var calls = 0;
+        var component = new PublicSessionsSurface();
+        SetQuery(component, _ => Task.FromResult<PublicSessionPage?>(++calls == 1
+            ? null : new PublicSessionPage([current], null)));
+
+        await InvokeAsync(component, "RefreshQueryAsync");
+        Assert.NotNull(Field<string?>(component, "_queryError"));
+        await InvokeAsync(component, "RetryAsync");
+
+        Assert.Null(Field<string?>(component, "_queryError"));
+        Assert.Equal(current.SessionId, Assert.Single(Field<IReadOnlyList<PublicSessionView>>(component, "_querySessions")).SessionId);
+    }
+
+    [Fact]
+    public async Task SlowerPreviousSearchCannotReplaceLatestResults()
+    {
+        var firstRequest = new TaskCompletionSource<PublicSessionPage?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var current = Session(Guid.NewGuid());
+        var calls = 0;
+        var component = new PublicSessionsSurface();
+        SetQuery(component, _ => ++calls == 1
+            ? firstRequest.Task
+            : Task.FromResult<PublicSessionPage?>(new PublicSessionPage([current], null)));
+
+        var old = InvokeAsync(component, "RefreshQueryAsync");
+        await InvokeAsync(component, "RefreshQueryAsync");
+        firstRequest.SetResult(new PublicSessionPage([Session(Guid.NewGuid())], null));
+        await old;
+
+        Assert.Equal(current.SessionId, Assert.Single(Field<IReadOnlyList<PublicSessionView>>(component, "_querySessions")).SessionId);
+    }
+
+    private static Task InvokeAsync(PublicSessionsSurface component, string method) =>
+        (Task)typeof(PublicSessionsSurface).GetMethod(method, BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(component, null)!;
+
+    private static void SetQuery(PublicSessionsSurface component, Func<PublicSessionQuery, Task<PublicSessionPage?>> query) =>
+        typeof(PublicSessionsSurface).GetProperty(nameof(component.QuerySessionsAsync))!.SetValue(component, query);
+
+    private static T Field<T>(PublicSessionsSurface component, string name) =>
+        (T)typeof(PublicSessionsSurface).GetField(name, BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(component)!;
+
+    private static T Property<T>(PublicSessionsSurface component, string name) =>
+        (T)typeof(PublicSessionsSurface).GetProperty(name, BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(component)!;
+
+    private static T Property<T>(object component, string name) =>
+        (T)component.GetType().GetProperty(name, BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(component)!;
+
+    private static PublicSessionView Session(Guid id) => new(
+        id, 3, "Session", "Summary", "Community", [], "SZ", "Region", "Education", "Presenter", "en",
+        DateTimeOffset.UtcNow.AddDays(2), "UTC", 60, null, [], SessionChannelType.None, null, "Scheduled", null, 0);
+
+    private sealed class UnavailableClipboard : IJSRuntime
+    {
+        public ValueTask<TValue> InvokeAsync<TValue>(string identifier, object?[]? args) =>
+            ValueTask.FromException<TValue>(new JSException("Clipboard unavailable"));
+
+        public ValueTask<TValue> InvokeAsync<TValue>(string identifier, CancellationToken cancellationToken, object?[]? args) =>
+            ValueTask.FromException<TValue>(new JSException("Clipboard unavailable"));
+    }
+
+    private sealed class TestNavigationManager : NavigationManager
+    {
+        public TestNavigationManager() => Initialize("http://localhost/", "http://localhost/");
+    }
+}

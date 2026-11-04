@@ -1,0 +1,34 @@
+@using Microsoft.AspNetCore.Components.Authorization
+
+<Router AppAssembly="typeof(Program).Assembly"
+        AdditionalAssemblies="new[] { typeof(SwiftAid.UI.Ellai.Pages.EllaiSettingsAbout).Assembly }"
+        NotFoundPage="typeof(Pages.NotFound)">
+    <Found Context="routeData">
+        <AuthorizeRouteView RouteData="routeData" DefaultLayout="typeof(SwiftAid.Gateway.Components.Layout.AuthorizedWorkspaceLayout)">
+            <Authorizing>
+                <MudContainer MaxWidth="MaxWidth.Small" Class="py-6">
+                    <MudProgressLinear Indeterminate="true" Color="Color.Primary" aria-label="Checking access" />
+                    <MudText Typo="Typo.body2" Class="mt-3">Checking your account access…</MudText>
+                </MudContainer>
+            </Authorizing>
+            <NotAuthorized Context="authenticationState">
+                <MudContainer MaxWidth="MaxWidth.Small" Class="py-6">
+                    @if (authenticationState.User.Identity?.IsAuthenticated == true)
+                    {
+                        <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" role="status">
+                            This page is not available to your account. Organization membership and case access are determined by the service.
+                        </MudAlert>
+                        <MudButton Href="/" Variant="Variant.Text" Color="Color.Primary" Class="mt-3" StartIcon="@Icons.Material.Filled.Home">
+                            Return to home
+                        </MudButton>
+                    }
+                    else
+                    {
+                        <RedirectToSignIn />
+                    }
+                </MudContainer>
+            </NotAuthorized>
+        </AuthorizeRouteView>
+        <FocusOnNavigate RouteData="routeData" Selector="h1" />
+    </Found>
+</Router>

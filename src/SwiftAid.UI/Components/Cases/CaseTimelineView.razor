@@ -1,0 +1,634 @@
+@using SwiftAid.Contracts.Cases
+@using Microsoft.Extensions.DependencyInjection
+@inject IServiceProvider Services
+
+<section class="case-timeline" aria-label="Case history">
+    @if (_reviewMessage is not null)
+    {
+        <MudAlert Severity="@(_reviewError ? Severity.Warning : Severity.Success)" Variant="Variant.Outlined" role="status">@_reviewMessage</MudAlert>
+    }
+    @if (_loading)
+    {
+        <div class="case-timeline__state" role="status" aria-live="polite">
+            <MudProgressCircular Indeterminate="true" Size="Size.Small" aria-label="Loading case history" />
+            <MudText Typo="Typo.body2">Loading case history…</MudText>
+        </div>
+    }
+    else if (_unavailable)
+    {
+        <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" role="status">
+            We couldn't find this case, or you can't view its history.
+        </MudAlert>
+    }
+    else if (_error is not null)
+    {
+        <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" role="alert">
+            @_error
+            <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Refresh" Color="Color.Error" OnClick="RefreshAsync" aria-label="Try loading case history again">Try again</MudButton>
+        </MudAlert>
+    }
+    else if (_timeline is not null)
+    {
+        @if (_timeline.Entries.Count == 0)
+        {
+            <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" role="status">
+                No history entries are recorded for this case yet.
+            </MudAlert>
+        }
+        else
+        {
+            <div class="case-timeline__toolbar">
+                <MudDatePicker Label="Recorded from (local date)"
+                               @bind-Date="_fromLocalDate"
+                               DateFormat="MMM d, yyyy"
+                               Clearable="true"
+                               Class="case-timeline__date-filter" />
+                <MudDatePicker Label="Recorded through (local date)"
+                               @bind-Date="_throughLocalDate"
+                               DateFormat="MMM d, yyyy"
+                               Clearable="true"
+                               Class="case-timeline__date-filter" />
+                <MudSelect T="string"
+                           Label="Filter history"
+                           Value="_selectedEventType"
+                           ValueChanged="SetEventFilterAsync"
+                           Variant="Variant.Text"
+                           Dense="true"
+                           Class="case-timeline__filter">
+                    <MudSelectItem T="string" Value="@AllEventsFilter">All Events</MudSelectItem>
+                    @foreach (var option in EventTypeOptions)
+                    {
+                        <MudSelectItem T="string" Value="@option.FilterValue">@option.Label</MudSelectItem>
+                    }
+                </MudSelect>
+            </div>
+
+            @if ((_selectedEventType is CaseTimelineEntryFilter.EllaiActivity or CaseTimelineEntryFilter.EllaiEnrichment or CaseTimelineEntryFilter.EllaiFollowUp) &&
+                _timeline.Entries.Any(entry => entry.AgentActivitiesTruncated))
+            {
+                <MudAlert Severity="Severity.Info" Variant="Variant.Text" role="status">Some Ellai activity is not shown in the loaded history.</MudAlert>
+            }
+
+            @if (DateFilterError is { } dateFilterError)
+            {
+                <MudAlert Severity="Severity.Warning" Variant="Variant.Text" role="alert">
+                    @dateFilterError
+                    <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="ClearFilters">Clear filters</MudButton>
+                </MudAlert>
+            }
+            else if (FilteredEntries.Count == 0)
+            {
+                <div class="case-timeline__filtered-empty" role="status">
+                    <MudText Typo="Typo.body2">No loaded history entries match these filters.</MudText>
+                    <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="ClearFilters">Clear filters</MudButton>
+                </div>
+            }
+            else
+            {
+                <MudText Typo="Typo.caption" Color="Color.Secondary">Dates use your local time. Ellai filters use activity dates; other filters use event dates. Only loaded history is shown.</MudText>
+                <MudTimeline TimelinePosition="TimelinePosition.Start" Class="case-timeline__list">
+                    @foreach (var entry in FilteredEntries)
+                    {
+                        <MudTimelineItem Color="@DotColor(entry)" Size="Size.Small">
+                            <ItemContent>
+                                <button type="button"
+                                        class="case-timeline__entry"
+                                        aria-haspopup="dialog"
+                                        aria-controls="case-history-event-drawer-title"
+                                        aria-label="@($"View details for {SafeEventLabel(entry.EventType, entry.Kind)} recorded {entry.RecordedAtUtc.ToLocalTime():g}")"
+                                        @onclick="() => OpenDetails(entry)">
+                                    <span class="case-timeline__entry-heading">
+                                        <span class="case-timeline__entry-title">@SafeEventLabel(entry.EventType, entry.Kind)</span>
+                                        <time datetime="@entry.RecordedAtUtc.ToString("O")">@entry.RecordedAtUtc.ToLocalTime().ToString("g")</time>
+                                    </span>
+                                    <span class="case-timeline__entry-actor">@ActorLabel(entry)</span>
+                                </button>
+                                @if (entry.OfficerEscalation is { } officer)
+                                {
+                                    <div class="case-timeline__officer-assignment">
+                                        <span>Officer escalation follow-up: @(officer.SafeOfficerDisplayLabel ?? "Name unavailable").</span>
+                                        <span>@(officer.IsCurrent ? "Current assignment." : "Historical assignment; the work has changed or closed.")</span>
+                                        @if (officer.FollowUpAcknowledged == true)
+                                        {
+                                            <span>Follow-up acknowledged.</span>
+                                        }
+                                        else
+                                        {
+                                            @if (officer.IsCurrent && officer.FollowUpAcknowledged is null)
+                                            {
+                                                <span>Acknowledgment status is unavailable.</span>
+                                            }
+                                            <span>@(officer.FollowUpAcknowledged == false ? "Acknowledgment due" : "Original acknowledgment deadline") <time datetime="@officer.AcknowledgementDueUtc.ToString("O")">@officer.AcknowledgementDueUtc.ToLocalTime().ToString("g")</time>.</span>
+                                        }
+                                        <span>@(officer.IsCurrent ? "Follow-up due" : "Originally approved follow-up due") <time datetime="@officer.FollowUpDueUtc.ToString("O")">@officer.FollowUpDueUtc.ToLocalTime().ToString("g")</time>.</span>
+                                    </div>
+                                }
+                                @if (entry.AgentActivities is { Count: > 0 })
+                                {
+                                    <ul aria-label="Ellai activity for this event">
+                                        @foreach (var activity in entry.AgentActivities)
+                                        {
+                                            <li>Ellai - @CaseAgentActivityPresentation.RoleLabel(activity.RoleId): @CaseAgentActivityPresentation.ActivityLabel(activity.RoleId, activity.RecommendationKind)
+                                                <time datetime="@activity.RecordedAtUtc.ToString("O")">@activity.RecordedAtUtc.ToLocalTime().ToString("g")</time>
+                                                @if (activity.FollowUpReviewedAtUtc is { } reviewedAt)
+                                                {
+                                                    <span>Staff review recorded <time datetime="@reviewedAt.ToString("O")">@reviewedAt.ToLocalTime().ToString("g")</time>.</span>
+                                                }
+                                                @if (activity.RoleId == "ops.followup" && activity.FollowUpIsCurrent == false)
+                                                {
+                                                    <span>Historical recommendation; the follow-up has changed.</span>
+                                                }
+                                                else if (activity.RoleId == "ops.followup" && activity.FollowUpIsCurrent is null)
+                                                {
+                                                    <span>Current follow-up status is unavailable.</span>
+                                                }
+                                                else if (activity.RoleId == "ops.followup" && activity.FollowUpIsCurrent == true && activity.FollowUpId is { } followUpId && OnReviewFollowUp.HasDelegate)
+                                                {
+                                                    <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="@(() => OnReviewFollowUp.InvokeAsync(followUpId))" aria-label="Review the recommended follow-up">Review follow-up</MudButton>
+                                                }
+                                                @if (activity.RoleId == "ops.followup" && activity.FollowUpIsCurrent == true && activity.FollowUpReviewedAtUtc is null && ReviewClient is not null)
+                                                {
+                                                    <MudButton Variant="Variant.Text" Color="Color.Primary" Disabled="@(_reviewingId is not null)" OnClick="@(() => RecordReviewAsync(activity.ActivityId))" aria-label="Mark this recommendation as reviewed">Mark reviewed</MudButton>
+                                                }
+                                            </li>
+                                        }
+                                    </ul>
+                                    @if (entry.AgentActivitiesTruncated)
+                                    {
+                                        <MudText Typo="Typo.caption">Additional Ellai activity is not shown.</MudText>
+                                    }
+                                }
+                            </ItemContent>
+                        </MudTimelineItem>
+                    }
+                </MudTimeline>
+            }
+
+            @if (_hasOlderEntries || _loadingOlder || _olderError is not null)
+            {
+                <section class="case-timeline__older" aria-label="Older case history">
+                    @if (_olderError is { } olderError)
+                    {
+                        <MudAlert Severity="Severity.Warning" Variant="Variant.Text" role="alert">@olderError</MudAlert>
+                    }
+                    <MudButton Variant="Variant.Outlined" Color="Color.Primary" Disabled="_loadingOlder"
+                               OnClick="LoadOlderAsync" aria-label="Load older case history">
+                        @(_loadingOlder ? "Loading older history…" : _olderError is null ? "Load older history" : "Retry loading older history")
+                    </MudButton>
+                </section>
+            }
+
+            <MudText Typo="Typo.caption" Color="Color.Secondary" Class="case-timeline__notice">
+                History entries stay as recorded. Sealed report details are protected.
+            </MudText>
+        }
+    }
+
+    @if (_selectedEntry is { } selected)
+    {
+        <MudDialog @bind-Visible="_detailsOpen"
+                   Options="@EventDetailsDialogOptions"
+                   Class="case-timeline__event-drawer"
+                   TitleClass="case-timeline__event-drawer-title"
+                   ContentClass="case-timeline__event-drawer-content">
+            <TitleContent>
+                <div class="case-timeline__drawer-heading">
+                    <div>
+                        <MudText Typo="Typo.overline" Color="Color.Secondary">History event</MudText>
+                        <MudText Typo="Typo.h6" HtmlTag="h2" id="case-history-event-drawer-title">@SafeEntryLabel(selected)</MudText>
+                    </div>
+                    <MudButton Variant="Variant.Text"
+                               Color="Color.Primary"
+                               StartIcon="@Icons.Material.Filled.Close"
+                               aria-label="Close event details"
+                               OnClick="CloseDetailsAsync">Close</MudButton>
+                </div>
+            </TitleContent>
+            <DialogContent>
+                <dl class="case-timeline__event-facts">
+                    <div>
+                        <dt>Recorded by</dt>
+                        <dd>@ActorLabel(selected)</dd>
+                    </div>
+                    <div>
+                        <dt>Recorded</dt>
+                        <dd><time datetime="@selected.RecordedAtUtc.ToString("O")">@selected.RecordedAtUtc.ToLocalTime().ToString("f")</time></dd>
+                    </div>
+                    @if (selected.OccurredAtUtc is { } occurredAt)
+                    {
+                        <div>
+                            <dt>Occurred</dt>
+                            <dd><time datetime="@occurredAt.ToString("O")">@occurredAt.ToLocalTime().ToString("f")</time></dd>
+                        </div>
+                    }
+                    <div>
+                        <dt>Event category</dt>
+                        <dd>@EventCategory(selected.EventType, selected.Kind)</dd>
+                    </div>
+                    <div>
+                        <dt>Case version</dt>
+                        <dd>@selected.AggregateVersion</dd>
+                    </div>
+                    <div>
+                        <dt>Report revision</dt>
+                        <dd>@selected.ReportRevision</dd>
+                    </div>
+                </dl>
+                <MudText Typo="Typo.caption" Color="Color.Secondary" Class="case-timeline__drawer-notice">
+                    This record is read-only. Sealed reasons and report content are not shown here.
+                </MudText>
+            </DialogContent>
+        </MudDialog>
+    }
+</section>
+
+@code {
+    private const string AllEventsFilter = "*";
+    private const string RelatedActivityFilter = "kind:derived";
+
+    private static readonly DialogOptions EventDetailsDialogOptions = new()
+    {
+        Position = DialogPosition.CenterRight,
+        MaxWidth = MaxWidth.Small,
+        FullWidth = true,
+        CloseOnEscapeKey = true,
+        BackdropClick = true
+    };
+
+    [Parameter, EditorRequired] public ICaseTimelineClient Client { get; set; } = null!;
+
+    [Parameter] public EventCallback<Guid> OnReviewFollowUp { get; set; }
+
+    [Parameter, EditorRequired] public Guid CaseId { get; set; }
+
+    [Parameter] public int? Limit { get; set; }
+
+    private bool _loading = true;
+    private long _timelineRequestGeneration;
+    private bool _unavailable;
+    private string? _error;
+    private CaseTimeline? _timeline;
+    private Guid _loadedCaseId = Guid.Empty;
+    private bool _hasOlderEntries;
+    private bool _loadingOlder;
+    private long? _olderThanAggregateVersion;
+    private string? _olderError;
+    private string _selectedEventType = AllEventsFilter;
+    private DateTime? _fromLocalDate;
+    private DateTime? _throughLocalDate;
+    private CaseTimelineEntry? _selectedEntry;
+    private bool _detailsOpen;
+    private IFollowUpRecommendationReviewClient? _reviewClient;
+    private IFollowUpRecommendationReviewClient? ReviewClient => _reviewClient ??= Services.GetService<IFollowUpRecommendationReviewClient>();
+    private Guid? _reviewingId;
+    private string? _reviewMessage;
+    private bool _reviewError;
+    private readonly Dictionary<Guid, Guid> _reviewCommandIds = [];
+
+    private IReadOnlyList<(string FilterValue, string Label)> EventTypeOptions
+    {
+        get
+        {
+            if (_timeline is null)
+            {
+                return Array.Empty<(string FilterValue, string Label)>();
+            }
+
+            var options = _timeline.Entries
+                .Where(entry => entry.Kind == CaseTimelineEntryKind.Authoritative)
+                .Select(entry => (FilterValue: entry.EventType, Label: SafeEventLabel(entry.EventType, entry.Kind)))
+                .DistinctBy(option => option.FilterValue, StringComparer.Ordinal)
+                .OrderBy(option => option.Label, StringComparer.CurrentCulture)
+                .ToList();
+
+            options.InsertRange(0,
+            [
+                (CaseTimelineEntryFilter.StaffActions, "User and officer actions"),
+                (CaseTimelineEntryFilter.EllaiActivity, "All Ellai activity"),
+                (CaseTimelineEntryFilter.EllaiEnrichment, "Ellai enrichment and quality"),
+                (CaseTimelineEntryFilter.EllaiFollowUp, "Ellai follow-ups"),
+                (CaseTimelineEntryFilter.Escalations, "Escalations")
+            ]);
+            if (_timeline.Entries.Any(entry => entry.Kind == CaseTimelineEntryKind.Derived))
+            {
+                options.Insert(0, (RelatedActivityFilter, "Related activity"));
+            }
+
+            return options;
+        }
+    }
+
+    private string? DateFilterError => _fromLocalDate is { } from && _throughLocalDate is { } through && from.Date > through.Date
+        ? "The start date must be on or before the end date."
+        : null;
+
+    private IReadOnlyList<CaseTimelineEntry> FilteredEntries => DateFilterError is null && _timeline is not null
+        ? CaseTimelineEntryFilter.Apply(_timeline.Entries, _selectedEventType, _fromLocalDate, _throughLocalDate)
+        : Array.Empty<CaseTimelineEntry>();
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (CaseId != Guid.Empty && CaseId != _loadedCaseId)
+        {
+            _loadedCaseId = CaseId;
+            _reviewCommandIds.Clear();
+            _reviewMessage = null;
+            _selectedEventType = AllEventsFilter;
+            _fromLocalDate = null;
+            _throughLocalDate = null;
+            _selectedEntry = null;
+            _detailsOpen = false;
+            await RefreshAsync();
+        }
+    }
+
+    private async Task RecordReviewAsync(Guid recommendationId)
+    {
+        if (_reviewingId is not null || CaseId == Guid.Empty || recommendationId == Guid.Empty) return;
+        var client = ReviewClient;
+        if (client is null) return;
+        var caseId = CaseId;
+        if (!_reviewCommandIds.TryGetValue(recommendationId, out var commandId))
+            _reviewCommandIds[recommendationId] = commandId = Guid.NewGuid();
+        _reviewingId = recommendationId;
+        _reviewMessage = null;
+        try
+        {
+            var result = await client.ReviewAsync(caseId, recommendationId, commandId);
+            if (CaseId != caseId) return;
+            _reviewError = result.Status is not (FollowUpReviewStatus.Recorded or FollowUpReviewStatus.Replayed or FollowUpReviewStatus.AlreadyReviewed);
+            _reviewMessage = result.Status switch
+            {
+                FollowUpReviewStatus.Recorded or FollowUpReviewStatus.Replayed => "Review recorded. No follow-up action was submitted.",
+                FollowUpReviewStatus.AlreadyReviewed => "A review was already recorded. No follow-up action was submitted.",
+                FollowUpReviewStatus.Stale => "This recommendation is no longer current. Refresh the follow-up before taking action.",
+                FollowUpReviewStatus.Denied => "The recommendation is unavailable or you cannot review it.",
+                FollowUpReviewStatus.Conflict => "The review request conflicted with an earlier request. Refresh before trying again.",
+                _ => "We couldn't confirm the review. Try again when connected."
+            };
+            if (result.Status != FollowUpReviewStatus.Unavailable) _reviewCommandIds.Remove(recommendationId);
+            if (result.Status != FollowUpReviewStatus.Unavailable) await RefreshAsync();
+        }
+        catch (Exception error) when (error is not OutOfMemoryException)
+        {
+            if (CaseId == caseId) { _reviewError = true; _reviewMessage = "We couldn't confirm the review. Try again when connected."; }
+        }
+        finally { _reviewingId = null; }
+    }
+
+    /// <summary>Reloads the timeline; called by hosting pages after a successful command.</summary>
+    public async Task RefreshAsync()
+    {
+        var requestGeneration = ++_timelineRequestGeneration;
+        var caseId = CaseId;
+        var client = Client;
+
+        _loadingOlder = false;
+        _timeline = null;
+        _hasOlderEntries = false;
+        _olderThanAggregateVersion = null;
+        _olderError = null;
+
+        if (client is null || caseId == Guid.Empty)
+        {
+            _loading = false;
+            _unavailable = false;
+            _error = null;
+            return;
+        }
+
+        _loading = true;
+        _unavailable = false;
+        _error = null;
+        try
+        {
+            var result = await client.GetAsync(caseId, PageSize);
+            if (requestGeneration != _timelineRequestGeneration || caseId != CaseId)
+            {
+                return;
+            }
+
+            if (result.Access == CaseTimelineAccess.Found && result.Timeline is not null)
+            {
+                if (result.Timeline.Header.CaseId != caseId || !HasValidPageMetadata(result.Timeline))
+                {
+                    _error = "The case history response was incomplete. Refresh the timeline and try again.";
+                    return;
+                }
+
+                _timeline = result.Timeline;
+                _hasOlderEntries = result.Timeline.HasOlderEntries;
+                _olderThanAggregateVersion = result.Timeline.OlderThanAggregateVersion;
+                _selectedEventType = AllEventsFilter;
+                _fromLocalDate = null;
+                _throughLocalDate = null;
+            }
+            else
+            {
+                _unavailable = true;
+            }
+        }
+        catch (Exception)
+        {
+            if (requestGeneration == _timelineRequestGeneration && caseId == CaseId)
+            {
+                _error = "The case history could not be loaded. Check your connection and try again.";
+            }
+        }
+        finally
+        {
+            if (requestGeneration == _timelineRequestGeneration)
+            {
+                _loading = false;
+            }
+        }
+    }
+
+    private int PageSize => Math.Clamp(Limit ?? 50, 1, 500);
+
+    private async Task LoadOlderAsync()
+    {
+        if (_loadingOlder || !_hasOlderEntries || _olderThanAggregateVersion is not { } cursor ||
+            Client is not { } client || _timeline is not { } currentTimeline || currentTimeline.Header.CaseId != CaseId)
+        {
+            return;
+        }
+
+        var requestGeneration = _timelineRequestGeneration;
+        var caseId = CaseId;
+        _loadingOlder = true;
+        _olderError = null;
+        try
+        {
+            var result = await client.GetAsync(caseId, PageSize, beforeAggregateVersion: cursor);
+            if (requestGeneration != _timelineRequestGeneration || caseId != CaseId)
+            {
+                return;
+            }
+
+            if (result.Access != CaseTimelineAccess.Found || result.Timeline is not { } olderPage || olderPage.Header.CaseId != caseId)
+            {
+                _timeline = null;
+                _unavailable = true;
+                _hasOlderEntries = false;
+                _olderThanAggregateVersion = null;
+                return;
+            }
+
+            if (!HasValidPageMetadata(olderPage) ||
+                (olderPage.OlderThanAggregateVersion is { } nextCursor && nextCursor >= cursor) ||
+                olderPage.Entries.Any(entry => entry.Kind == CaseTimelineEntryKind.Authoritative && entry.AggregateVersion >= cursor) ||
+                olderPage.Entries.Any(entry => currentTimeline.Entries.Any(current => current.EventId == entry.EventId)))
+            {
+                _olderError = "Older history could not be continued safely. Refresh the timeline and try again.";
+                return;
+            }
+
+            var mergedEntries = olderPage.Entries
+                .Concat(currentTimeline.Entries)
+                .OrderBy(entry => entry.RecordedAtUtc)
+                .ThenBy(entry => entry.AggregateVersion)
+                .ToArray();
+            _timeline = olderPage with { Entries = mergedEntries };
+            _hasOlderEntries = olderPage.HasOlderEntries;
+            _olderThanAggregateVersion = olderPage.OlderThanAggregateVersion;
+        }
+        catch (Exception)
+        {
+            if (requestGeneration == _timelineRequestGeneration && caseId == CaseId)
+            {
+                _olderError = "Older case history could not be loaded. Check your connection and try again.";
+            }
+        }
+        finally
+        {
+            if (requestGeneration == _timelineRequestGeneration)
+            {
+                _loadingOlder = false;
+            }
+        }
+    }
+
+    private static bool HasValidPageMetadata(CaseTimeline timeline)
+    {
+        if (timeline.HasOlderEntries != timeline.OlderThanAggregateVersion.HasValue)
+        {
+            return false;
+        }
+
+        if (!timeline.HasOlderEntries)
+        {
+            return true;
+        }
+
+        var authoritativeVersions = timeline.Entries
+            .Where(entry => entry.Kind == CaseTimelineEntryKind.Authoritative)
+            .Select(entry => entry.AggregateVersion)
+            .ToArray();
+        return timeline.OlderThanAggregateVersion is { } cursor && cursor > 0 &&
+            authoritativeVersions.Length > 0 &&
+            authoritativeVersions.Min() == cursor;
+    }
+
+    private Task SetEventFilterAsync(string? eventType)
+    {
+        _selectedEventType = string.IsNullOrWhiteSpace(eventType) ? AllEventsFilter : eventType;
+        return Task.CompletedTask;
+    }
+
+    private void ClearFilters()
+    {
+        _selectedEventType = AllEventsFilter;
+        _fromLocalDate = null;
+        _throughLocalDate = null;
+    }
+
+    private void OpenDetails(CaseTimelineEntry entry)
+    {
+        _selectedEntry = entry;
+        _detailsOpen = true;
+    }
+
+    private Task CloseDetailsAsync()
+    {
+        _detailsOpen = false;
+        _selectedEntry = null;
+        return Task.CompletedTask;
+    }
+
+    private static Color DotColor(CaseTimelineEntry entry) => entry.Kind switch
+    {
+        CaseTimelineEntryKind.Derived => Color.Info,
+        _ => entry.EventType switch
+        {
+            "CaseResolved" => Color.Success,
+            "CaseReopened" => Color.Warning,
+            _ => Color.Primary
+        }
+    };
+
+    private static string ActorLabel(CaseTimelineEntry entry) =>
+        entry.SafeActorDisplayLabel ?? "Attribution unavailable";
+
+    private static string SafeEntryLabel(CaseTimelineEntry entry) =>
+        string.IsNullOrWhiteSpace(entry.Label) ? SafeEventLabel(entry.EventType, entry.Kind) : entry.Label;
+
+    private static string EventCategory(string? eventType, CaseTimelineEntryKind kind)
+    {
+        if (kind == CaseTimelineEntryKind.Derived)
+        {
+            return "Related activity";
+        }
+
+        return eventType switch
+        {
+            "CaseCreated" or "CaseReported" or "ReportCorrected" => "Reporting",
+            "CaseResolved" or "CaseReopened" => "Case status",
+            "CaseObservationRecorded" => "Observation",
+            "CaseFollowUpScheduled" or "CaseFollowUpAcknowledged" or "CaseFollowUpOutcomeRecorded" => "Follow-up",
+            "ActionOwnerChanged" => "Action ownership",
+            "AssistanceRequested" or "AssistanceAccepted" or "AssistanceProgressRecorded" or
+                "AssistanceProvided" or "AssistanceReceiptConfirmed" or "AssistanceUnfulfilled" or
+                "AssistanceCancelled" => "Assistance",
+            "CaseActionRequested" or "CaseActionRequestReviewed" => "Action review",
+            "CaseEscalationRaised" or "CaseEscalationAcknowledged" or "CaseEscalationActionRecorded" or "CaseEscalationClosed" => "Escalation",
+            _ => "Case activity"
+        };
+    }
+
+    private static string SafeEventLabel(string? eventType, CaseTimelineEntryKind kind)
+    {
+        if (kind == CaseTimelineEntryKind.Derived)
+        {
+            return "Related activity";
+        }
+
+        return eventType switch
+        {
+            "CaseCreated" => "Case opened",
+            "CaseReported" => "Report received",
+            "CaseResolved" => "Case resolved",
+            "CaseReopened" => "Case reopened",
+            "ReportCorrected" => "Report details updated",
+            "CaseObservationRecorded" => "Observation recorded",
+            "CaseFollowUpScheduled" => "Follow-up scheduled",
+            "CaseFollowUpAcknowledged" => "Follow-up acknowledged",
+            "CaseFollowUpOutcomeRecorded" => "Follow-up updated",
+            "ActionOwnerChanged" => "Action owner changed",
+            "AssistanceRequested" => "Assistance requested",
+            "AssistanceAccepted" => "Assistance responsibility accepted",
+            "AssistanceProgressRecorded" => "Assistance progress recorded",
+            "AssistanceProvided" => "Assistance provided; receipt unconfirmed",
+            "AssistanceReceiptConfirmed" => "Assistance receipt confirmed",
+            "AssistanceUnfulfilled" => "Assistance not fulfilled",
+            "AssistanceCancelled" => "Assistance request cancelled",
+            "CaseActionRequested" => "Action review requested",
+            "CaseActionRequestReviewed" => "Action review completed",
+            "CaseEscalationRaised" => "Escalation raised",
+            "CaseEscalationAcknowledged" => "Escalation acknowledged",
+            "CaseEscalationActionRecorded" => "Escalation action recorded",
+            "CaseEscalationClosed" => "Escalation closed",
+            _ => "Case activity recorded"
+        };
+    }
+}

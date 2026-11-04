@@ -1,0 +1,276 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://swiftaid.online/contracts/intake/intake-submission.v1.schema.json",
+  "title": "SwiftAid public intake submission v1",
+  "description": "Client-side shape for account-free reports. The server re-validates every rule; ordinal cross-object equality (occurrence country vs location), UTC-offset/zone consistency, approximate range ordering, and audio policy gating are enforced server-side and noted per property.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "clientSubmissionId",
+    "subjectScope",
+    "observations",
+    "originalAudioAttachmentIds",
+    "capturedAt",
+    "occurrence",
+    "location",
+    "confirmations"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "clientSubmissionId": { "$ref": "#/$defs/nonNilUuid" },
+    "subjectScope": { "enum": ["human", "individual", "herd", "flock", "otherGroup"] },
+    "narrative": { "type": ["string", "null"], "maxLength": 6000, "pattern": "^(?!\\s)(.*\\S)?$" },
+    "observations": {
+      "type": "array",
+      "maxItems": 32,
+      "items": { "type": "string", "minLength": 1, "maxLength": 300, "pattern": "^(?!\\s)(.*\\S)$" }
+    },
+    "originalAudioAttachmentIds": {
+      "type": "array",
+      "maxItems": 2,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/nonNilUuid" }
+    },
+    "capturedAt": { "$ref": "#/$defs/reportedTime" },
+    "occurrence": { "$ref": "#/$defs/reportedTime" },
+    "location": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["countryCode", "region", "area", "locality", "source", "precision", "catalogueVersion"],
+      "properties": {
+        "countryCode": { "type": "string", "pattern": "^[A-Z]{2}$" },
+        "region": { "$ref": "#/$defs/place" },
+        "area": { "$ref": "#/$defs/place" },
+        "locality": { "$ref": "#/$defs/place" },
+        "latitude": { "type": ["number", "null"], "minimum": -90, "maximum": 90 },
+        "longitude": { "type": ["number", "null"], "minimum": -180, "maximum": 180 },
+        "accuracyMetres": { "type": ["number", "null"], "exclusiveMinimum": 0, "maximum": 100000 },
+        "source": { "enum": ["reporter", "device", "geocoder"] },
+        "precision": { "enum": ["exact", "approximate", "unknown"] },
+        "catalogueVersion": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "\\S" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "latitude": { "type": "number" } }, "required": ["latitude"] },
+          "then": {
+            "required": ["longitude", "accuracyMetres"],
+            "properties": {
+              "longitude": { "type": "number" },
+              "accuracyMetres": { "type": "number" },
+              "precision": { "not": { "const": "unknown" } }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "longitude": { "type": "number" } }, "required": ["longitude"] },
+          "then": { "required": ["latitude"] }
+        },
+        {
+          "if": { "properties": { "accuracyMetres": { "type": "number" } }, "required": ["accuracyMetres"] },
+          "then": { "required": ["latitude", "longitude"] }
+        },
+        {
+          "if": { "properties": {"source": { "const": "device" } } },
+          "then": { "required": ["latitude", "longitude"] }
+        },
+        {
+          "if": { "properties": {"precision": { "const": "exact" } } },
+          "then": { "required": ["latitude", "longitude"] }
+        }
+      ]
+    },
+    "confirmations": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reportReviewConfirmed", "occurrenceCountryCode", "occurrenceCountryCatalogueVersion",
+        "occurrenceCountryConfirmed", "processingConfirmed", "processingPolicyReference",
+        "processingPolicyVersion", "recordingConfirmed", "recordingPolicyReference", "recordingPolicyVersion"
+      ],
+      "properties": {
+        "reportReviewConfirmed": { "const": true },
+        "occurrenceCountryCode": {
+          "type": "string",
+          "pattern": "^[A-Z]{2}$",
+          "description": "Must equal location.countryCode by ordinal comparison; enforced server-side."
+        },
+        "occurrenceCountryCatalogueVersion": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "\\S",
+          "description": "Must equal location.catalogueVersion by ordinal comparison; enforced server-side."
+        },
+        "occurrenceCountryConfirmed": { "const": true },
+        "processingConfirmed": { "const": true },
+        "processingPolicyReference": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "\\S" },
+        "processingPolicyVersion": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "\\S" },
+        "recordingConfirmed": { "type": ["boolean", "null"] },
+        "recordingPolicyReference": { "type": ["string", "null"], "maxLength": 128 },
+        "recordingPolicyVersion": { "type": ["string", "null"], "maxLength": 64 }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "description": "An empty report carries no facts: at least one of a non-blank narrative, one observation, or one audio attachment is required.",
+      "anyOf": [
+        { "properties": { "narrative": { "type": "string", "pattern": "\\S" } } },
+        { "properties": { "observations": { "minItems": 1 } } },
+        { "properties": { "originalAudioAttachmentIds": { "minItems": 1 } } }
+      ]
+    },
+    {
+      "description": "Recording consent follows the audio payload: audio requires confirmed consent with policy references; no audio requires all recording fields to be absent.",
+      "if": { "properties": { "originalAudioAttachmentIds": { "minItems": 1 } }, "required": ["originalAudioAttachmentIds"] },
+      "then": {
+        "properties": {
+          "confirmations": {
+            "properties": {
+              "recordingConfirmed": { "const": true },
+              "recordingPolicyReference": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "\\S" },
+              "recordingPolicyVersion": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "\\S" }
+            }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "confirmations": {
+            "properties": {
+              "recordingConfirmed": { "const": null },
+              "recordingPolicyReference": { "const": null },
+              "recordingPolicyVersion": { "const": null }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "nonNilUuid": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^(?![0]{8}-[0]{4}-[0]{4}-[0]{4}-[0]{12}$)[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    },
+    "place": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reportedName", "normalizedId", "presence"],
+      "properties": {
+        "reportedName": { "type": ["string", "null"], "maxLength": 200 },
+        "normalizedId": { "type": ["string", "null"], "maxLength": 128 },
+        "presence": { "enum": ["known", "unknown", "notRecorded", "notApplicable", "absent"] }
+      },
+      "allOf": [
+        {
+          "description": "A place marked known must carry at least one non-blank identifier.",
+          "if": { "properties": { "presence": { "const": "known" } } },
+          "then": {
+            "anyOf": [
+              { "properties": { "reportedName": { "type": "string", "pattern": "\\S" } } },
+              { "properties": { "normalizedId": { "type": "string", "pattern": "\\S" } } }
+            ]
+          }
+        }
+      ]
+    },
+    "reportedTime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value", "localDate", "rangeStart", "rangeEnd", "originalOffset", "zoneId", "precision"],
+      "properties": {
+        "value": { "type": ["string", "null"], "format": "date-time" },
+        "localDate": { "type": ["string", "null"], "format": "date" },
+        "rangeStart": { "type": ["string", "null"], "format": "date" },
+        "rangeEnd": { "type": ["string", "null"], "format": "date" },
+        "originalOffset": {
+          "type": ["string", "null"],
+          "maxLength": 16,
+          "pattern": "^(?:[+-](?:0\\d|1[0-3]):[0-5]\\d|[+-]14:00)$",
+          "description": "±HH:mm within ±14:00. Offset/zone consistency and zone existence are enforced server-side."
+        },
+        "zoneId": {
+          "type": ["string", "null"],
+          "maxLength": 128,
+          "pattern": "\\S",
+          "description": "Blank zone identifiers are rejected; existence is enforced server-side."
+        },
+        "precision": { "enum": ["exact", "dateOnly", "approximate", "unknown"] }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "precision": { "const": "exact" } } },
+          "then": {
+            "required": ["value"],
+            "properties": {
+              "value": { "type": "string", "format": "date-time" },
+              "localDate": { "const": null },
+              "rangeStart": { "const": null },
+              "rangeEnd": { "const": null }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "precision": { "const": "dateOnly" } } },
+          "then": {
+            "required": ["localDate"],
+            "properties": {
+              "localDate": { "type": "string", "format": "date" },
+              "value": { "const": null },
+              "rangeStart": { "const": null },
+              "rangeEnd": { "const": null }
+            }
+          }
+        },
+        {
+          "description": "Approximate time is one instant, one local date, or one complete ordered range; range ordering is enforced server-side.",
+          "if": { "properties": { "precision": { "const": "approximate" } } },
+          "then": {
+            "oneOf": [
+              {
+                "required": ["value"],
+                "properties": {
+                  "value": { "type": "string", "format": "date-time" },
+                  "localDate": { "const": null },
+                  "rangeStart": { "const": null },
+                  "rangeEnd": { "const": null }
+                }
+              },
+              {
+                "required": ["localDate"],
+                "properties": {
+                  "localDate": { "type": "string", "format": "date" },
+                  "value": { "const": null },
+                  "rangeStart": { "const": null },
+                  "rangeEnd": { "const": null }
+                }
+              },
+              {
+                "required": ["rangeStart", "rangeEnd"],
+                "properties": {
+                  "rangeStart": { "type": "string", "format": "date" },
+                  "rangeEnd": { "type": "string", "format": "date" },
+                  "value": { "const": null },
+                  "localDate": { "const": null }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "if": { "properties": { "precision": { "const": "unknown" } } },
+          "then": {
+            "properties": {
+              "value": { "const": null },
+              "localDate": { "const": null },
+              "rangeStart": { "const": null },
+              "rangeEnd": { "const": null }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,29 @@
+@page "/case/{CaseId:guid}"
+@using SwiftAid.UI.Components.Surfaces.Operations.CaseDetail
+@using SwiftAid.UI.Components.Theme
+@inject NavigationManager Navigation
+
+<SwiftAidThemeProvider />
+<MudPopoverProvider />
+<main>
+    <h1>Case tab navigation synthetic fixture</h1>
+    @foreach (var tab in new[] { "overview", "history", "follow-ups", "assistance", "discussion", "attachments", "observations" })
+    {
+        <button disabled="@(!_interactiveReady)" @onclick="() => Select(tab)">Select @tab through route</button>
+    }
+    <OperationsCaseDetailSurface CaseId="CaseId" OverviewData="_overview" />
+</main>
+
+@code {
+    [Parameter] public Guid CaseId { get; set; }
+    private bool _interactiveReady;
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (firstRender) { _interactiveReady = true; StateHasChanged(); }
+    }
+    private readonly CaseDetailOverviewView _overview = new(CaseDetailPanelState.Populated,
+        new(Guid.Parse("6d8cbf50-47f6-4b39-9ad8-7c2324401679"), "SYNTHETIC-PRIVATE-REFERENCE", CaseDetailSubjectType.Human,
+            "SYNTHETIC-PRIVATE-NARRATIVE", "Not classified", "Open", "Routine", "Eswatini", "Synthetic locality", null,
+            DateTimeOffset.UtcNow, DateTimeOffset.UtcNow));
+    private void Select(string tab) => Navigation.NavigateTo(Navigation.GetUriWithQueryParameter("tab", tab));
+}

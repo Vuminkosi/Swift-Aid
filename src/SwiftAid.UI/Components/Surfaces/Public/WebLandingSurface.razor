@@ -1,0 +1,164 @@
+@using SwiftAid.UI.Components
+@using Microsoft.AspNetCore.Components.Web
+
+<PageTitle>SwiftAid | AI-Powered Community Disease Surveillance</PageTitle>
+<HeadContent>
+    <meta name="description" content="SwiftAid connects community health reporting, AI assistance and accountable case follow-through for frontline teams in Zimbabwe and Eswatini." />
+    <meta property="og:title" content="SwiftAid | AI-Powered Community Disease Surveillance" />
+    <meta property="og:description" content="Give every community a voice. Report concerns, keep evidence connected and coordinate follow-through with SwiftAid." />
+</HeadContent>
+
+@code {
+    [Parameter]
+    public bool IsSignedIn { get; set; }
+}
+
+<div class="web-landing">
+    <section class="web-landing__hero" aria-labelledby="web-landing-title">
+        <div class="web-landing__hero-copy">
+            <p class="web-landing__eyebrow">Community health, connected</p>
+            <h1 id="web-landing-title">Healthier people.<br />Safer communities.<br /><span>Brighter tomorrows.</span></h1>
+            <p class="web-landing__lead">
+                Turn community reports into early-warning intelligence. SwiftAid brings
+                offline reporting, AI assistance and connected surveillance to frontline
+                teams in Zimbabwe and Eswatini—so every community can be heard and every
+                emerging pattern can receive attention.
+            </p>
+            <div class="web-landing__actions" aria-label="Get started">
+                <a class="web-landing__button web-landing__button--primary" href="/report">Report a concern</a>
+                <a class="web-landing__button web-landing__button--secondary" href="#how-swiftaid-works">Explore SwiftAid</a>
+            </div>
+            <p class="web-landing__access-note">You can report without signing in. Unknown details can stay unknown.</p>
+        </div>
+
+        <div class="web-landing__hero-art" aria-hidden="true">
+            <div class="web-landing__art-orbit web-landing__art-orbit--outer"></div>
+            <div class="web-landing__art-orbit web-landing__art-orbit--inner"></div>
+            <div class="web-landing__art-core"><MudIcon Icon="@Icons.Material.Filled.VolunteerActivism" /></div>
+            <div class="web-landing__art-node web-landing__art-node--people"><MudIcon Icon="@Icons.Material.Filled.Groups" /></div>
+            <div class="web-landing__art-node web-landing__art-node--animal"><MudIcon Icon="@Icons.Material.Filled.Pets" /></div>
+            <div class="web-landing__art-node web-landing__art-node--community"><MudIcon Icon="@Icons.Material.Filled.EventAvailable" /></div>
+            <div class="web-landing__art-caption">People · Animals · Communities</div>
+        </div>
+    </section>
+
+    <section class="web-landing__intro" aria-labelledby="what-is-swiftaid-title">
+        <div>
+            <p class="web-landing__eyebrow">What SwiftAid is about</p>
+            <h2 id="what-is-swiftaid-title">See the pattern. Connect the response.</h2>
+        </div>
+        <p>
+            A concern in one village can be the first sign of a wider problem.
+            SwiftAid connects reports across place and time, brings the evidence into
+            focus, and gives authorized teams a shared foundation for investigation
+            and follow-up. Local knowledge becomes a stronger voice in public health.
+        </p>
+    </section>
+
+    <section id="how-swiftaid-works" class="web-landing__features" aria-label="How SwiftAid supports communities">
+        <article class="web-landing__feature">
+            <span class="web-landing__feature-icon" aria-hidden="true"><MudIcon Icon="@Icons.Material.Filled.AssignmentTurnedIn" /></span>
+            <p class="web-landing__feature-label">For authorized teams</p>
+            <h3>Manage cases</h3>
+            <p>Keep assigned cases, follow-ups and supporting evidence in one place.</p>
+            @if (IsSignedIn)
+            {
+                <a href="/dashboard">Open your workspace <span aria-hidden="true">→</span></a>
+            }
+            else
+            {
+                <a href="/sign-in?returnUrl=%2Fdashboard">Sign in to your workspace <span aria-hidden="true">→</span></a>
+            }
+        </article>
+        <article class="web-landing__feature">
+            <span class="web-landing__feature-icon" aria-hidden="true"><MudIcon Icon="@Icons.Material.Filled.MenuBook" /></span>
+            <p class="web-landing__feature-label">For shared learning</p>
+            <h3>Educate communities</h3>
+            <p>Browse source-linked reference materials and understand how to use SwiftAid.</p>
+            <a href="/education">Explore the reference library <span aria-hidden="true">→</span></a>
+        </article>
+        <article class="web-landing__feature">
+            <span class="web-landing__feature-icon" aria-hidden="true"><MudIcon Icon="@Icons.Material.Filled.Pets" /></span>
+            <p class="web-landing__feature-label">One Health</p>
+            <h3>People and animals</h3>
+            <p>Share a concern about a person or an animal through the same guided report flow.</p>
+            <a href="/report">Start a report <span aria-hidden="true">→</span></a>
+        </article>
+    </section>
+
+    <section class="web-landing__journey" aria-labelledby="how-it-works-title">
+        <div class="web-landing__journey-heading">
+            <p class="web-landing__eyebrow">A clear path forward</p>
+            <h2 id="how-it-works-title">From concern to follow-through.</h2>
+            <p>SwiftAid keeps each step and its status clear.</p>
+        </div>
+        <ol class="web-landing__steps">
+            <li><span>01</span><div><h3>Share what was observed</h3><p>Use the guided report and leave uncertain details blank.</p></div></li>
+            <li><span>02</span><div><h3>Keep moving, even offline</h3><p>Save reports on your device and send them when connectivity returns.</p></div></li>
+            <li><span>03</span><div><h3>Turn reports into follow-through</h3><p>Receive confirmation, connect the evidence, and bring emerging patterns to the right teams.</p></div></li>
+        </ol>
+    </section>
+
+    <PlatformArchitecture />
+
+    <section id="meta-models" class="web-landing__models" aria-labelledby="meta-models-title">
+        <div class="web-landing__models-heading">
+            <p class="web-landing__eyebrow">Meta models &amp; voice technology</p>
+            <h2 id="meta-models-title">Speak. Understand. Follow through.</h2>
+            <p>Different models do different jobs: conversation, speech, report analysis and translation. Each result stays connected to its source and the access of the person using it.</p>
+        </div>
+        <div class="web-landing__model-list">
+            <article>
+                <span class="web-landing__model-number" aria-hidden="true">01</span>
+                <div><h3>Muse Voice Transcribe</h3><p>Turns spoken words into text for Ellai, making voice another way to ask a question or describe an observation.</p></div>
+            </article>
+            <article>
+                <span class="web-landing__model-number" aria-hidden="true">02</span>
+                <div><h3>Muse Spark</h3><p>Helps Ellai understand a request, find information you are allowed to see, and explain the next step. Actions that need your approval still wait for it.</p></div>
+            </article>
+            <article>
+                <span class="web-landing__model-number" aria-hidden="true">03</span>
+                <div><h3>MMS-TTS</h3><p>Brings Ellai's replies to life in Shona, Nyanja and Tsonga, making spoken information more accessible to the communities SwiftAid serves.</p></div>
+            </article>
+            <article>
+                <span class="web-landing__model-number" aria-hidden="true">04</span>
+                <div><h3>BART Large MNLI</h3><p>Helps organize English case reports by reported symptoms and exposures, such as respiratory symptoms or contact with water. Health workers can review these patterns alongside the original report in case details. The labels describe what was reported; they do not establish a diagnosis or confirm an outbreak.</p></div>
+            </article>
+            <article>
+                <span class="web-landing__model-number" aria-hidden="true">05</span>
+                <div><h3>NLLB-200</h3><p>Connects English and local-language reporting through translation. Original wording stays alongside the translation, giving reviewers the context they need to check meaning before using it in report analysis.</p></div>
+            </article>
+            <article>
+                <span class="web-landing__model-number" aria-hidden="true">06</span>
+                <div><h3>MMS-ASR</h3><p>Adds Shona, Nyanja and Tsonga speech recognition to SwiftAid's language tools, helping spoken observations become text that can be reviewed and understood.</p></div>
+            </article>
+        </div>
+        <aside class="web-landing__voice-support" aria-labelledby="kokoro-title">
+            <h3 id="kokoro-title">Kokoro · English speech</h3>
+            <p>Gives Ellai a clear, calm English voice. Hear replies and brief updates as Ellai helps you find information and take the next step. English with Heart is the default.</p>
+        </aside>
+        <aside class="web-landing__voice-support" aria-labelledby="silero-title">
+            <h3 id="silero-title">Silero · Supporting natural voice turns</h3>
+            <p>Alongside Meta's speech models, Silero helps Ellai recognize speech and pauses, so spoken requests can be organized into conversational turns.</p>
+        </aside>
+        <div class="web-landing__models-footer">
+            <p>Speak with Ellai in English, or type when talking isn't convenient. Keep report drafts on your device and send them when you're connected.</p>
+            <a class="web-landing__button web-landing__button--secondary" href="https://github.com/Vuminkosi/Swift-Aid">Explore SwiftAid on GitHub <span aria-hidden="true">&nbsp;↗</span></a>
+        </div>
+        <p class="web-landing__model-notice"><a href="https://huggingface.co/hexgrad/Kokoro-82M">Kokoro English voice</a> · Apache-2.0. MMS voices by Meta AI · <a href="https://creativecommons.org/licenses/by-nc/4.0/">CC BY-NC 4.0</a> · Noncommercial use.</p>
+    </section>
+
+    <section class="web-landing__community" aria-labelledby="community-title">
+        <div>
+            <p class="web-landing__eyebrow">Learn and connect</p>
+            <h2 id="community-title">Community is part of the work.</h2>
+            <p>Browse published community sessions and see what is available to you.</p>
+        </div>
+        <a class="web-landing__button web-landing__button--light" href="/sessions">Explore Community</a>
+    </section>
+
+    <aside class="web-landing__boundary" aria-label="Service boundary">
+        <MudIcon Icon="@Icons.Material.Filled.Info" aria-hidden="true" />
+        <p>SwiftAid records and supports community workflows. It does not provide medical or veterinary diagnosis, treatment, or emergency dispatch.</p>
+    </aside>
+</div>

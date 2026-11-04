@@ -1,0 +1,21 @@
+<section class="swiftaid-settings-group" aria-labelledby="@HeadingId">
+    <MudText Typo="Typo.subtitle2" Color="Color.Secondary" HtmlTag="h2" id="@HeadingId"
+             Class="swiftaid-settings-group__label">@Label</MudText>
+    <ul class="swiftaid-settings-group__rows">
+        @ChildContent
+    </ul>
+</section>
+
+@code {
+    /// <summary>Sentence-case group label, for example "Workspace".</summary>
+    [Parameter, EditorRequired]
+    public string Label { get; set; } = string.Empty;
+
+    /// <summary>Unique heading id used by the section landmark.</summary>
+    [Parameter, EditorRequired]
+    public string HeadingId { get; set; } = string.Empty;
+
+    /// <summary>Row content, normally <see cref="SwiftAidSettingsRow" /> items.</summary>
+    [Parameter]
+    public RenderFragment? ChildContent { get; set; }
+}

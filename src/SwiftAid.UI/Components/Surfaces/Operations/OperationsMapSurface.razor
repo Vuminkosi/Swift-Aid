@@ -1,0 +1,310 @@
+@using SwiftAid.Contracts.Ellai
+@implements IEllaiUiContextProvider
+<SwiftAid.UI.Ellai.Guidance.EllaiSemanticContext Provider="this" />
+@using System.Globalization
+@using SwiftAid.UI.Components.Theme
+@using SwiftAid.Contracts.Surveillance
+
+<section class="operations-map @(CompactPreview ? "operations-map--compact" : string.Empty)"
+         aria-labelledby="@(CompactPreview ? null : "operations-map-title")"
+         aria-label="@(CompactPreview ? Title : null)">
+    @if (!CompactPreview)
+    {
+    <header class="operations-map__header">
+        <div>
+            <MudText Typo="Typo.overline" Color="Color.Secondary">@Eyebrow</MudText>
+            <MudText Typo="Typo.h4" HtmlTag="@HeadingTag" id="operations-map-title" data-ellai-control="surveillance-map.overview" data-bonboarding-anchor="ellai-map-overview">@Title</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">@Description</MudText>
+        </div>
+        @if (OnRetry.HasDelegate)
+        {
+            <MudIconButton Icon="@Icons.Material.Filled.Refresh" Color="Color.Primary" OnClick="OnRetry" aria-label="Refresh map totals" data-ellai-control="surveillance-map.refresh" data-bonboarding-anchor="ellai-map-refresh" />
+        }
+    </header>
+    }
+
+    @if (FilterContent is not null)
+    {
+        <div class="operations-map__filters" data-ellai-control="surveillance-map.filters" data-bonboarding-anchor="ellai-map-filters" role="group" aria-label="Map filters">@FilterContent</div>
+    }
+
+    @if (State is not (OperationsSurfaceState.Populated or OperationsSurfaceState.Empty))
+    {
+        <SwiftAidStatePanel State="State.ToSwiftAidViewState()" Title="@StateTitle" Description="@StateDescription" OnRetry="OnRetry" />
+    }
+    else if (Areas.Count == 0)
+    {
+        <OperationsStreetMap Country="@(FocusCountry ?? "SZ")" Points="@(Details?.Points ?? [])" Focus="Focus"
+                             @bind-ShowHuman="_showHuman" @bind-ShowAnimal="_showAnimal" />
+        <SwiftAidStatePanel State="SwiftAidViewState.Empty" Title="No area totals" Description="No area totals are available for these filters." />
+    }
+    else
+    {
+        <section class="operations-map__geography"
+                 aria-labelledby="@(CompactPreview ? null : "aggregate-map-heading")"
+                 aria-label="@(CompactPreview ? "Country totals map" : null)">
+            <div class="operations-map__geography-heading">
+                <div>
+                    @if (!CompactPreview)
+                    {
+                        <MudText Typo="Typo.subtitle1" HtmlTag="h2" id="aggregate-map-heading">Map of reported cases</MudText>
+                    }
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">Report markers group cases at public place references. Small groups are withheld.</MudText>
+                </div>
+            </div>
+
+            <OperationsStreetMap Country="@(FocusCountry ?? "SZ")" Points="@(Details?.Points ?? [])"
+                                 @bind-ShowHuman="_showHuman" @bind-ShowAnimal="_showAnimal" Focus="Focus" />
+
+            @if (!CompactPreview && SelectedArea is not null)
+            {
+                <div class="operations-map__selection" role="status" aria-live="polite" aria-atomic="true">
+                    <MudText Typo="Typo.subtitle2">@DisplayAreaLabel(SelectedArea.AreaLabel)</MudText>
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">@PrecisionLabel(SelectedArea.Precision) · as of @SelectedArea.AsOfUtc.ToLocalTime().ToString("g", CultureInfo.CurrentCulture)</MudText>
+                    @if (SelectedArea.IsSuppressed)
+                    {
+                        <MudText Typo="Typo.body2">Numbers are withheld to protect privacy.</MudText>
+                    }
+                    else
+                    {
+                        @if (_showHuman)
+                        {
+                            <MudText Typo="Typo.body2">Human reports: @FormatCount(SelectedArea.HumanCount)</MudText>
+                        }
+                        @if (_showAnimal)
+                        {
+                            <MudText Typo="Typo.body2">Animal reports: @FormatCount(SelectedArea.AnimalCount)</MudText>
+                        }
+                        @if (SelectedArea.Denominator.HasValue)
+                        {
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">Total reports: @SelectedArea.Denominator.Value</MudText>
+                        }
+                    }
+                </div>
+            }
+        </section>
+
+        @if (!CompactPreview)
+        {
+            <section class="operations-map__signals" aria-labelledby="map-signals-heading">
+                <h2 id="map-signals-heading">Recent signals</h2>
+                @if (DetailsLoading) { <MudProgressLinear Indeterminate="true" aria-label="Loading mapped reports and signals" /> }
+                else if (Details is null) { <p>Signal details could not be loaded.</p> }
+                else if (Details.Signals.Count == 0) { <p>No signals to review for this view.</p> }
+                @if (Details is not null)
+                {
+                    <div class="operations-map__signal-list">
+                        @foreach (var signal in Details.Signals)
+                        {
+                            <article class="operations-map__signal">
+                                <MudLink Href="@signal.CaseHref">@signal.Label</MudLink>
+                                <small>@signal.Area · @signal.Reports reports · @signal.FromUtc.ToString("dd MMM")–@signal.ToUtc.ToString("dd MMM")</small>
+                                <span>@signal.State · Requires human review</span>
+                            </article>
+                        }
+                    </div>
+                    @if (Details.Truncated) { <small>Mapped report groups cover the latest 500 cases available to you.</small> }
+                    @if (Details.UnmappedReports > 0) { <small>Some reports are not mapped because their location is unavailable or their group is too small.</small> }
+                }
+            </section>
+        }
+
+        <section class="operations-map__data" aria-labelledby="area-totals-table-title">
+            <MudText Typo="Typo.subtitle1" HtmlTag="h2" id="area-totals-table-title">Area totals</MudText>
+            @if (CompactPreview)
+            {
+                <div class="operations-map__compact-totals" role="list" aria-label="Area totals">
+                    @foreach (var area in Areas.Take(3))
+                    {
+                        <div class="operations-map__compact-total" role="listitem" @key="area.AreaCode">
+                            <MudText Typo="Typo.body2">@DisplayAreaLabel(area.AreaLabel)</MudText>
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                @if (area.IsSuppressed)
+                                {
+                                    <span>Values withheld</span>
+                                }
+                                else
+                                {
+                                    <span>@PrecisionLabel(area.Precision) · @DisplayCount(area.Denominator, false) reports</span>
+                                }
+                            </MudText>
+                        </div>
+                    }
+                </div>
+            }
+            else
+            {
+            <MudHidden Breakpoint="Breakpoint.SmAndDown">
+                <MudTable Class="operations-map__totals-table" Items="Areas" Dense="true" Hover="true" aria-label="Area totals by location">
+                    <HeaderContent>
+                        <MudTh>Area</MudTh><MudTh>Area level</MudTh><MudTh>Human reports</MudTh><MudTh>Animal reports</MudTh><MudTh>Total reports</MudTh><MudTh>As of</MudTh>
+                    </HeaderContent>
+                    <RowTemplate>
+                        <MudTd DataLabel="Area">@DisplayAreaLabel(context.AreaLabel)</MudTd>
+                        <MudTd DataLabel="Area level">@PrecisionLabel(context.Precision)</MudTd>
+                        <MudTd DataLabel="Human reports">@DisplayCount(context.HumanCount, context.IsSuppressed)</MudTd>
+                        <MudTd DataLabel="Animal reports">@DisplayCount(context.AnimalCount, context.IsSuppressed)</MudTd>
+                        <MudTd DataLabel="Total reports">@DisplayCount(context.Denominator, context.IsSuppressed)</MudTd>
+                        <MudTd DataLabel="As of">@context.AsOfUtc.ToLocalTime().ToString("g", CultureInfo.CurrentCulture)</MudTd>
+                    </RowTemplate>
+                    <PagerContent><MudTablePager PageSizeOptions="new int[] { 10, 25, 50 }" /></PagerContent>
+                </MudTable>
+            </MudHidden>
+            <MudHidden Breakpoint="Breakpoint.SmAndDown" Invert="true">
+                <div class="operations-map__mobile-table" role="list" aria-label="Area totals by location">
+                    @foreach (var area in Areas)
+                    {
+                        <article class="operations-map__mobile-row" role="listitem" @key="area.AreaCode">
+                            <div class="operations-map__mobile-heading">
+                                <MudText Typo="Typo.body2">@DisplayAreaLabel(area.AreaLabel)</MudText>
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">@PrecisionLabel(area.Precision)</MudText>
+                            </div>
+                            @if (area.IsSuppressed)
+                            {
+                                <MudText Typo="Typo.caption">Values withheld to protect privacy.</MudText>
+                            }
+                            else
+                            {
+                                <MudText Typo="Typo.caption">Human: @FormatCount(area.HumanCount) · Animal: @FormatCount(area.AnimalCount)</MudText>
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">Total reports: @DisplayCount(area.Denominator, false)</MudText>
+                            }
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">As of @area.AsOfUtc.ToLocalTime().ToString("g", CultureInfo.CurrentCulture)</MudText>
+                        </article>
+                    }
+                </div>
+            </MudHidden>
+            }
+        </section>
+    }
+
+    @if (UpdatedAtUtc.HasValue)
+    {
+        <MudText Typo="Typo.caption" Color="Color.Secondary">Updated @UpdatedAtUtc.Value.ToLocalTime().ToString("g", CultureInfo.CurrentCulture) · @PeriodLabel.</MudText>
+    }
+    @if (!string.IsNullOrWhiteSpace(StatusMessage))
+    {
+        <MudText Typo="Typo.caption" Color="Color.Secondary" role="status" aria-live="polite">@StatusMessage</MudText>
+    }
+</section>
+
+@code {
+    public string ComponentId => EllaiSurveillanceUiManifest.Surface.ComponentId;
+    public EllaiUiManifest Describe() => EllaiSurveillanceUiManifest.Surface;
+    public EllaiUiState GetState() => new(ComponentId, State == OperationsSurfaceState.Loading, State == OperationsSurfaceState.Error,
+        [new("surveillance-map.overview", CompactPreview ? UiObservationState.Unmounted : UiObservationState.Ready),
+         new("surveillance-map.filters", FilterContent is null ? UiObservationState.Unmounted : UiObservationState.Ready),
+         new("surveillance-map.refresh", !CompactPreview && OnRetry.HasDelegate ? UiObservationState.Ready : UiObservationState.Unmounted)]);
+
+    public enum AggregatePrecision
+    {
+        Country,
+        Region
+    }
+
+    public sealed record AreaAggregateView(
+        string AreaCode,
+        string AreaLabel,
+        AggregatePrecision Precision,
+        int? HumanCount,
+        int? AnimalCount,
+        int? Denominator,
+        bool IsSuppressed,
+        string? SuppressionReason,
+        DateTimeOffset AsOfUtc);
+
+    private bool _showHuman = true;
+    private bool _showAnimal = true;
+    private AreaAggregateView? _selectedArea;
+
+    [Parameter] public string Eyebrow { get; set; } = "Operations";
+    [Parameter, EditorRequired] public string Title { get; set; } = "Surveillance map";
+    [Parameter] public string HeadingTag { get; set; } = "h1";
+    [Parameter, EditorRequired] public string Description { get; set; } = string.Empty;
+    [Parameter] public OperationsSurfaceState State { get; set; } = OperationsSurfaceState.Loading;
+    [Parameter] public IReadOnlyList<AreaAggregateView> Areas { get; set; } = Array.Empty<AreaAggregateView>();
+    [Parameter] public DateTimeOffset? UpdatedAtUtc { get; set; }
+    [Parameter] public string ContractVersion { get; set; } = "Unknown";
+    [Parameter] public string PeriodLabel { get; set; } = "the selected period";
+    [Parameter] public string? StatusMessage { get; set; }
+    public sealed record MapFocus(double Latitude, double Longitude, string Label);
+    [Parameter] public SurveillanceMapDetails? Details { get; set; }
+    [Parameter] public bool DetailsLoading { get; set; }
+    [Parameter] public MapFocus? Focus { get; set; }
+    [Parameter] public string? FocusCountry { get; set; }
+    private string? _appliedFocusCountry;
+    [Parameter] public bool CompactPreview { get; set; }
+    [Parameter] public RenderFragment? FilterContent { get; set; }
+    [Parameter] public EventCallback OnRetry { get; set; }
+
+    private AreaAggregateView? SelectedArea => Areas.FirstOrDefault(area => area.Precision == AggregatePrecision.Country && string.Equals(area.AreaCode, _selectedArea?.AreaCode, StringComparison.OrdinalIgnoreCase));
+
+    protected override void OnParametersSet()
+    {
+        if (FocusCountry != _appliedFocusCountry || (_selectedArea is null && FocusCountry is not null))
+        {
+            SelectCountry(FocusCountry ?? "");
+            _appliedFocusCountry = FocusCountry;
+        }
+        if (_selectedArea is not null && Areas.All(area => area.AreaCode != _selectedArea.AreaCode))
+        {
+            _selectedArea = null;
+        }
+    }
+
+    private string StateTitle => State switch
+    {
+        OperationsSurfaceState.Loading => "Loading area totals",
+        OperationsSurfaceState.Offline => "You are offline",
+        OperationsSurfaceState.Denied => "You do not have access to this information",
+        OperationsSurfaceState.Unavailable => "Map data is not available",
+        OperationsSurfaceState.Error => "Map totals could not be loaded",
+        _ => "Map totals"
+    };
+
+    private string StateDescription => StatusMessage ?? State switch
+    {
+        OperationsSurfaceState.Loading => "Checking the latest totals available to your account.",
+        OperationsSurfaceState.Offline => "Reconnect and try again to refresh area totals.",
+        OperationsSurfaceState.Denied => "Your account does not have access to these area totals.",
+        OperationsSurfaceState.Unavailable => "Map totals are not available right now.",
+        OperationsSurfaceState.Error => "Check your connection and try again.",
+        _ => "Map totals are not available for this view."
+    };
+
+    private void SelectCountry(string countryCode) => _selectedArea = Areas.FirstOrDefault(area =>
+        area.Precision == AggregatePrecision.Country &&
+        string.Equals(area.AreaCode, countryCode, StringComparison.OrdinalIgnoreCase));
+
+    private string AccessibleAreaLabel(AreaAggregateView area)
+    {
+        if (area.IsSuppressed)
+        {
+            return $"{area.AreaLabel}, {PrecisionLabel(area.Precision)}, values withheld to protect privacy.";
+        }
+
+        var parts = new List<string> { area.AreaLabel, PrecisionLabel(area.Precision) };
+        if (_showHuman)
+        {
+            parts.Add($"human reports {FormatCount(area.HumanCount)}");
+        }
+        if (_showAnimal)
+        {
+            parts.Add($"animal reports {FormatCount(area.AnimalCount)}");
+        }
+
+        return string.Join(", ", parts);
+    }
+
+    private static string DisplayAreaLabel(string label) => label;
+
+    private static string PrecisionLabel(AggregatePrecision precision) => precision switch
+    {
+        AggregatePrecision.Country => "Country",
+        AggregatePrecision.Region => "Region",
+        _ => "Area"
+    };
+
+    private static string FormatCount(int? count) => count?.ToString("N0", CultureInfo.CurrentCulture) ?? "Not available";
+
+    private static string DisplayCount(int? count, bool isSuppressed) => isSuppressed ? "Withheld" : FormatCount(count);
+}

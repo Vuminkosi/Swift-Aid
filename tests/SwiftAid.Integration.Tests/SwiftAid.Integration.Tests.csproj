@@ -1,0 +1,28 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" />
+    <PackageReference Include="Microsoft.AspNetCore.TestHost" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <ProjectReference Include="..\..\src\SwiftAid.Gateway\SwiftAid.Gateway.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+    <Compile Include="../Shared/EllaiLegacy/*.cs" Link="EllaiLegacy/%(Filename)%(Extension)" />
+    <Compile Include="../../src/SwiftAid.Mobile/Platforms/Android/AndroidSileroSpeechDetectorFactory.cs" Link="NativeSilero/AndroidSileroSpeechDetectorFactory.cs" />
+    <EmbeddedResource Include="../../src/SwiftAid.UI/wwwroot/vendor/vad/silero_vad_v5.onnx" LogicalName="SwiftAid.Mobile.silero_vad_v5.onnx" />
+  </ItemGroup>
+
+</Project>

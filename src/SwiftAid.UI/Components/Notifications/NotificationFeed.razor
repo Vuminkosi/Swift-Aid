@@ -1,0 +1,285 @@
+@using SwiftAid.UI.Components.Notifications
+@using SwiftAid.Contracts.Notifications
+
+<section class="swiftaid-notification-feed" aria-label="Notifications">
+    <div class="swiftaid-notification-feed__heading">
+        <div>
+            <MudText Typo="Typo.subtitle1" HtmlTag="h2" Class="swiftaid-notification-feed__title">
+                <span tabindex="-1" @ref="_headingFocusTarget">Notifications</span>
+            </MudText>
+            <MudText Typo="Typo.caption" Color="Color.Secondary">Private to your current staff account</MudText>
+        </div>
+        <MudBadge Content="@UnreadCount" Visible="@(_items.Count > 0)" Color="Color.Primary" Overlap="true">
+            <MudIcon Icon="@Icons.Material.Outlined.Notifications" aria-label="Unread notifications" />
+        </MudBadge>
+    </div>
+
+    @if (Loading)
+    {
+        <div class="swiftaid-notification-feed__state" role="status" aria-live="polite">
+            <MudProgressCircular Indeterminate="true" Size="Size.Small" aria-label="Loading notifications" />
+            <MudText Typo="Typo.body2">Loading notifications…</MudText>
+        </div>
+    }
+    else if (PermissionDenied)
+    {
+        <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" role="status">
+            Notifications are unavailable for this account.
+        </MudAlert>
+    }
+    else if (ErrorMessage is not null)
+    {
+        <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" role="alert">
+            @ErrorMessage
+            <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Refresh" Color="Color.Error" OnClick="RetryAsync" aria-label="Retry loading notifications">Retry</MudButton>
+        </MudAlert>
+    }
+    else if (_items.Count == 0)
+    {
+        <div class="swiftaid-notification-feed__empty">
+            <MudIcon Icon="@Icons.Material.Outlined.DoneAll" aria-hidden="true" />
+            <MudText Typo="Typo.body2">You’re all caught up.</MudText>
+        </div>
+    }
+    else
+    {
+        <ul class="swiftaid-notification-feed__list">
+            @foreach (var item in _items)
+            {
+                <li @key="item.Id" class="swiftaid-notification-feed__item @(item.ReadAtUtc is null ? "is-unread" : null)">
+                    <div class="swiftaid-notification-feed__content">
+                        <MudText Typo="Typo.body2" Class="swiftaid-notification-feed__message">@SafeMessage(item.Kind)</MudText>
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">@item.CreatedAtUtc.ToLocalTime().ToString("g")</MudText>
+                    </div>
+                    <div class="swiftaid-notification-feed__actions">
+                        @if (HasPermittedAction(item))
+                        {
+                                <MudButton @ref="_openActionButtons[item.Id]" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.OpenInNew" Size="Size.Small" OnClick="() => OpenAsync(item)" aria-label="Open notification">
+                                Open
+                            </MudButton>
+                        }
+                        else if (HasUnavailableWorkAction(item))
+                        {
+                            <MudText Typo="Typo.caption" Color="Color.Secondary" role="status">
+                                Linked work is unavailable. Use the available notification actions instead.
+                            </MudText>
+                        }
+                        @if (item.ReadAtUtc is null)
+                        {
+                            <MudButton @ref="_markReadActionButtons[item.Id]" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.MarkEmailRead" Size="Size.Small" OnClick="() => MarkReadAsync(item)" aria-label="Mark notification as read">
+                                Mark read
+                            </MudButton>
+                        }
+                        @if (item.DismissedAtUtc is null)
+                        {
+                            <MudIconButton @ref="_dismissActionButtons[item.Id]" Icon="@Icons.Material.Outlined.Close" Size="Size.Small" OnClick="() => DismissAsync(item)" aria-label="Dismiss notification" />
+                        }
+                    </div>
+                </li>
+            }
+        </ul>
+        @if (MutationError)
+        {
+            <MudText Typo="Typo.caption" Color="Color.Error" role="alert">That update could not be saved. Try again.</MudText>
+        }
+    }
+</section>
+
+@code {
+    [Parameter] public IReadOnlyList<NotificationItemView> Items { get; set; } = Array.Empty<NotificationItemView>();
+    [Parameter] public bool Loading { get; set; }
+    [Parameter] public bool PermissionDenied { get; set; }
+    [Parameter] public string? ErrorMessage { get; set; }
+    [Parameter] public EventCallback OnRetry { get; set; }
+    [Parameter] public Func<Guid, Task<bool>>? OnMarkRead { get; set; }
+    [Parameter] public Func<Guid, Task<bool>>? OnDismiss { get; set; }
+    [Parameter] public EventCallback<NotificationItemView> OnOpen { get; set; }
+
+    private IReadOnlyList<NotificationItemView> _items =>
+        (Items ?? Array.Empty<NotificationItemView>())
+        .Where(item => item.DismissedAtUtc is null)
+        .ToArray();
+    private int UnreadCount => _items.Count(item => item.ReadAtUtc is null);
+    private bool MutationError { get; set; }
+    private readonly Dictionary<Guid, MudButton> _openActionButtons = [];
+    private readonly Dictionary<Guid, MudButton> _markReadActionButtons = [];
+    private readonly Dictionary<Guid, MudIconButton> _dismissActionButtons = [];
+    private ElementReference _headingFocusTarget;
+    private bool _restoreFocusAfterDismiss;
+    private int _dismissedItemIndex;
+
+    protected override void OnParametersSet()
+    {
+        var renderedItems = CanRenderActions ? _items : Array.Empty<NotificationItemView>();
+        RemoveStaleReferences(_openActionButtons, renderedItems
+            .Where(HasPermittedAction)
+            .Select(item => item.Id)
+            .ToHashSet());
+        RemoveStaleReferences(_markReadActionButtons, renderedItems
+            .Where(item => item.ReadAtUtc is null)
+            .Select(item => item.Id)
+            .ToHashSet());
+        RemoveStaleReferences(_dismissActionButtons, renderedItems
+            .Where(item => item.DismissedAtUtc is null)
+            .Select(item => item.Id)
+            .ToHashSet());
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!_restoreFocusAfterDismiss)
+        {
+            return;
+        }
+
+        _restoreFocusAfterDismiss = false;
+        var currentItems = _items;
+        if (currentItems.Count == 0)
+        {
+            await _headingFocusTarget.FocusAsync();
+            return;
+        }
+
+        var preferredIndex = Math.Min(_dismissedItemIndex, currentItems.Count - 1);
+        for (var index = preferredIndex; index < currentItems.Count; index++)
+        {
+            if (await FocusFirstActionAsync(currentItems[index]))
+            {
+                return;
+            }
+        }
+
+        for (var index = preferredIndex - 1; index >= 0; index--)
+        {
+            if (await FocusFirstActionAsync(currentItems[index]))
+            {
+                return;
+            }
+        }
+
+        await _headingFocusTarget.FocusAsync();
+    }
+
+    private Task RetryAsync() => OnRetry.InvokeAsync();
+
+    private async Task MarkReadAsync(NotificationItemView item)
+    {
+        MutationError = false;
+        try
+        {
+            if (OnMarkRead is null || !await OnMarkRead(item.Id))
+            {
+                MutationError = true;
+            }
+        }
+        catch
+        {
+            MutationError = true;
+        }
+    }
+
+    private async Task DismissAsync(NotificationItemView item)
+    {
+        MutationError = false;
+        _dismissedItemIndex = Array.FindIndex(_items.ToArray(), candidate => candidate.Id == item.Id);
+        try
+        {
+            if (OnDismiss is null || !await OnDismiss(item.Id))
+            {
+                MutationError = true;
+            }
+            else
+            {
+                _restoreFocusAfterDismiss = true;
+            }
+        }
+        catch
+        {
+            MutationError = true;
+        }
+    }
+
+    private async Task OpenAsync(NotificationItemView item)
+    {
+        if (!HasPermittedAction(item))
+        {
+            return;
+        }
+
+        MutationError = false;
+        if (item.ReadAtUtc is null)
+        {
+            try
+            {
+                if (OnMarkRead is null || !await OnMarkRead(item.Id))
+                {
+                    MutationError = true;
+                    return;
+                }
+            }
+            catch
+            {
+                MutationError = true;
+                return;
+            }
+        }
+
+        await OnOpen.InvokeAsync(item);
+    }
+
+    private bool HasPermittedAction(NotificationItemView item) =>
+        item.Action is NotificationAction.OpenAssignedWork &&
+        OnOpen.HasDelegate &&
+        TryGetAssignedWorkId(item, out _);
+
+    private static bool HasUnavailableWorkAction(NotificationItemView item) =>
+        item.Action is NotificationAction.OpenAssignedWork && !TryGetAssignedWorkId(item, out _);
+
+    private static bool TryGetAssignedWorkId(NotificationItemView item, out Guid caseId) =>
+        Guid.TryParseExact(item.OpaqueResourceReference, "D", out caseId) && caseId != Guid.Empty;
+
+    private bool CanRenderActions =>
+        !Loading && !PermissionDenied && ErrorMessage is null && _items.Count > 0;
+
+    private async Task<bool> FocusFirstActionAsync(NotificationItemView item)
+    {
+        if (!CanRenderActions)
+        {
+            return false;
+        }
+
+        if (HasPermittedAction(item) && _openActionButtons.TryGetValue(item.Id, out var openButton))
+        {
+            await openButton.FocusAsync();
+            return true;
+        }
+
+        if (item.ReadAtUtc is null && _markReadActionButtons.TryGetValue(item.Id, out var markReadButton))
+        {
+            await markReadButton.FocusAsync();
+            return true;
+        }
+
+        if (item.DismissedAtUtc is null && _dismissActionButtons.TryGetValue(item.Id, out var dismissButton))
+        {
+            await dismissButton.FocusAsync();
+            return true;
+        }
+
+        return false;
+    }
+
+    private static void RemoveStaleReferences<T>(Dictionary<Guid, T> references, HashSet<Guid> visibleIds)
+    {
+        foreach (var staleId in references.Keys.Where(id => !visibleIds.Contains(id)).ToArray())
+        {
+            references.Remove(staleId);
+        }
+    }
+
+    private static string SafeMessage(NotificationKind kind) => kind switch
+    {
+        NotificationKind.CaseNeedsAttention => "A case needs your attention.",
+        _ => "You have a new notification."
+    };
+}

@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "eventId": "ccf47316-f31e-c656-e218-004ca2b7cea6",
+  "eventType": "CaseReopened",
+  "caseId": "10000000-0000-0000-0000-000000000001",
+  "aggregateVersion": 4,
+  "reportRevision": 1,
+  "commandId": "20000000-0000-0000-0000-000000000007",
+  "actorId": "officer-1",
+  "occurredAtUtc": null,
+  "recordedAtUtc": "2026-10-26T08:01:00+00:00",
+  "payload": {
+    "reason": "new support work",
+    "accountableOwnerId": "worker-1"
+  }
+}

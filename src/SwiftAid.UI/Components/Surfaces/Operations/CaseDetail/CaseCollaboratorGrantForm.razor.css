@@ -1,0 +1,7 @@
+.grant-form { margin-block: 1rem; padding: 1rem; border: 1px solid var(--mud-palette-divider); border-radius: var(--mud-default-borderradius); min-width: 0; }
+.grant-form__field { display: grid; gap: .4rem; margin-block: .75rem; }
+.grant-form select, .grant-form input[type=datetime-local] { width: 100%; min-width: 0; max-width: 100%; min-height: 44px; padding: .5rem; border: 1px solid var(--mud-palette-divider); background: var(--mud-palette-surface); color: var(--mud-palette-text-primary); border-radius: var(--mud-default-borderradius); }
+.grant-form fieldset { margin-block: 1rem; padding: .5rem; border: 1px solid var(--mud-palette-divider); }
+.grant-form__permission { display: flex; align-items: center; gap: .5rem; min-height: 44px; }
+.grant-form__reason { white-space: pre-wrap; overflow-wrap: anywhere; }
+.grant-form ::deep button { min-height: 44px; }

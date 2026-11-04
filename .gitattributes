@@ -1,0 +1,3 @@
+# Preserve authoritative source line endings
+/spec.md text eol=lf
+/implementation.md text eol=lf

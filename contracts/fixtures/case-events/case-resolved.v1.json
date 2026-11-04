@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "eventId": "c9b354ce-a256-6426-7ca5-a669ad9a98e5",
+  "eventType": "CaseResolved",
+  "caseId": "10000000-0000-0000-0000-000000000001",
+  "aggregateVersion": 3,
+  "reportRevision": 1,
+  "commandId": "20000000-0000-0000-0000-000000000006",
+  "actorId": "officer-1",
+  "occurredAtUtc": "2026-10-26T08:00:00+00:00",
+  "recordedAtUtc": "2026-10-26T08:01:00+00:00",
+  "payload": {
+    "reason": "administrative work complete"
+  }
+}

@@ -1,0 +1,105 @@
+@page "/welcome-complete"
+@using SwiftAid.Client.Presentation
+@using SwiftAid.Client.Navigation
+@using SwiftAid.Gateway.Presentation
+@using SwiftAid.Infrastructure.Identity
+@using SwiftAid.UI.Components.Surfaces.Account
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.AspNetCore.Identity
+@inject IServiceProvider ServiceProvider
+
+<PageTitle>Welcome to SwiftAid | SwiftAid</PageTitle>
+
+<WelcomeCompleteSurface Snapshot="_snapshot" ReturnUrl="SafeReturnUrl" OnRefresh="RefreshAsync" />
+
+@code {
+    [SupplyParameterFromQuery(Name = "returnUrl")]
+    private string? RequestedReturnUrl { get; set; }
+    private string SafeReturnUrl => LocalReturnUrlPolicy.Resolve(RequestedReturnUrl, "/");
+
+    private WelcomeCompleteSnapshot _snapshot = WelcomeCompleteSnapshot.Loading;
+
+    private IUserProfileClient ProfileClient =>
+        (IUserProfileClient?)ServiceProvider.GetService(typeof(IUserProfileClient))
+        ?? CreateProfileFallback()
+        ?? new UnavailableUserProfileClient();
+
+    private IOrganizationMembershipClient MembershipClient =>
+        (IOrganizationMembershipClient?)ServiceProvider.GetService(typeof(IOrganizationMembershipClient))
+        ?? CreateMembershipFallback()
+        ?? new UnavailableOrganizationMembershipClient();
+
+    private IUserProfileClient? CreateProfileFallback()
+    {
+        var auth = (AuthenticationStateProvider?)ServiceProvider.GetService(typeof(AuthenticationStateProvider));
+        var users = (UserManager<SwiftAidUser>?)ServiceProvider.GetService(typeof(UserManager<SwiftAidUser>));
+        var profiles = (IUserProfileService?)ServiceProvider.GetService(typeof(IUserProfileService));
+        var verification = (IEmailVerificationService?)ServiceProvider.GetService(typeof(IEmailVerificationService));
+        var avatars = (IProfileAvatarService?)ServiceProvider.GetService(typeof(IProfileAvatarService));
+        var signIn = (SignInManager<SwiftAidUser>?)ServiceProvider.GetService(typeof(SignInManager<SwiftAidUser>));
+        return auth is null || users is null || profiles is null || verification is null || avatars is null || signIn is null
+            ? null
+            : new GatewayUserProfileClient(auth, users, profiles, verification, avatars, signIn);
+    }
+
+    private IOrganizationMembershipClient? CreateMembershipFallback()
+    {
+        var auth = (AuthenticationStateProvider?)ServiceProvider.GetService(typeof(AuthenticationStateProvider));
+        var users = (UserManager<SwiftAidUser>?)ServiceProvider.GetService(typeof(UserManager<SwiftAidUser>));
+        var memberships = (IOrganizationMembershipService?)ServiceProvider.GetService(typeof(IOrganizationMembershipService));
+        var invitations = (IOrganizationInvitationService?)ServiceProvider.GetService(typeof(IOrganizationInvitationService));
+        return auth is null || users is null || memberships is null || invitations is null
+            ? null
+            : new GatewayOrganizationMembershipClient(auth, users, memberships, invitations);
+    }
+
+    protected override async Task OnInitializedAsync() => await SafeRefreshAsync();
+
+    private async Task SafeRefreshAsync()
+    {
+        try
+        {
+            await RefreshAsync();
+        }
+        catch (Exception)
+        {
+            _snapshot = WelcomeCompleteSnapshot.Unavailable;
+        }
+    }
+
+    private async Task RefreshAsync()
+    {
+        var profile = await ProfileClient.GetAsync();
+        if (profile.Value is null)
+        {
+            _snapshot = profile.Code == UiCapabilityResultCode.Denied
+                ? WelcomeCompleteSnapshot.SignedOut
+                : WelcomeCompleteSnapshot.Unavailable with
+                {
+                    StatusMessage = profile.Message ?? WelcomeCompleteSnapshot.Unavailable.StatusMessage
+                };
+            return;
+        }
+
+        if (!profile.Value.IsSignedIn)
+        {
+            _snapshot = WelcomeCompleteSnapshot.SignedOut;
+            return;
+        }
+
+        // Sequential: concurrent service awaits would share one scoped data context on the server circuit.
+        var memberships = await MembershipClient.GetMineAsync();
+        var requests = await MembershipClient.GetMyRequestsAsync();
+        if (memberships.Value is null || requests.Value is null)
+        {
+            _snapshot = WelcomeCompleteSnapshot.Unavailable;
+            return;
+        }
+
+        _snapshot = new WelcomeCompleteSnapshot(
+            WelcomeCompleteViewState.Ready,
+            profile.Value.DisplayName,
+            memberships.Value.Any(entry => entry.WorkspaceIds.Count > 0),
+            requests.Value.Any(entry => string.Equals(entry.Status, "Pending", StringComparison.OrdinalIgnoreCase)));
+    }
+}

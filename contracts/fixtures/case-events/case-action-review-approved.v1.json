@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "eventId": "d32bfba3-2252-4436-14f1-f9f28d370b13",
+  "eventType": "CaseActionRequestReviewed",
+  "caseId": "10000000-0000-0000-0000-000000000001",
+  "aggregateVersion": 5,
+  "reportRevision": 1,
+  "commandId": "20000000-0000-0000-0000-000000000003",
+  "actorId": "officer-1",
+  "occurredAtUtc": null,
+  "recordedAtUtc": "2026-10-26T08:01:00+00:00",
+  "payload": {
+    "requestId": "30000000-0000-0000-0000-000000000001",
+    "outcome": "Approved",
+    "linkedAcceptedEventId": "53ebf286-8017-e95a-ae43-2fd807b00bb3",
+    "reason": "authorized transfer"
+  }
+}

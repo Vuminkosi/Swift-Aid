@@ -1,0 +1,231 @@
+@using System.Globalization
+@using System.Text
+@using SwiftAid.UI.Components.Theme
+
+<section class="operations-analytics" aria-labelledby="operations-analytics-title">
+    <header class="operations-analytics__header">
+        <div>
+            <MudText Typo="Typo.overline" Color="Color.Secondary">@Eyebrow</MudText>
+            <MudText Typo="Typo.h4" HtmlTag="h1" id="operations-analytics-title">@Title</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">@Description</MudText>
+        </div>
+        <div class="operations-analytics__actions">
+            @if (State == OperationsSurfaceState.Populated && Metrics.Count > 0)
+            {
+                <a class="operations-analytics__download" href="@CsvDataUri" download="swiftaid-service-report.csv" aria-label="Download service report as CSV">
+                    <MudIcon Icon="@Icons.Material.Filled.Download" aria-hidden="true" />
+                    <span>Download CSV</span>
+                </a>
+            }
+            @if (OnPreviewExport.HasDelegate)
+            {
+                <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Preview"
+                           OnClick="OnPreviewExport" Disabled="@(State != OperationsSurfaceState.Populated)">
+                    Preview export
+                </MudButton>
+            }
+            @if (OnRetry.HasDelegate)
+            {
+                <MudIconButton Icon="@Icons.Material.Filled.Refresh" Color="Color.Primary" OnClick="OnRetry" aria-label="Refresh service report" />
+            }
+        </div>
+    </header>
+
+    @if (FilterContent is not null)
+    {
+        <div class="operations-analytics__filters" role="group" aria-label="Report filters">@FilterContent</div>
+    }
+
+    @if (State != OperationsSurfaceState.Populated)
+    {
+        <SwiftAidStatePanel State="State.ToSwiftAidViewState()" Title="@StateTitle" Description="@StateDescription" OnRetry="OnRetry" />
+    }
+    else if (Metrics.Count == 0)
+    {
+        <SwiftAidStatePanel State="SwiftAidViewState.Empty" Title="No service activity" Description="No figures are available for these selections." />
+    }
+    else
+    {
+        <section class="operations-analytics__chart" aria-labelledby="analytics-chart-title">
+            <div class="operations-analytics__section-heading">
+                <div>
+                    <MudText Typo="Typo.subtitle1" HtmlTag="h2" id="analytics-chart-title">Service activity</MudText>
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">Counts and workload for @PeriodLabel. These figures do not describe health patterns or causes.</MudText>
+                </div>
+                @if (UpdatedAtUtc.HasValue)
+                {
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">Updated @UpdatedAtUtc.Value.ToLocalTime().ToString("g", CultureInfo.CurrentCulture)</MudText>
+                }
+            </div>
+
+            <div class="operations-analytics__bars" role="img" aria-label="Bar chart of service activity. A complete data table follows.">
+                @foreach (var metric in Metrics)
+                {
+                    <div class="operations-analytics__bar-row" @key="metric.Id">
+                        <div class="operations-analytics__bar-label">
+                            <MudText Typo="Typo.body2">@metric.Label</MudText>
+                            @if (!string.IsNullOrWhiteSpace(metric.Category))
+                            {
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">@metric.Category</MudText>
+                            }
+                        </div>
+                        <div class="operations-analytics__bar-track" aria-hidden="true">
+                            <span class="operations-analytics__bar-fill" style="width: @BarWidth(metric.Value)"></span>
+                        </div>
+                        <MudText Typo="Typo.body2" Class="operations-analytics__bar-value">@metric.Value <span>@metric.Unit</span></MudText>
+                    </div>
+                }
+            </div>
+            <MudText Typo="Typo.caption" Color="Color.Secondary">Bars compare the selected figures. They do not indicate risk or cause.</MudText>
+        </section>
+
+        <section class="operations-analytics__data" aria-labelledby="analytics-data-title">
+            <MudText Typo="Typo.subtitle1" HtmlTag="h2" id="analytics-data-title">Data table</MudText>
+            <MudHidden Breakpoint="Breakpoint.SmAndDown">
+                <MudTable Items="Metrics" Dense="true" Hover="true" aria-label="Service activity report">
+                    <HeaderContent>
+                        <MudTh>Measure</MudTh>
+                        @if (HasCategories)
+                        {
+                            <MudTh>Category</MudTh>
+                        }
+                        <MudTh>Value</MudTh>
+                        <MudTh>Trend</MudTh>
+                    </HeaderContent>
+                    <RowTemplate>
+                        <MudTd DataLabel="Measure">@context.Label</MudTd>
+                        @if (HasCategories)
+                        {
+                            <MudTd DataLabel="Category">@(context.Category ?? "—")</MudTd>
+                        }
+                        <MudTd DataLabel="Value">@context.Value @context.Unit</MudTd>
+                        <MudTd DataLabel="Trend">@(context.Trend ?? "Not reported")</MudTd>
+                    </RowTemplate>
+                    <PagerContent><MudTablePager PageSizeOptions="new int[] { 10, 25, 50 }" /></PagerContent>
+                </MudTable>
+            </MudHidden>
+            <MudHidden Breakpoint="Breakpoint.SmAndDown" Invert="true">
+                <div class="operations-analytics__mobile-table" role="list" aria-label="Service activity report">
+                    @foreach (var metric in Metrics)
+                    {
+                        <article class="operations-analytics__mobile-row" role="listitem" @key="metric.Id">
+                            <div class="operations-analytics__mobile-heading">
+                                <MudText Typo="Typo.body2">@metric.Label</MudText>
+                                <MudText Typo="Typo.subtitle2">@metric.Value <span>@metric.Unit</span></MudText>
+                            </div>
+                            @if (!string.IsNullOrWhiteSpace(metric.Category))
+                            {
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">@metric.Category</MudText>
+                            }
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">Trend: @(metric.Trend ?? "Not reported")</MudText>
+                        </article>
+                    }
+                </div>
+            </MudHidden>
+        </section>
+    }
+
+    @if (!string.IsNullOrWhiteSpace(StatusMessage))
+    {
+        <MudText Typo="Typo.caption" Color="Color.Secondary" role="status" aria-live="polite">@StatusMessage</MudText>
+    }
+    @if (!string.IsNullOrWhiteSpace(PreviewMessage))
+    {
+        <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" role="status" aria-live="polite">@PreviewMessage</MudAlert>
+    }
+</section>
+
+@code {
+    [Parameter] public string Eyebrow { get; set; } = "Service report";
+    [Parameter, EditorRequired] public string Title { get; set; } = "Reports and analytics";
+    [Parameter, EditorRequired] public string Description { get; set; } = string.Empty;
+    [Parameter] public OperationsSurfaceState State { get; set; } = OperationsSurfaceState.Loading;
+    [Parameter] public IReadOnlyList<OperationsMetricView> Metrics { get; set; } = Array.Empty<OperationsMetricView>();
+    [Parameter] public DateTimeOffset? UpdatedAtUtc { get; set; }
+    [Parameter] public string ContractVersion { get; set; } = "Unknown";
+    [Parameter] public string PeriodLabel { get; set; } = "the selected period";
+    [Parameter] public string? StatusMessage { get; set; }
+    [Parameter] public string? PreviewMessage { get; set; }
+    [Parameter] public RenderFragment? FilterContent { get; set; }
+    [Parameter] public EventCallback OnRetry { get; set; }
+    [Parameter] public EventCallback OnPreviewExport { get; set; }
+
+    private string StateTitle => State switch
+    {
+        OperationsSurfaceState.Loading => "Loading service report",
+        OperationsSurfaceState.Offline => "You are offline",
+        OperationsSurfaceState.Denied => "You do not have access to this report",
+        OperationsSurfaceState.Unavailable => "Report not available",
+        OperationsSurfaceState.Error => "Service report could not be loaded",
+        _ => "Service report"
+    };
+
+    private string StateDescription => StatusMessage ?? State switch
+    {
+        OperationsSurfaceState.Loading => "Checking the latest information available to your account.",
+        OperationsSurfaceState.Offline => "Reconnect and try again to refresh this report.",
+        OperationsSurfaceState.Denied => "Your account does not have access to this report.",
+        OperationsSurfaceState.Unavailable => "This report is not available right now.",
+        OperationsSurfaceState.Error => "Check your connection and try again.",
+        _ => "No data is available for this view."
+    };
+
+    private string CsvDataUri => $"data:text/csv;charset=utf-8,{Uri.EscapeDataString(BuildCsv())}";
+    private bool HasCategories => Metrics.Any(metric => !string.IsNullOrWhiteSpace(metric.Category));
+
+    private string BarWidth(string value)
+    {
+        var maximum = Metrics.Select(metric => NumericValue(metric.Value)).DefaultIfEmpty(0).Max();
+        if (maximum <= 0)
+        {
+            return "0%";
+        }
+
+        var valueNumber = NumericValue(value);
+        return $"{Math.Clamp(valueNumber / maximum * 100d, 0, 100):0.#}%";
+    }
+
+    private static double NumericValue(string value) =>
+        double.TryParse(value, NumberStyles.Number, CultureInfo.InvariantCulture, out var number) && double.IsFinite(number)
+            ? Math.Max(0, number)
+            : 0;
+
+    private string BuildCsv()
+    {
+        var builder = new StringBuilder();
+        builder.AppendLine(CsvRow("SwiftAid service report"));
+        builder.AppendLine(CsvRow("Period", PeriodLabel));
+        builder.AppendLine(CsvRow("Updated at UTC", UpdatedAtUtc?.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture) ?? "Not provided"));
+        builder.AppendLine(CsvRow("Measure", "Category", "Value", "Unit", "Trend"));
+        foreach (var metric in Metrics)
+        {
+            builder.AppendLine(CsvRow(metric.Label, metric.Category ?? string.Empty, metric.Value, metric.Unit, metric.Trend));
+        }
+
+        return builder.ToString();
+    }
+
+    private static string CsvRow(params string?[] cells) => string.Join(",", cells.Select(EscapeCsv));
+
+    private static string EscapeCsv(string? value)
+    {
+        var normalized = value ?? string.Empty;
+        var firstSignificantCharacter = 0;
+        while (firstSignificantCharacter < normalized.Length &&
+               (char.IsWhiteSpace(normalized[firstSignificantCharacter]) ||
+                char.IsControl(normalized[firstSignificantCharacter]) ||
+                normalized[firstSignificantCharacter] == '\uFEFF'))
+        {
+            firstSignificantCharacter++;
+        }
+
+        if (firstSignificantCharacter < normalized.Length &&
+            normalized[firstSignificantCharacter] is '=' or '+' or '-' or '@')
+        {
+            normalized = $"'{normalized}";
+        }
+
+        return $"\"{normalized.Replace("\"", "\"\"", StringComparison.Ordinal)}\"";
+    }
+
+}

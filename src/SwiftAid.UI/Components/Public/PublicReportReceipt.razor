@@ -1,0 +1,71 @@
+@using SwiftAid.Contracts.Ellai
+@using SwiftAid.Contracts.Intake
+@implements IEllaiUiContextProvider
+@implements IDisposable
+@inject IServiceProvider Services
+<SwiftAid.UI.Ellai.Guidance.EllaiSemanticContext Provider="this" />
+
+@if (Receipt is not null)
+{
+    <section class="public-report-receipt" aria-labelledby="public-receipt-title">
+        <MudAlert Severity="@RoutingSeverity" Variant="Variant.Outlined">
+            <strong>@StatusLabel</strong>
+            <div>@RoutingMessage</div>
+        </MudAlert>
+        <MudText id="public-receipt-title" data-ellai-control="report.receipt" data-bonboarding-anchor='@EllaiReportUiManifest.AnchorFor("report.receipt")' Typo="Typo.h6" HtmlTag="h2">Your report receipt</MudText>
+        <dl class="public-report-receipt__details">
+            <div>
+                <dt>Receipt number</dt>
+                <dd><code>@Receipt.ReceiptId.ToString("D")</code></dd>
+            </div>
+            <div>
+                <dt>Received</dt>
+                <dd><time datetime="@Receipt.ReceivedAtUtc.ToString("O")">@Receipt.ReceivedAtUtc.ToLocalTime().ToString("g")</time></dd>
+            </div>
+        </dl>
+        <MudText Typo="Typo.body2" Class="public-report-receipt__hint">
+            Keep this receipt with the private proof provided when the report was started. The receipt number alone cannot open report details.
+        </MudText>
+        <MudText Typo="Typo.body2" Class="public-report-receipt__hint">
+            This receipt does not include staff notes, names, a diagnosis, or a promise that someone will attend.
+        </MudText>
+    </section>
+}
+
+@code {
+    private SwiftAid.UI.Ellai.Guidance.EllaiDisplayedReceiptContext? ReceiptContext =>
+        Services.GetService(typeof(SwiftAid.UI.Ellai.Guidance.EllaiDisplayedReceiptContext)) as SwiftAid.UI.Ellai.Guidance.EllaiDisplayedReceiptContext;
+    protected override void OnParametersSet() => ReceiptContext?.Update(this, Receipt);
+    public void Dispose() => ReceiptContext?.Remove(this);
+    public string ComponentId => "public.report-receipt";
+    public EllaiUiManifest Describe() => new(ComponentId, EllaiReportUiManifest.NavigationId,
+        EllaiReportUiManifest.Definition.ComponentId,
+        "Display a private intake receipt; receipt visibility alone does not prove persistence or grant case access.",
+        EllaiReportUiManifest.All.Where(control => control.ControlId == "report.receipt").ToArray());
+    public EllaiUiState GetState() => new(ComponentId, false, false,
+        [new("report.receipt", Receipt is null ? UiObservationState.Unmounted : UiObservationState.Ready)]);
+
+    [Parameter, EditorRequired] public IntakeReceipt Receipt { get; set; } = default!;
+
+    private string StatusLabel => Receipt.Status switch
+    {
+        IntakeStatus.ReceivedUnverified => "Received; not yet verified",
+        IntakeStatus.AwaitingReview => "Received for review",
+        IntakeStatus.AcceptedIntoCase => "Accepted for private follow-up",
+        IntakeStatus.LinkedAsEvidence => "Linked as supporting information",
+        IntakeStatus.Declined => "Not accepted for follow-up",
+        _ => "Status unavailable"
+    };
+
+    private string RoutingMessage => Receipt.RoutingStatus switch
+    {
+        IntakeRoutingStatus.NeedsRouting => "The report still needs a suitable local service. No service is assigned yet.",
+        IntakeRoutingStatus.RoutedForReview => "A participating service is available to review the report. This does not mean someone has been assigned.",
+        IntakeRoutingStatus.NoServiceCoverage => "No participating service is available for this area through SwiftAid right now.",
+        _ => "Local service coverage is unavailable."
+    };
+
+    private Severity RoutingSeverity => Receipt.RoutingStatus == IntakeRoutingStatus.NoServiceCoverage
+        ? Severity.Warning
+        : Severity.Info;
+}

@@ -1,0 +1,123 @@
+@page "/case-follow-up-fixture"
+@using SwiftAid.Contracts.Cases
+@using SwiftAid.UI.Components.Surfaces.Operations
+@using SwiftAid.UI.Components.Surfaces.Operations.WorkManagement
+@using static SwiftAid.UI.Components.Surfaces.Operations.WorkManagement.OperationsWorkManagementSurface
+
+<SwiftAidThemeProvider />
+<MudPopoverProvider />
+<output id="fixture-ready">@_ready</output>
+<output id="request-result">@_result</output>
+    <output id="outcome-request">@_outcomeRequest</output>
+    <output id="transfer-request">@_transferRequest</output>
+    <output id="escalation-action-request">@_escalationActionRequest</output>
+<OperationsWorkManagementSurface Title="Follow-ups" Description="Synthetic follow-up acknowledgement scenario."
+                                 State="OperationsSurfaceState.Populated" Items="Items" CandidatesClient="_candidateClient" OnAction="RecordAction" />
+
+@code {
+    private static readonly Guid CaseId = Guid.Parse("b2210000-2222-4222-8222-222222222222");
+    private static readonly Guid FollowUpId = Guid.Parse("f4410000-4444-4444-8444-444444444444");
+    [SupplyParameterFromQuery(Name = "Schedule")] public bool ScheduleMode { get; set; }
+    [SupplyParameterFromQuery(Name = "Outcome")] public bool OutcomeMode { get; set; }
+    [SupplyParameterFromQuery(Name = "Transfer")] public bool TransferMode { get; set; }
+    [SupplyParameterFromQuery(Name = "Escalation")] public bool EscalationMode { get; set; }
+    private bool _ready;
+    private string _result = "Scheduled";
+    private string _outcomeRequest = "None";
+    private string _transferRequest = "None";
+    private string _escalationActionRequest = "None";
+    private readonly ICaseCollaboratorCandidatesClient _candidateClient = new SyntheticCandidateClient();
+    private IReadOnlyList<OperationsWorkItem> Items => EscalationMode
+        ? [new OperationsWorkItem(CaseId, "esc:33333333-3333-3333-3333-333333333333", 7, "SYNTHETIC-CASE", OperationsWorkKind.Escalation,
+            OperationsWorkStatus.Acknowledged, OperationsAssignmentStatus.Unassigned, "Synthetic operational concern",
+            DateTimeOffset.UtcNow, null, [OperationsWorkAction.RecordEscalationAction], [], null)]
+        : TransferMode
+        ? [new OperationsWorkItem(CaseId, $"fu:{FollowUpId:D}", 7, "SYNTHETIC-CASE", OperationsWorkKind.FollowUp,
+            OperationsWorkStatus.Scheduled, OperationsAssignmentStatus.Assigned, "Call reporting worker",
+            DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddDays(1), [OperationsWorkAction.TransferFollowUp], [], null,
+            AssignedWorkerKey: "current-synthetic-owner")]
+        : ScheduleMode
+        ?
+        [
+            new OperationsWorkItem(CaseId, "new", 7, "SYNTHETIC-CASE", OperationsWorkKind.FollowUp,
+                OperationsWorkStatus.Scheduled, OperationsAssignmentStatus.AssignedToYou, "Call reporting worker",
+                DateTimeOffset.UtcNow, null, [OperationsWorkAction.ScheduleFollowUp], [], null)
+        ]
+        : OutcomeMode
+            ? [new OperationsWorkItem(CaseId, $"fu:{FollowUpId:D}", 7, "SYNTHETIC-CASE", OperationsWorkKind.FollowUp,
+                OperationsWorkStatus.Acknowledged, OperationsAssignmentStatus.AssignedToYou, "Call reporting worker",
+                DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddDays(1), [OperationsWorkAction.RecordFollowUpOutcome], [], null)]
+            : _items;
+    private IReadOnlyList<OperationsWorkItem> _items =
+    [
+        new OperationsWorkItem(CaseId, $"fu:{FollowUpId:D}", 7, "SYNTHETIC-CASE", OperationsWorkKind.FollowUp,
+            OperationsWorkStatus.Scheduled, OperationsAssignmentStatus.AssignedToYou, "Call reporting worker",
+            DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddDays(1), [OperationsWorkAction.AcknowledgeFollowUp], [], null)
+    ];
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (firstRender) { _ready = true; StateHasChanged(); }
+    }
+
+    private void RecordAction(OperationsWorkActionRequest request)
+    {
+        if (EscalationMode)
+        {
+            if (request.CaseId != CaseId || request.WorkKey != "esc:33333333-3333-3333-3333-333333333333" || request.ExpectedVersion != 7 ||
+                request.Action != OperationsWorkAction.RecordEscalationAction || request.EscalationAction != EscalationActionKind.CoordinatedWithTeam ||
+                string.IsNullOrWhiteSpace(request.Details) || string.IsNullOrWhiteSpace(request.Reason) || request.CommandId is null || request.CommandId == Guid.Empty)
+                throw new InvalidOperationException("Unexpected synthetic escalation action request.");
+
+            _escalationActionRequest = $"{request.CommandId:D}:{request.EscalationAction}:{request.Details}:{request.Reason}";
+            return;
+        }
+
+        if (TransferMode)
+        {
+            if (request.CaseId != CaseId || request.WorkKey != $"fu:{FollowUpId:D}" || request.ExpectedVersion != 7 ||
+                request.Action != OperationsWorkAction.TransferFollowUp || request.WorkerKey != "synthetic-follow-up-worker" ||
+                string.IsNullOrWhiteSpace(request.Reason) || request.Details is not null)
+                throw new InvalidOperationException("Unexpected synthetic follow-up transfer request.");
+
+            _transferRequest = $"{request.WorkerKey}:{request.Reason}";
+            return;
+        }
+
+        if (OutcomeMode)
+        {
+            if (request.CaseId != CaseId || request.WorkKey != $"fu:{FollowUpId:D}" || request.ExpectedVersion != 7 ||
+                request.Action != OperationsWorkAction.RecordFollowUpOutcome)
+                throw new InvalidOperationException("Unexpected synthetic follow-up outcome request.");
+
+            _outcomeRequest = $"{request.FollowUpOutcome}:{request.NewDueAtUtc:O}:{request.LocalTimeZoneId}:{request.LocalOffset}";
+            return;
+        }
+
+        if (request.CaseId != CaseId || request.WorkKey != $"fu:{FollowUpId:D}" || request.ExpectedVersion != 7 ||
+            request.Action != OperationsWorkAction.AcknowledgeFollowUp)
+            throw new InvalidOperationException("Unexpected synthetic follow-up acknowledgement.");
+
+        _result = "Acknowledged";
+        _items =
+        [
+            new OperationsWorkItem(CaseId, $"fu:{FollowUpId:D}", 8, "SYNTHETIC-CASE", OperationsWorkKind.FollowUp,
+                OperationsWorkStatus.Acknowledged, OperationsAssignmentStatus.AssignedToYou, "Call reporting worker",
+                DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddDays(1),
+                [OperationsWorkAction.RescheduleFollowUp, OperationsWorkAction.RecordFollowUpOutcome, OperationsWorkAction.CancelFollowUp], [], null)
+        ];
+    }
+
+    private sealed class SyntheticCandidateClient : ICaseCollaboratorCandidatesClient
+    {
+        public Task<CaseCollaboratorCandidatePage?> GetAsync(Guid caseId, string? search, string? after,
+            CancellationToken cancellationToken = default, bool followUpAssignees = false)
+        {
+            IReadOnlyList<CaseCollaboratorCandidate> candidates = followUpAssignees &&
+                (string.IsNullOrWhiteSpace(search) || "Synthetic colleague".Contains(search, StringComparison.OrdinalIgnoreCase))
+                ? [new("synthetic-grant", "synthetic-follow-up-worker", "Synthetic colleague", ["ReadCase", "ManageFollowUp"])]
+                : [];
+            return Task.FromResult<CaseCollaboratorCandidatePage?>(new(candidates, null));
+        }
+    }
+}

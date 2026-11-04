@@ -1,0 +1,95 @@
+@using SwiftAid.Contracts.Cases
+@using Microsoft.Extensions.DependencyInjection
+@implements IDisposable
+@inject IServiceProvider Services
+
+<section class="case-detail__section" aria-labelledby="case-translation-heading">
+    <div class="case-detail__section-heading">
+        <MudText Typo="Typo.subtitle1" HtmlTag="h2" id="case-translation-heading">Experimental translation</MudText>
+        <MudButton Size="Size.Small" Disabled="_busy" OnClick="LoadAsync">Refresh</MudButton>
+    </div>
+    @if (_busy) { <MudProgressLinear Indeterminate="true" aria-label="Loading translation" /> }
+    @if (_message is not null) { <MudText Typo="Typo.caption" role="status">@_message</MudText> }
+    @if (_snapshot is { Access: CaseClassificationAccess.Available } snapshot)
+    {
+        @if (snapshot.Items.Count == 0) { <MudText Typo="Typo.caption">No translation is available for this report.</MudText> }
+        @foreach (var item in snapshot.Items)
+        {
+            <MudText Typo="Typo.caption">@Status(item)</MudText>
+            <MudGrid Spacing="2">
+                <MudItem xs="12" sm="6"><MudText Typo="Typo.subtitle2">Original report</MudText><MudText Typo="Typo.body2">@item.OriginalText</MudText></MudItem>
+                <MudItem xs="12" sm="6"><MudText Typo="Typo.subtitle2">English translation</MudText><MudText Typo="Typo.body2">@(item.TranslatedText ?? "Not available yet.")</MudText></MudItem>
+            </MudGrid>
+            @if (item.Findings.Contains("numeric-content-changed")) { <MudText Typo="Typo.caption" Color="Color.Warning">Numbers differ. Compare the original carefully.</MudText> }
+            @if (item.Findings.Contains("unusual-length-ratio")) { <MudText Typo="Typo.caption" Color="Color.Warning">Check for missing or added details.</MudText> }
+            @if (item.CanReview && item.State == "Completed")
+            {
+                <MudCheckBox T="bool" Value="@(_confirmed == item.ArtifactId)" ValueChanged="@(value => _confirmed = value ? item.ArtifactId : null)" Label="I have compared the meaning of both reports." Disabled="_busy" />
+                <MudButton Size="Size.Small" Color="Color.Primary" Disabled="@(_busy || _confirmed != item.ArtifactId)" OnClick="@(() => ReviewAsync(item, true))">Accept translation</MudButton>
+                <MudButton Size="Size.Small" Disabled="@(_busy || _confirmed != item.ArtifactId)" OnClick="@(() => ReviewAsync(item, false))">Reject translation</MudButton>
+            }
+        }
+    }
+    else if (!_busy) { <MudText Typo="Typo.caption">Translation could not be loaded. Try Refresh.</MudText> }
+</section>
+
+@code {
+    [Parameter] public Guid CaseId { get; set; }
+    [Parameter] public ICaseTranslationClient? Client { get; set; }
+    private CaseTranslationSnapshot? _snapshot;
+    private Guid? _loadedCase;
+    private Guid? _confirmed;
+    private CancellationTokenSource? _request;
+    private bool _busy;
+    private bool _disposed;
+    private string? _message;
+    private int _generation;
+    private ICaseTranslationClient? Service => Client ?? Services.GetService<ICaseTranslationClient>();
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loadedCase != CaseId) { _loadedCase = CaseId; await LoadAsync(); }
+    }
+
+    private async Task LoadAsync()
+    {
+        _request?.Cancel(); _request?.Dispose(); _request = new();
+        var generation = ++_generation;
+        var id = CaseId;
+        _busy = true; _snapshot = null; _confirmed = null;
+        try
+        {
+            var result = Service is { } service ? await service.GetAsync(id, _request.Token) : new(id, [], CaseClassificationAccess.Unavailable);
+            if (!_disposed && generation == _generation) _snapshot = result.IsValidFor(id) ? result : new(id, [], CaseClassificationAccess.Unavailable);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception) { if (!_disposed && generation == _generation) _message = "Translation could not be loaded."; }
+        finally { if (!_disposed && generation == _generation) _busy = false; }
+    }
+
+    private async Task ReviewAsync(CaseTranslationItem item, bool approve)
+    {
+        if (_busy || _confirmed != item.ArtifactId || Service is not { } service) return;
+        var generation = _generation;
+        var id = CaseId;
+        _busy = true;
+        try
+        {
+            var result = await service.ReviewAsync(id, item.ArtifactId, Guid.NewGuid(), item.ReviewVersion, approve, _request?.Token ?? default);
+            if (_disposed || generation != _generation) return;
+            _message = result is "Recorded" or "Replayed" ? "Review saved." : result == "Conflict" ? "This translation changed. Review the latest version." : "Review could not be saved. Refresh before trying again.";
+            await LoadAsync();
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception) { if (!_disposed && generation == _generation) _message = "Review could not be saved. Refresh before trying again."; }
+        finally { if (!_disposed && generation == _generation) _busy = false; }
+    }
+
+    private static string Status(CaseTranslationItem item) => item.State switch
+    {
+        "Failed" => "Translation could not be completed.", "Cancelled" => "Translation cancelled.",
+        "Completed" => item.ReviewStatus switch { "Approved" => "Translation accepted by a reviewer.", "Rejected" => "Translation rejected by a reviewer.", _ => "Not yet reviewed. Compare all details with the original." },
+        _ => "Translation is being prepared."
+    };
+    public void Dispose() { _disposed = true; _request?.Cancel(); _request?.Dispose(); }
+}

@@ -1,0 +1,444 @@
+@page "/education"
+@using SwiftAid.Client.Presentation
+@using SwiftAid.UI.Components.Theme
+@using SwiftAid.UI.Components.Surfaces.Public
+@inject IEducationClient EducationClient
+
+<PageTitle>Education | SwiftAid</PageTitle>
+
+<EducationSurface Materials="_materials"
+                  Query="_query"
+                  IsLoading="_loading"
+                  IsAvailable="_available"
+                  UnavailableState="_unavailableState"
+                  CapabilityMessage="@_capabilityMessage"
+                  TotalCount="_totalCount"
+                  HasMore="_hasMore"
+                  OnQueryChanged="QueryChangedAsync"
+                  OnRetry="LoadAsync"
+                  OnViewContent="ViewContentAsync"
+                  OnDownload="DownloadAsync"
+                  OnSaveOffline="SaveOfflineAsync"
+                  OnRemoveOffline="RemoveOfflineAsync" />
+
+@code {
+    private EducationBrowseRequest _query = new();
+    private IReadOnlyList<EducationMaterialPresentation> _materials = [];
+    private bool _loading = true;
+    private bool _available;
+    private SwiftAidViewState _unavailableState = SwiftAidViewState.Information;
+    private bool _hasMore;
+    private int _totalCount;
+    private long _loadGeneration;
+    private string? _capabilityMessage;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task QueryChangedAsync(EducationBrowseRequest request)
+    {
+        _query = request;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        var generation = Interlocked.Increment(ref _loadGeneration);
+        var querySnapshot = _query;
+        _loading = true;
+        _capabilityMessage = null;
+        _unavailableState = SwiftAidViewState.Information;
+        try
+        {
+            var query = new EducationQuery(
+                new PageRequest(querySnapshot.PageNumber, querySnapshot.PageSize),
+                Category: querySnapshot.Category,
+                Language: querySnapshot.Language,
+                Search: querySnapshot.Search,
+                OfflineOnly: querySnapshot.OfflineOnly);
+            var result = await EducationClient.ListAsync(query);
+            if (!IsCurrentLoad(generation))
+            {
+                return;
+            }
+
+            if (result.Code != UiCapabilityResultCode.Success || !result.Metadata.IsAvailable || result.Value is not { } page)
+            {
+                SetUnavailable(result.Code);
+                return;
+            }
+
+            var materials = await Task.WhenAll(page.Items.Select(MapMaterialAsync));
+            if (!IsCurrentLoad(generation))
+            {
+                return;
+            }
+
+            _available = true;
+            _totalCount = page.TotalCount;
+            _hasMore = page.HasMore;
+            _materials = materials;
+        }
+        catch (OperationCanceledException)
+        {
+            if (!IsCurrentLoad(generation))
+            {
+                return;
+            }
+
+            SetUnavailable(UiCapabilityResultCode.Cancelled);
+        }
+        catch (Exception)
+        {
+            if (!IsCurrentLoad(generation))
+            {
+                return;
+            }
+
+            _available = false;
+            _unavailableState = SwiftAidViewState.Error;
+            _materials = [];
+            _totalCount = 0;
+            _hasMore = false;
+            _capabilityMessage = "The education library is temporarily unavailable. No substitute guidance was generated.";
+        }
+        finally
+        {
+            if (IsCurrentLoad(generation))
+            {
+                _loading = false;
+            }
+        }
+    }
+
+    private bool IsCurrentLoad(long generation) => generation == Volatile.Read(ref _loadGeneration);
+
+    private void SetUnavailable(UiCapabilityResultCode code)
+    {
+        _available = false;
+        _unavailableState = code switch
+        {
+            UiCapabilityResultCode.Denied => SwiftAidViewState.Denied,
+            UiCapabilityResultCode.Retryable => SwiftAidViewState.Offline,
+            UiCapabilityResultCode.InvalidRequest => SwiftAidViewState.Error,
+            _ => SwiftAidViewState.Information
+        };
+        _materials = [];
+        _totalCount = 0;
+        _hasMore = false;
+        _capabilityMessage = code switch
+        {
+            UiCapabilityResultCode.Denied => "You do not have permission to view these materials.",
+            UiCapabilityResultCode.Cancelled => "Loading materials was cancelled. Try again when ready.",
+            UiCapabilityResultCode.Retryable => "The education library could not be reached. Check your connection and try again.",
+            _ => "The education library is not available right now. Unreviewed content will not be shown."
+        };
+    }
+
+    private async Task<EducationMaterialPresentation> MapMaterialAsync(EducationMaterial material)
+    {
+        EducationOfflineResult? status = null;
+        try
+        {
+            var offline = await EducationClient.GetOfflineStatusAsync(
+                new EducationMaterialVersionRequest(material.Id, material.SourceVersion));
+            status = offline.Code == UiCapabilityResultCode.Success && offline.Metadata.IsAvailable ? offline.Value : null;
+        }
+        catch (Exception)
+        {
+            // A saved-copy status failure does not prevent browsing the approved library entry.
+        }
+        var offlineState = status switch
+        {
+            { IsAvailableOffline: true, StorageProvenance: EducationStorageProvenance.PersistentDeviceStore } => EducationOfflinePresentationState.SavedOnDevice,
+            { StorageProvenance: EducationStorageProvenance.SessionPreview } => EducationOfflinePresentationState.SessionPreviewOnly,
+            { IsAvailableOffline: false, StorageProvenance: EducationStorageProvenance.PersistentDeviceStore } => EducationOfflinePresentationState.NotSaved,
+            null => EducationOfflinePresentationState.Unavailable,
+            _ => EducationOfflinePresentationState.Unknown
+        };
+
+        return new EducationMaterialPresentation(
+            material.Id,
+            material.Title,
+            material.Summary,
+            material.Category,
+            material.Language,
+            material.Source,
+            material.SourceVersion,
+            material.IsApproved,
+            status?.IsAvailableOffline ?? material.IsAvailableOffline,
+            SourceUrl: TryGetHttpsUrl(material.Source),
+            OfflineState: offlineState,
+            ReviewStatus: ReviewStatusLabel(material.ReviewState),
+            CanSaveOffline: status?.CanSaveOffline == true,
+            CanRemoveOffline: status?.CanRemoveOffline == true,
+            ReuseRights: ReuseRightsLabel(material.ReuseRights));
+    }
+
+    private async Task ViewContentAsync(EducationMaterialVersionPresentation request)
+    {
+        var index = FindMaterial(request);
+        if (index < 0)
+        {
+            return;
+        }
+
+        _materials = ReplaceAt(_materials, index, _materials[index] with { IsContentLoading = true, ContentStatus = null, ContentStatusIsError = false });
+        try
+        {
+            var result = await EducationClient.GetContentAsync(ToClientRequest(request));
+            index = FindMaterial(request);
+            if (index < 0)
+            {
+                return;
+            }
+
+            if (result.Code != UiCapabilityResultCode.Success || !result.Metadata.IsAvailable || result.Value is not { } content ||
+                !Matches(content, request) || string.IsNullOrWhiteSpace(content.ContentHash) ||
+                string.IsNullOrWhiteSpace(content.TextContent))
+            {
+                _materials = ReplaceAt(_materials, index, _materials[index] with
+                {
+                    IsContentLoading = false,
+                    Content = null,
+                    CanDownload = false,
+                    ContentStatus = "This source is not approved for public display or could not be verified. No substitute content was generated.",
+                    ContentStatusIsError = true
+                });
+                return;
+            }
+
+            var isApprovedPublic = IsApprovedPublic(content);
+            if (!isApprovedPublic)
+            {
+                _materials = ReplaceAt(_materials, index, _materials[index] with
+                {
+                    IsContentLoading = false,
+                    Content = null,
+                    CanDownload = false,
+                    ContentStatus = "This material is not approved for public display. No replacement guidance was generated.",
+                    ContentStatusIsError = true,
+                    ReviewStatus = ReviewStatusLabel(content.ReviewState),
+                    ReuseRights = ReuseRightsLabel(content.ReuseRights)
+                });
+                return;
+            }
+
+            _materials = ReplaceAt(_materials, index, _materials[index] with
+            {
+                IsContentLoading = false,
+                Content = content.TextContent,
+                ContentHash = content.ContentHash,
+                ContentStatus = null,
+                ContentStatusIsError = false,
+                ReviewStatus = ReviewStatusLabel(content.ReviewState),
+                ReuseRights = ReuseRightsLabel(content.ReuseRights),
+                Source = content.Source,
+                SourceUrl = content.SourceUrl,
+                SourceVersion = content.SourceVersion,
+                Language = content.Language,
+                CanDownload = isApprovedPublic
+            });
+        }
+        catch (Exception)
+        {
+            SetMaterialError(request, "The selected source could not be loaded. Try again without substituting generated content.");
+        }
+    }
+
+    private async Task DownloadAsync(EducationMaterialVersionPresentation request)
+    {
+        var index = FindMaterial(request);
+        if (index < 0 || !_materials[index].CanDownload || _materials[index].IsDownloadPending)
+        {
+            return;
+        }
+
+        var material = _materials[index];
+        _materials = ReplaceAt(_materials, index, material with { IsDownloadPending = true, ContentStatus = null });
+        try
+        {
+            var result = await EducationClient.DownloadAsync(ToClientRequest(request));
+            index = FindMaterial(request);
+            if (index < 0)
+            {
+                return;
+            }
+
+            if (result.Code == UiCapabilityResultCode.Success && result.Metadata.IsAvailable &&
+                result.Value is { } download &&
+                Matches(download, request) && string.Equals(download.ContentHash, material.ContentHash, StringComparison.Ordinal))
+            {
+                if (!download.DownloadCompleted && download.StorageProvenance == EducationStorageProvenance.SessionPreview)
+                {
+                    _materials = ReplaceAt(_materials, index, _materials[index] with
+                    {
+                        IsDownloadPending = false,
+                        ContentStatus = string.IsNullOrWhiteSpace(download.Message)
+                            ? "Preview only; the source file was not downloaded."
+                            : download.Message,
+                        ContentStatusIsError = false
+                    });
+                    return;
+                }
+
+                if (!download.DownloadCompleted)
+                {
+                    _materials = ReplaceAt(_materials, index, _materials[index] with
+                    {
+                        IsDownloadPending = false,
+                        ContentStatus = "The source file was not confirmed as downloaded.",
+                        ContentStatusIsError = true
+                    });
+                    return;
+                }
+
+                _materials = ReplaceAt(_materials, index, _materials[index] with
+                {
+                    IsDownloadPending = false,
+                    ContentStatus = "The source file download completed. Offline storage is tracked separately.",
+                    ContentStatusIsError = false
+                });
+                return;
+            }
+
+            _materials = ReplaceAt(_materials, index, _materials[index] with
+            {
+                IsDownloadPending = false,
+                ContentStatus = "The source file was not confirmed as downloaded.",
+                ContentStatusIsError = true
+            });
+        }
+        catch (Exception)
+        {
+            SetMaterialError(request, "The source file could not be downloaded. Try again when it is available.");
+        }
+    }
+
+    private Task SaveOfflineAsync(EducationMaterialVersionPresentation request) => ChangeOfflineAsync(request, save: true);
+
+    private Task RemoveOfflineAsync(EducationMaterialVersionPresentation request) => ChangeOfflineAsync(request, save: false);
+
+    private async Task ChangeOfflineAsync(EducationMaterialVersionPresentation request, bool save)
+    {
+        var index = FindMaterial(request);
+        if (index < 0 || _materials[index].IsOfflineActionPending)
+        {
+            return;
+        }
+
+        _materials = ReplaceAt(_materials, index, _materials[index] with { IsOfflineActionPending = true, ContentStatus = null });
+        try
+        {
+            var result = save
+                ? await EducationClient.SaveOfflineAsync(ToClientRequest(request))
+                : await EducationClient.RemoveOfflineAsync(ToClientRequest(request));
+            index = FindMaterial(request);
+            if (index < 0)
+            {
+                return;
+            }
+
+            var material = _materials[index];
+            if (result.Code == UiCapabilityResultCode.Success && result.Metadata.IsAvailable && result.Value is { } offline &&
+                Matches(offline, request) && string.Equals(offline.ContentHash, material.ContentHash, StringComparison.Ordinal) &&
+                offline.StorageProvenance == EducationStorageProvenance.PersistentDeviceStore && offline.IsAvailableOffline == save)
+            {
+                _materials = ReplaceAt(_materials, index, material with
+                {
+                    IsOfflineActionPending = false,
+                    IsAvailableOffline = save,
+                    OfflineState = save ? EducationOfflinePresentationState.SavedOnDevice : EducationOfflinePresentationState.NotSaved,
+                    CanSaveOffline = offline.CanSaveOffline,
+                    CanRemoveOffline = offline.CanRemoveOffline,
+                    ContentStatus = save ? "Saved on this device." : "Removed from this device's offline library.",
+                    ContentStatusIsError = false
+                });
+                return;
+            }
+
+            var previewOnly = result.Code == UiCapabilityResultCode.Success && result.Metadata.IsAvailable &&
+                result.Value?.StorageProvenance == EducationStorageProvenance.SessionPreview;
+            _materials = ReplaceAt(_materials, index, material with
+            {
+                IsOfflineActionPending = false,
+                OfflineState = previewOnly ? EducationOfflinePresentationState.SessionPreviewOnly : EducationOfflinePresentationState.Unknown,
+                ContentStatus = previewOnly
+                    ? "This was only a preview; the material was not saved on this device."
+                    : "This device did not confirm the change. Its saved state has not been changed here.",
+                ContentStatusIsError = true
+            });
+        }
+        catch (Exception)
+        {
+            SetMaterialError(request, "This device could not confirm the offline change. Check the saved state and try again.");
+        }
+    }
+
+    private void SetMaterialError(EducationMaterialVersionPresentation request, string message)
+    {
+        var index = FindMaterial(request);
+        if (index >= 0)
+        {
+            _materials = ReplaceAt(_materials, index, _materials[index] with
+            {
+                IsContentLoading = false,
+                IsDownloadPending = false,
+                IsOfflineActionPending = false,
+                ContentStatus = message,
+                ContentStatusIsError = true
+            });
+        }
+    }
+
+    private int FindMaterial(EducationMaterialVersionPresentation request) =>
+        _materials.ToList().FindIndex(material => material.Id == request.MaterialId && material.SourceVersion == request.SourceVersion);
+
+    private static EducationMaterialVersionRequest ToClientRequest(EducationMaterialVersionPresentation request) =>
+        new(request.MaterialId, request.SourceVersion);
+
+    private static bool Matches(EducationMaterialContent content, EducationMaterialVersionPresentation request) =>
+        content.MaterialId == request.MaterialId && content.SourceVersion == request.SourceVersion;
+
+    private static bool Matches(EducationDownloadResult result, EducationMaterialVersionPresentation request) =>
+        result.MaterialId == request.MaterialId && result.SourceVersion == request.SourceVersion;
+
+    private static bool Matches(EducationOfflineResult result, EducationMaterialVersionPresentation request) =>
+        result.MaterialId == request.MaterialId && result.SourceVersion == request.SourceVersion;
+
+    private static bool IsApprovedPublic(EducationMaterialContent content) =>
+        (content.ReviewState == EducationReviewState.ApprovedForPublic &&
+         content.ReuseRights is EducationReuseRights.PublicDomain or EducationReuseRights.ReuseGranted or EducationReuseRights.AttributionRequired) ||
+        (content.ReviewState == EducationReviewState.AppAuthoredProcess &&
+         content.ReuseRights == EducationReuseRights.AppOwnedOriginal);
+
+    private static string ReviewStatusLabel(EducationReviewState state) => state switch
+    {
+        EducationReviewState.ApprovedForPublic => "Approved for public display",
+        EducationReviewState.AppAuthoredProcess => "App-authored process content",
+        EducationReviewState.Withdrawn => "Withdrawn",
+        _ => "Not reviewed"
+    };
+
+    private static string ReuseRightsLabel(EducationReuseRights rights) => rights switch
+    {
+        EducationReuseRights.PublicDomain => "Public domain",
+        EducationReuseRights.ReuseGranted => "Reuse granted",
+        EducationReuseRights.AttributionRequired => "Attribution required",
+        EducationReuseRights.AppOwnedOriginal => "App-owned original",
+        EducationReuseRights.Restricted => "Restricted",
+        _ => "Not verified"
+    };
+
+    private static string? TryGetHttpsUrl(string? value) =>
+        Uri.TryCreate(value, UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttps ? uri.AbsoluteUri : null;
+
+    private static IReadOnlyList<EducationMaterialPresentation> ReplaceAt(
+        IReadOnlyList<EducationMaterialPresentation> source,
+        int index,
+        EducationMaterialPresentation item)
+    {
+        var copy = source.ToArray();
+        copy[index] = item;
+        return copy;
+    }
+}

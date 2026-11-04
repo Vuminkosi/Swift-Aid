@@ -1,0 +1,28 @@
+.street-map { position: relative; min-width: 0; }
+.street-map__canvas { height: clamp(22rem, 60dvh, 42rem); width: 100%; border-radius: .65rem; background: var(--sa-surface-subtle); z-index: 0; }
+.street-map__reset { position: absolute; top: .65rem; right: .65rem; display: flex; align-items: center; gap: .35rem; padding: .15rem .4rem; border-radius: .4rem; background: var(--sa-surface); color: var(--sa-text-primary); box-shadow: 0 2px 8px #0002; z-index: 500; font-size: .72rem; }
+.street-map p { font-size: .75rem; color: var(--sa-text-secondary); }
+.street-map ::deep .sa-map-marker { display: grid; place-items: center; border-radius: 50%; background: #087ed8; color: white; border: 4px solid #ffffffb3; font-size: .75rem; font-weight: 800; box-shadow: 0 0 0 6px #087ed826; }
+.street-map ::deep .sa-map-marker--animal { background: #00865a; box-shadow: 0 0 0 6px #00865a26; }
+.street-map ::deep .sa-map-marker--mixed { background: #7543bb; box-shadow: 0 0 0 6px #7543bb26; }
+.street-map__legend { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem 1rem; padding: .5rem .1rem; font-size: .75rem; }
+.street-map__legend button { display: inline-flex; align-items: center; gap: .4rem; min-height: 44px; padding: .35rem .65rem; border: 1px solid var(--sa-border); border-radius: 1.5rem; background: var(--sa-surface); color: var(--sa-text-primary); font: inherit; cursor: pointer; }
+.street-map__legend button[aria-pressed="true"] { border-color: var(--sa-action-primary); background: var(--sa-surface-subtle); font-weight: 700; }
+.street-map__legend button[aria-pressed="false"] i { opacity: .4; }
+.street-map__legend button:focus-visible { outline: 2px solid var(--sa-action-primary); outline-offset: 2px; }
+.street-map__legend i { width: .65rem; height: .65rem; border-radius: 50%; background: #087ed8; }
+.street-map__legend .animal { background: #00865a; }
+.street-map__legend .mixed { background: #7543bb; }
+.street-map__legend .medical { width: 1rem; height: 1rem; display: grid; place-items: center; border-radius: .2rem; font: 700 .7rem/1 sans-serif; background: #a63354; color: white; }
+.street-map ::deep .sa-medical-marker { display: grid; place-items: center; background: #a63354; color: white; border: 2px solid white; border-radius: .35rem; box-shadow: 0 1px 5px #0004; font-size: .75rem; font-weight: 800; }
+.street-map ::deep .sa-medical-popup strong, .street-map ::deep .sa-medical-popup small { display: block; margin-bottom: .5rem; }
+.street-map__legend small { color: var(--sa-text-secondary); }
+.street-map ::deep .sa-map-popup__cases { display: block; border: 0; padding: .3rem 0 .7rem; background: transparent; color: #0864b3; font: inherit; font-weight: 600; cursor: pointer; }
+.street-map ::deep .sa-map-popup__cases:hover { text-decoration: underline; }
+.street-map ::deep .sa-map-popup__cases:focus-visible { outline: 2px solid #0864b3; outline-offset: 3px; }
+.street-map ::deep .sa-map-popup__cases:disabled { opacity: .6; cursor: wait; }
+.street-map ::deep .sa-map-popup { max-width: 15rem; font-size: .8rem; }
+.street-map ::deep .sa-map-popup strong { display: block; }
+.street-map ::deep .sa-map-popup small { color: #555; }
+.street-map ::deep .leaflet-control-attribution { font-size: .65rem; }
+@media(max-width: 600px) { .street-map__canvas { height: 58dvh; min-height: 22rem; } }

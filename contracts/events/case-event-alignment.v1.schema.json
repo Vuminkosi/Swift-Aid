@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://swiftaid.invalid/contracts/events/case-event-alignment.v1.schema.json",
+  "title": "SwiftAid additive operational and request case events v1",
+  "description": "Versioned schema definitions for the §6.4 additions. Handler implementations are owned by later P5 tasks.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "eventId", "eventType", "caseId", "aggregateVersion", "reportRevision", "commandId", "actorId", "recordedAtUtc", "payload"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "eventId": { "type": "string", "format": "uuid" },
+    "eventType": { "enum": ["CaseWorkflowRecorded", "AssistanceProgressRecorded", "AssistanceCancelled", "FollowUpCancelled", "ActionOwnerChanged", "CaseActionRequested", "CaseActionRequestReviewed"] },
+    "caseId": { "type": "string", "format": "uuid" },
+    "aggregateVersion": { "type": "integer", "minimum": 1 },
+    "reportRevision": { "type": "integer", "minimum": 1 },
+    "commandId": { "type": "string", "format": "uuid" },
+    "actorId": { "type": "string", "minLength": 1 },
+    "occurredAtUtc": { "type": ["string", "null"], "format": "date-time" },
+    "recordedAtUtc": { "type": "string", "format": "date-time" },
+    "payload": {
+      "oneOf": [
+        { "$ref": "#/$defs/workflow" },
+        { "$ref": "#/$defs/assistanceProgress" },
+        { "$ref": "#/$defs/actionCancellation" },
+        { "$ref": "#/$defs/ownerChange" },
+        { "$ref": "#/$defs/actionRequest" },
+        { "$ref": "#/$defs/actionReview" }
+      ]
+    }
+  },
+  "$defs": {
+    "workflow": { "type": "object", "additionalProperties": false, "required": ["workflow"], "properties": { "workflow": { "enum": ["Reported", "UnderReview", "Active", "AwaitingFollowUp", "Resolved"] } } },
+    "assistanceProgress": { "type": "object", "additionalProperties": false, "required": ["assistanceId", "state"], "properties": { "assistanceId": { "type": "string", "minLength": 1 }, "state": { "enum": ["Requested", "Accepted", "InProgress", "Provided", "ReceiptConfirmed", "Unfulfilled", "Cancelled"] } } },
+    "actionCancellation": { "type": "object", "additionalProperties": false, "required": ["actionId", "reason"], "properties": { "actionId": { "type": "string", "minLength": 1 }, "reason": { "type": "string", "minLength": 1 } } },
+    "ownerChange": { "type": "object", "additionalProperties": false, "required": ["actionKind", "actionId", "previousOwnerId", "newOwnerId", "reason"], "properties": { "actionKind": { "enum": ["FollowUp", "Assistance"] }, "actionId": { "type": "string", "format": "uuid" }, "previousOwnerId": { "type": "string", "minLength": 1 }, "newOwnerId": { "type": "string", "minLength": 1 }, "reason": { "type": "string", "minLength": 1 } } },
+    "actionRequest": { "$ref": "case-event.v1.schema.json#/$defs/actionRequest" },
+    "actionReview": { "$ref": "case-event.v1.schema.json#/$defs/actionReview" }
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "eventId": "880cbcc7-daa8-1163-cb17-1833a59adb38",
+  "eventType": "CaseEscalationRaised",
+  "caseId": "10000000-0000-0000-0000-000000000001",
+  "aggregateVersion": 3,
+  "reportRevision": 1,
+  "commandId": "20000000-0000-0000-0000-000000000012",
+  "actorId": "worker-1",
+  "occurredAtUtc": null,
+  "recordedAtUtc": "2026-10-26T08:01:00+00:00",
+  "payload": {
+    "escalationId": "40000000-0000-0000-0000-000000000003",
+    "reason": "holding unreachable twice",
+    "evidenceEventIds": [
+      "evidence-1"
+    ],
+    "recipientRoute": "duty-officer"
+  }
+}

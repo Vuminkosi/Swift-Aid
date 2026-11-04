@@ -1,0 +1,38 @@
+@page "/case-classification-fixture"
+@using SwiftAid.Contracts.Cases
+@using SwiftAid.UI.Components.Surfaces.Operations.CaseDetail
+@using SwiftAid.UI.Components.Theme
+
+<SwiftAidThemeProvider />
+<MudPopoverProvider />
+<main style="max-width:900px;margin:1rem auto;padding:1rem">
+    <h1>Classification synthetic fixture</h1>
+    <p>Deterministic presentation evidence, not provider or device validation.</p>
+    @foreach (var mode in new[] { "completed", "pending", "abstained", "failed", "empty", "denied", "unavailable", "slow" })
+    {
+        <button @onclick="() => Select(mode)">@mode</button>
+    }
+    <CaseClassificationPanel CaseId="_case" Client="_client" />
+</main>
+
+@code {
+    private Guid _case = Guid.NewGuid();
+    private readonly FixtureClient _client = new();
+    private void Select(string mode) { _client.Mode = mode; _case = Guid.NewGuid(); }
+    private sealed class FixtureClient : ICaseClassificationClient
+    {
+        public string Mode { get; set; } = "completed";
+        public async Task<CaseClassificationSnapshot> GetAsync(Guid id, CancellationToken ct = default)
+        {
+            var mode = Mode;
+            if (mode == "slow") await Task.Delay(1200); // Deliberately ignores cancellation to test stale-response fencing.
+            if (mode == "denied") return new(id, [], CaseClassificationAccess.Denied);
+            if (mode == "unavailable") return new(id, [], CaseClassificationAccess.Unavailable);
+            if (mode == "empty") return new(id, []);
+            return new(id, [new(Guid.NewGuid(), 1, mode == "pending" ? "Leased" : mode == "failed" ? "Failed" : "Completed", true,
+                mode == "abstained" ? "sn" : "en", mode == "abstained" ? "unsupported-language" : null, DateTimeOffset.UtcNow,
+                [new("respiratory", "Cough or breathing symptoms", .9, true)],
+                new("fixture", [new("geography-not-exact", "location", "internal explanation should not render")]))]);
+        }
+    }
+}

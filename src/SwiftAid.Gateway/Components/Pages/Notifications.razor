@@ -1,0 +1,199 @@
+@page "/notifications"
+@implements IDisposable
+@using SwiftAid.Client.Presentation
+@using SwiftAid.Gateway.Presentation
+@using SwiftAid.Infrastructure.Identity
+@using SwiftAid.UI.Components.Surfaces.Account
+@using SwiftAid.Client.Presentation.PublicWorkflows
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.AspNetCore.Identity
+@inject IServiceProvider ServiceProvider
+@inject ISubscriptionClient SubscriptionClient
+@inject IPublicCommunitySessionClient SessionClient
+
+<PageTitle>Notifications | SwiftAid</PageTitle>
+
+<AccountSettingsLayout>
+
+<NotificationsSurface Snapshot="_snapshot" OnRefresh="RefreshAsync" OnSave="SaveAsync"
+                        SessionsHref="/sessions" Subscriptions="_subscriptions"
+                        SubscriptionMessage="_subscriptionMessage" OnUnsubscribe="UnsubscribeAsync" />
+
+</AccountSettingsLayout>
+
+@code {
+    private NotificationsSnapshot _snapshot = NotificationsSnapshot.Loading;
+    private IReadOnlyList<SessionSubscriptionSummary>? _subscriptions;
+    private string? _subscriptionMessage;
+    private long _identityGeneration;
+    private long _preferenceGeneration;
+    private long _subscriptionGeneration;
+    private bool _disposed;
+    private AuthenticationStateProvider? _authentication;
+
+    private INotificationPreferenceClient PreferenceClient =>
+        (INotificationPreferenceClient?)ServiceProvider.GetService(typeof(INotificationPreferenceClient))
+        ?? CreateFallback()
+        ?? new UnavailableNotificationPreferenceClient();
+
+    private INotificationPreferenceClient? CreateFallback()
+    {
+        var auth = (AuthenticationStateProvider?)ServiceProvider.GetService(typeof(AuthenticationStateProvider));
+        var users = (UserManager<SwiftAidUser>?)ServiceProvider.GetService(typeof(UserManager<SwiftAidUser>));
+        var preferences = (INotificationPreferenceService?)ServiceProvider.GetService(typeof(INotificationPreferenceService));
+        return auth is null || users is null || preferences is null
+            ? null
+            : new GatewayNotificationPreferenceClient(auth, users, preferences);
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        _authentication = (AuthenticationStateProvider?)ServiceProvider.GetService(typeof(AuthenticationStateProvider));
+        if (_authentication is not null) _authentication.AuthenticationStateChanged += AuthenticationChanged;
+        await RefreshAsync();
+    }
+
+    private void AuthenticationChanged(Task<AuthenticationState> stateTask)
+    {
+        var identity = Interlocked.Increment(ref _identityGeneration);
+        Interlocked.Increment(ref _preferenceGeneration);
+        Interlocked.Increment(ref _subscriptionGeneration);
+        _ = InvokeAsync(async () =>
+        {
+            if (_disposed || identity != Volatile.Read(ref _identityGeneration)) return;
+            _snapshot = NotificationsSnapshot.Loading;
+            _subscriptions = null;
+            _subscriptionMessage = null;
+            StateHasChanged();
+            await RefreshAsync();
+            if (!_disposed && identity == Volatile.Read(ref _identityGeneration)) StateHasChanged();
+        });
+    }
+
+    public void Dispose()
+    {
+        _disposed = true;
+        Interlocked.Increment(ref _identityGeneration);
+        Interlocked.Increment(ref _preferenceGeneration);
+        Interlocked.Increment(ref _subscriptionGeneration);
+        if (_authentication is not null) _authentication.AuthenticationStateChanged -= AuthenticationChanged;
+    }
+
+    private async Task RefreshAsync()
+    {
+        await Task.WhenAll(RefreshPreferencesAsync(), RefreshSubscriptionsAsync());
+    }
+
+    private async Task RefreshPreferencesAsync()
+    {
+        var generation = Interlocked.Increment(ref _preferenceGeneration);
+        try
+        {
+            var result = await PreferenceClient.GetAsync();
+            if (!_disposed && generation == Volatile.Read(ref _preferenceGeneration))
+                _snapshot = Map(result, result.Value);
+        }
+        catch (Exception)
+        {
+            if (!_disposed && generation == Volatile.Read(ref _preferenceGeneration))
+                _snapshot = NotificationsSnapshot.Unavailable;
+        }
+    }
+
+    private async Task RefreshSubscriptionsAsync()
+    {
+        var generation = Interlocked.Increment(ref _subscriptionGeneration);
+        _subscriptions = null;
+        _subscriptionMessage = null;
+        try
+        {
+            var subscriptions = await SubscriptionClient.ListMineAsync();
+            if (_disposed || generation != Volatile.Read(ref _subscriptionGeneration)) return;
+            if (subscriptions.Succeeded && subscriptions.Value is { } values)
+            {
+                var details = await SessionSubscriptionLookup.ResolveAsync(values, SessionClient);
+                if (_disposed || generation != Volatile.Read(ref _subscriptionGeneration)) return;
+                _subscriptions = details.Select(item => new SessionSubscriptionSummary(item.SessionId, item.Version,
+                    item.Title, item.StartsAtUtc, item.TimeZoneId, item.ChannelLabel, item.HasInactiveStoredConsent)).ToArray();
+            }
+            else
+            {
+                _subscriptionMessage = subscriptions.Message ?? subscriptions.Metadata.Notice ??
+                    "Your session subscriptions are temporarily unavailable.";
+            }
+        }
+        catch (Exception)
+        {
+            if (_disposed || generation != Volatile.Read(ref _subscriptionGeneration)) return;
+            _subscriptions = null;
+            _subscriptionMessage = "Your session subscriptions are temporarily unavailable. Retry to check again.";
+        }
+    }
+
+    private async Task UnsubscribeAsync(SessionSubscriptionSummary subscription)
+    {
+        var identity = Volatile.Read(ref _identityGeneration);
+        Interlocked.Increment(ref _subscriptionGeneration);
+        try
+        {
+            var result = await SubscriptionClient.UnsubscribeAsync(subscription.SessionId, subscription.Version);
+            if (_disposed || identity != Volatile.Read(ref _identityGeneration)) return;
+            var message = SessionSubscriptionPresentation.UnsubscribeMessage(result, subscription.SessionId);
+            await RefreshSubscriptionsAsync();
+            if (!_disposed && identity == Volatile.Read(ref _identityGeneration)) _subscriptionMessage = message;
+        }
+        catch (Exception)
+        {
+            if (!_disposed && identity == Volatile.Read(ref _identityGeneration))
+            {
+                await RefreshSubscriptionsAsync();
+                if (!_disposed && identity == Volatile.Read(ref _identityGeneration))
+                    _subscriptionMessage = "We could not confirm the update. Refresh and try again.";
+            }
+        }
+    }
+
+    private async Task SaveAsync(NotificationPreferenceChange change)
+    {
+        var generation = Interlocked.Increment(ref _preferenceGeneration);
+        _snapshot = _snapshot with { IsSaving = true, StatusMessage = null, StatusIsError = false };
+        try
+        {
+            var result = await PreferenceClient.SaveAsync(
+                new NotificationPreferenceEdit(change.WorkReminders, change.SessionUpdates));
+            if (!_disposed && generation == Volatile.Read(ref _preferenceGeneration)) _snapshot = Map(result, result.Value);
+        }
+        catch (Exception)
+        {
+            if (!_disposed && generation == Volatile.Read(ref _preferenceGeneration)) _snapshot = NotificationsSnapshot.Unavailable;
+        }
+    }
+
+    private static NotificationsSnapshot Map(
+        UiCapabilityResult<NotificationPreferenceState> result,
+        NotificationPreferenceState? value)
+    {
+        if (value is null)
+        {
+            return result.Code == UiCapabilityResultCode.Denied
+                ? NotificationsSnapshot.SignedOut
+                : NotificationsSnapshot.Unavailable with
+                {
+                    StatusMessage = result.Message ?? NotificationsSnapshot.Unavailable.StatusMessage
+                };
+        }
+
+        if (!value.IsSignedIn)
+        {
+            return NotificationsSnapshot.SignedOut;
+        }
+
+        return new NotificationsSnapshot(
+            NotificationsViewState.Ready,
+            value.WorkReminders,
+            value.SessionUpdates,
+            IsSaving: false,
+            value.StatusMessage,
+            value.StatusIsError);
+    }
+}

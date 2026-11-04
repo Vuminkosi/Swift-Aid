@@ -1,0 +1,36 @@
+﻿<script type="module" src="@(Assets["Components/Layout/ReconnectModal.razor.js"])"></script>
+
+<dialog id="components-reconnect-modal" aria-label="Connection status" aria-busy="false" data-nosnippet>
+    <div class="components-reconnect-container">
+        <div id="components-reconnect-loader"
+             class="components-rejoining-animation"
+             data-gif-src="@(Assets["_content/SwiftAid.UI/assets/loading/swiftaid-loader.gif"])"
+             data-still-src="@(Assets["_content/SwiftAid.UI/assets/loading/swiftaid-loader-still.png"])"
+             aria-hidden="true"
+             hidden>
+        </div>
+        <p id="components-reconnect-live-status" class="components-visually-hidden" role="status" aria-live="polite" aria-atomic="true"></p>
+        <p id="components-reconnect-active-text" class="components-reconnect-active-text" aria-hidden="true"></p>
+        <p class="components-reconnect-first-attempt-visible">
+            Trying to reconnect...
+        </p>
+        <p class="components-reconnect-repeated-attempt-visible">
+            Could not reconnect. Trying again in <span id="components-seconds-to-next-attempt"></span> seconds.
+        </p>
+        <p class="components-reconnect-failed-visible">
+            Still offline.<br />Try again or refresh the page.
+        </p>
+        <button id="components-reconnect-button" class="components-reconnect-failed-visible">
+            Try again
+        </button>
+        <p class="components-pause-visible">
+            Your work is paused while we reconnect.
+        </p>
+        <p class="components-resume-failed-visible">
+            We could not continue.<br />Try again or refresh the page.
+        </p>
+        <button id="components-resume-button" class="components-pause-visible components-resume-failed-visible">
+            Continue
+        </button>
+    </div>
+</dialog>

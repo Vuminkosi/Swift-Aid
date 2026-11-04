@@ -1,0 +1,443 @@
+@page "/investigations"
+@using SwiftAid.Client.Presentation
+@using Client = SwiftAid.Client.Presentation
+@using Ui = SwiftAid.UI.Components.Surfaces.Operations
+@using SwiftAid.UI.Components.Surfaces.Operations
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@inject IAiInvestigationClient InvestigationClient
+
+<PageTitle>Investigations | SwiftAid</PageTitle>
+<OperationsInvestigationSurface WorkItems="_workItems" ListState="_listState" ListMessage="_listMessage"
+                                DetailState="_detailState" DetailMessage="_detailMessage" Snapshot="_snapshot"
+                                ExecutionState="_executionState" ExecutionMessage="_executionMessage" Execution="_execution"
+                                Busy="_busy" StatusMessage="@_message" StatusSeverity="_messageSeverity"
+                                OnRefreshList="RefreshListAsync" OnSelect="SelectAsync" OnStart="StartAsync"
+                                OnClarify="ReplyAsync" OnPause="PauseAsync" OnResume="ResumeAsync"
+                                OnPropose="ProposeAsync" OnReviewProposal="ReviewProposalAsync"
+                                OnRefreshExecution="RefreshExecutionAsync" />
+
+@code {
+    private IReadOnlyList<Ui.OperationsInvestigationWorkItem> _workItems = Array.Empty<Ui.OperationsInvestigationWorkItem>();
+    private Ui.OperationsInvestigationSnapshot? _snapshot;
+    private Ui.OperationsInvestigationExecutionAndVerification? _execution;
+    private OperationsSurfaceState _listState = OperationsSurfaceState.Loading;
+    private OperationsSurfaceState _detailState = OperationsSurfaceState.Empty;
+    private OperationsSurfaceState _executionState = OperationsSurfaceState.Empty;
+    private string _listMessage = "The investigation list is unavailable.";
+    private string _detailMessage = "Choose an investigation to view its details.";
+    private string _executionMessage = "Execution and verification status is unavailable.";
+    private string? _message;
+    private Severity _messageSeverity = Severity.Info;
+    private bool _busy;
+
+    protected override Task OnInitializedAsync() => RefreshListAsync();
+
+    private async Task RefreshListAsync()
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _listState = OperationsSurfaceState.Loading;
+        try
+        {
+            var result = await InvestigationClient.ListAsync(new PageRequest(1, 50));
+            _listState = MapState(result, result.Value?.Items.Count > 0);
+            _listMessage = MessageFor(result, "The investigation list could not be loaded.");
+            if (result.Succeeded && result.Metadata.IsAvailable && result.Value is not null)
+            {
+                _workItems = result.Value.Items.Select(ToUi).ToArray();
+                ClearSelectedIfNoLongerCurrent();
+            }
+            else
+            {
+                ClearSensitiveProjections(_listState, _listMessage);
+                _workItems = Array.Empty<Ui.OperationsInvestigationWorkItem>();
+            }
+        }
+        catch (Exception)
+        {
+            ClearSensitiveProjections(OperationsSurfaceState.Error, "The investigation list could not be loaded. Try again when the connection is available.");
+            _workItems = Array.Empty<Ui.OperationsInvestigationWorkItem>();
+            _listState = OperationsSurfaceState.Error;
+            _listMessage = "The investigation list could not be loaded. Try again when the connection is available.";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task SelectAsync(string investigationId)
+    {
+        if (_busy || string.IsNullOrWhiteSpace(investigationId))
+        {
+            return;
+        }
+
+        _busy = true;
+        _detailState = OperationsSurfaceState.Loading;
+        _snapshot = null;
+        _execution = null;
+        _executionState = OperationsSurfaceState.Empty;
+        try
+        {
+            var result = await InvestigationClient.GetAsync(investigationId);
+            if (IsValidSnapshot(result, investigationId))
+            {
+                _detailState = OperationsSurfaceState.Populated;
+                _detailMessage = MessageFor(result, "The investigation could not be loaded.");
+                _snapshot = ToUi(result.Value!);
+                await LoadExecutionAsync(_snapshot.Id);
+            }
+            else
+            {
+                var state = result.Succeeded ? OperationsSurfaceState.Error : MapState(result, false);
+                var message = result.Succeeded
+                    ? "The investigation response could not be verified. Refresh the list and try again."
+                    : MessageFor(result, "The investigation could not be loaded.");
+                if (ShouldClearPrivateData(result))
+                {
+                    ClearSensitiveProjections(state, message);
+                }
+                else
+                {
+                    _detailState = state;
+                    _detailMessage = message;
+                }
+            }
+        }
+        catch (Exception)
+        {
+            _snapshot = null;
+            _execution = null;
+            _executionState = OperationsSurfaceState.Error;
+            _detailState = OperationsSurfaceState.Error;
+            _detailMessage = "The investigation could not be loaded. Try again.";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task StartAsync(Ui.OperationsInvestigationRequest request)
+    {
+        await ApplySnapshotAsync(() => InvestigationClient.StartAsync(new Client.InvestigationRequest(request.Title, request.Objective)), "The investigation could not be started.");
+    }
+
+    private async Task ReplyAsync(Ui.OperationsInvestigationClarificationSubmission submission)
+    {
+        var current = _snapshot;
+        var clarification = current?.Clarifications.FirstOrDefault(item => string.Equals(item.Id, submission.ClarificationId, StringComparison.Ordinal));
+        if (current is null || !CanMutateCurrent(submission.InvestigationId) || string.IsNullOrWhiteSpace(submission.Answer) ||
+            current.Version != submission.ExpectedVersion ||
+            clarification is null || !string.IsNullOrWhiteSpace(clarification.Answer) ||
+            current.Status is not (Ui.OperationsInvestigationStatus.NeedsInput or Ui.OperationsInvestigationStatus.GatheringEvidence or Ui.OperationsInvestigationStatus.Resuming))
+        {
+            return;
+        }
+
+        await ApplySnapshotAsync(
+            () => InvestigationClient.ReplyAsync(submission.InvestigationId, submission.ExpectedVersion, submission.ClarificationId, submission.Answer),
+            "The factual answer could not be saved.", submission.InvestigationId,
+            snapshot => snapshot.Version == submission.ExpectedVersion,
+            submission.ExpectedVersion);
+    }
+
+    private async Task PauseAsync(Ui.OperationsInvestigationCommand command)
+    {
+        var current = _snapshot;
+        if (current is null || !CanMutateCurrent(command.InvestigationId) || current.Version != command.ExpectedVersion)
+        {
+            return;
+        }
+
+        await ApplySnapshotAsync(() => InvestigationClient.PauseAsync(command.InvestigationId, command.ExpectedVersion), "The investigation could not be paused.", command.InvestigationId,
+            snapshot => snapshot.Version == command.ExpectedVersion &&
+                snapshot.Status is Ui.OperationsInvestigationStatus.GatheringEvidence or Ui.OperationsInvestigationStatus.NeedsInput or Ui.OperationsInvestigationStatus.Resuming,
+            command.ExpectedVersion);
+    }
+
+    private async Task ResumeAsync(Ui.OperationsInvestigationCommand command)
+    {
+        var current = _snapshot;
+        if (current is null || !CanMutateCurrent(command.InvestigationId) || current.Version != command.ExpectedVersion)
+        {
+            return;
+        }
+
+        await ApplySnapshotAsync(() => InvestigationClient.ResumeAsync(command.InvestigationId, command.ExpectedVersion), "The investigation could not be resumed.", command.InvestigationId,
+            snapshot => snapshot.Version == command.ExpectedVersion && snapshot.Status == Ui.OperationsInvestigationStatus.Paused,
+            command.ExpectedVersion);
+    }
+
+    private async Task ProposeAsync(Ui.OperationsInvestigationProposalRequest request)
+    {
+        var current = _snapshot;
+        if (current is null || !CanMutateCurrent(request.InvestigationId) || current.Id != request.InvestigationId ||
+            current.Version != request.ExpectedVersion || string.IsNullOrWhiteSpace(request.Summary) || current.Proposal is not null ||
+            current.Status is not (Ui.OperationsInvestigationStatus.GatheringEvidence or Ui.OperationsInvestigationStatus.NeedsInput or Ui.OperationsInvestigationStatus.Resuming))
+        {
+            return;
+        }
+
+        await ApplySnapshotAsync(
+            () => InvestigationClient.ProposeAdministrativeActionAsync(request.InvestigationId, request.ExpectedVersion, request.Summary),
+            "The proposal could not be prepared.", request.InvestigationId,
+            snapshot => snapshot.Version == request.ExpectedVersion,
+            request.ExpectedVersion);
+    }
+
+    private async Task ReviewProposalAsync(Ui.OperationsInvestigationProposalReview review)
+    {
+        if (!CanMutateCurrent(review.InvestigationId) || _snapshot!.Proposal is not { RequiresHumanApproval: true } proposal ||
+            !string.Equals(proposal.Id, review.ProposalId, StringComparison.Ordinal) ||
+            !string.Equals(proposal.ReviewStatus, "Pending", StringComparison.OrdinalIgnoreCase) ||
+            review.ExpectedVersion != _snapshot.Version || string.IsNullOrWhiteSpace(review.Reason))
+        {
+            return;
+        }
+
+        await ApplySnapshotAsync(
+            () => InvestigationClient.ReviewProposalAsync(new Client.InvestigationProposalReview(review.InvestigationId, review.ProposalId, review.Approve, review.Reason, review.ExpectedVersion)),
+            "The proposal review could not be recorded.", review.InvestigationId,
+            snapshot => snapshot.Version == review.ExpectedVersion,
+            review.ExpectedVersion);
+    }
+
+    private async Task ApplySnapshotAsync(Func<Task<UiCapabilityResult<Client.InvestigationSnapshot>>> operation, string fallback,
+        string? expectedInvestigationId = null, Func<Ui.OperationsInvestigationSnapshot, bool>? additionalGuard = null,
+        long? expectedVersion = null)
+    {
+        if (_busy || (expectedInvestigationId is not null && !CanMutateCurrent(expectedInvestigationId)) ||
+            (additionalGuard is not null && (_snapshot is null || !additionalGuard(_snapshot))))
+        {
+            return;
+        }
+
+        _busy = true;
+        _detailState = OperationsSurfaceState.Loading;
+        try
+        {
+            var result = await operation();
+            var succeeded = IsValidSnapshot(result, expectedInvestigationId) &&
+                (expectedVersion is null || result.Value!.Version > expectedVersion.Value);
+            _detailState = succeeded ? OperationsSurfaceState.Populated : result.Succeeded ? OperationsSurfaceState.Error : MapState(result, false);
+            _detailMessage = succeeded ? MessageFor(result, fallback) : result.Succeeded
+                ? "The investigation response could not be verified. Refresh the list and try again."
+                : MessageFor(result, fallback);
+            _snapshot = succeeded ? ToUi(result.Value!) : null;
+            if (!succeeded)
+            {
+                var state = result.Succeeded ? OperationsSurfaceState.Error : MapState(result, false);
+                if (ShouldClearPrivateData(result))
+                {
+                    ClearSensitiveProjections(state, "Your access changed or the investigation is unavailable. Refresh the list before continuing.");
+                }
+                else
+                {
+                    _execution = null;
+                    _executionState = state;
+                    _executionMessage = "Refresh the investigation to get its current execution status.";
+                }
+            }
+            _message = succeeded ? result.Message ?? result.Metadata.Notice ?? "Investigation updated." : result.Message ?? result.Metadata.Notice ?? fallback;
+            _messageSeverity = succeeded
+                ? Severity.Success
+                : result.Code == UiCapabilityResultCode.Denied ? Severity.Warning : Severity.Error;
+            if (_snapshot is not null)
+            {
+                await LoadExecutionAsync(_snapshot.Id);
+                if (_snapshot is not null)
+                {
+                    await RefreshListCoreAsync();
+                }
+            }
+        }
+        catch (Exception)
+        {
+            _snapshot = null;
+            _execution = null;
+            _executionState = OperationsSurfaceState.Error;
+            _detailState = OperationsSurfaceState.Error;
+            _detailMessage = fallback;
+            _message = fallback;
+            _messageSeverity = Severity.Error;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task RefreshExecutionAsync()
+    {
+        if (_snapshot is not null && !_busy)
+        {
+            _busy = true;
+            try
+            {
+                await LoadExecutionAsync(_snapshot.Id);
+            }
+            finally
+            {
+                _busy = false;
+            }
+        }
+    }
+
+    private async Task LoadExecutionAsync(string investigationId)
+    {
+        var expectedVersion = _snapshot?.Version;
+        _executionState = OperationsSurfaceState.Loading;
+        try
+        {
+            var result = await InvestigationClient.GetExecutionAndVerificationAsync(investigationId);
+            var valid = result.Succeeded && result.Metadata.IsAvailable && result.Value is not null &&
+                string.Equals(result.Value.InvestigationId, investigationId, StringComparison.Ordinal) &&
+                expectedVersion is not null && result.Value.Version == expectedVersion.Value;
+            _executionState = valid ? OperationsSurfaceState.Populated : result.Succeeded ? OperationsSurfaceState.Error : MapState(result, false);
+            _executionMessage = valid
+                ? MessageFor(result, "Execution and verification status could not be loaded.")
+                : result.Succeeded ? "This status is out of date. Refresh the investigation and check again." : MessageFor(result, "Execution and verification status could not be loaded.");
+            _execution = valid ? ToUi(result.Value!) : null;
+            if (!valid && (ShouldClearPrivateData(result) || result.Code == UiCapabilityResultCode.Conflict ||
+                           result.Succeeded && result.Value is not null && expectedVersion is not null && result.Value.Version != expectedVersion.Value))
+            {
+                var state = ShouldClearPrivateData(result) ? MapState(result, false) : OperationsSurfaceState.Error;
+                ClearSensitiveProjections(state, "Access changed or the status is out of date. Refresh the list and select the investigation again.");
+            }
+        }
+        catch (Exception)
+        {
+            ClearSensitiveProjections(OperationsSurfaceState.Error, "Execution and verification status could not be loaded. Refresh the list and select the investigation again.");
+        }
+    }
+
+    private async Task RefreshListCoreAsync()
+    {
+        try
+        {
+            var result = await InvestigationClient.ListAsync(new PageRequest(1, 50));
+            _listState = MapState(result, result.Value?.Items.Count > 0);
+            _listMessage = MessageFor(result, "The investigation list could not be loaded.");
+            _workItems = result.Succeeded && result.Metadata.IsAvailable && result.Value is not null
+                ? result.Value.Items.Select(ToUi).ToArray()
+                : Array.Empty<Ui.OperationsInvestigationWorkItem>();
+            if (!(result.Succeeded && result.Metadata.IsAvailable && result.Value is not null))
+            {
+                ClearSensitiveProjections(_listState, _listMessage);
+            }
+            else
+            {
+                ClearSelectedIfNoLongerCurrent();
+            }
+        }
+        catch (Exception)
+        {
+            ClearSensitiveProjections(OperationsSurfaceState.Error, "The investigation list could not be loaded. Try again.");
+            _listState = OperationsSurfaceState.Error;
+            _listMessage = "The investigation list could not be loaded. Try again.";
+            _workItems = Array.Empty<Ui.OperationsInvestigationWorkItem>();
+        }
+    }
+
+    private bool CanMutateCurrent(string investigationId) => !_busy && _detailState == OperationsSurfaceState.Populated &&
+        _snapshot is { Version: > 0 } snapshot && string.Equals(snapshot.Id, investigationId, StringComparison.Ordinal);
+
+    private static bool ShouldClearPrivateData<T>(UiCapabilityResult<T> result) =>
+        result.Code is UiCapabilityResultCode.Denied or UiCapabilityResultCode.Unavailable ||
+        result.Succeeded && !result.Metadata.IsAvailable;
+
+    private void ClearSensitiveProjections(OperationsSurfaceState state, string message)
+    {
+        if (state is OperationsSurfaceState.Denied or OperationsSurfaceState.Unavailable)
+        {
+            _workItems = Array.Empty<Ui.OperationsInvestigationWorkItem>();
+            _listState = state;
+            _listMessage = message;
+        }
+
+        _snapshot = null;
+        _execution = null;
+        _detailState = state;
+        _detailMessage = message;
+        _executionState = OperationsSurfaceState.Empty;
+        _executionMessage = string.Empty;
+    }
+
+    private void ClearSelectedIfNoLongerCurrent()
+    {
+        if (_snapshot is null)
+        {
+            return;
+        }
+
+        var currentItem = _workItems.FirstOrDefault(item => string.Equals(item.Id, _snapshot.Id, StringComparison.Ordinal));
+        if (currentItem is null || currentItem.Version != _snapshot.Version || currentItem.Status != _snapshot.Status)
+        {
+            ClearSensitiveProjections(OperationsSurfaceState.Error, "The selected investigation has changed. Refresh and select it again.");
+        }
+    }
+
+    private static OperationsSurfaceState MapState<T>(UiCapabilityResult<T> result, bool hasData)
+    {
+        if (result.Succeeded && !result.Metadata.IsAvailable)
+        {
+            return OperationsSurfaceState.Unavailable;
+        }
+
+        if (result.Succeeded && result.Value is null)
+        {
+            return OperationsSurfaceState.Error;
+        }
+
+        return result.Code switch
+        {
+            UiCapabilityResultCode.Denied => OperationsSurfaceState.Denied,
+            UiCapabilityResultCode.Unavailable => OperationsSurfaceState.Unavailable,
+            UiCapabilityResultCode.Retryable or UiCapabilityResultCode.Cancelled => OperationsSurfaceState.Offline,
+            UiCapabilityResultCode.Success when hasData => OperationsSurfaceState.Populated,
+            UiCapabilityResultCode.Success => OperationsSurfaceState.Empty,
+            _ => OperationsSurfaceState.Error
+        };
+    }
+
+    private static bool IsValidSnapshot(UiCapabilityResult<Client.InvestigationSnapshot> result, string? expectedInvestigationId) =>
+        result.Succeeded && result.Metadata.IsAvailable && result.Value is { } snapshot &&
+        !string.IsNullOrWhiteSpace(snapshot.Id) &&
+        (expectedInvestigationId is null || string.Equals(snapshot.Id, expectedInvestigationId, StringComparison.Ordinal)) &&
+        !string.IsNullOrWhiteSpace(snapshot.Title) &&
+        !string.IsNullOrWhiteSpace(snapshot.Objective) &&
+        Enum.IsDefined(snapshot.Status) && snapshot.Version > 0 &&
+        snapshot.EvidenceReferences is not null && snapshot.Clarifications is not null;
+
+    private static Ui.OperationsInvestigationWorkItem ToUi(Client.InvestigationWorkItem item) => new(
+        item.Id, item.Title, item.Objective, Enum.Parse<Ui.OperationsInvestigationStatus>(item.Status.ToString()), item.Version, item.UpdatedAtUtc);
+
+    private static Ui.OperationsInvestigationSnapshot ToUi(Client.InvestigationSnapshot snapshot) => new(
+        snapshot.Id, Enum.Parse<Ui.OperationsInvestigationStatus>(snapshot.Status.ToString()), snapshot.Title, snapshot.Objective,
+        snapshot.EvidenceReferences.Select(item => new Ui.OperationsInvestigationEvidenceReference(item.Id, item.Label, item.SourceVersion)).ToArray(),
+        snapshot.Clarifications.Select(item => new Ui.OperationsInvestigationClarification(item.Id, item.FactualQuestion, item.Answer)).ToArray(),
+        snapshot.Proposal is null ? null : new Ui.OperationsInvestigationProposal(snapshot.Proposal.Id, snapshot.Proposal.Summary,
+            snapshot.Proposal.RequiresHumanApproval, snapshot.Proposal.Executed, snapshot.Proposal.ReviewStatus, snapshot.Proposal.ReviewReason),
+        snapshot.Version, Enum.Parse<Ui.OperationsInvestigationExecutionStatus>(snapshot.ExecutionStatus.ToString()),
+        Enum.Parse<Ui.OperationsInvestigationVerificationStatus>(snapshot.VerificationStatus.ToString()),
+        snapshot.ResultSummary, snapshot.UpdatedAtUtc, snapshot.Notice);
+
+    private static Ui.OperationsInvestigationExecutionAndVerification ToUi(Client.InvestigationExecutionAndVerification execution) => new(
+        execution.InvestigationId, execution.Version,
+        Enum.Parse<Ui.OperationsInvestigationExecutionStatus>(execution.ExecutionStatus.ToString()),
+        Enum.Parse<Ui.OperationsInvestigationVerificationStatus>(execution.VerificationStatus.ToString()), execution.ResultSummary,
+        execution.Checks.Select(check => new Ui.OperationsInvestigationExecutionCheck(check.Name, check.Passed, check.Summary)).ToArray(),
+        execution.UpdatedAtUtc, execution.Notice);
+
+    private static string MessageFor<T>(UiCapabilityResult<T> result, string fallback) =>
+        result.Message ?? result.Metadata.Notice ?? fallback;
+}
+
+
+

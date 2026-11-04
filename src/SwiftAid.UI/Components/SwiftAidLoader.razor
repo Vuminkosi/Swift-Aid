@@ -1,0 +1,227 @@
+@using Blazor.Lottie.Player
+@inject IJSRuntime JSRuntime
+@implements IAsyncDisposable
+
+@if (IsLoading)
+{
+    <div class="swiftaid-loader" role="status" aria-live="polite" aria-atomic="true">
+        <div class="swiftaid-loader__visual" aria-hidden="true">
+            @if (_reducedMotion)
+            {
+                <img class="swiftaid-loader__image" src="./_content/SwiftAid.UI/assets/loading/swiftaid-loader-still.png" alt="" />
+            }
+            else if (!_lottieReady)
+            {
+                <img class="swiftaid-loader__image swiftaid-loader__fallback" src="./_content/SwiftAid.UI/assets/loading/swiftaid-loader.gif" alt="" />
+            }
+
+            @if (UseLottie && !_reducedMotion && _lottieRuntimeAvailable && !_lottieFailed)
+            {
+                <SwiftAidLoaderErrorBoundary OnLottieError="HandleLottieError">
+                    <ChildContent>
+                        <LottiePlayer Class="@LottieClass"
+                                      Style="width: 100%; height: 100%;"
+                                      Src="./_content/SwiftAid.UI/assets/loading/swiftaid-loader.lottie.json"
+                                      AutoPlay="true"
+                                      Loop="true"
+                                      LoopCount="0"
+                                      AnimationOptions="_localLottieOptions"
+                                      DOMLoaded="HandleLottieReady" />
+                    </ChildContent>
+                    <ErrorContent>
+                        <span aria-hidden="true"></span>
+                    </ErrorContent>
+                </SwiftAidLoaderErrorBoundary>
+            }
+        </div>
+
+        <span class="swiftaid-loader__status">@StatusText</span>
+    </div>
+}
+
+@code {
+    private readonly LottieAnimationOptions _localLottieOptions = new()
+    {
+        LottieSourceJs = "./_content/Blazor.Lottie.Player/lottie.min.js"
+    };
+
+    private IJSObjectReference? _motionModule;
+    private DotNetObjectReference<SwiftAidLoader>? _dotNetReference;
+    private bool _previousIsLoading;
+    private bool _previousUseLottie;
+    private bool _motionPreferenceResolved;
+    private bool _lottieRuntimeChecked;
+    private bool _reducedMotion = true;
+    private bool _lottieRuntimeAvailable;
+    private bool _lottieReady;
+    private bool _lottieFailed;
+
+    private string LottieClass => _lottieReady
+        ? "swiftaid-loader__lottie is-ready"
+        : "swiftaid-loader__lottie is-pending";
+
+    [Parameter]
+    public bool IsLoading { get; set; }
+
+    [Parameter]
+    public string StatusText { get; set; } = "Loading";
+
+    [Parameter]
+    public bool UseLottie { get; set; }
+
+    protected override void OnParametersSet()
+    {
+        if (IsLoading && !_previousIsLoading)
+        {
+            ResetAnimationState();
+        }
+        else if (!IsLoading && _previousIsLoading)
+        {
+            ResetAnimationState();
+        }
+
+        if (UseLottie != _previousUseLottie)
+        {
+            _lottieRuntimeChecked = false;
+            _lottieRuntimeAvailable = false;
+            _lottieReady = false;
+            _lottieFailed = false;
+        }
+
+        _previousIsLoading = IsLoading;
+        _previousUseLottie = UseLottie;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!IsLoading)
+        {
+            await StopWatchingMotionPreferenceAsync();
+            return;
+        }
+
+        if (!_motionPreferenceResolved)
+        {
+            _motionPreferenceResolved = true;
+
+            try
+            {
+                _motionModule = await JSRuntime.InvokeAsync<IJSObjectReference>(
+                    "import",
+                    "./_content/SwiftAid.UI/Components/SwiftAidLoader.razor.js");
+                _dotNetReference = DotNetObjectReference.Create(this);
+                _reducedMotion = await _motionModule.InvokeAsync<bool>(
+                    "watchMotionPreference",
+                    _dotNetReference);
+            }
+            catch (Exception exception) when (exception is JSException or InvalidOperationException)
+            {
+                _reducedMotion = true;
+            }
+
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+
+        if (UseLottie && !_reducedMotion && !_lottieRuntimeChecked && _motionModule is not null)
+        {
+            _lottieRuntimeChecked = true;
+
+            try
+            {
+                _lottieRuntimeAvailable = await _motionModule.InvokeAsync<bool>("ensureLocalLottieRuntime");
+            }
+            catch (Exception exception) when (exception is JSException or InvalidOperationException)
+            {
+                _lottieRuntimeAvailable = false;
+            }
+
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    [JSInvokable]
+    public Task OnReducedMotionChanged(bool reducedMotion)
+    {
+        if (!IsLoading)
+        {
+            return Task.CompletedTask;
+        }
+
+        _reducedMotion = reducedMotion;
+
+        if (reducedMotion)
+        {
+            _lottieReady = false;
+        }
+
+        return InvokeAsync(StateHasChanged);
+    }
+
+    private Task HandleLottieReady(LottiePlayerLoadedEventArgs _)
+    {
+        if (IsLoading && !_reducedMotion && !_lottieFailed)
+        {
+            _lottieReady = true;
+            StateHasChanged();
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private Task HandleLottieError(Exception _)
+    {
+        _lottieFailed = true;
+        _lottieReady = false;
+        return InvokeAsync(StateHasChanged);
+    }
+
+    private void ResetAnimationState()
+    {
+        _motionPreferenceResolved = false;
+        _lottieRuntimeChecked = false;
+        _reducedMotion = true;
+        _lottieRuntimeAvailable = false;
+        _lottieReady = false;
+        _lottieFailed = false;
+    }
+
+    private async ValueTask StopWatchingMotionPreferenceAsync()
+    {
+        if (_motionModule is null)
+        {
+            return;
+        }
+
+        if (_dotNetReference is not null)
+        {
+            try
+            {
+                await _motionModule.InvokeVoidAsync("stopWatchingMotionPreference", _dotNetReference);
+            }
+            catch (JSDisconnectedException)
+            {
+                // The page or WebView is already shutting down.
+            }
+
+            _dotNetReference.Dispose();
+            _dotNetReference = null;
+        }
+
+        try
+        {
+            await _motionModule.DisposeAsync();
+        }
+        catch (JSDisconnectedException)
+        {
+            // The page or WebView is already shutting down.
+        }
+
+        _motionModule = null;
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        await StopWatchingMotionPreferenceAsync();
+    }
+}

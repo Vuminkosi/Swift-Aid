@@ -1,0 +1,361 @@
+@using SwiftAid.Contracts.Intake
+@using SwiftAid.UI.Components.Public
+@using SwiftAid.UI.Components.Theme
+
+<section class="public-report-history" aria-labelledby="report-history-title">
+    <div class="public-report-history__heading">
+        <div>
+            <MudText id="report-history-title" Typo="Typo.h5" HtmlTag="h2">Saved reports</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">Draft and receipt history from this device. Report text is not shown in this list.</MudText>
+        </div>
+        @if (StoreAvailable && OnRefreshReceipts.HasDelegate)
+        {
+            <MudButton Variant="Variant.Text" Color="Color.Primary"
+                       Disabled="@RefreshingReceipts" OnClick="OnRefreshReceipts" StartIcon="@Icons.Material.Filled.Refresh">
+                @(RefreshingReceipts ? "Checking receipts…" : "Check for updates")
+            </MudButton>
+        }
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(StatusMessage))
+    {
+        <MudAlert Severity="@(StatusIsError ? Severity.Warning : Severity.Info)"
+                  Variant="Variant.Outlined" Dense="true" role="status" aria-live="polite">
+            @StatusMessage
+        </MudAlert>
+    }
+
+    @if (Loading)
+    {
+        <SwiftAidStatePanel State="SwiftAidViewState.Loading" Title="Opening saved reports" Description="Reading report status from this device." />
+    }
+    else if (!StoreAvailable)
+    {
+        <SwiftAidStatePanel State="SwiftAidViewState.Error"
+                            Title="Saved reports are unavailable"
+                            Description="Saved reports on this device could not be opened. Your current entries remain on screen."
+                            OnRetry="OnRetryLoad" />
+    }
+    else if (Items.Count == 0)
+    {
+        <SwiftAidStatePanel State="SwiftAidViewState.Empty" Title="No saved report history" Description="Saved drafts, queued reports, and actual server receipts will appear here." />
+    }
+    else
+    {
+        <section class="public-report-history__filters" aria-label="Filter saved report history">
+            <MudTextField T="string" Label="Search history" Value="@_searchText"
+                          ValueChanged="SearchChangedAsync" Variant="Variant.Outlined"
+                          Immediate="true" DebounceInterval="200" Clearable="true"
+                          Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
+                          aria-describedby="report-history-search-help" />
+            <span id="report-history-search-help" class="public-report-history__hint">Search state, date, and actual receipt status. Report text is never searched.</span>
+
+            <div class="public-report-history__filter-row">
+                <MudSelect T="HistoryStateFilter" Label="State" Value="@_stateFilter" ValueChanged="StateChangedAsync"
+                           Variant="Variant.Outlined" Dense="true">
+                    <MudSelectItem T="HistoryStateFilter" Value="@HistoryStateFilter.All">All states</MudSelectItem>
+                    <MudSelectItem T="HistoryStateFilter" Value="@HistoryStateFilter.Draft">Drafts</MudSelectItem>
+                    <MudSelectItem T="HistoryStateFilter" Value="@HistoryStateFilter.NeedsAttention">Needs attention</MudSelectItem>
+                    <MudSelectItem T="HistoryStateFilter" Value="@HistoryStateFilter.Queued">Waiting to send</MudSelectItem>
+                    <MudSelectItem T="HistoryStateFilter" Value="@HistoryStateFilter.Received">Receipts</MudSelectItem>
+                    <MudSelectItem T="HistoryStateFilter" Value="@HistoryStateFilter.Superseded">Replaced drafts</MudSelectItem>
+                </MudSelect>
+                <MudDatePicker Date="@_dateFrom" DateChanged="DateFromChangedAsync" Label="From date" Variant="Variant.Outlined" />
+                <MudDatePicker Date="@_dateTo" DateChanged="DateToChangedAsync" Label="To date" Variant="Variant.Outlined" />
+            </div>
+
+            <div class="public-report-history__filter-summary">
+                <MudText Typo="Typo.caption" Color="Color.Secondary">@FilteredItems.Count of @Items.Count saved records</MudText>
+                @if (HasActiveFilters)
+                {
+                    <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="ClearFiltersAsync" StartIcon="@Icons.Material.Filled.FilterAltOff">Clear filters</MudButton>
+                }
+            </div>
+        </section>
+
+        @if (FilteredItems.Count == 0)
+        {
+            <SwiftAidStatePanel State="SwiftAidViewState.Empty" Title="No matching saved reports" Description="Try changing the state, date, or search filters." />
+        }
+        else
+        {
+            @if (DraftItems.Count > 0)
+            {
+                <section class="public-report-history__group" aria-labelledby="saved-drafts-heading">
+                    <MudText id="saved-drafts-heading" Typo="Typo.subtitle1" HtmlTag="h3">Saved drafts</MudText>
+                    @foreach (var draft in DraftItems)
+                    {
+                        <MudPaper Class="public-report-history__row" Elevation="0" Outlined="true">
+                            <div>
+                                <MudText Typo="Typo.subtitle2">
+                                    @(draft.State == HistoryState.NeedsAttention ? "Review before sending" : "Report draft")
+                                </MudText>
+                                <MudText Typo="Typo.body2" Class="public-report-history__hint">
+                                    Saved @FormatCreatedAt(draft.CreatedAtUtc). It has not been sent.
+                                </MudText>
+                            </div>
+                            <div class="public-report-history__actions">
+                                @if (OnOpenDraft.HasDelegate)
+                                {
+                                    <MudButton Variant="Variant.Text" Color="Color.Primary"
+                                               Disabled="@Busy" OnClick="() => OpenDraftAsync(draft)" StartIcon="@Icons.Material.Filled.Edit">
+                                        Open draft
+                                    </MudButton>
+                                }
+                                @if (CanSendDraft(draft))
+                                {
+                                    <MudButton Variant="Variant.Text" Color="Color.Primary"
+                                               Disabled="@Busy" OnClick="() => RetryDraftAsync(draft)" StartIcon="@Icons.Material.Filled.Send">
+                                        Send report
+                                    </MudButton>
+                                }
+                            </div>
+                            @if (!CanSendDraft(draft))
+                            {
+                                <MudText Typo="Typo.caption" Class="public-report-history__availability public-report-history__hint" role="status">
+                                    @SendUnavailableReason(draft)
+                                </MudText>
+                            }
+                        </MudPaper>
+                    }
+                </section>
+            }
+
+            @if (QueuedItems.Count > 0)
+            {
+                <section class="public-report-history__group" aria-labelledby="queued-reports-heading">
+                    <div class="public-report-history__group-heading">
+                        <MudText id="queued-reports-heading" Typo="Typo.subtitle1" HtmlTag="h3">Waiting to send</MudText>
+                        @if (OnRetryQueued.HasDelegate)
+                        {
+                            <MudButton Variant="Variant.Text" Color="Color.Primary"
+                                       Disabled="@Busy" OnClick="OnRetryQueued" StartIcon="@Icons.Material.Filled.Sync">
+                                Try sending now
+                            </MudButton>
+                        }
+                    </div>
+                    @foreach (var report in QueuedItems)
+                    {
+                        <MudPaper Class="public-report-history__row" Elevation="0" Outlined="true">
+                            <div>
+                                <MudText Typo="Typo.subtitle2">Queued report</MudText>
+                                <MudText Typo="Typo.body2" Class="public-report-history__hint">
+                                    Saved @FormatCreatedAt(report.CreatedAtUtc). Server receipt not confirmed.
+                                </MudText>
+                            </div>
+                        </MudPaper>
+                    }
+                </section>
+            }
+
+            @if (ReceiptItems.Count > 0)
+            {
+                <section class="public-report-history__group" aria-labelledby="received-reports-heading">
+                    <MudText id="received-reports-heading" Typo="Typo.subtitle1" HtmlTag="h3">Reports with a receipt</MudText>
+                    @foreach (var report in ReceiptItems)
+                    {
+                        <PublicReportReceipt Receipt="report.Receipt!" />
+                    }
+                </section>
+            }
+
+            @if (HasReceiptWithoutDetails)
+            {
+                <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true" role="status" aria-live="polite">
+                    A saved record is marked received, but its receipt details are unavailable on this device. Retry checking for updates; no receipt details are shown without an actual receipt.
+                </MudAlert>
+            }
+
+            @if (SupersededItems.Count > 0)
+            {
+                <section class="public-report-history__group" aria-labelledby="replaced-reports-heading">
+                    <MudText id="replaced-reports-heading" Typo="Typo.subtitle1" HtmlTag="h3">Replaced drafts</MudText>
+                    @foreach (var report in SupersededItems)
+                    {
+                        <MudPaper Class="public-report-history__row" Elevation="0" Outlined="true">
+                            <MudText Typo="Typo.body2">A newer draft replaced this saved version. It has not been sent.</MudText>
+                            <MudText Typo="Typo.caption" Class="public-report-history__hint">Saved @FormatCreatedAt(report.CreatedAtUtc)</MudText>
+                        </MudPaper>
+                    }
+                </section>
+            }
+        }
+    }
+</section>
+
+@code {
+    public enum HistoryState
+    {
+        Draft,
+        Queued,
+        Received,
+        NeedsAttention,
+        Superseded
+    }
+
+    public enum HistoryStateFilter
+    {
+        All,
+        Draft,
+        Queued,
+        Received,
+        NeedsAttention,
+        Superseded
+    }
+
+    /// <summary>Safe display projection. The identifier is used only for callbacks and is never rendered.</summary>
+    public sealed record HistoryItem(
+        Guid ClientSubmissionId,
+        HistoryState State,
+        DateTimeOffset CreatedAtUtc,
+        IntakeReceipt? Receipt,
+        bool CanSend = false,
+        string? SendUnavailableMessage = null);
+
+    [Parameter] public IReadOnlyList<HistoryItem> Items { get; set; } = [];
+    [Parameter] public bool Loading { get; set; }
+    [Parameter] public bool StoreAvailable { get; set; }
+    [Parameter] public bool Busy { get; set; }
+    [Parameter] public bool SendAvailable { get; set; } = true;
+    [Parameter] public string? SendUnavailableMessage { get; set; }
+    [Parameter] public bool RefreshingReceipts { get; set; }
+    [Parameter] public string? StatusMessage { get; set; }
+    [Parameter] public bool StatusIsError { get; set; }
+    [Parameter] public EventCallback OnRetryLoad { get; set; }
+    [Parameter] public EventCallback OnRetryQueued { get; set; }
+    [Parameter] public EventCallback OnRefreshReceipts { get; set; }
+    [Parameter] public EventCallback<Guid> OnOpenDraft { get; set; }
+    [Parameter] public EventCallback<Guid> OnRetryDraft { get; set; }
+
+    private string _searchText = string.Empty;
+    private HistoryStateFilter _stateFilter = HistoryStateFilter.All;
+    private DateTime? _dateFrom;
+    private DateTime? _dateTo;
+
+    private IReadOnlyList<HistoryItem> FilteredItems => Items
+        .Where(MatchesState)
+        .Where(MatchesDate)
+        .Where(MatchesSearch)
+        .ToArray();
+
+    private IReadOnlyList<HistoryItem> DraftItems => FilteredItems
+        .Where(item => item.State is HistoryState.Draft or HistoryState.NeedsAttention)
+        .ToArray();
+
+    private IReadOnlyList<HistoryItem> QueuedItems => FilteredItems
+        .Where(item => item.State == HistoryState.Queued)
+        .ToArray();
+
+    private IReadOnlyList<HistoryItem> ReceiptItems => FilteredItems
+        .Where(item => item.Receipt is not null)
+        .ToArray();
+
+    private IReadOnlyList<HistoryItem> SupersededItems => FilteredItems
+        .Where(item => item.State == HistoryState.Superseded)
+        .ToArray();
+
+    private bool HasReceiptWithoutDetails => FilteredItems.Any(item =>
+        item.State == HistoryState.Received && item.Receipt is null);
+
+    private bool CanSendDraft(HistoryItem item) =>
+        SendAvailable && item.CanSend && OnRetryDraft.HasDelegate;
+
+    private string SendUnavailableReason(HistoryItem item) =>
+        !item.CanSend && !string.IsNullOrWhiteSpace(item.SendUnavailableMessage)
+            ? item.SendUnavailableMessage
+            : !string.IsNullOrWhiteSpace(SendUnavailableMessage)
+                ? SendUnavailableMessage
+                : "Sending is unavailable for this report right now.";
+
+    private bool HasActiveFilters => !string.IsNullOrWhiteSpace(_searchText) ||
+        _stateFilter != HistoryStateFilter.All || _dateFrom.HasValue || _dateTo.HasValue;
+
+    private Task SearchChangedAsync(string? value)
+    {
+        _searchText = value ?? string.Empty;
+        return Task.CompletedTask;
+    }
+
+    private Task StateChangedAsync(HistoryStateFilter value)
+    {
+        _stateFilter = value;
+        return Task.CompletedTask;
+    }
+
+    private Task DateFromChangedAsync(DateTime? value)
+    {
+        _dateFrom = value?.Date;
+        return Task.CompletedTask;
+    }
+
+    private Task DateToChangedAsync(DateTime? value)
+    {
+        _dateTo = value?.Date;
+        return Task.CompletedTask;
+    }
+
+    private Task ClearFiltersAsync()
+    {
+        _searchText = string.Empty;
+        _stateFilter = HistoryStateFilter.All;
+        _dateFrom = null;
+        _dateTo = null;
+        return Task.CompletedTask;
+    }
+
+    private Task OpenDraftAsync(HistoryItem item) =>
+        OnOpenDraft.InvokeAsync(item.ClientSubmissionId);
+
+    private Task RetryDraftAsync(HistoryItem item) =>
+        OnRetryDraft.InvokeAsync(item.ClientSubmissionId);
+
+    private bool MatchesState(HistoryItem item) => _stateFilter switch
+    {
+        HistoryStateFilter.Draft => item.State == HistoryState.Draft,
+        HistoryStateFilter.Queued => item.State == HistoryState.Queued,
+        HistoryStateFilter.Received => item.State == HistoryState.Received,
+        HistoryStateFilter.NeedsAttention => item.State == HistoryState.NeedsAttention,
+        HistoryStateFilter.Superseded => item.State == HistoryState.Superseded,
+        _ => true
+    };
+
+    private bool MatchesDate(HistoryItem item)
+    {
+        var date = item.CreatedAtUtc.ToLocalTime().Date;
+        return (!_dateFrom.HasValue || date >= _dateFrom.Value.Date) &&
+            (!_dateTo.HasValue || date <= _dateTo.Value.Date);
+    }
+
+    private bool MatchesSearch(HistoryItem item)
+    {
+        var query = _searchText.Trim();
+        if (query.Length == 0)
+        {
+            return true;
+        }
+
+        var state = StateLabel(item.State);
+        var created = FormatCreatedAt(item.CreatedAtUtc);
+        var receiptStatus = item.Receipt?.Status.ToString() ?? string.Empty;
+        var routingStatus = item.Receipt?.RoutingStatus.ToString() ?? string.Empty;
+        var receiptId = item.Receipt?.ReceiptId.ToString("D") ?? string.Empty;
+        return state.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+            created.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+            receiptStatus.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+            routingStatus.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+            receiptId.Contains(query, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string StateLabel(HistoryState state) => state switch
+    {
+        HistoryState.Draft => "Draft",
+        HistoryState.Queued => "Waiting to send",
+        HistoryState.Received => "Received",
+        HistoryState.NeedsAttention => "Needs attention",
+        HistoryState.Superseded => "Replaced draft",
+        _ => "Status unavailable"
+    };
+
+    private static string FormatCreatedAt(DateTimeOffset createdAtUtc) =>
+        createdAtUtc.ToLocalTime().ToString("g");
+}

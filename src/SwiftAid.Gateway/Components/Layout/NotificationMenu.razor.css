@@ -1,0 +1,16 @@
+.swiftaid-notification-menu {
+    margin-inline-end: var(--sa-space-sm);
+}
+
+.swiftaid-notification-menu__content {
+    display: grid;
+    gap: var(--sa-space-sm);
+    inline-size: min(28rem, calc(100vw - 2rem));
+    max-block-size: min(70vh, 36rem);
+    overflow: auto;
+    padding: var(--sa-space-sm);
+}
+
+.swiftaid-notification-menu__preferences {
+    justify-self: start;
+}

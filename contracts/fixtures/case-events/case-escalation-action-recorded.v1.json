@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "eventId": "f92f89b2-462b-1413-c434-370a1f804cbf",
+  "eventType": "CaseEscalationActionRecorded",
+  "caseId": "10000000-0000-0000-0000-000000000001",
+  "aggregateVersion": 5,
+  "reportRevision": 1,
+  "commandId": "20000000-0000-0000-0000-000000000015",
+  "actorId": "officer-1",
+  "occurredAtUtc": null,
+  "recordedAtUtc": "2026-10-26T08:01:00+00:00",
+  "payload": {
+    "escalationId": "40000000-0000-0000-0000-000000000003",
+    "actionSummary": "Supervisor paged",
+    "reason": "Duty officer coordinated a visit."
+  }
+}

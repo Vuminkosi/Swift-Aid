@@ -1,0 +1,13 @@
+@using SwiftAid.UI.Components.Theme
+<MudChip T="string"
+         Color="@SwiftAidDesignTokens.ToMudColor(Status)"
+         Variant="Variant.Filled"
+         Size="Size.Small"
+         aria-label="@($"Status: {Status}")">@Status</MudChip>
+
+@code {
+    /// <summary>Status label as shown on the reference boards
+    /// (for example "Escalated", "In Progress", "Follow-up due").</summary>
+    [Parameter, EditorRequired]
+    public string Status { get; set; } = "New";
+}

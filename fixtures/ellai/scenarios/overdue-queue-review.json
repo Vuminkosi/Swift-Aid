@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "manifestId": "demo-morning-001",
+  "purpose": "demo-morning",
+  "scenarioId": "overdue-queue-review",
+  "label": "Overdue queue review (synthetic)",
+  "synthetic": true,
+  "allowedCapabilities": [ "cases.read", "queue.read" ],
+  "resourceBounds": [ "synthetic-case-001", "synthetic-case-002" ],
+  "totalCycles": 8,
+  "permittedPersonas": [ "officer" ],
+  "allowedModes": [ "ShowMe", "GuideMe" ],
+  "drafts": [
+    {
+      "manifestDraftId": "draft-overdue-note",
+      "title": "Synthetic overdue follow-up draft",
+      "body": "Synthetic draft for demonstration only. No real case content."
+    }
+  ],
+  "proofGates": {
+    "navigation": "UiObserved",
+    "queueSummary": "UiObserved",
+    "noWrites": "No business writes in this scenario; protected steps pause at Your turn."
+  }
+}

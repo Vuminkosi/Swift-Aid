@@ -1,0 +1,614 @@
+@using SwiftAid.Client.Presentation
+@using SwiftAid.Client.Intake
+@using SwiftAid.Client.Presentation.PublicWorkflows
+@using SwiftAid.Contracts.Cases
+@using SwiftAid.Contracts.Sessions
+@using SwiftAid.Contracts.Intake
+@using MudBlazor
+@using SwiftAid.UI.Components.Public
+@using SwiftAid.UI.Components.Geography
+@using SwiftAid.UI.Components.Surfaces.Public
+@using SwiftAid.UI.Components.Surfaces.Shell
+@using SwiftAid.UI.Ellai
+@using SwiftAid.UI.Ellai.Components
+@using SwiftAid.UI.Ellai.Guidance
+@implements IAsyncDisposable
+@inject NavigationManager Navigation
+@inject IJSRuntime JS
+@inject ICaseQueueClient CaseQueueClient
+@inject IPublicIntakeMetadataClient IntakeMetadataClient
+@inject IPublicIntakeProcessingPolicyClient ProcessingPolicyClient
+@inject IPublicCommunitySessionClient PublicCommunitySessions
+@inject SwiftAid.Client.Presentation.IGeoLookupClient GeoLookup
+@inject IGuestSubmissionStore SubmissionStore
+@inject IGuestSubmissionCoordinator SubmissionCoordinator
+@inject EllaiLauncher EllaiLauncher
+
+<SwiftAidThemeProvider />
+<MudPopoverProvider />
+<MudDialogProvider />
+<MudSnackbarProvider />
+<EllaiGuidanceHost />
+<EllaiLauncherMenu PublicHelpOnly="true" OnModeSelected="RequestEllaiMode" />
+
+@if (_isHome)
+{
+    <PublicWebsiteShell>
+        <ChildContent>
+            <WebLandingSurface />
+        </ChildContent>
+    </PublicWebsiteShell>
+}
+else if (_isEllaiAbout)
+{
+    <PublicWebsiteShell>
+        <ChildContent>
+            <SwiftAid.UI.Ellai.Pages.EllaiSettingsAbout />
+        </ChildContent>
+    </PublicWebsiteShell>
+}
+else if (_isSessions)
+{
+    <PublicWebsiteShell>
+        <ChildContent>
+            <PublicSessionsSurface @key="(_requestedSessionId, _isCalendarRoute, _initialRemindersView)" Sessions="_publicSessions"
+                                   InitialSessionId="_requestedSessionId"
+                                   InitialRemindersView="_initialRemindersView"
+                                   InitialCalendarView="@(_isCalendarRoute && !_hasSessionParameter)"
+                                   Loading="_publicSessionsLoading"
+                                   ErrorMessage="@_publicSessionsError"
+                                   QuerySessionsAsync="@(_hasSessionParameter ? null : QueryPublicSessionsAsync)"
+                                   LoadInvitationTextAsync="LoadPublicInvitationAsync"
+                                   LoadSubscriptionStateAsync="GuestSubscriptionStateAsync"
+                                   OnRequestSignIn="RequestSessionSignInAsync"
+                                   OnRetry="LoadPublicSessionsAsync" />
+        </ChildContent>
+    </PublicWebsiteShell>
+}
+else
+{
+<SwiftAidApplicationShell BrandName="SwiftAid" HomeHref="/" PageLabel="Community support" MainContentId="guest-main">
+    <DesktopNavigation>
+        <MudNavLink Href="/" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.Home">Home</MudNavLink>
+        <MudNavLink Href="/report" ActiveClass="@(_isReport ? "active" : string.Empty)"
+                    Icon="@Icons.Material.Filled.AddCircleOutline">Report a concern</MudNavLink>
+        <MudNavLink Href="/report?view=tracking" ActiveClass="@(_isTracking ? "active" : string.Empty)"
+                    Icon="@Icons.Material.Filled.ReceiptLong">My reports</MudNavLink>
+        <MudNavLink Href="/sessions" Icon="@Icons.Material.Filled.Event">Community sessions</MudNavLink>
+    </DesktopNavigation>
+    <MobileNavigation>
+        <MudNavLink Href="/" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.Home">Home</MudNavLink>
+        <MudNavLink Href="/report?view=tracking" ActiveClass="@(_isTracking ? "active" : string.Empty)"
+                    Icon="@Icons.Material.Filled.ReceiptLong">Cases</MudNavLink>
+        <MudNavLink Href="/report" Class="mobile-report-link" ActiveClass="" aria-label="Report a concern">
+            <MudIcon Icon="@Icons.Material.Filled.Add" aria-hidden="true" />
+        </MudNavLink>
+        <MudNavLink Href="/sessions" Icon="@Icons.Material.Filled.Groups">Community</MudNavLink>
+    </MobileNavigation>
+    <ChildContent>
+    <MudContainer Style="height:97vh;" MaxWidth="MaxWidth.Medium" Class="browser-guest__shell">
+        @if (_isTracking)
+        {
+            <MudContainer MaxWidth="MaxWidth.Medium" Class="browser-guest__tracking">
+                <SwiftAidPageHeading Eyebrow="Your reports" Title="My reports"
+                                     Description="Saved drafts and confirmed receipts on this device. Report text is not shown here."
+                                     HeadingId="guest-history-heading" />
+                <PublicReportHistorySurface Items="HistoryItems" Loading="_historyLoading"
+                    StoreAvailable="_storageAvailable" Busy="_busy" SendAvailable="@CanSend"
+                    SendUnavailableMessage="@SendUnavailableMessage" StatusMessage="@_feedback"
+                    StatusIsError="_feedbackIsError" OnRetryLoad="ReloadHistoryAsync"
+                    OnRetryQueued="RetryQueuedAsync" OnRefreshReceipts="RetryQueuedAsync"
+                    OnOpenDraft="OpenDraftAsync" OnRetryDraft="SendDraftAsync" />
+                <MudButton Href="/report" Color="Color.Primary" Variant="Variant.Text"
+                           StartIcon="@Icons.Material.Filled.PostAdd" Class="mt-4">Start a report</MudButton>
+            </MudContainer>
+        }
+        else if (_isReport)
+        {
+            <div class="browser-guest__report">
+                <PublicReportSurface Countries="_countries"
+                                     CountryCatalogueVersion="@_countryCatalogueVersion"
+                                     CountryCatalogueIsCurrent="_countryCatalogueIsCurrent"
+                                     GeoCountries="_geoCountries"
+                                     PlaceSearchFunc="SearchPlacesAsync"
+                                     PlaceChildrenFunc="GetPlaceChildrenAsync"
+                                     PrivacyNoticeReference="@_privacyNoticeReference"
+                                     PrivacyNoticeIsCurrent="_privacyNoticeIsCurrent"
+                                     ProcessingPolicyReference="@_processingPolicyReference"
+                                     ProcessingPolicyVersion="@_processingPolicyVersion"
+                                     ProcessingPolicyNotice="@_processingPolicyMetadataNotice"
+                                     ProcessingPolicyNoticeText="@_processingPolicyNoticeText"
+                                     ProcessingPolicyAcknowledgementLabel="@_processingPolicyAcknowledgementLabel"
+                                     DraftSavingAvailable="_storageAvailable"
+                                     SubmitAvailable="@CanSend"
+                                     Draft="_draft"
+                                     CurrentDraftId="_activeDraftId"
+                                     Receipt="_receivedReceipt"
+                                     OnSaveDraft="SaveDraftAsync"
+                                     OnSendReport="SendReportAsync"
+                                     Feedback="@_feedback"
+                                     FeedbackIsError="_feedbackIsError" />
+            </div>
+        }
+        else
+        {
+            <MudContainer  MaxWidth="MaxWidth.Small" Class="browser-guest__not-found">
+                    <SwiftAidPageHeading Eyebrow="Community support" Title="Page not found" HeadingId="guest-not-found-heading" />
+                    <MudButton Href="/" Color="Color.Primary" Variant="Variant.Text"
+                            StartIcon="@Icons.Material.Filled.Home">Return home</MudButton>
+            </MudContainer>
+        }
+    </MudContainer>
+    </ChildContent>
+</SwiftAidApplicationShell>
+}
+
+@code {
+    private void RequestEllaiMode(SwiftAid.Contracts.Ellai.EllaiMode mode) => EllaiLauncher.Request(mode);
+
+    private PublicReportDraft _draft = new() { CapturedAt = DateTimeOffset.Now };
+    private IReadOnlyList<PublicCountryOption> _countries = [];
+    private IReadOnlyList<GeoPlaceCountry> _geoCountries = [];
+    private string? _countryCatalogueVersion;
+    private bool _countryCatalogueIsCurrent;
+    private bool _privacyNoticeIsCurrent;
+    private string? _privacyNoticeReference;
+    private string? _processingPolicyReference;
+    private string? _processingPolicyVersion;
+    private string? _processingPolicyMetadataNotice;
+    private string? _processingPolicyNoticeText;
+    private string? _processingPolicyAcknowledgementLabel;
+    private string? _feedback;
+    private bool _feedbackIsError;
+    private bool _isHome;
+    private bool _isSessions;
+    private bool _isEllaiAbout;
+    private bool _isReport;
+    private bool _isTracking;
+    private Guid? _activeDraftId;
+    private IntakeReceipt? _receivedReceipt;
+    private IReadOnlyList<PublicReportHistorySurface.HistoryItem> _history = [];
+    private bool _historyLoading;
+    private bool _storageAvailable = true;
+    private bool _busy;
+    private bool _processingPolicyIsLive;
+    private IReadOnlyList<SwiftAid.Contracts.Sessions.PublicSessionView> _publicSessions = [];
+    private bool _publicSessionsLoading;
+    private string? _publicSessionsError;
+    private Guid? _requestedSessionId;
+    private bool _initialRemindersView;
+    private bool _isCalendarRoute;
+    private bool _hasSessionParameter;
+    private long _publicSessionsGeneration;
+    private bool IsSecureIntakeTransportAvailable =>
+        Uri.TryCreate(Navigation.BaseUri, UriKind.Absolute, out var baseUri) &&
+        string.Equals(baseUri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase);
+    private bool CanSend => IsSecureIntakeTransportAvailable && _storageAvailable && _countryCatalogueIsCurrent && _privacyNoticeIsCurrent &&
+        !string.IsNullOrWhiteSpace(_processingPolicyReference) && !string.IsNullOrWhiteSpace(_processingPolicyVersion) &&
+        _processingPolicyIsLive;
+    private string SendUnavailableMessage => !IsSecureIntakeTransportAvailable
+        ? "Sending requires a secure HTTPS connection. You can save this report on this device and send it when using SwiftAid over HTTPS."
+        : !_storageAvailable
+            ? "Sending is unavailable because this browser cannot safely save the report first. Your entries remain on this page."
+            : !_countryCatalogueIsCurrent || !_privacyNoticeIsCurrent ||
+              string.IsNullOrWhiteSpace(_processingPolicyReference) ||
+              string.IsNullOrWhiteSpace(_processingPolicyVersion) ||
+              !_processingPolicyIsLive
+                ? "Sending is unavailable until current report information is available. You can save this report on this device."
+                : "Sending is temporarily unavailable. Your saved report remains on this device.";
+    private IReadOnlyList<PublicReportHistorySurface.HistoryItem> HistoryItems => _history;
+
+    protected override async Task OnInitializedAsync()
+    {
+        UpdateRoute();
+        if (_isEllaiAbout) return;
+        if (_isSessions)
+        {
+            await LoadPublicSessionsAsync();
+            return;
+        }
+
+        await LoadMetadataAsync();
+        await ReloadHistoryAsync();
+    }
+
+    private async Task<PublicSessionPage?> QueryPublicSessionsAsync(PublicSessionQuery query)
+    {
+        var result = await PublicCommunitySessions.QueryPublicAsync(query);
+        return result.Succeeded ? result.Value : null;
+    }
+
+    private async Task<string?> LoadPublicInvitationAsync(Guid sessionId, long expectedVersion)
+    {
+        var result = await PublicCommunitySessions.GetInvitationTextForVersionAsync(sessionId, expectedVersion);
+        return result.Succeeded ? result.Value : null;
+    }
+
+    private static Task<PublicSessionsSurface.SessionSubscriptionPanelState?> GuestSubscriptionStateAsync(Guid sessionId) =>
+        Task.FromResult<PublicSessionsSurface.SessionSubscriptionPanelState?>(new(
+            sessionId, PublicSessionsSurface.SessionSubscriptionStatus.RequiresAuthentication, 0, null, null, false));
+
+    private Task RequestSessionSignInAsync(Guid sessionId)
+    {
+        var returnUrl = $"/sessions?sessionId={sessionId:D}&tab=reminders";
+        Navigation.NavigateTo($"/sign-in?returnUrl={Uri.EscapeDataString(returnUrl)}", forceLoad: true);
+        return Task.CompletedTask;
+    }
+
+    private async Task LoadPublicSessionsAsync()
+    {
+        var generation = ++_publicSessionsGeneration;
+        _publicSessionsLoading = true;
+        _publicSessionsError = null;
+        StateHasChanged();
+        try
+        {
+            if (_hasSessionParameter)
+            {
+                if (_requestedSessionId is not { } sessionId)
+                {
+                    _publicSessions = [];
+                    _publicSessionsError = "This session is not available.";
+                    return;
+                }
+                var detail = await PublicCommunitySessions.GetPublicAsync(sessionId);
+                if (generation != _publicSessionsGeneration) return;
+                _publicSessions = detail.Succeeded && detail.Value is { } session ? [session] : [];
+                if (!detail.Succeeded)
+                    _publicSessionsError = "This session is temporarily unavailable. Try again.";
+                else if (detail.Value is null)
+                    _publicSessionsError = "This session is not available.";
+                return;
+            }
+            var result = await PublicCommunitySessions.ListPublicAsync();
+            if (generation != _publicSessionsGeneration) return;
+            if (result.Code == UiCapabilityResultCode.Success && result.Metadata.IsAvailable && result.Value is not null)
+            {
+                _publicSessions = result.Value;
+            }
+            else
+            {
+                _publicSessionsError = "Community sessions are unavailable right now. Please try again.";
+            }
+        }
+        catch (Exception)
+        {
+            if (generation != _publicSessionsGeneration) return;
+            _publicSessionsError = "Community sessions are unavailable right now. Please try again.";
+        }
+        finally
+        {
+            if (generation == _publicSessionsGeneration)
+            {
+                _publicSessionsLoading = false;
+                StateHasChanged();
+            }
+        }
+    }
+
+    private async Task LoadMetadataAsync()
+    {
+        try
+        {
+            var metadataTask = IntakeMetadataClient.GetMetadataAsync();
+            var countriesTask = IntakeMetadataClient.GetCountriesAsync();
+            var policyTask = ProcessingPolicyClient.GetPolicyAsync();
+            await Task.WhenAll(metadataTask, countriesTask, policyTask);
+
+            var metadataResult = await metadataTask;
+            var countriesResult = await countriesTask;
+            var policyResult = await policyTask;
+            if (metadataResult.Code == UiCapabilityResultCode.Success && metadataResult.Value is { } metadata &&
+                countriesResult.Code == UiCapabilityResultCode.Success && countriesResult.Value is { } catalogue &&
+                string.Equals(metadata.CountryCatalogueVersion, catalogue.Version, StringComparison.Ordinal))
+            {
+                _countries = catalogue.Countries.Select(country => new PublicCountryOption(country.Code, country.Label)).ToArray();
+                _geoCountries = _countries
+                    .Where(country => GeoRegistryCoverage.CountryCodes.Contains(country.Code))
+                    .Select(country => new GeoPlaceCountry(country.Code, country.Name))
+                    .ToList();
+                _countryCatalogueVersion = catalogue.Version;
+                _countryCatalogueIsCurrent = _countries.Count > 0 &&
+                    metadataResult.Metadata.IsAvailable && countriesResult.Metadata.IsAvailable;
+                _privacyNoticeReference = metadata.PrivacyNoticeReference;
+                _privacyNoticeIsCurrent = _countryCatalogueIsCurrent &&
+                    !string.IsNullOrWhiteSpace(metadata.PrivacyNoticeReference) &&
+                    !string.IsNullOrWhiteSpace(metadata.PrivacyNoticeVersion);
+            }
+
+            if (policyResult.Code == UiCapabilityResultCode.Success && policyResult.Value is { } policy)
+            {
+                _processingPolicyReference = policy.Reference;
+                _processingPolicyVersion = policy.Version;
+                _processingPolicyMetadataNotice = policyResult.Metadata.Notice;
+                _processingPolicyNoticeText = policy.NoticeText;
+                _processingPolicyAcknowledgementLabel = policy.AcknowledgementLabel;
+                _processingPolicyIsLive = policyResult.Metadata.IsAvailable &&
+                    policyResult.Metadata.Provenance == UiCapabilityProvenance.LiveService;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            _feedback = "Report information could not be loaded. Your entries remain on this page.";
+            _feedbackIsError = true;
+        }
+        catch (Exception)
+        {
+            _countries = [];
+            _geoCountries = [];
+            _countryCatalogueVersion = null;
+            _countryCatalogueIsCurrent = false;
+            _privacyNoticeIsCurrent = false;
+            _privacyNoticeReference = null;
+            _processingPolicyReference = null;
+            _processingPolicyVersion = null;
+            _processingPolicyMetadataNotice = null;
+            _processingPolicyNoticeText = null;
+            _processingPolicyAcknowledgementLabel = null;
+            _feedback = "Report information could not be loaded. Your entries remain on this page.";
+            _feedbackIsError = true;
+        }
+    }
+
+    private async Task<GeoPlaceQueryResult> SearchPlacesAsync(
+        string query,
+        string? countryCode,
+        CancellationToken cancellationToken)
+    {
+        var result = await GeoLookup.SearchAsync(query, countryCode, cancellationToken).ConfigureAwait(false);
+        return MapGeoLookupResult(result);
+    }
+
+    private async Task<GeoPlaceQueryResult> GetPlaceChildrenAsync(
+        string parentId,
+        CancellationToken cancellationToken)
+    {
+        var result = await GeoLookup.GetChildrenAsync(parentId, cancellationToken).ConfigureAwait(false);
+        return MapGeoLookupResult(result);
+    }
+
+    private static GeoPlaceQueryResult MapGeoLookupResult(
+        SwiftAid.Client.Presentation.UiCapabilityResult<IReadOnlyList<SwiftAid.Client.Presentation.GeoLookupOption>> result) =>
+        result.Code == SwiftAid.Client.Presentation.UiCapabilityResultCode.Success && result.Value is { } options
+            ? new GeoPlaceQueryResult(true, options.Select(ToPlaceOption).ToList(), null)
+            : new GeoPlaceQueryResult(false, [], result.Message ?? "Place search is temporarily unavailable.");
+
+    private static GeoPlaceOption ToPlaceOption(SwiftAid.Client.Presentation.GeoLookupOption option) => new(
+        option.Id,
+        option.Name,
+        option.Kind.ToString(),
+        option.CountryCode,
+        option.CountryName,
+        option.Ancestry,
+        option.HasChildren,
+        option.Ancestors.Select(ancestor => new GeoPlaceAncestor(ancestor.Id, ancestor.Name, ancestor.Kind.ToString())).ToList());
+
+    private async Task SaveDraftAsync(PublicReportSaveRequest request)
+    {
+        if (_busy)
+        {
+            _feedback = "Another report action is in progress. Your latest changes have not been saved.";
+            _feedbackIsError = true;
+            throw new InvalidOperationException("A report action is already in progress.");
+        }
+
+        if (!_storageAvailable)
+        {
+            _feedback = "Draft saving is unavailable on this browser. Your entries remain on this page, but could be lost if you leave or refresh.";
+            _feedbackIsError = true;
+            throw new InvalidOperationException("Draft storage is unavailable.");
+        }
+
+        _busy = true;
+        var sourceDraft = _draft;
+        var sourceDraftId = _activeDraftId;
+        try
+        {
+            var result = request.PreviousDraftId is { } previous
+                ? await SubmissionStore.CreateRevisionAsync(previous, request.Submission)
+                : await SubmissionStore.CreateDraftAsync(request.Submission);
+            request.ConfirmPersisted(result.ClientSubmissionId);
+            if (ReferenceEquals(_draft, sourceDraft) && _activeDraftId == sourceDraftId)
+            {
+                _activeDraftId = result.ClientSubmissionId;
+                _feedback = "Your draft was saved on this device. Save again to include any newer edits. It has not been sent.";
+                _feedbackIsError = false;
+            }
+            await ReloadHistoryAsync();
+        }
+        catch (Exception)
+        {
+            _feedback = "This draft could not be saved safely. Your entries remain on this page.";
+            _feedbackIsError = true;
+            throw;
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task SendReportAsync(IntakeSubmission submission)
+    {
+        if (_busy || !CanSend) return;
+        _receivedReceipt = null;
+        _busy = true;
+        try
+        {
+            var saved = _activeDraftId is { } previous
+                ? await SubmissionStore.CreateRevisionAsync(previous, submission)
+                : await SubmissionStore.CreateDraftAsync(submission);
+            _activeDraftId = saved.ClientSubmissionId;
+            _draft = PublicReportDraft.FromSubmission(submission with { ClientSubmissionId = saved.ClientSubmissionId });
+            await SubmissionStore.QueueAsync(saved.ClientSubmissionId);
+            await SubmissionCoordinator.SubmitPendingAsync();
+            var submitted = await SubmissionStore.GetAsync(saved.ClientSubmissionId);
+            _receivedReceipt = submitted is { State: GuestSubmissionLocalState.Received } ? submitted.Receipt : null;
+            await ReloadHistoryAsync();
+            _feedback = submitted is { State: GuestSubmissionLocalState.Received, Receipt: not null }
+                ? "SwiftAid confirmed receiving your report. Its receipt is available in My reports."
+                : "Your report is saved on this device. SwiftAid has not confirmed receiving it yet.";
+            _feedbackIsError = false;
+        }
+        catch (Exception)
+        {
+            _feedback = "Your report could not be sent. A safely saved draft can be retried from My reports.";
+            _feedbackIsError = true;
+            await ReloadHistoryAsync();
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task ReloadHistoryAsync()
+    {
+        _historyLoading = true;
+        try
+        {
+            var records = await SubmissionStore.GetAllAsync();
+            _history = records.Select(item => new PublicReportHistorySurface.HistoryItem(
+                item.ClientSubmissionId,
+                item.State switch
+                {
+                    GuestSubmissionLocalState.Draft => PublicReportHistorySurface.HistoryState.Draft,
+                    GuestSubmissionLocalState.Queued => PublicReportHistorySurface.HistoryState.Queued,
+                    GuestSubmissionLocalState.Received => PublicReportHistorySurface.HistoryState.Received,
+                    GuestSubmissionLocalState.NeedsAttention => PublicReportHistorySurface.HistoryState.NeedsAttention,
+                    _ => PublicReportHistorySurface.HistoryState.Superseded
+                }, item.CreatedAtUtc, item.Receipt, CanSend && item.State is GuestSubmissionLocalState.Draft or GuestSubmissionLocalState.Queued,
+                SendUnavailableMessage)).ToArray();
+            _storageAvailable = true;
+        }
+        catch (Exception)
+        {
+            _storageAvailable = false;
+            _history = [];
+        }
+        finally { _historyLoading = false; }
+    }
+
+    private async Task OpenDraftAsync(Guid id)
+    {
+        try
+        {
+            var draft = await SubmissionStore.GetDraftAsync(id);
+            if (draft is null) { _feedback = "This draft is no longer available on this device."; return; }
+            _activeDraftId = id;
+            _draft = PublicReportDraft.FromSubmission(draft.Submission);
+            _feedback = null;
+            Navigation.NavigateTo("/report");
+        }
+        catch (Exception) { _feedback = "This draft could not be opened safely."; _feedbackIsError = true; }
+    }
+
+    private Task SendDraftAsync(Guid id) => RetryDraftAsync(id);
+    private async Task RetryDraftAsync(Guid id)
+    {
+        if (!CanSend || _busy) return;
+        _busy = true;
+        try
+        {
+            await SubmissionStore.QueueAsync(id);
+            await SubmissionCoordinator.SubmitPendingAsync();
+            var submitted = await SubmissionStore.GetAsync(id);
+            _feedback = submitted is { State: GuestSubmissionLocalState.Received, Receipt: not null }
+                ? "SwiftAid confirmed receiving your report. Its receipt is available in My reports."
+                : "Your report remains saved on this device; receipt is not confirmed.";
+            _feedbackIsError = false;
+            await ReloadHistoryAsync();
+        }
+        catch (Exception) { _feedback = "This report could not be sent. Its saved copy remains on this device."; _feedbackIsError = true; }
+        finally { _busy = false; }
+    }
+    private Task RetryQueuedAsync() => RetryAllQueuedAsync();
+    private async Task RetryAllQueuedAsync()
+    {
+        if (_busy || !CanSend) return;
+        _busy = true;
+        try { await SubmissionCoordinator.SubmitPendingAsync(); await SubmissionCoordinator.RefreshReceiptsAsync(); await ReloadHistoryAsync(); }
+        catch (Exception) { _feedback = "Report updates are unavailable right now. Saved reports remain on this device."; _feedbackIsError = true; }
+        finally { _busy = false; }
+    }
+
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs args)
+    {
+        _ = InvokeAsync(async () =>
+        {
+            if (!UpdateRoute())
+            {
+                // The hosted guest boot owns only Home and Report. Let Gateway's
+                // existing server routes handle every other destination.
+                Navigation.NavigateTo(args.Location, forceLoad: true);
+                return;
+            }
+
+            if (_isSessions)
+            {
+                await LoadPublicSessionsAsync();
+            }
+
+            StateHasChanged();
+        });
+    }
+
+    private bool UpdateRoute()
+    {
+        var uri = Navigation.ToAbsoluteUri(Navigation.Uri);
+        var path = uri.AbsolutePath.TrimEnd('/');
+        var query = Uri.UnescapeDataString(uri.Query);
+        _requestedSessionId = null;
+        _hasSessionParameter = false;
+        _initialRemindersView = false;
+        foreach (var item in uri.Query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var pair = item.Split('=', 2);
+            if (!_hasSessionParameter && string.Equals(Uri.UnescapeDataString(pair[0]), "sessionId", StringComparison.OrdinalIgnoreCase))
+            {
+                _hasSessionParameter = true;
+                if (pair.Length == 2 && Guid.TryParse(Uri.UnescapeDataString(pair[1]), out var id) && id != Guid.Empty)
+                    _requestedSessionId = id;
+            }
+            else if (pair.Length == 2 && string.Equals(Uri.UnescapeDataString(pair[0]), "tab", StringComparison.OrdinalIgnoreCase) &&
+                     string.Equals(Uri.UnescapeDataString(pair[1]), "reminders", StringComparison.OrdinalIgnoreCase))
+                _initialRemindersView = true;
+        }
+        _initialRemindersView &= _requestedSessionId is not null;
+        _isHome = path.Length == 0;
+        _isCalendarRoute = string.Equals(path, "/sessions/calendar", StringComparison.OrdinalIgnoreCase);
+        _isSessions = _isCalendarRoute || string.Equals(path, "/sessions", StringComparison.OrdinalIgnoreCase);
+        _isEllaiAbout = string.Equals(path, "/ellai/about", StringComparison.OrdinalIgnoreCase);
+        _isTracking = string.Equals(path, "/report", StringComparison.OrdinalIgnoreCase) &&
+            query.Contains("view=tracking", StringComparison.OrdinalIgnoreCase);
+        _isReport = string.Equals(path, "/report", StringComparison.OrdinalIgnoreCase) && !_isTracking;
+        return _isHome || _isSessions || _isEllaiAbout || _isReport || _isTracking;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        Navigation.LocationChanged += OnLocationChanged;
+        try
+        {
+            var module = await JS.InvokeAsync<IJSObjectReference>("import", "js/guest-registration.js");
+            try
+            {
+                await module.InvokeVoidAsync("registerServiceWorker");
+            }
+            finally
+            {
+                await module.DisposeAsync();
+            }
+        }
+        catch (Exception)
+        {
+            // The guest app remains usable when service workers are unavailable.
+        }
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        Navigation.LocationChanged -= OnLocationChanged;
+        return ValueTask.CompletedTask;
+    }
+}
+@using Microsoft.JSInterop

@@ -1,0 +1,285 @@
+@page "/follow-ups"
+@using Microsoft.Extensions.DependencyInjection
+@using SwiftAid.Client.Presentation
+@using SwiftAid.Contracts.Cases
+@using SwiftAid.UI.Components.Surfaces.Operations
+@using SwiftAid.UI.Components.Surfaces.Operations.WorkManagement
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@inject IMonitoringQueueClient MonitoringClient
+@inject IServiceProvider ServiceProvider
+
+<PageTitle>Follow-ups | SwiftAid</PageTitle>
+<OperationsWorkManagementSurface Title="Follow-ups"
+                                 Description="Review scheduled follow-ups, current status, due times, and available actions."
+                                 State="_state" Items="_items" Filter="_filter"
+                                 HasPreviousPage="_hasPreviousPage" HasNextPage="_hasNextPage"
+                                 IsBusy="_busy" StatusMessage="@_statusMessage" StatusIsError="_statusIsError"
+                                 OnAction="ExecuteActionAsync" OnFilterChanged="ChangeFilterAsync" OnRetry="RefreshAsync" />
+
+@code {
+    private IReadOnlyList<OperationsWorkManagementSurface.OperationsWorkItem> _items = Array.Empty<OperationsWorkManagementSurface.OperationsWorkItem>();
+    private OperationsSurfaceState _state = OperationsSurfaceState.Loading;
+    private OperationsWorkManagementSurface.WorkFilter _filter = new(
+        OperationsWorkManagementSurface.OperationsWorkKind.FollowUp, null, null, 1, 25);
+    private string? _statusMessage;
+    private bool _statusIsError;
+    private bool _busy;
+    private bool _hasPreviousPage;
+    private bool _hasNextPage;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private Task ChangeFilterAsync(OperationsWorkManagementSurface.WorkFilter filter)
+    {
+        _filter = filter with { PageNumber = Math.Max(1, filter.PageNumber), PageSize = Math.Clamp(filter.PageSize, 10, 100) };
+        _statusMessage = null;
+        _statusIsError = false;
+        return LoadAsync();
+    }
+
+    private Task RefreshAsync()
+    {
+        _statusMessage = null;
+        _statusIsError = false;
+        return LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        if (_busy) return;
+        _busy = true;
+        _state = OperationsSurfaceState.Loading;
+        _items = Array.Empty<OperationsWorkManagementSurface.OperationsWorkItem>();
+        _hasPreviousPage = _filter.PageNumber > 1;
+        _hasNextPage = false;
+        _statusIsError = false;
+        try
+        {
+            var workClient = ServiceProvider.GetService<IWorkManagementClient>();
+            if (workClient is null)
+            {
+                _state = OperationsSurfaceState.Unavailable;
+                _statusMessage = "Follow-up actions are not available here.";
+                return;
+            }
+
+            var queue = await MonitoringClient.GetAssignedAsync(100);
+            if (queue.Access != CaseQueueAccess.Allowed)
+            {
+                _state = queue.Access == CaseQueueAccess.Denied ? OperationsSurfaceState.Denied : OperationsSurfaceState.Unavailable;
+                _statusMessage = queue.Access == CaseQueueAccess.Denied
+                    ? "You do not have permission to view assigned follow-ups."
+                    : "Assigned follow-up work is unavailable right now.";
+                return;
+            }
+
+            var query = CreateQuery();
+            var loadedItems = new List<OperationsWorkManagementSurface.OperationsWorkItem>();
+            var hadUnavailable = false;
+            var hadDenied = false;
+            var hadFailure = false;
+            foreach (var caseId in queue.Items.Select(item => item.CaseId).Distinct())
+            {
+                var result = await workClient.GetAsync(caseId, query);
+                if (result.Succeeded && result.Value is { } snapshot && snapshot.CaseId == caseId)
+                {
+                    var mappedItems = snapshot.Items.Items
+                        .Select(item => MapItem(snapshot, item))
+                        .Where(item => item is not null)
+                        .Select(item => item!)
+                        .ToArray();
+                    hadFailure |= mappedItems.Length != snapshot.Items.Items.Count;
+                    loadedItems.AddRange(mappedItems);
+                    _hasNextPage |= snapshot.Items.HasMore;
+                    continue;
+                }
+
+                hadDenied |= result.Code == UiCapabilityResultCode.Denied;
+                hadUnavailable |= result.Code == UiCapabilityResultCode.Unavailable;
+                hadFailure |= result.Code is not (UiCapabilityResultCode.Denied or UiCapabilityResultCode.Unavailable);
+            }
+
+            _items = loadedItems;
+            if (_items.Count > 0 || (!hadDenied && !hadUnavailable && !hadFailure))
+            {
+                _state = OperationsSurfaceState.Populated;
+                _statusMessage = hadDenied || hadUnavailable || hadFailure
+                    ? "Some assigned follow-ups could not be loaded. Refresh to try again."
+                    : null;
+            }
+            else
+            {
+                _state = hadDenied ? OperationsSurfaceState.Denied : hadUnavailable ? OperationsSurfaceState.Unavailable : OperationsSurfaceState.Error;
+                _statusMessage = hadDenied
+                    ? "You do not have permission to view this work."
+                    : hadUnavailable ? "Assigned follow-up work is unavailable right now." : "Assigned follow-up work could not be loaded. Refresh to try again.";
+            }
+        }
+        catch (HttpRequestException)
+        {
+            _state = OperationsSurfaceState.Offline;
+            _statusMessage = "Check your connection, then refresh assigned follow-up work.";
+        }
+        catch (Exception)
+        {
+            _state = OperationsSurfaceState.Error;
+            _statusMessage = "Assigned follow-up work could not be loaded. Refresh to try again.";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task ExecuteActionAsync(OperationsWorkManagementSurface.OperationsWorkActionRequest request)
+    {
+        var workClient = ServiceProvider.GetService<IWorkManagementClient>();
+        if (workClient is null || !Enum.TryParse<WorkManagementAction>(request.Action.ToString(), out var action) || !Enum.IsDefined(action))
+        {
+            _statusMessage = "This action is unavailable for this work type.";
+            _statusIsError = true;
+            return;
+        }
+
+        _busy = true;
+        _statusIsError = false;
+        try
+        {
+            var result = await workClient.ExecuteAsync(new WorkManagementCommand(
+                CaseId: request.CaseId,
+                WorkKey: request.WorkKey,
+                Action: action,
+                ExpectedVersion: request.ExpectedVersion,
+                WorkerKey: request.WorkerKey,
+                AssistanceNeed: ParseNullable<WorkManagementAssistanceNeed>(request.AssistanceNeed),
+                Details: request.Details,
+                FollowUpOutcome: ParseNullable<WorkManagementFollowUpOutcome>(request.FollowUpOutcome),
+                EscalationReason: ParseNullable<WorkManagementEscalationReason>(request.EscalationReason),
+                EscalationAction: ParseNullable<WorkManagementEscalationAction>(request.EscalationAction),
+                AssistanceReceiptConfirmed: request.AssistanceReceiptConfirmed,
+                DueAtUtc: request.DueAtUtc,
+                NewDueAtUtc: request.NewDueAtUtc,
+                LocalTimeZoneId: request.LocalTimeZoneId,
+                LocalOffset: request.LocalOffset,
+                CancellationReason: request.CancellationReason,
+                Reason: request.Reason,
+                ResolutionSummary: request.ResolutionSummary,
+                ReceiptMethod: request.AssistanceReceiptMethod,
+                ReceiptContext: request.AssistanceReceiptContext,
+                CommandId: request.CommandId), CreateQuery());
+
+            if (result.Succeeded)
+            {
+                _statusMessage = "The action was accepted. Refreshing assigned follow-up work.";
+                await LoadAfterActionAsync();
+                return;
+            }
+
+            _statusIsError = true;
+            _statusMessage = ResultMessage(result.Code);
+            if (result.Code == UiCapabilityResultCode.Conflict)
+            {
+                await LoadAfterActionAsync();
+            }
+        }
+        catch (HttpRequestException)
+        {
+            _statusMessage = "The action could not reach the service. Check your connection and refresh.";
+            _statusIsError = true;
+        }
+        catch (Exception)
+        {
+            _statusMessage = "The action could not be completed. Refresh before trying again.";
+            _statusIsError = true;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task LoadAfterActionAsync()
+    {
+        var message = _statusMessage;
+        var isError = _statusIsError;
+        _busy = false;
+        await LoadAsync();
+        _statusMessage = message;
+        _statusIsError = isError;
+    }
+
+    private WorkManagementQuery CreateQuery() => new(
+        new PageRequest(_filter.PageNumber, _filter.PageSize),
+        ParseNullable<WorkManagementKind>(_filter.Kind),
+        ParseNullable<WorkManagementStatus>(_filter.Status),
+        _filter.OverdueOnly);
+
+    private static OperationsWorkManagementSurface.OperationsWorkItem? MapItem(
+        WorkManagementSnapshot snapshot,
+        WorkManagementItem item)
+    {
+        if (!Enum.TryParse<OperationsWorkManagementSurface.OperationsWorkKind>(item.Kind.ToString(), out var kind) || !Enum.IsDefined(kind) ||
+            !Enum.TryParse<OperationsWorkManagementSurface.OperationsWorkStatus>(item.Status.ToString(), out var status) || !Enum.IsDefined(status) ||
+            !Enum.TryParse<OperationsWorkManagementSurface.OperationsAssignmentStatus>(item.Assignment.ToString(), out var assignment) || !Enum.IsDefined(assignment))
+        {
+            return null;
+        }
+
+        var actions = item.AvailableActions
+            .Select(action => Enum.TryParse<OperationsWorkManagementSurface.OperationsWorkAction>(action.ToString(), out var parsed) && Enum.IsDefined(parsed)
+                ? (OperationsWorkManagementSurface.OperationsWorkAction?)parsed
+                : null)
+            .Where(action => action.HasValue)
+            .Select(action => action!.Value)
+            .ToArray();
+        var history = item.History
+            .Select(entry => Enum.TryParse<OperationsWorkManagementSurface.OperationsWorkAction>(entry.Action.ToString(), out var action) && Enum.IsDefined(action)
+                ? new OperationsWorkManagementSurface.WorkHistoryEntry(action, entry.OccurredAtUtc,
+                    entry.DueAtUtc, entry.NewDueAtUtc, entry.LocalTimeZoneId, entry.LocalOffset,
+                    entry.CancellationReason, entry.Reason, entry.ResolutionSummary,
+                    ParseNullable<OperationsWorkManagementSurface.AssistanceNeed>(entry.AssistanceNeed),
+                    entry.AssistanceReceiptConfirmed,
+                    ParseNullable<OperationsWorkManagementSurface.FollowUpOutcome>(entry.FollowUpOutcome),
+                    ParseNullable<OperationsWorkManagementSurface.EscalationReason>(entry.EscalationReason),
+                    ParseNullable<OperationsWorkManagementSurface.EscalationActionKind>(entry.EscalationAction))
+                : null)
+            .Where(entry => entry is not null)
+            .Select(entry => entry!)
+            .ToArray();
+
+        return new OperationsWorkManagementSurface.OperationsWorkItem(
+            snapshot.CaseId,
+            item.WorkKey,
+            snapshot.Version,
+            item.DisplayReference,
+            kind,
+            status,
+            assignment,
+            item.Summary,
+            item.UpdatedAtUtc,
+            item.DueAtUtc,
+            actions,
+            history,
+            item.EligibleWorkers.Select(worker => new OperationsWorkManagementSurface.WorkOption(worker.Key, worker.DisplayName)).ToArray(),
+            AssignedWorkerKey: item.AssignedWorkerKey);
+    }
+
+    private static TEnum? ParseNullable<TEnum>(object? value) where TEnum : struct, Enum =>
+        value is Enum enumValue && Enum.TryParse<TEnum>(enumValue.ToString(), out var parsed) && Enum.IsDefined(parsed)
+            ? parsed
+            : null;
+
+    private static TEnum ParseView<TEnum>(Enum value) where TEnum : struct, Enum =>
+        Enum.TryParse<TEnum>(value.ToString(), out var parsed) && Enum.IsDefined(parsed) ? parsed : default;
+
+    private static string ResultMessage(UiCapabilityResultCode code) => code switch
+    {
+        UiCapabilityResultCode.Denied => "You do not have permission to make this change.",
+        UiCapabilityResultCode.Conflict => "This work changed. Refresh before trying again.",
+        UiCapabilityResultCode.Unavailable => "This action is unavailable right now.",
+        UiCapabilityResultCode.Cancelled => "The action was cancelled.",
+        UiCapabilityResultCode.Retryable => "The action could not be completed. Try again shortly.",
+        UiCapabilityResultCode.InvalidRequest => "Check the action details and try again.",
+        _ => "The action could not be completed. Refresh before trying again."
+    };
+}

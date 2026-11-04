@@ -1,0 +1,3265 @@
+@using Bit.Bonboarding
+@using SwiftAid.Contracts.Ellai
+@using SwiftAid.UI.Ellai.Components
+@using Microsoft.Extensions.DependencyInjection
+@using System.Buffers.Binary
+@using System.Threading.Channels
+@inject IBonboardingService Bonboarding
+@inject IEllaiGuidanceControl Guidance
+@inject EllaiLauncher Launcher
+@inject IEllaiReviewClient ReviewClient
+@inject MudBlazor.IDialogService Dialogs
+@inject EllaiEventPoller EventPoller
+@inject Microsoft.JSInterop.IJSRuntime JS
+@inject Microsoft.AspNetCore.Components.NavigationManager Navigation
+@inject IServiceProvider Services
+@implements IDisposable
+
+<div class="ellai-host">
+    <BonboardingRoot PopoverClass="ellai-guided-popover" ChildContent="@(_generatedTour is null ? null : GuidancePopover)" />
+    @if (_guidanceProposalId is not null && _generatedTour is null)
+    {
+        <MudButton Variant="Variant.Text" Disabled="@_preparingGuidance" OnClick="StartProposedGuidanceAsync">
+            @(_preparingGuidance ? "Preparing guidance…" : "Start guidance")
+        </MudButton>
+        @if (_guidanceNotice is not null)
+        {
+            <MudText Typo="Typo.caption" role="status">@_guidanceNotice</MudText>
+        }
+    }
+    @if (_generatedTour is not null)
+    {
+        <MudStack Row="true" AlignItems="AlignItems.Center">
+            @if (_generatedTour.Status == BonboardingTourStatus.Paused)
+            {
+                <MudButton OnClick='@(() => ControlGeneratedTourAsync("resume"))'>Resume guidance</MudButton>
+            }
+            else
+            {
+                <MudButton OnClick='@(() => ControlGeneratedTourAsync("pause"))'>Pause guidance</MudButton>
+            }
+            <MudButton OnClick='@(() => ControlGeneratedTourAsync("cancel"))'>Cancel guidance</MudButton>
+            @if (_guidanceNotice is not null)
+            {
+                <MudText Typo="Typo.caption" role="status">@_guidanceNotice</MudText>
+            }
+        </MudStack>
+    }
+    @if (_guidanceNotice is not null && _generatedTour is null && _guidanceProposalId is null)
+    {
+        <MudText Typo="Typo.caption" role="status">@_guidanceNotice</MudText>
+    }
+    @if (_showStartFailure)
+    {
+        <MudAlert Severity="@(_startOutcomeUnknown ? Severity.Warning : Severity.Info)"
+                  aria-live="assertive" Class="ellai-host__recovery-status">
+            @StatusText
+        </MudAlert>
+    }
+    @if (_generatedTour is null && ShowComposer && (IsActive || !_startOutcomeUnknown))
+    {
+        <div class="@(IsActive ? "ellai-host__attached" : "ellai-host__floating")">
+            @Composer(IsActive ? EllaiSurfacePlacement.Attached : EllaiSurfacePlacement.Floating)
+        </div>
+    }
+</div>
+
+@code {
+    private RenderFragment Composer(EllaiSurfacePlacement placement) => @<text>
+        <EllaiCompactComposer Placement="placement"
+                                  StatusText="@GetComposerStatusText()" Phase="null"
+                                  ResponseText="@_latestResponseText" SentMessage="@_latestUserText"
+                                  LivePartialTranscript="@_livePartialVoiceTranscript"
+                                  InputText="@InputText" InputTextChanged="OnInputChanged"
+                                  Position="@Position" PositionChanged="OnPositionChanged"
+                                  CanSend="@CanSubmitText" CanCancel="@(!_startOutcomeUnknown)" CanUseMicrophone="@(CanStartVoiceCapture && _microphoneCaptureAvailable)"
+                                  CanUseRealtimeMicrophone="@(CanStartVoiceCapture && (_microphoneCaptureAvailable || _nativeVoiceCapture?.IsAvailable == true))"
+                                  IsLiveSpeaking="@(_isRecordingAudio && _captureMode == EllaiVoiceCaptureMode.Live)"
+                                  IsRecordingAudio="@(_isRecordingAudio && _captureMode == EllaiVoiceCaptureMode.Recorded)"
+                                  CanPlayResponse="@CanPlayResponse" IsPlayingResponse="@_isPlayingResponse" IsListeningEnabled="@_readResponsesAloud"
+                                  OnToggleResponseAudio="ToggleResponseAudioAsync"
+                                  OnSend="OnSend" OnCancel="OnCancel" OnClose="CloseComposerAsync" OnOpenSettings="OpenEllaiSettings"
+                                  OnStartVoice="StartRecordedCaptureAsync"
+                                  OnStartRealtimeVoice="StartLiveCaptureAsync" OnStopVoice="StopVoiceCaptureAsync" />
+    </text>;
+
+    private RenderFragment<BonboardingStepRenderContext> GuidancePopover => context => @<section class="ellai-guided-conversation" aria-label="Ellai walkthrough">
+        <header class="ellai-guided-conversation__heading">
+            <strong>Ellai guidance</strong>
+            <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small"
+                           OnClick='@(() => ControlGeneratedTourAsync("cancel"))' aria-label="Cancel guidance" />
+        </header>
+        @if (!string.IsNullOrWhiteSpace(context.ValidationMessage))
+        {
+            <p role="status" class="ellai-guided-conversation__validation">@context.ValidationMessage</p>
+        }
+        @if (!string.IsNullOrWhiteSpace(_guidanceNotice))
+        {
+            <p role="status" class="ellai-guided-conversation__validation">@_guidanceNotice</p>
+        }
+        @if (ShowComposer)
+        {
+            <div class="ellai-guided-conversation__composer">
+                @Composer(EllaiSurfacePlacement.Attached)
+            </div>
+        }
+        <div class="ellai-guided-conversation__navigation">
+            <span class="ellai-guided-conversation__progress" role="img" aria-label="@context.ProgressText">
+                @for (var index = 0; index < context.Count; index++)
+                {
+                    <i class="@(index == context.Index ? "is-current" : null)" aria-hidden="true"></i>
+                }
+            </span>
+            @if (!context.IsFirst)
+            {
+                <MudButton Size="Size.Small" OnClick='@(() => MoveGuidanceStepAsync("back"))'>Back</MudButton>
+            }
+            <MudButton Size="Size.Small" OnClick="@(async () => await context.SkipAsync())">Skip tour</MudButton>
+            <MudButton Size="Size.Small" Color="Color.Primary" Variant="Variant.Filled"
+                       OnClick="@(async () => { CancelGuidanceCountdown(); await AdvanceGuidanceStepAsync(_uiObservationLifetime.Token); })">@context.NextLabel @(_guidanceCountdownSeconds is { } seconds ? $"({seconds})" : null)</MudButton>
+        </div>
+        @if (CurrentGuidanceStep is { SuggestionIds.Count: > 0 } currentStep && _generatedPlan is { } currentPlan)
+        {
+            <div class="ellai-guided-conversation__suggestions" aria-label="Suggested next steps">
+                @foreach (var id in currentStep.SuggestionIds)
+                {
+                    if (currentPlan.Suggestions.TryGetValue(id, out var suggestion))
+                    {
+                        <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Primary"
+                                   Disabled="@(_selectingGuidanceSuggestion || _submittingUtterance || !string.IsNullOrWhiteSpace(InputText))"
+                                   OnClick="@(() => SelectGuidanceSuggestionAsync(id))">@suggestion.Label</MudButton>
+                    }
+                }
+            </div>
+        }
+    </section>;
+
+    private CancellationTokenSource? _cts;
+    private bool ShowComposer;
+    private bool IsActive;
+    private string? StatusText = "Ready";
+    private string? Phase = EllaiStatusPhases.Ready;
+    private string? InputText;
+    private EllaiComposerPosition? Position;
+
+    private string? GetComposerStatusText()
+    {
+        if (_liveVoiceReconnectRequired ||
+            (_lastDurableTurn?.Outcome == "RetryableFailure" &&
+             _lastDurableTurn.ClientUtteranceId == _thinkingUtteranceId))
+        {
+            return "Reconnecting…";
+        }
+
+        if (_startingSession || _startingVoiceCapture)
+        {
+            return "Connecting…";
+        }
+
+        if (!string.IsNullOrWhiteSpace(_toolActivityText)) return _toolActivityText;
+
+        if (_submittingUtterance || _thinkingUtteranceId is not null || _preparingGuidance)
+        {
+            return "Thinking…";
+        }
+
+        return "Ready";
+    }
+    private EllaiSessionView? _sessionView;
+    private string? _pendingUtteranceId;
+    private string? _pendingUtteranceText;
+    private bool _submittingUtterance;
+    private string? _thinkingUtteranceId;
+    private string? _settledUtteranceId;
+    private CancellationTokenSource? _submissionCts;
+    private TaskCompletionSource? _submissionSettled;
+    private bool _startingSession;
+    private bool _cancelRequestedWhileStarting;
+    private bool _startOutcomeUnknown;
+    private bool _showStartFailure;
+    private bool _sessionVersionConflict;
+    private bool _submissionPolicyBlocked;
+    private bool _authorizationRequired;
+    private bool _submissionCorrectionRequired;
+    private bool _cancelOutcomeUnknown;
+    private GuidanceSnapshot? _guidance;
+    private string? _stopCommandId;
+    private long _latestResponseSequence;
+    private long _lastReceivedResponseSequence;
+    private string? _responseSessionId;
+    private string? _responseTextUtteranceId;
+    private string? _latestResponseText;
+    private string? _latestUserText;
+    private string? _latestUserUtteranceId;
+    private EllaiConversationTurnDto? _lastDurableTurn;
+    private Microsoft.JSInterop.IJSObjectReference? _sessionContinuity;
+    private readonly List<long> _latestResponseAudioSequences = [];
+    private readonly Queue<long> _pendingResponseAudioSequences = new();
+    private int _stopResponsePlaybackRequested;
+    private long _activeResponseSequence;
+    private string? _activeResponsePlaybackId;
+    private bool _isPlayingResponse;
+    private Microsoft.JSInterop.IJSObjectReference? _speechModule;
+    private CancellationTokenSource? _audioPlaybackCts;
+    private Microsoft.JSInterop.IJSObjectReference? _captureModule;
+    private Microsoft.JSInterop.IJSObjectReference? _connectivitySubscription;
+    private IEllaiNativeVoiceCapture? _nativeVoiceCapture;
+    private long _lastNativeGlowTimestamp;
+    private double _nativeGlowLevel;
+    private IEllaiClientSpeechDetectorFactory? _sileroFactory;
+    private EllaiClientBargeInDetector? _otherNativeBargeInDetector;
+    private Microsoft.JSInterop.DotNetObjectReference<EllaiGuidanceHost>? _captureDotnetReference;
+    private readonly object _capturedPcmGate = new();
+    private readonly SemaphoreSlim _liveVoiceReplayGate = new(1, 1);
+    private MemoryStream? _capturedPcm;
+    private Channel<byte[]>? _liveVoiceChunks;
+    private Stream? _liveVoiceStream;
+    private Task<EllaiVoiceTranscriptionResult?>? _liveVoiceTranscriptionTask;
+    private TaskCompletionSource<EllaiVoiceTranscriptionResult?>? _browserVoiceStreamCompletion;
+    private bool _browserLiveVoiceWebSocket;
+    private volatile bool _liveVoiceReconnectRequired;
+    private volatile bool _liveVoiceCaptureEnding;
+    private int _liveVoiceReconnectAttempts;
+    private long _liveVoiceReplayBytesSent;
+    private CancellationTokenSource? _liveVoiceCts;
+    private CancellationTokenSource? _voiceTurnStatusCts;
+    private Task? _voiceTurnStatusTask;
+    private string? _liveVoiceCaptureId;
+    private string? _livePartialVoiceTranscript;
+    private long _capturedVoiceBytes;
+    private long _lastCompletedVoiceTurnSequence;
+    private long _lastVoiceTurnStatusEpoch;
+    private string? _voiceTurnCursorSessionId;
+    private EllaiVoiceCaptureMode? _captureMode;
+    private EllaiLanguagePreferences _speechPreferences = new();
+    private bool _microphoneCaptureAvailable;
+    private bool _voiceNetworkOnline = true;
+    private bool _nativeVoiceCaptureActive;
+    private bool _captureEchoCancellationEnabled;
+    private EllaiAudioProcessingStatus _audioProcessingStatus = EllaiAudioProcessingStatus.Unknown;
+    private bool _voiceCaptureConsentGranted;
+    private bool _isRecordingAudio;
+    private bool _voiceTranscriptionInProgress;
+    private bool _startingVoiceCapture;
+    private string? _greetedLiveSessionId;
+    private bool _readResponsesAloud;
+    private bool _guidanceSpeechAutoEnabled;
+    private bool _guidanceSpeechMutedByUser;
+    private bool _responseAudioQueueRunning;
+    private readonly HashSet<long> _progressAudioSequences = [];
+    private string? _toolActivityText;
+    private string? _silencedProgressTurnId;
+    private Task<bool> _responseStopTask = Task.FromResult(true);
+    private int _localBargeInPending;
+
+    private bool CanPlayResponse => _sessionView is not null
+        && (_latestResponseSequence > 0 || _progressAudioSequences.Count > 0)
+        && (!ReviewClient.UsesGatewayPcmAudioDownload
+            || Services.GetService<IEllaiPcmAudioPlayer>()?.IsAvailable == true);
+
+    private bool CanSubmitText => _sessionView is not null
+        && string.Equals(EventPoller.SessionId, _sessionView.SessionId, StringComparison.Ordinal)
+        && string.Equals(_sessionView.Status, "Active", StringComparison.Ordinal)
+        && !_submittingUtterance
+        && !_sessionVersionConflict
+        && !_submissionPolicyBlocked
+        && !_authorizationRequired
+        && !_submissionCorrectionRequired
+        && !_cancelOutcomeUnknown
+        && !_startingSession
+        && !_startOutcomeUnknown
+        && !string.IsNullOrWhiteSpace(InputText);
+
+    [Parameter]
+    public double ViewportWidth { get; set; } = 1280;
+
+    [Parameter]
+    public double ViewportHeight { get; set; } = 800;
+
+    [Parameter]
+    public EventCallback<EllaiMode> OnModeSelected { get; set; }
+
+    [Parameter]
+    public EventCallback OnCreateGuide { get; set; }
+
+    [Parameter]
+    public EventCallback RevealNavigation { get; set; }
+
+    protected override void OnInitialized()
+    {
+        if (Services.GetService<EllaiValidationGuidance>() is { } validation)
+            validation.Changed += OnValidationGuidanceChanged;
+        _navigationTrail.Record(Navigation.ToBaseRelativePath(Navigation.Uri));
+        Navigation.LocationChanged += TrackNavigation;
+        Launcher.Requested += OnLauncherRequested;
+        EventPoller.ApprovalRequired += OnApprovalRequired;
+        EventPoller.SessionCancelled += OnSessionCancelled;
+        EventPoller.ActivityUpdated += OnActivityUpdated;
+        EventPoller.ResponseReceived += OnResponseReceived;
+        EventPoller.ConversationUpdated += OnConversationUpdated;
+        EventPoller.ResponseStreamReset += OnResponseStreamReset;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        try
+        {
+            var speechModule = await JS.InvokeAsync<Microsoft.JSInterop.IJSObjectReference>(
+                "import", "./_content/SwiftAid.UI/js/ellai-audio-playback.js");
+            if (speechModule is not null)
+            {
+                _speechModule = speechModule;
+                await _speechModule.InvokeVoidAsync("initializeAudioUnlock");
+            }
+        }
+        catch (Microsoft.JSInterop.JSDisconnectedException)
+        {
+            _speechModule = null;
+        }
+        catch (Microsoft.JSInterop.JSException)
+        {
+            _speechModule = null;
+        }
+
+        _sileroFactory = Services.GetService<IEllaiClientSpeechDetectorFactory>();
+        if (_sileroFactory is not null) _sileroFactory.SpeechConfirmed += OnNativeSileroSpeech;
+        _nativeVoiceCapture = Services.GetService<IEllaiNativeVoiceCapture>();
+        if (_nativeVoiceCapture is not null)
+        {
+            _nativeVoiceCapture.Interrupted += OnNativeVoiceCaptureInterrupted;
+            _nativeVoiceCapture.RouteChanged += OnNativeVoiceRouteChanged;
+        }
+
+        try
+        {
+            _captureDotnetReference ??= Microsoft.JSInterop.DotNetObjectReference.Create(this);
+            _captureModule = await JS.InvokeAsync<Microsoft.JSInterop.IJSObjectReference>(
+                "import", "./_content/SwiftAid.UI/js/ellai-voice-capture.js");
+            _microphoneCaptureAvailable = await _captureModule.InvokeAsync<bool>("isSupported");
+        }
+        catch (Microsoft.JSInterop.JSDisconnectedException)
+        {
+            _microphoneCaptureAvailable = false;
+        }
+        catch (Microsoft.JSInterop.JSException)
+        {
+            _microphoneCaptureAvailable = false;
+        }
+
+        if (_captureModule is not null && _captureDotnetReference is not null)
+        {
+            try
+            {
+                _voiceNetworkOnline = await _captureModule.InvokeAsync<bool>("isOnline");
+                _connectivitySubscription = await _captureModule.InvokeAsync<Microsoft.JSInterop.IJSObjectReference>(
+                    "startConnectivityMonitoring", _captureDotnetReference);
+            }
+            catch (Microsoft.JSInterop.JSDisconnectedException)
+            {
+                _voiceNetworkOnline = true;
+            }
+            catch (Microsoft.JSInterop.JSException)
+            {
+                _voiceNetworkOnline = true;
+            }
+        }
+
+        _ = MonitorUiObservationsAsync();
+        await RestoreConversationAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task RestoreConversationAsync()
+    {
+        try
+        {
+            _sessionContinuity = await JS.InvokeAsync<Microsoft.JSInterop.IJSObjectReference>(
+                "import", "./_content/SwiftAid.UI/js/ellai-session-continuity.js");
+            var sessionId = await _sessionContinuity.InvokeAsync<string?>("read");
+            if (string.IsNullOrWhiteSpace(sessionId) || _sessionView is not null || _startingSession) return;
+            var result = await ReviewClient.ResumeSessionAsync(sessionId, CancellationToken.None);
+            if (result.Status == EllaiClientOperationStatus.Accepted && result.Session is { Status: "Active" } session)
+            {
+                _sessionView = session;
+                OfferSavedGuidance(session);
+                ShowComposer = true;
+                StatusText = "Ready";
+                TrackSession(sessionId);
+            }
+            else if (result.Status is EllaiClientOperationStatus.Unauthorized
+                || result.Session is { Status: "Completed" or "Cancelled" })
+            {
+                await _sessionContinuity.InvokeVoidAsync("write", (string?)null);
+            }
+        }
+        catch (Microsoft.JSInterop.JSException) { }
+        catch (Microsoft.JSInterop.JSDisconnectedException) { }
+    }
+
+    private async Task RememberSessionAsync(string? sessionId)
+    {
+        if (_sessionContinuity is null) return;
+        try { await _sessionContinuity.InvokeVoidAsync("write", sessionId); }
+        catch (Microsoft.JSInterop.JSException) { }
+        catch (Microsoft.JSInterop.JSDisconnectedException) { }
+    }
+
+    private Task StartRecordedCaptureAsync() => StartVoiceCaptureAsync(EllaiVoiceCaptureMode.Recorded);
+
+    private Task StartLiveCaptureAsync() => StartVoiceCaptureAsync(EllaiVoiceCaptureMode.Live);
+
+    private bool CanStartVoiceCapture => _sessionView is { Status: "Active" }
+        && !_startingSession && !_startingVoiceCapture && !_voiceTranscriptionInProgress
+        && !_isRecordingAudio && !_cancelOutcomeUnknown && !_startOutcomeUnknown;
+
+    private async Task StartVoiceCaptureAsync(EllaiVoiceCaptureMode mode)
+    {
+        var session = _sessionView;
+        var useNativeLiveCapture = mode == EllaiVoiceCaptureMode.Live
+            && _nativeVoiceCapture?.IsAvailable == true;
+        var useBrowserLiveVoiceWebSocket = mode == EllaiVoiceCaptureMode.Live
+            && !useNativeLiveCapture && !ReviewClient.UsesGatewayPcmAudioDownload;
+        if ((!useNativeLiveCapture && !_microphoneCaptureAvailable)
+            || (!useNativeLiveCapture && _captureModule is null)
+            || session is null || !string.Equals(session.Status, "Active", StringComparison.Ordinal)
+            || _isRecordingAudio || _voiceTranscriptionInProgress || _startingVoiceCapture)
+        {
+            StatusText = "Microphone capture is unavailable. You can still type to Ellai.";
+            Phase = EllaiStatusPhases.NeedsInput;
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(InputText))
+        {
+            StatusText = "Send or clear the existing text before starting a voice turn.";
+            Phase = EllaiStatusPhases.NeedsInput;
+            return;
+        }
+
+        _startingVoiceCapture = true;
+        var nativePermission = Services.GetService<IEllaiMicrophonePermission>();
+        if (nativePermission is not null
+            && !await nativePermission.RequestAsync(CancellationToken.None).ConfigureAwait(false))
+        {
+            _startingVoiceCapture = false;
+            StatusText = "Microphone permission was denied. You can still type to Ellai.";
+            Phase = EllaiStatusPhases.NeedsInput;
+            return;
+        }
+
+        if (!_voiceCaptureConsentGranted)
+        {
+            if (!await ReviewClient.GrantVoiceCaptureConsentAsync(session.SessionId, CancellationToken.None)
+                    .ConfigureAwait(false))
+            {
+                _startingVoiceCapture = false;
+                StatusText = "We couldn't confirm your permission to use the microphone. No audio was recorded.";
+                Phase = EllaiStatusPhases.Blocked;
+                return;
+            }
+            _voiceCaptureConsentGranted = true;
+        }
+
+        DiscardCapturedAudio();
+        lock (_capturedPcmGate)
+        {
+            _capturedPcm = new MemoryStream();
+            _capturedVoiceBytes = 0;
+        }
+        _captureMode = mode;
+        _liveVoiceCaptureId = Guid.NewGuid().ToString("N");
+        _captureEchoCancellationEnabled = false;
+        _otherNativeBargeInDetector?.Dispose();
+        // Preserve existing iOS behaviour; this milestone replaces the detector on web/Android only.
+        _otherNativeBargeInDetector = useNativeLiveCapture && _sileroFactory is null ? new EllaiClientBargeInDetector() : null;
+        if (!string.Equals(_voiceTurnCursorSessionId, session.SessionId, StringComparison.Ordinal))
+        {
+            _voiceTurnCursorSessionId = session.SessionId;
+            _lastCompletedVoiceTurnSequence = 0;
+            _lastVoiceTurnStatusEpoch = 0;
+        }
+        _captureDotnetReference ??= Microsoft.JSInterop.DotNetObjectReference.Create(this);
+        var capturingAlongsidePlayback = mode == EllaiVoiceCaptureMode.Live && _isPlayingResponse;
+        try
+        {
+            await LoadSpeechPreferencesAsync();
+            if (mode == EllaiVoiceCaptureMode.Live)
+            {
+                StatusText = "Hi, What's on your mind!";
+                Phase = EllaiStatusPhases.Active;
+                await InvokeAsync(StateHasChanged);
+                if (!capturingAlongsidePlayback)
+                {
+                    StopResponseAudio();
+                }
+
+            }
+
+            if (_sessionView is null
+                || !string.Equals(_sessionView.SessionId, session.SessionId, StringComparison.Ordinal)
+                || !string.Equals(_sessionView.Status, "Active", StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            _liveVoiceReconnectRequired = false;
+            _liveVoiceCaptureEnding = false;
+            _liveVoiceReconnectAttempts = 0;
+            _liveVoiceReplayBytesSent = 0;
+            if (mode == EllaiVoiceCaptureMode.Live && _voiceNetworkOnline)
+            {
+                if (useBrowserLiveVoiceWebSocket)
+                {
+                    StartBrowserLiveVoiceStream();
+                }
+                else
+                {
+                    StartLiveVoiceStream(session.SessionId);
+                }
+            }
+            else if (mode == EllaiVoiceCaptureMode.Live)
+            {
+                _liveVoiceReconnectRequired = true;
+            }
+
+            _isRecordingAudio = true;
+            if (mode == EllaiVoiceCaptureMode.Live) _readResponsesAloud = true;
+            if (useNativeLiveCapture)
+            {
+                try
+                {
+                    _ = await _nativeVoiceCapture!.StartAsync(
+                        QueueNativePcmChunkAsync, _cts?.Token ?? CancellationToken.None);
+                    _audioProcessingStatus = _nativeVoiceCapture.AudioProcessingStatus;
+                    _captureEchoCancellationEnabled = _audioProcessingStatus.EchoCancellationEnabled == true;
+                }
+                catch (OperationCanceledException) when (_cts?.IsCancellationRequested == true)
+                {
+                    throw;
+                }
+                catch (Exception) when (_microphoneCaptureAvailable && _captureModule is not null)
+                {
+                    useNativeLiveCapture = false;
+                    _ = await _captureModule.InvokeAsync<string>(
+                        "startCapture", _captureDotnetReference, true, session.SessionId);
+                }
+            }
+            else
+            {
+                _ = await _captureModule!.InvokeAsync<string>(
+                    "startCapture", _captureDotnetReference, mode == EllaiVoiceCaptureMode.Live, session.SessionId,
+                    useBrowserLiveVoiceWebSocket
+                        ? _speechPreferences.ApplyToVoiceUri(ReviewClient.CreateLiveVoiceWebSocketUri(
+                            new Uri(Navigation.BaseUri), session.SessionId, _liveVoiceCaptureId!)).ToString()
+                        : string.Empty);
+            }
+            _nativeVoiceCaptureActive = useNativeLiveCapture;
+            if (mode == EllaiVoiceCaptureMode.Live
+                && (_liveVoiceChunks is not null || _browserLiveVoiceWebSocket))
+            {
+                await StartVoiceTurnStatusPollingAsync(session.SessionId);
+            }
+            _startingVoiceCapture = false;
+            if (mode == EllaiVoiceCaptureMode.Live && !capturingAlongsidePlayback
+                && !string.Equals(_greetedLiveSessionId, session.SessionId, StringComparison.Ordinal)
+                && await PlayListeningGreetingAsync(session.SessionId))
+            {
+                _greetedLiveSessionId = session.SessionId;
+            }
+            if (mode == EllaiVoiceCaptureMode.Live && _liveVoiceReconnectRequired)
+            {
+                StatusText = "Reconnecting…";
+            }
+            else
+            {
+                StatusText = "Ready";
+            }
+            Phase = EllaiStatusPhases.Active;
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (Microsoft.JSInterop.JSException)
+        {
+            _isRecordingAudio = false;
+            _startingVoiceCapture = false;
+            await CancelLiveVoiceStreamAsync();
+            DiscardCapturedAudio();
+            StatusText = "Microphone access was denied or is unavailable. You can still type to Ellai.";
+            Phase = EllaiStatusPhases.NeedsInput;
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (Exception)
+        {
+            _isRecordingAudio = false;
+            _startingVoiceCapture = false;
+            await CancelLiveVoiceStreamAsync();
+            DiscardCapturedAudio();
+            StatusText = "Voice capture could not be started. You can still type to Ellai.";
+            Phase = EllaiStatusPhases.NeedsInput;
+            await InvokeAsync(StateHasChanged);
+        }
+        finally
+        {
+            _startingVoiceCapture = false;
+        }
+    }
+
+    private void StartLiveVoiceStream(string sessionId) =>
+        StartLiveVoiceStreamCore(sessionId, isReconnect: false);
+
+    private void StartBrowserLiveVoiceStream()
+    {
+        _browserLiveVoiceWebSocket = true;
+        _liveVoiceCts = CancellationTokenSource.CreateLinkedTokenSource(
+            _cts?.Token ?? CancellationToken.None);
+        _browserVoiceStreamCompletion = new TaskCompletionSource<EllaiVoiceTranscriptionResult?>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        _liveVoiceTranscriptionTask = _browserVoiceStreamCompletion.Task;
+        _liveVoiceCaptureEnding = false;
+        _ = ObserveLiveVoiceStreamAsync(_sessionView!.SessionId, _liveVoiceTranscriptionTask);
+    }
+
+    private void StartReconnectedLiveVoiceStream(string sessionId) =>
+        StartLiveVoiceStreamCore(sessionId, isReconnect: true);
+
+    private void StartLiveVoiceStreamCore(string sessionId, bool isReconnect)
+    {
+        _browserLiveVoiceWebSocket = false;
+        _liveVoiceChunks = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(8)
+        {
+            FullMode = BoundedChannelFullMode.Wait,
+            SingleReader = true,
+            SingleWriter = true,
+            AllowSynchronousContinuations = false,
+        });
+        _liveVoiceStream = new PcmChannelReadStream(_liveVoiceChunks.Reader);
+        _liveVoiceCts = CancellationTokenSource.CreateLinkedTokenSource(
+            _cts?.Token ?? CancellationToken.None);
+        _liveVoiceTranscriptionTask = ReviewClient.TranscribeLiveVoiceStreamAsync(
+            sessionId, _liveVoiceStream, _liveVoiceCts.Token, _liveVoiceCaptureId);
+        if (!isReconnect)
+        {
+            _liveVoiceReconnectRequired = false;
+            _liveVoiceReplayBytesSent = 0;
+        }
+        _liveVoiceCaptureEnding = false;
+        _ = ObserveLiveVoiceStreamAsync(sessionId, _liveVoiceTranscriptionTask);
+    }
+
+    private async Task ObserveLiveVoiceStreamAsync(
+        string sessionId,
+        Task<EllaiVoiceTranscriptionResult?> streamTask)
+    {
+        try
+        {
+            await streamTask.ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            // Keep observing only for completion; the bounded capture copy can recover on stop.
+        }
+
+        if (_liveVoiceCaptureEnding || !ReferenceEquals(_liveVoiceTranscriptionTask, streamTask))
+        {
+            return;
+        }
+
+        _liveVoiceReconnectRequired = true;
+        if (_voiceNetworkOnline)
+        {
+            try
+            {
+                if (await TryReconnectLiveVoiceStreamAsync(sessionId).ConfigureAwait(false))
+                {
+                    return;
+                }
+            }
+            catch (Exception)
+            {
+                // Keep the in-memory copy available for the single stop-time upload fallback.
+            }
+        }
+        try
+        {
+            await InvokeAsync(() =>
+            {
+                if (_isRecordingAudio && _captureMode == EllaiVoiceCaptureMode.Live
+                    && _liveVoiceReconnectRequired
+                    && string.Equals(_sessionView?.SessionId, sessionId, StringComparison.Ordinal))
+                {
+                    SetLiveVoiceRecoveryStatus();
+                    StateHasChanged();
+                }
+            }).ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            // Component disposal can race an advisory connection status update.
+        }
+    }
+
+    private void SetLiveVoiceRecoveryStatus()
+    {
+        StatusText = "Reconnecting…";
+        Phase = EllaiStatusPhases.Active;
+    }
+
+    private void EnterLiveVoiceRecovery()
+    {
+        _liveVoiceReconnectRequired = true;
+        _liveVoiceChunks?.Writer.TryComplete();
+        _ = InvokeAsync(() =>
+        {
+            if (_isRecordingAudio && _captureMode == EllaiVoiceCaptureMode.Live
+                && _liveVoiceReconnectRequired)
+            {
+                SetLiveVoiceRecoveryStatus();
+                StateHasChanged();
+            }
+        });
+    }
+
+    private async Task<bool> TryReconnectLiveVoiceStreamAsync(string sessionId)
+    {
+        if (!_voiceNetworkOnline || _liveVoiceCaptureEnding || _liveVoiceReconnectAttempts >= 1)
+        {
+            return false;
+        }
+
+        await _liveVoiceReplayGate.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            if (!_voiceNetworkOnline || _liveVoiceCaptureEnding || !_isRecordingAudio
+                || _liveVoiceReconnectAttempts >= 1
+                || !string.Equals(_sessionView?.SessionId, sessionId, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            _liveVoiceReconnectAttempts++;
+            _liveVoiceReconnectRequired = true;
+            if (_browserLiveVoiceWebSocket)
+            {
+                _browserVoiceStreamCompletion?.TrySetResult(null);
+                if (_liveVoiceTranscriptionTask is not null)
+                {
+                    await _liveVoiceTranscriptionTask.ConfigureAwait(false);
+                }
+
+                _liveVoiceCts?.Dispose();
+                _liveVoiceCts = CancellationTokenSource.CreateLinkedTokenSource(
+                    _cts?.Token ?? CancellationToken.None);
+                _browserVoiceStreamCompletion = new TaskCompletionSource<EllaiVoiceTranscriptionResult?>(
+                    TaskCreationOptions.RunContinuationsAsynchronously);
+                _liveVoiceTranscriptionTask = _browserVoiceStreamCompletion.Task;
+                _liveVoiceCaptureEnding = false;
+                _ = ObserveLiveVoiceStreamAsync(sessionId, _liveVoiceTranscriptionTask);
+
+                var replay = SnapshotCapturedAudio();
+                try
+                {
+                    var socketUrl = _speechPreferences.ApplyToVoiceUri(ReviewClient.CreateLiveVoiceWebSocketUri(
+                        new Uri(Navigation.BaseUri), sessionId, _liveVoiceCaptureId!, 0)).ToString();
+                    var connected = await _captureModule!.InvokeAsync<bool>(
+                        "reconnectVoiceStream", socketUrl, replay).ConfigureAwait(false);
+                    if (!connected)
+                    {
+                        return false;
+                    }
+                    _liveVoiceReplayBytesSent = replay.Length;
+                }
+                finally
+                {
+                    Array.Clear(replay);
+                }
+            }
+            else
+            {
+            await StopLiveVoiceStreamForReconnectAsync().ConfigureAwait(false);
+            if (!_voiceNetworkOnline || _liveVoiceCaptureEnding)
+            {
+                return false;
+            }
+
+            StartReconnectedLiveVoiceStream(sessionId);
+            var replay = SnapshotCapturedAudio();
+            _liveVoiceReplayBytesSent = 0;
+            try
+            {
+                for (var offset = 0; offset < replay.Length;)
+                {
+                    var count = Math.Min(8_192, replay.Length - offset);
+                    var chunk = replay.AsSpan(offset, count).ToArray();
+                    if (!await WriteLiveVoiceChunkAsync(chunk, _liveVoiceCts?.Token ?? CancellationToken.None)
+                            .ConfigureAwait(false))
+                    {
+                        Array.Clear(chunk);
+                        EnterLiveVoiceRecovery();
+                        return false;
+                    }
+
+                    offset += count;
+                    _liveVoiceReplayBytesSent = offset;
+                }
+            }
+            finally
+            {
+                Array.Clear(replay);
+            }
+            }
+
+            if (!_voiceNetworkOnline || _liveVoiceTranscriptionTask?.IsCompleted != false)
+            {
+                EnterLiveVoiceRecovery();
+                return false;
+            }
+
+            _liveVoiceReconnectRequired = false;
+            StatusText = "Ready";
+            Phase = EllaiStatusPhases.Active;
+            await InvokeAsync(StateHasChanged).ConfigureAwait(false);
+            return true;
+        }
+        catch (Exception)
+        {
+            EnterLiveVoiceRecovery();
+            return false;
+        }
+        finally
+        {
+            _liveVoiceReplayGate.Release();
+        }
+    }
+
+    private async Task StopLiveVoiceStreamForReconnectAsync()
+    {
+        _liveVoiceCts?.Cancel();
+        _liveVoiceChunks?.Writer.TryComplete();
+        try
+        {
+            if (_liveVoiceTranscriptionTask is not null)
+            {
+                await _liveVoiceTranscriptionTask.ConfigureAwait(false);
+            }
+        }
+        catch
+        {
+            // A failed stream is replaced by a fresh server epoch below.
+        }
+        await ReleaseLiveVoiceStreamAsync().ConfigureAwait(false);
+    }
+
+    private async Task<bool> WriteLiveVoiceChunkAsync(byte[] chunk, CancellationToken cancellationToken)
+    {
+        var channel = _liveVoiceChunks;
+        if (channel is null || _liveVoiceTranscriptionTask?.IsCompleted != false)
+        {
+            return false;
+        }
+
+        using var enqueueCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        enqueueCts.CancelAfter(EllaiLiveVoiceChunkEnqueueTimeout);
+        try
+        {
+            await channel.Writer.WriteAsync(chunk, enqueueCts.Token).ConfigureAwait(false);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private (byte[] Audio, long StartSample) GetUncompletedLiveVoiceAudio(
+        byte[] capturedAudio, EllaiVoiceTurnStatusDto? status)
+    {
+        var completedTurns = status?.CompletedTurns?
+            .Where(turn => string.Equals(turn.Kind, "TurnCompleted", StringComparison.Ordinal)
+                && (turn.SessionId is null
+                    || string.Equals(turn.SessionId, _sessionView?.SessionId, StringComparison.Ordinal)))
+            .OrderByDescending(turn => turn.Sequence)
+            .ToArray() ?? [];
+
+        var captureTurns = completedTurns.Where(turn => string.Equals(
+            turn.VoiceCaptureId, _liveVoiceCaptureId, StringComparison.Ordinal)).ToArray();
+        if (captureTurns.Length == 0
+            && completedTurns.Length > 0
+            && completedTurns.All(turn => !string.IsNullOrWhiteSpace(turn.VoiceCaptureId)))
+        {
+            return (capturedAudio.ToArray(), 0);
+        }
+
+        if (captureTurns.Length == 0 && (completedTurns.Length > 0 || _lastCompletedVoiceTurnSequence > 0))
+        {
+            return ([], 0);
+        }
+
+        var latestCompletedTurn = captureTurns.FirstOrDefault();
+        if (latestCompletedTurn is null && _lastCompletedVoiceTurnSequence == 0)
+        {
+            return (capturedAudio.ToArray(), 0);
+        }
+        if (latestCompletedTurn is null || latestCompletedTurn.AudioEndSample < 0)
+        {
+            return ([], 0);
+        }
+
+        var startByteLong = latestCompletedTurn.AudioEndSample * sizeof(short);
+        var startByte = (int)Math.Clamp(startByteLong, 0, capturedAudio.Length);
+        return (capturedAudio.AsSpan(startByte).ToArray(), latestCompletedTurn.AudioEndSample);
+    }
+
+    private async Task QueueLiveVoiceChunkAsync(byte[] bytes, long offset, CancellationToken cancellationToken)
+    {
+        await _liveVoiceReplayGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (_liveVoiceReconnectRequired || _liveVoiceChunks is null)
+            {
+                Array.Clear(bytes);
+                return;
+            }
+
+            var end = offset + bytes.Length;
+            if (end <= _liveVoiceReplayBytesSent)
+            {
+                Array.Clear(bytes);
+                return;
+            }
+            if (offset != _liveVoiceReplayBytesSent
+                || !await WriteLiveVoiceChunkAsync(bytes, cancellationToken).ConfigureAwait(false))
+            {
+                EnterLiveVoiceRecovery();
+                Array.Clear(bytes);
+                return;
+            }
+
+            _liveVoiceReplayBytesSent = end;
+        }
+        catch (OperationCanceledException)
+        {
+            EnterLiveVoiceRecovery();
+            Array.Clear(bytes);
+        }
+        finally
+        {
+            _liveVoiceReplayGate.Release();
+        }
+    }
+
+    private async Task CancelLiveVoiceStreamAsync()
+    {
+        if (_browserLiveVoiceWebSocket && _captureModule is not null)
+        {
+            try
+            {
+                await _captureModule.InvokeVoidAsync("closeVoiceStream").ConfigureAwait(false);
+            }
+            catch (Microsoft.JSInterop.JSException)
+            {
+                // The capture module may already be disposed during navigation.
+            }
+        }
+        _browserVoiceStreamCompletion?.TrySetResult(null);
+        _liveVoiceCts?.Cancel();
+        if (_nativeVoiceCaptureActive && _nativeVoiceCapture is not null)
+        {
+            try
+            {
+                await _nativeVoiceCapture.StopAsync().ConfigureAwait(false);
+            }
+            catch
+            {
+                // Cancellation discards the transient turn after a device read failure.
+            }
+            _nativeVoiceCaptureActive = false;
+        }
+        _liveVoiceChunks?.Writer.TryComplete();
+        try
+        {
+            _liveVoiceCts?.Cancel();
+            if (_liveVoiceTranscriptionTask is not null)
+            {
+                await _liveVoiceTranscriptionTask.ConfigureAwait(false);
+            }
+        }
+        catch
+        {
+            // Cancellation and transport failures both discard the partial turn.
+        }
+        finally
+        {
+            await ReleaseLiveVoiceStreamAsync();
+            _otherNativeBargeInDetector?.Dispose();
+            _otherNativeBargeInDetector = null;
+            _captureEchoCancellationEnabled = false;
+            _nativeGlowLevel = 0;
+            if (_captureModule is not null)
+            {
+                try { await _captureModule.InvokeVoidAsync("setNativeVoiceLevel", 0); }
+                catch (Microsoft.JSInterop.JSException) { }
+                catch (Microsoft.JSInterop.JSDisconnectedException) { }
+            }
+        }
+    }
+
+    private Task ReleaseLiveVoiceStreamAsync()
+    {
+        _liveVoiceStream?.Dispose();
+        _liveVoiceStream = null;
+        _liveVoiceChunks = null;
+        _liveVoiceTranscriptionTask = null;
+        _browserVoiceStreamCompletion = null;
+        _browserLiveVoiceWebSocket = false;
+        _liveVoiceCts?.Dispose();
+        _liveVoiceCts = null;
+        return Task.CompletedTask;
+    }
+
+    private async Task StartVoiceTurnStatusPollingAsync(string sessionId)
+    {
+        await StopVoiceTurnStatusPollingAsync();
+        var statusCts = CancellationTokenSource.CreateLinkedTokenSource(
+            _cts?.Token ?? CancellationToken.None);
+        _voiceTurnStatusCts = statusCts;
+        _voiceTurnStatusTask = PollVoiceTurnStatusAsync(sessionId, statusCts);
+    }
+
+    private async Task PollVoiceTurnStatusAsync(string sessionId, CancellationTokenSource statusCts)
+    {
+        try
+        {
+            using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(250));
+            do
+            {
+                var status = await ReviewClient.GetVoiceTurnStatusAsync(
+                    sessionId, statusCts.Token, Volatile.Read(ref _lastCompletedVoiceTurnSequence))
+                    .ConfigureAwait(false);
+                if (status is not null && status.Epoch > 0
+                    && (status.SessionId is null
+                        || string.Equals(status.SessionId, sessionId, StringComparison.Ordinal)))
+                {
+                    await InvokeAsync(async () =>
+                    {
+                        if (!_isRecordingAudio || _captureMode != EllaiVoiceCaptureMode.Live
+                            || !string.Equals(_sessionView?.SessionId, sessionId, StringComparison.Ordinal))
+                        {
+                            return;
+                        }
+
+                        if (status.Epoch < _lastVoiceTurnStatusEpoch)
+                        {
+                            return;
+                        }
+                        _lastVoiceTurnStatusEpoch = Math.Max(_lastVoiceTurnStatusEpoch, status.Epoch);
+
+                        var changed = false;
+                        if (!string.Equals(_livePartialVoiceTranscript, status.PartialTranscript,
+                                StringComparison.Ordinal))
+                        {
+                            _livePartialVoiceTranscript = status.PartialTranscript;
+                            changed = true;
+                        }
+
+                        if (_liveVoiceReconnectRequired)
+                        {
+                            var recoveryText = "Reconnecting…";
+                            if (!string.Equals(StatusText, recoveryText, StringComparison.Ordinal))
+                            {
+                                StatusText = recoveryText;
+                                Phase = EllaiStatusPhases.Active;
+                                changed = true;
+                            }
+
+                            if (changed)
+                            {
+                                StateHasChanged();
+                            }
+
+                            return;
+                        }
+
+                        if (_isPlayingResponse
+                            && string.Equals(status.State, "UserSpeaking", StringComparison.Ordinal))
+                        {
+                            // Native mobile playback cannot receive the browser's local
+                            // acoustic barge-in callback. Stop it as soon as the Gateway
+                            // confirms speech for this live turn.
+                            StopResponseAudio();
+                            changed = true;
+                        }
+
+                        if (GetVoiceTurnStatusText(status.State) is { } text
+                            && !string.Equals(StatusText, text, StringComparison.Ordinal))
+                        {
+                            StatusText = text;
+                            Phase = EllaiStatusPhases.Active;
+                            changed = true;
+                        }
+
+                        if (changed)
+                        {
+                            StateHasChanged();
+                        }
+
+                        await SubmitConfirmedGatewayVoiceTurnsAsync(status, sessionId);
+                    }).ConfigureAwait(false);
+                }
+            }
+            while (await timer.WaitForNextTickAsync(statusCts.Token).ConfigureAwait(false));
+        }
+        catch (OperationCanceledException) when (statusCts.IsCancellationRequested)
+        {
+        }
+        catch (Exception)
+        {
+            // Status polling is advisory; capture and final transcription continue.
+        }
+        finally
+        {
+            if (ReferenceEquals(_voiceTurnStatusCts, statusCts))
+            {
+                _voiceTurnStatusCts = null;
+                _voiceTurnStatusTask = null;
+            }
+            statusCts.Dispose();
+        }
+    }
+
+    private async Task SubmitConfirmedGatewayVoiceTurnsAsync(
+        EllaiVoiceTurnStatusDto status,
+        string sessionId,
+        bool allowClosedCapture = false)
+    {
+        if ((!_isRecordingAudio && !allowClosedCapture) || _captureMode != EllaiVoiceCaptureMode.Live
+            || !string.Equals(_sessionView?.SessionId, sessionId, StringComparison.Ordinal)
+            || status.CompletedTurns is null)
+        {
+            return;
+        }
+
+        foreach (var completedTurn in status.CompletedTurns.OrderBy(turn => turn.Sequence))
+        {
+            if (completedTurn.Sequence <= _lastCompletedVoiceTurnSequence
+                || !string.Equals(completedTurn.Kind, "TurnCompleted", StringComparison.Ordinal)
+                || (completedTurn.SessionId is not null
+                    && !string.Equals(completedTurn.SessionId, sessionId, StringComparison.Ordinal))
+                || completedTurn.StreamEpoch > status.Epoch
+                || string.IsNullOrWhiteSpace(completedTurn.Transcript))
+            {
+                continue;
+            }
+
+            // A pending server admission must not advance the replay cursor.
+            if (completedTurn.ServerSubmission && completedTurn.Admission is null) break;
+            _lastCompletedVoiceTurnSequence = completedTurn.Sequence;
+            var transcript = completedTurn.Transcript.Trim();
+            if (completedTurn.ServerSubmission)
+            {
+                ReconcileVoiceAdmission(completedTurn.TurnId, transcript, completedTurn.Admission);
+                continue;
+            }
+            InputText = transcript;
+            if (Guid.TryParseExact(completedTurn.TurnId, "N", out var turnId)
+                || Guid.TryParse(completedTurn.TurnId, out turnId))
+            {
+                _pendingUtteranceId = turnId.ToString("N");
+                _pendingUtteranceText = transcript;
+            }
+            _submissionCorrectionRequired = false;
+            StatusText = "Voice turn confirmed. Ellai is responding…";
+            Phase = EllaiStatusPhases.Active;
+            StateHasChanged();
+            await SendConfirmedVoiceAsync();
+        }
+    }
+
+    private void ReconcileVoiceAdmission(string? utteranceId, string transcript, EllaiUtteranceSubmitResult? result)
+    {
+        if (_sessionView is null || string.IsNullOrWhiteSpace(utteranceId)) return;
+        if (result?.Session is { } updated
+            && string.Equals(updated.SessionId, _sessionView.SessionId, StringComparison.Ordinal))
+        {
+            if (updated.SessionVersion < _sessionView.SessionVersion && _lastDurableTurn is not null
+                && _lastDurableTurn.ClientUtteranceId != utteranceId) return;
+            if (updated.SessionVersion >= _sessionView.SessionVersion) _sessionView = updated;
+        }
+        if (result?.Status == EllaiClientOperationStatus.Accepted)
+        {
+            ShowLatestUserMessage(utteranceId, transcript);
+            if (_settledUtteranceId != utteranceId) _thinkingUtteranceId = utteranceId;
+            StatusText = "Ready";
+            Phase = EllaiStatusPhases.Active;
+        }
+        else
+        {
+            // Keep the stable identity on retry, including an ambiguous commit result.
+            // Never overwrite a typed draft while reconciling a voice failure.
+            if (string.IsNullOrWhiteSpace(InputText))
+            {
+                InputText = transcript;
+                _pendingUtteranceId = utteranceId;
+                _pendingUtteranceText = transcript;
+            }
+            StatusText = "Couldn't send your voice message. Try again.";
+            Phase = EllaiStatusPhases.NeedsInput;
+        }
+        StateHasChanged();
+    }
+
+    private async Task StopVoiceTurnStatusPollingAsync()
+    {
+        var statusCts = _voiceTurnStatusCts;
+        var statusTask = _voiceTurnStatusTask;
+        if (statusCts is null)
+        {
+            return;
+        }
+
+        statusCts.Cancel();
+        if (statusTask is not null)
+        {
+            try
+            {
+                await statusTask.ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+            }
+        }
+    }
+
+    private static string? GetVoiceTurnStatusText(string state) => state switch
+    {
+        "Listening" or "SpeechCandidate" or "UserSpeaking" or "EndpointCandidate"
+            or "Processing" or "AssistantSpeaking" or "Interrupted" => "Ready",
+        "Recovering" => "Reconnecting…",
+        _ => null,
+    };
+
+    private async Task LoadSpeechPreferencesAsync()
+    {
+        try
+        {
+            await using var module = await JS.InvokeAsync<IJSObjectReference>("import",
+                "./_content/SwiftAid.UI/js/ellai-language-preferences.js");
+            var preferences = await module.InvokeAsync<EllaiLanguagePreferences>("load");
+            _speechPreferences = preferences is not null && preferences.IsValid() ? preferences : new();
+        }
+        catch (JSException) { _speechPreferences = new(); }
+        ReviewClient.ConfigureSpeechPreferences(_speechPreferences);
+    }
+
+    private async Task<bool> PlayListeningGreetingAsync(string sessionId)
+    {
+        try
+        {
+            if (ReviewClient.UsesGatewayPcmAudioDownload)
+            {
+                var audio = await ReviewClient.DownloadListeningGreetingAudioAsync(
+                    sessionId, _cts?.Token ?? CancellationToken.None);
+                var player = Services.GetService<IEllaiPcmAudioPlayer>();
+                if (audio is null || player is null || !player.IsAvailable
+                    || audio.Sequence != 0
+                    || !string.Equals(audio.VoiceId, "swiftaid-mms-english-v1", StringComparison.Ordinal))
+                {
+                    return false;
+                }
+
+                await player.PlayAsync(audio.Pcm, audio.SampleRate, _cts?.Token ?? CancellationToken.None);
+                return true;
+            }
+
+            _speechModule ??= await JS.InvokeAsync<Microsoft.JSInterop.IJSObjectReference>(
+                "import", "./_content/SwiftAid.UI/js/ellai-audio-playback.js");
+            await _speechModule.InvokeVoidAsync("playListeningGreeting", sessionId, _speechPreferences.EnglishVoiceId);
+            return true;
+        }
+        catch (OperationCanceledException) when (_cts?.IsCancellationRequested == true)
+        {
+            // Session cancellation owns playback and prevents capture from starting.
+            return false;
+        }
+        catch (Exception)
+        {
+            // Keep the visible greeting and allow the typed composer to remain usable.
+            return false;
+        }
+    }
+
+    [Microsoft.JSInterop.JSInvokable]
+    public async Task ReceiveVoicePcmChunk(int[] samples)
+    {
+        if (!_isRecordingAudio || samples is null || samples.Length > 4096)
+        {
+            return;
+        }
+
+        var bytes = new byte[samples.Length * sizeof(short)];
+        for (var index = 0; index < samples.Length; index++)
+        {
+            var sample = (short)Math.Clamp(samples[index], short.MinValue, short.MaxValue);
+            BinaryPrimitives.WriteInt16LittleEndian(bytes.AsSpan(index * sizeof(short), sizeof(short)), sample);
+        }
+        if (!TryAppendCapturedAudio(bytes, out var offset))
+        {
+            Array.Clear(bytes);
+            _ = InvokeAsync(StopVoiceCaptureAsync);
+            return;
+        }
+
+
+        if (_captureMode == EllaiVoiceCaptureMode.Live && _liveVoiceChunks is not null)
+        {
+            if (_liveVoiceTranscriptionTask?.IsCompleted == true)
+            {
+                EnterLiveVoiceRecovery();
+            }
+            await QueueLiveVoiceChunkAsync(bytes, offset, _liveVoiceCts?.Token ?? CancellationToken.None)
+                .ConfigureAwait(false);
+        }
+        else
+        {
+            Array.Clear(bytes);
+        }
+
+    }
+
+    private async ValueTask QueueNativePcmChunkAsync(
+        ReadOnlyMemory<byte> pcm,
+        CancellationToken cancellationToken)
+    {
+        if (!_isRecordingAudio || _captureMode != EllaiVoiceCaptureMode.Live || pcm.Length is 0 or > 8_192
+            || (pcm.Length & 1) != 0)
+        {
+            return;
+        }
+
+        var bytes = pcm.ToArray();
+        ObserveOtherNativeBargeIn(bytes);
+        await UpdateNativeVoiceGlowAsync(bytes);
+        if (!TryAppendCapturedAudio(bytes, out var offset))
+        {
+            Array.Clear(bytes);
+            _ = InvokeAsync(StopVoiceCaptureAsync);
+            return;
+        }
+        if (_liveVoiceChunks is null)
+        {
+            Array.Clear(bytes);
+            return;
+        }
+
+        if (_liveVoiceTranscriptionTask?.IsCompleted == true)
+        {
+            EnterLiveVoiceRecovery();
+        }
+        await QueueLiveVoiceChunkAsync(bytes, offset, cancellationToken).ConfigureAwait(false);
+    }
+
+    [Microsoft.JSInterop.JSInvokable]
+    public Task OnVoiceCaptureLimitReached() => InvokeAsync(StopVoiceCaptureAsync);
+
+    [Microsoft.JSInterop.JSInvokable]
+    public Task OnVoiceWebSocketClosed(int closeCode, bool wasClean)
+    {
+        _browserVoiceStreamCompletion?.TrySetResult(null);
+        if (_isRecordingAudio && !_liveVoiceCaptureEnding && _browserLiveVoiceWebSocket)
+        {
+            EnterLiveVoiceRecovery();
+        }
+        return Task.CompletedTask;
+    }
+
+    [Microsoft.JSInterop.JSInvokable]
+    public Task OnVoiceAudioProcessingChanged(EllaiAudioProcessingStatus status)
+    {
+        _audioProcessingStatus = status ?? EllaiAudioProcessingStatus.Unknown;
+        _captureEchoCancellationEnabled = _audioProcessingStatus.EchoCancellationEnabled == true;
+        return Task.CompletedTask;
+    }
+
+    [Microsoft.JSInterop.JSInvokable]
+    public Task OnVoiceConnectivityChanged(bool isOnline) => InvokeAsync(async () =>
+    {
+        if (_voiceNetworkOnline == isOnline)
+        {
+            return;
+        }
+
+        _voiceNetworkOnline = isOnline;
+        if (!_isRecordingAudio || _captureMode != EllaiVoiceCaptureMode.Live)
+        {
+            return;
+        }
+
+        if (!isOnline)
+        {
+            EnterLiveVoiceRecovery();
+            return;
+        }
+
+        if (_liveVoiceReconnectRequired && _sessionView is not null
+            && await TryReconnectLiveVoiceStreamAsync(_sessionView.SessionId))
+        {
+            return;
+        }
+
+        if (_liveVoiceReconnectRequired)
+        {
+            StatusText = "Ready";
+            Phase = EllaiStatusPhases.Active;
+            StateHasChanged();
+        }
+    });
+
+    [Microsoft.JSInterop.JSInvokable]
+    public Task OnVoiceCaptureBackpressure() => InvokeAsync(async () =>
+    {
+        if (_captureMode == EllaiVoiceCaptureMode.Live && _isRecordingAudio)
+        {
+            EnterLiveVoiceRecovery();
+            if (_sessionView is { } session)
+            {
+                _ = TryReconnectLiveVoiceStreamAsync(session.SessionId);
+            }
+            return;
+        }
+
+        if (_captureModule is not null)
+        {
+            await _captureModule.InvokeVoidAsync("cancelCapture");
+        }
+        _isRecordingAudio = false;
+        await StopVoiceTurnStatusPollingAsync();
+        await CancelLiveVoiceStreamAsync();
+        DiscardCapturedAudio();
+        StatusText = "Voice capture paused because audio could not be sent reliably. Try again or type your message.";
+        Phase = EllaiStatusPhases.NeedsInput;
+        await InvokeAsync(StateHasChanged);
+    });
+
+    private void OnNativeVoiceCaptureInterrupted(string message)
+    {
+        _ = InvokeAsync(async () =>
+        {
+            if (!_nativeVoiceCaptureActive)
+            {
+                return;
+            }
+
+            _isRecordingAudio = false;
+            await StopVoiceTurnStatusPollingAsync();
+            await CancelLiveVoiceStreamAsync();
+            _nativeVoiceCaptureActive = false;
+            DiscardCapturedAudio();
+            StatusText = message;
+            Phase = EllaiStatusPhases.NeedsInput;
+            await InvokeAsync(StateHasChanged);
+        });
+    }
+
+    private void OnNativeVoiceRouteChanged()
+    {
+        _ = InvokeAsync(() =>
+        {
+            if (_nativeVoiceCaptureActive)
+            {
+                _audioProcessingStatus = _nativeVoiceCapture?.AudioProcessingStatus
+                    ?? EllaiAudioProcessingStatus.Unknown;
+                _captureEchoCancellationEnabled = _audioProcessingStatus.EchoCancellationEnabled == true;
+                StatusText = $"Microphone route changed; capture continues. {_audioProcessingStatus.ToStatusText()}";
+                StateHasChanged();
+            }
+        });
+    }
+
+    private const int EllaiVoiceTranscriptionMaximumBytes = 32 * 1024 * 1024;
+    private static readonly TimeSpan EllaiLiveVoiceChunkEnqueueTimeout = TimeSpan.FromMilliseconds(500);
+
+    private bool TryAppendCapturedAudio(byte[] bytes, out long offset)
+    {
+        lock (_capturedPcmGate)
+        {
+            offset = _capturedVoiceBytes;
+            if (_capturedPcm is null || bytes.Length == 0
+                || _capturedVoiceBytes + bytes.Length > EllaiVoiceTranscriptionMaximumBytes)
+            {
+                return false;
+            }
+
+            _capturedPcm.Write(bytes);
+            _capturedVoiceBytes += bytes.Length;
+            return true;
+        }
+    }
+
+    private byte[] SnapshotCapturedAudio()
+    {
+        lock (_capturedPcmGate)
+        {
+            return _capturedPcm?.ToArray() ?? [];
+        }
+    }
+
+    private async Task StopVoiceCaptureAsync()
+    {
+        if (!_isRecordingAudio || _voiceTranscriptionInProgress)
+        {
+            return;
+        }
+
+        byte[]? capturedAudio = null;
+        _voiceTranscriptionInProgress = true;
+        _liveVoiceCaptureEnding = true;
+        try
+        {
+            if (_nativeVoiceCaptureActive && _nativeVoiceCapture is not null)
+            {
+                await _nativeVoiceCapture.StopAsync();
+                _nativeVoiceCaptureActive = false;
+            }
+            else if (_captureModule is not null)
+            {
+                await _captureModule.InvokeVoidAsync("stopCapture");
+            }
+            _isRecordingAudio = false;
+            await StopVoiceTurnStatusPollingAsync();
+            await _liveVoiceReplayGate.WaitAsync().ConfigureAwait(false);
+            _liveVoiceReplayGate.Release();
+            var session = _sessionView;
+            var mode = _captureMode;
+            capturedAudio = SnapshotCapturedAudio();
+            if (session is null || mode is null || capturedAudio.Length == 0)
+            {
+                Array.Clear(capturedAudio);
+                StatusText = "No audio was captured. You can type to Ellai.";
+                Phase = EllaiStatusPhases.NeedsInput;
+                return;
+            }
+
+            StatusText = "Connecting…";
+            Phase = EllaiStatusPhases.Active;
+            await InvokeAsync(StateHasChanged);
+            EllaiVoiceTranscriptionResult? result;
+            var usedLiveVoiceUploadRecovery = false;
+            if (mode == EllaiVoiceCaptureMode.Live)
+            {
+                _liveVoiceChunks?.Writer.TryComplete();
+                try
+                {
+                    result = _liveVoiceTranscriptionTask is null
+                        ? null
+                        : await _liveVoiceTranscriptionTask.ConfigureAwait(false);
+                }
+                catch (Exception)
+                {
+                    result = null;
+                }
+
+                var finalStatus = await ReviewClient.GetVoiceTurnStatusAsync(
+                    session.SessionId, _cts?.Token ?? CancellationToken.None, afterSequence: 0)
+                    .ConfigureAwait(false);
+                if (finalStatus is not null)
+                {
+                    await InvokeAsync(() => SubmitConfirmedGatewayVoiceTurnsAsync(
+                        finalStatus, session.SessionId, allowClosedCapture: true));
+                }
+
+                {
+                    var pendingAudio = GetUncompletedLiveVoiceAudio(capturedAudio, finalStatus);
+                    if (pendingAudio.Audio.Length > 0
+                        && _liveVoiceReconnectRequired)
+                    {
+                        usedLiveVoiceUploadRecovery = true;
+                        StatusText = "Reconnecting…";
+                        await InvokeAsync(StateHasChanged);
+                        try
+                        {
+                            _ = await ReviewClient.TranscribeVoiceAsync(
+                                session.SessionId,
+                                pendingAudio.Audio,
+                                EllaiVoiceCaptureMode.Live,
+                                _cts?.Token ?? CancellationToken.None,
+                                _liveVoiceCaptureId,
+                                pendingAudio.StartSample).ConfigureAwait(false);
+                        }
+                        finally
+                        {
+                            Array.Clear(pendingAudio.Audio);
+                        }
+
+                        finalStatus = await ReviewClient.GetVoiceTurnStatusAsync(
+                            session.SessionId, _cts?.Token ?? CancellationToken.None, afterSequence: 0)
+                            .ConfigureAwait(false);
+                        if (finalStatus is not null)
+                        {
+                            await InvokeAsync(() => SubmitConfirmedGatewayVoiceTurnsAsync(
+                                finalStatus, session.SessionId, allowClosedCapture: true));
+                        }
+                    }
+                }
+
+                Array.Clear(capturedAudio);
+                await ReleaseLiveVoiceStreamAsync();
+                result = null;
+
+                if (finalStatus is not null && _lastCompletedVoiceTurnSequence == 0 && !_submittingUtterance
+                    && !_isPlayingResponse)
+                {
+                    StatusText = usedLiveVoiceUploadRecovery
+                        ? "Couldn't send your voice message. Try again or type your message."
+                        : "No completed voice turn came through. Try again or type your message.";
+                    Phase = EllaiStatusPhases.NeedsInput;
+                }
+                return;
+            }
+            else
+            {
+                var payload = CreateWavePayload(capturedAudio);
+                Array.Clear(capturedAudio);
+                try
+                {
+                    result = await ReviewClient.TranscribeVoiceAsync(
+                        session.SessionId, payload, mode.Value, CancellationToken.None, _liveVoiceCaptureId).ConfigureAwait(false);
+                }
+                finally
+                {
+                    Array.Clear(payload);
+                }
+            }
+
+            if (result is null || string.IsNullOrWhiteSpace(result.Transcript))
+            {
+                if (usedLiveVoiceUploadRecovery)
+                {
+                    StatusText = "Couldn't send your voice message. Try again or type your message.";
+                    Phase = EllaiStatusPhases.NeedsInput;
+                    return;
+                }
+
+                var failedTurnStatus = mode == EllaiVoiceCaptureMode.Live
+                    ? await ReviewClient.GetVoiceTurnStatusAsync(
+                        session.SessionId, _cts?.Token ?? CancellationToken.None).ConfigureAwait(false)
+                    : null;
+                StatusText = failedTurnStatus is not null
+                    ? GetVoiceTurnStatusText(failedTurnStatus.State)
+                        ?? "That voice turn didn't come through. Please try again or type your message."
+                    : "That voice turn didn't come through. Please try again or type your message.";
+                Phase = EllaiStatusPhases.NeedsInput;
+                return;
+            }
+
+            var transcript = result.Transcript.Trim();
+            if (result.ServerSubmission)
+            {
+                await InvokeAsync(() => ReconcileVoiceAdmission(result.ClientUtteranceId, transcript, result.Admission));
+                return;
+            }
+            var canAutoSubmitVoiceTurn = string.IsNullOrWhiteSpace(InputText);
+            InputText = string.IsNullOrWhiteSpace(InputText)
+                ? transcript
+                : $"{InputText.TrimEnd()}\n{transcript}";
+            _submissionCorrectionRequired = false;
+            if (canAutoSubmitVoiceTurn)
+            {
+                StatusText = mode == EllaiVoiceCaptureMode.Live
+                    ? "Voice turn transcribed. Ellai is responding…"
+                    : "Recording transcribed. Ellai is responding…";
+                Phase = EllaiStatusPhases.Active;
+                await InvokeAsync(StateHasChanged);
+                await InvokeAsync(SendConfirmedVoiceAsync);
+            }
+            else if (mode == EllaiVoiceCaptureMode.Live)
+            {
+                StatusText = "Voice turn transcribed. Review the words and existing draft before selecting Send.";
+                Phase = EllaiStatusPhases.NeedsInput;
+            }
+            else
+            {
+                StatusText = "Transcript added to the composer. Review it before selecting Send.";
+                Phase = EllaiStatusPhases.NeedsInput;
+            }
+        }
+        catch (Microsoft.JSInterop.JSException)
+        {
+            StatusText = "Microphone capture could not be completed. You can still type to Ellai.";
+            Phase = EllaiStatusPhases.NeedsInput;
+        }
+        catch (OperationCanceledException)
+        {
+            StatusText = "Voice transcription was canceled. You can still type to Ellai.";
+            Phase = EllaiStatusPhases.NeedsInput;
+        }
+        catch (Exception)
+        {
+            StatusText = "Voice transcription could not be completed. You can still type to Ellai.";
+            Phase = EllaiStatusPhases.NeedsInput;
+        }
+        finally
+        {
+            if (capturedAudio is not null)
+            {
+                Array.Clear(capturedAudio);
+            }
+            _isRecordingAudio = false;
+            _voiceTranscriptionInProgress = false;
+            _captureMode = null;
+            _liveVoiceCaptureEnding = true;
+            if (_liveVoiceChunks is not null || _browserLiveVoiceWebSocket)
+            {
+                await CancelLiveVoiceStreamAsync();
+            }
+            DiscardCapturedAudio();
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private static byte[] CreateWavePayload(byte[] pcm)
+    {
+        var wav = new byte[44 + pcm.Length];
+        "RIFF"u8.CopyTo(wav);
+        BinaryPrimitives.WriteInt32LittleEndian(wav.AsSpan(4, 4), wav.Length - 8);
+        "WAVEfmt "u8.CopyTo(wav.AsSpan(8, 8));
+        BinaryPrimitives.WriteInt32LittleEndian(wav.AsSpan(16, 4), 16);
+        BinaryPrimitives.WriteInt16LittleEndian(wav.AsSpan(20, 2), 1);
+        BinaryPrimitives.WriteInt16LittleEndian(wav.AsSpan(22, 2), 1);
+        BinaryPrimitives.WriteInt32LittleEndian(wav.AsSpan(24, 4), 24000);
+        BinaryPrimitives.WriteInt32LittleEndian(wav.AsSpan(28, 4), 48000);
+        BinaryPrimitives.WriteInt16LittleEndian(wav.AsSpan(32, 2), 2);
+        BinaryPrimitives.WriteInt16LittleEndian(wav.AsSpan(34, 2), 16);
+        "data"u8.CopyTo(wav.AsSpan(36, 4));
+        BinaryPrimitives.WriteInt32LittleEndian(wav.AsSpan(40, 4), pcm.Length);
+        pcm.CopyTo(wav, 44);
+        return wav;
+    }
+
+    private void DiscardCapturedAudio()
+    {
+        _livePartialVoiceTranscript = null;
+        lock (_capturedPcmGate)
+        {
+            if (_capturedPcm is not null)
+            {
+                if (_capturedPcm.TryGetBuffer(out var buffer))
+                {
+                    Array.Clear(buffer.Array!, buffer.Offset, buffer.Count);
+                }
+                _capturedPcm.Dispose();
+                _capturedPcm = null;
+            }
+            _capturedVoiceBytes = 0;
+        }
+    }
+
+    /// <summary>Binds trusted runtime progress to the composer status line.
+    /// Coordinator phases map onto the canonical label set; unknown phases
+    /// keep the current label while the template text still updates.</summary>
+    internal static string? MapActivityPhase(string phase) => phase switch
+    {
+        "blocked" => EllaiStatusPhases.Blocked,
+        "approval" => EllaiStatusPhases.NeedsInput,
+        "done" or "cancelled" => EllaiStatusPhases.Ready,
+        "working" or "reading" or "reviewing" or "opening" or "verifying"
+            => EllaiStatusPhases.Active,
+        _ => null,
+    };
+
+    private void OnActivityUpdated(string phase, string text)
+    {
+        _ = InvokeAsync(() =>
+        {
+            if (MapActivityPhase(phase) is { } mapped)
+            {
+                Phase = mapped;
+            }
+
+            StatusText = text;
+            StateHasChanged();
+        });
+    }
+
+    private static string? OutcomeText(string? outcome, string? text) => outcome switch
+    {
+        "Completed" => text,
+        "TerminalFailure" => "I couldn't complete that request. Please try again.",
+        "Cancelled" => "Request cancelled.",
+        "RetryableFailure" => null,
+        "LegacyUnknown" => "This earlier response is unavailable.",
+        _ => null,
+    };
+
+    private void OnResponseStreamReset()
+    {
+        _ = InvokeAsync(() =>
+        {
+            StopResponseAudio();
+            _lastReceivedResponseSequence = 0;
+            _latestResponseSequence = 0;
+            _latestResponseAudioSequences.Clear();
+            _pendingResponseAudioSequences.Clear();
+        });
+    }
+
+    private void SettleThinking(string? utteranceId)
+    {
+        if (utteranceId is null) return;
+        _settledUtteranceId = utteranceId;
+        if (_thinkingUtteranceId == utteranceId) _thinkingUtteranceId = null;
+        _toolActivityText = null;
+        PreemptProgressAudio();
+    }
+
+    private void ShowLatestUserMessage(string utteranceId, string? text)
+    {
+        if (_latestUserUtteranceId != utteranceId) _toolActivityText = null;
+        if (_latestUserUtteranceId != utteranceId && _responseTextUtteranceId != utteranceId)
+        {
+            StopResponseAudio();
+            _latestResponseText = null;
+            _latestResponseSequence = 0;
+            _latestResponseAudioSequences.Clear();
+        }
+        _latestUserUtteranceId = utteranceId;
+        _latestUserText = text;
+    }
+
+    private void OnConversationUpdated(IReadOnlyList<EllaiConversationTurnDto> conversation)
+    {
+        _ = InvokeAsync(() =>
+        {
+            var latest = conversation.LastOrDefault();
+            if (latest is null) return;
+            // HTTP deserialization creates a fresh proposal collection every poll.
+            // Compare its stable identities, otherwise an unchanged durable answer
+            // replaces the active step's narration on every history refresh.
+            if (_lastDurableTurn is { } previous && latest with { UiProposals = previous.UiProposals } == previous &&
+                latest.UiProposals.Select(item => item.ProposalId).SequenceEqual(previous.UiProposals.Select(item => item.ProposalId))) return;
+            if (_lastDurableTurn is not null && latest.Sequence < _lastDurableTurn.Sequence) return;
+            if (_thinkingUtteranceId is not null && latest.ClientUtteranceId != _thinkingUtteranceId
+                && !conversation.Any(turn => turn.ClientUtteranceId == _thinkingUtteranceId
+                    && turn.Sequence < latest.Sequence)) return;
+            var wasAwaitingThisTurn = _thinkingUtteranceId == latest.ClientUtteranceId;
+            _lastDurableTurn = latest;
+            ObserveGuidanceProposal(latest, wasAwaitingThisTurn);
+            ShowLatestUserMessage(latest.ClientUtteranceId, latest.UserText);
+            if (latest.Outcome is "Queued" or "Processing" or "RetryableFailure")
+            {
+                if (latest.ClientUtteranceId != _settledUtteranceId)
+                    _thinkingUtteranceId = latest.ClientUtteranceId;
+                StateHasChanged();
+            }
+            else
+            {
+                SettleThinking(latest.ClientUtteranceId);
+            }
+            if (latest.Outcome is "Queued" or "Processing") return;
+            _responseTextUtteranceId = latest.ClientUtteranceId;
+            _latestResponseText = OutcomeText(latest.Outcome, latest.AssistantText);
+            if (latest.Outcome != "Completed")
+            {
+                StopResponseAudio();
+                _latestResponseSequence = 0;
+                _latestResponseAudioSequences.Clear();
+                _pendingResponseAudioSequences.Clear();
+            }
+            StatusText = latest.Outcome == "RetryableFailure" ? "Reconnecting.." : "Ready";
+            Phase = EllaiStatusPhases.Ready;
+            StateHasChanged();
+        });
+    }
+
+    private void OnResponseReceived(EllaiSessionResponseDto response)
+    {
+        _ = InvokeAsync(() =>
+        {
+            if (_sessionView is null
+                || !string.Equals(response.SessionId, _sessionView.SessionId, StringComparison.Ordinal)
+                || (string.IsNullOrWhiteSpace(response.Text) && !response.IsFinal && response.Progress is null))
+            {
+                return;
+            }
+
+            if (!string.Equals(_responseSessionId, response.SessionId, StringComparison.Ordinal))
+            {
+                _responseSessionId = response.SessionId;
+                _lastReceivedResponseSequence = 0;
+                _latestResponseSequence = 0;
+                _responseTextUtteranceId = null;
+                _latestResponseText = null;
+                _latestResponseAudioSequences.Clear();
+                _pendingResponseAudioSequences.Clear();
+            }
+
+            if (response.Sequence <= _lastReceivedResponseSequence)
+            {
+                return;
+            }
+
+            _lastReceivedResponseSequence = response.Sequence;
+            if (_latestUserUtteranceId is not null && response.ClientUtteranceId is not null
+                && response.ClientUtteranceId != _latestUserUtteranceId) return;
+            if (response.Progress is { } progress)
+            {
+                if (progress.State == "Guidance")
+                {
+                    if ((progress.EventId != _guidanceNarrationEventId && progress.EventId != _validationNarrationEventId) || _generatedTour is null ||
+                        progress.ExpiresAtUtc <= DateTimeOffset.UtcNow) return;
+                    _latestResponseText = response.Text;
+                    _latestResponseSequence = response.Sequence;
+                    _latestResponseAudioSequences.Clear();
+                    _latestResponseAudioSequences.Add(response.Sequence);
+                    if (_readResponsesAloud)
+                    {
+                        _progressAudioSequences.Add(response.Sequence);
+                        _pendingResponseAudioSequences.Enqueue(response.Sequence);
+                        Interlocked.Exchange(ref _stopResponsePlaybackRequested, 0);
+                        if (!_responseAudioQueueRunning) _ = PlayQueuedResponseAudioAsync();
+                    }
+                    else if (progress.EventId == _guidanceNarrationEventId) BeginGuidanceCountdown(response.Sequence);
+                    StateHasChanged();
+                    return;
+                }
+                if (progress.State == "Interrupted") _silencedProgressTurnId = response.ClientUtteranceId;
+                if (progress.State is "Completed" or "Failed" or "Cancelled" or "Interrupted" or "Retrying")
+                {
+                    _toolActivityText = null;
+                    PreemptProgressAudio();
+                }
+                else if (_settledUtteranceId != response.ClientUtteranceId
+                    && _silencedProgressTurnId != response.ClientUtteranceId)
+                {
+                    _toolActivityText = progress.Operation;
+                    if (progress.Speak && _readResponsesAloud && progress.ExpiresAtUtc > DateTimeOffset.UtcNow)
+                    {
+                        _progressAudioSequences.Add(response.Sequence);
+                        _pendingResponseAudioSequences.Enqueue(response.Sequence);
+                        Interlocked.Exchange(ref _stopResponsePlaybackRequested, 0);
+                        if (!_responseAudioQueueRunning) _ = PlayQueuedResponseAudioAsync();
+                    }
+                }
+                StateHasChanged();
+                return;
+            }
+            _toolActivityText = null;
+            PreemptProgressAudio();
+            if (response.IsFinal || response.IsReconciliation)
+                SettleThinking(response.ClientUtteranceId);
+            if (response.IsReconciliation)
+            {
+                var hadChunks = _responseTextUtteranceId == response.ClientUtteranceId
+                    && _latestResponseAudioSequences.Count > 0;
+                _responseTextUtteranceId = response.ClientUtteranceId;
+                _latestResponseText = OutcomeText(response.Outcome, response.Text);
+                if (response.Outcome != "Completed")
+                {
+                    StopResponseAudio();
+                    _latestResponseSequence = 0;
+                    _latestResponseAudioSequences.Clear();
+                    _pendingResponseAudioSequences.Clear();
+                }
+                else if (!hadChunks)
+                {
+                    _latestResponseSequence = response.Sequence;
+                    _latestResponseAudioSequences.Clear();
+                    _latestResponseAudioSequences.Add(response.Sequence);
+                    if (_readResponsesAloud && CanPlayResponse)
+                    {
+                        _pendingResponseAudioSequences.Enqueue(response.Sequence);
+                        if (!_isPlayingResponse) _ = PlayQueuedResponseAudioAsync();
+                    }
+                }
+                Phase = EllaiStatusPhases.Ready;
+                StatusText = "Ready";
+                StateHasChanged();
+                return;
+            }
+            var startsNewResponse = !string.IsNullOrWhiteSpace(response.Text)
+                && (response.ClientUtteranceId is null
+                    || !string.Equals(_responseTextUtteranceId, response.ClientUtteranceId, StringComparison.Ordinal));
+            var hasDurableAnswer = _lastDurableTurn?.ClientUtteranceId == response.ClientUtteranceId
+                && _lastDurableTurn?.Outcome == "Completed";
+            if (startsNewResponse)
+            {
+                _responseTextUtteranceId = response.ClientUtteranceId;
+                if (!hasDurableAnswer) _latestResponseText = response.Text;
+                _latestResponseAudioSequences.Clear();
+                _pendingResponseAudioSequences.Clear();
+            }
+            else if (!hasDurableAnswer && !string.IsNullOrWhiteSpace(response.Text))
+            {
+                _latestResponseText = string.Concat(_latestResponseText, " ", response.Text);
+            }
+            StatusText = response.IsFinal ? "Ready" : "Connecting..";
+            _latestResponseSequence = response.Sequence;
+            if (!string.IsNullOrWhiteSpace(response.Text))
+            {
+                _latestResponseAudioSequences.Add(response.Sequence);
+            }
+            Phase = response.IsFinal ? EllaiStatusPhases.Ready : EllaiStatusPhases.Active;
+            if (!string.IsNullOrWhiteSpace(response.Text)
+                && _readResponsesAloud && CanPlayResponse)
+            {
+                _pendingResponseAudioSequences.Enqueue(response.Sequence);
+                if (!_isPlayingResponse)
+                {
+                    _ = PlayQueuedResponseAudioAsync();
+                }
+            }
+            StateHasChanged();
+        });
+    }
+
+    private async Task ToggleResponseAudioAsync()
+    {
+        if (_sessionView is null)
+        {
+            return;
+        }
+
+        if (_readResponsesAloud)
+        {
+            _readResponsesAloud = false;
+            _guidanceSpeechAutoEnabled = false;
+            _guidanceSpeechMutedByUser = true;
+            StopResponseAudio();
+            StatusText = "Speech playback stopped.";
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+
+        _readResponsesAloud = true;
+        _guidanceSpeechAutoEnabled = false;
+        _guidanceSpeechMutedByUser = false;
+        await InvokeAsync(StateHasChanged);
+        await PlayResponseAudioAsync();
+    }
+
+    private void DisableResponseAudio()
+    {
+        _readResponsesAloud = false;
+        _guidanceSpeechAutoEnabled = false;
+        _guidanceSpeechMutedByUser = true;
+        StopResponseAudio();
+        StatusText = "Speech playback stopped.";
+    }
+
+    private void BeginGuidanceSpeech()
+    {
+        if (_readResponsesAloud || _guidanceSpeechMutedByUser) return;
+        _guidanceSpeechAutoEnabled = true;
+        _readResponsesAloud = true;
+    }
+
+    private void EndGuidanceSpeech()
+    {
+        if (!_guidanceSpeechAutoEnabled) return;
+        _guidanceSpeechAutoEnabled = false;
+        _readResponsesAloud = false;
+        StopResponseAudio();
+    }
+
+    private async Task PlayResponseAudioAsync()
+    {
+        if (_sessionView is null || _latestResponseSequence < 1 || _isPlayingResponse)
+        {
+            return;
+        }
+
+        Interlocked.Exchange(ref _stopResponsePlaybackRequested, 0);
+
+        var sequences = _latestResponseAudioSequences.Count == 0
+            ? [_latestResponseSequence]
+            : _latestResponseAudioSequences.ToArray();
+        foreach (var sequence in sequences)
+        {
+            if (!_pendingResponseAudioSequences.Contains(sequence))
+                _pendingResponseAudioSequences.Enqueue(sequence);
+        }
+        await PlayQueuedResponseAudioAsync();
+    }
+
+    private async Task PlayQueuedResponseAudioAsync()
+    {
+        if (_responseAudioQueueRunning) return;
+        _responseAudioQueueRunning = true;
+        try
+        {
+            Interlocked.Exchange(ref _stopResponsePlaybackRequested, 0);
+            while (_pendingResponseAudioSequences.TryDequeue(out var sequence))
+            {
+                if (Interlocked.CompareExchange(ref _stopResponsePlaybackRequested, 0, 0) != 0
+                    || !_readResponsesAloud || !CanPlayResponse)
+                {
+                    _pendingResponseAudioSequences.Clear();
+                    return;
+                }
+                // Await local stop acknowledgement before a replacement starts.
+                if (!await _responseStopTask)
+                {
+                    _pendingResponseAudioSequences.Clear();
+                    _progressAudioSequences.Clear();
+                    return;
+                }
+                if (Interlocked.CompareExchange(ref _stopResponsePlaybackRequested, 0, 0) != 0
+                    || !_readResponsesAloud) break;
+                await PlayResponseAudioSequenceAsync(sequence);
+                _progressAudioSequences.Remove(sequence);
+            }
+        }
+        finally { _responseAudioQueueRunning = false; }
+    }
+
+    private async Task PlayResponseAudioSequenceAsync(long sequence)
+    {
+        if (_sessionView is null || sequence < 1 || _isPlayingResponse)
+        {
+            return;
+        }
+
+        var sessionId = _sessionView.SessionId;
+        var playbackId = Guid.NewGuid().ToString("N");
+        var playbackCts = new CancellationTokenSource();
+        CancelGuidanceCountdown();
+        var playbackCompleted = false;
+        var narrationEventId = _guidanceNarrationEventId;
+        _audioPlaybackCts = playbackCts;
+        _activeResponseSequence = sequence;
+        _activeResponsePlaybackId = playbackId;
+        _isPlayingResponse = true;
+        Interlocked.Exchange(ref _localBargeInPending, 0);
+        StatusText = "Preparing Ellai speech…";
+        await InvokeAsync(StateHasChanged);
+        try
+        {
+            if (ReviewClient.UsesGatewayPcmAudioDownload)
+            {
+                await using var audio = await ReviewClient.DownloadResponseAudioStreamAsync(
+                    sessionId, sequence, playbackId, playbackCts.Token);
+                var player = Services.GetService<IEllaiPcmAudioPlayer>();
+                if (audio is null || player is null || !player.IsAvailable
+                    || audio.Sequence != sequence
+                    || !string.Equals(audio.VoiceId, "swiftaid-mms-english-v1", StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException("Gateway PCM playback is unavailable.");
+                }
+
+                await player.PlayAsync(audio.Pcm, audio.SampleRate, playbackCts.Token);
+            }
+            else
+            {
+                _speechModule ??= await JS.InvokeAsync<Microsoft.JSInterop.IJSObjectReference>(
+                    "import", "./_content/SwiftAid.UI/js/ellai-audio-playback.js");
+                await _speechModule.InvokeVoidAsync(
+                    "playResponse", sessionId, sequence, playbackId);
+            }
+
+            StatusText = "Ellai speech playback finished.";
+            playbackCompleted = !playbackCts.IsCancellationRequested;
+        }
+        catch (OperationCanceledException) when (playbackCts.IsCancellationRequested)
+        {
+            StatusText = _isRecordingAudio && _captureMode == EllaiVoiceCaptureMode.Live
+                ? "You interrupted Ellai. Keep speaking; completed turns are sent automatically."
+                : "Speech playback stopped.";
+        }
+        catch (Exception)
+        {
+            StatusText = "Ellai couldn't play the spoken reply. You can still read it above.";
+        }
+        finally
+        {
+            if (ReferenceEquals(_audioPlaybackCts, playbackCts))
+            {
+                _audioPlaybackCts = null;
+                _isPlayingResponse = false;
+                _activeResponseSequence = 0;
+                _activeResponsePlaybackId = null;
+            }
+
+            playbackCts.Dispose();
+            await InvokeAsync(StateHasChanged);
+        }
+        if (playbackCompleted && narrationEventId is not null && narrationEventId == _guidanceNarrationEventId)
+            BeginGuidanceCountdown(sequence);
+    }
+
+    private void OnLauncherRequested(EllaiMode mode)
+    {
+        _ = InvokeAsync(() => SelectModeAsync(mode));
+    }
+
+    /// <summary>Attaches live guidance, enabling the attached composer
+    /// branch. Called by the hosting page when a journey starts.</summary>
+    public async Task AttachGuidanceAsync(
+        string journeyId, string journeyVersion, GuidanceMode mode, CancellationToken cancellationToken)
+    {
+        _guidance = await Guidance.StartAsync(journeyId, journeyVersion, mode, null, cancellationToken);
+        IsActive = true;
+        ShowComposer = true;
+        Phase = EllaiStatusPhases.Active;
+        StatusText = "Guidance is showing. The composer follows the active card.";
+    }
+
+    private async Task SelectModeAsync(EllaiMode mode)
+    {
+        if (_guidance is not null && IsActive)
+        {
+            ShowComposer = true;
+            StatusText = "Guidance is showing. The composer follows the active card.";
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+
+        if (_sessionView is { } existingSession)
+        {
+            if (string.Equals(existingSession.Status, "Active", StringComparison.Ordinal)
+                && string.Equals(EventPoller.SessionId, existingSession.SessionId, StringComparison.Ordinal))
+            {
+                ShowComposer = true;
+                StatusText = "Ellai session is active. Continue where you left off.";
+                Phase = EllaiStatusPhases.Active;
+                await InvokeAsync(StateHasChanged);
+                return;
+            }
+
+            StatusText = "End or reconcile the current Ellai session before starting another.";
+            return;
+        }
+
+        if (_startingSession || _startOutcomeUnknown)
+        {
+            StatusText = "End or reconcile the current Ellai session before starting another.";
+            return;
+        }
+
+        CancelPriorSession();
+        StopResponseAudio();
+        _sessionView = null;
+        _pendingUtteranceId = null;
+        _pendingUtteranceText = null;
+        _sessionVersionConflict = false;
+        _submissionPolicyBlocked = false;
+        _voiceCaptureConsentGranted = false;
+        _authorizationRequired = false;
+        _submissionCorrectionRequired = false;
+        _cancelOutcomeUnknown = false;
+        EventPoller.ForgetSession();
+        _pollCts?.Cancel();
+        ShowComposer = true;
+        IsActive = false;
+        Phase = EllaiStatusPhases.Ready;
+        _startingSession = true;
+        _cancelRequestedWhileStarting = false;
+        _showStartFailure = false;
+        StatusText = "Starting an Ellai session…";
+        StateHasChanged();
+        try
+        {
+            var startResult = await ReviewClient.StartSessionAsync(mode, CancellationToken.None);
+            if (startResult.Status != EllaiClientOperationStatus.Accepted
+                || startResult.Session is not { } view
+                || string.IsNullOrWhiteSpace(view.SessionId))
+            {
+                _sessionView = null;
+                ShowComposer = false;
+                _startOutcomeUnknown = startResult.Status == EllaiClientOperationStatus.OutcomeUnknown
+                    || startResult.Status == EllaiClientOperationStatus.Accepted;
+                _showStartFailure = true;
+                StatusText = startResult.Status switch
+                {
+                    EllaiClientOperationStatus.Unauthorized => "Sign in to start an Ellai session. No session was created.",
+                    EllaiClientOperationStatus.PolicyBlocked => "Ellai is unavailable for this account or workspace. No session was created.",
+                    EllaiClientOperationStatus.InvalidRequest => "This Ellai request could not be validated. No session was created.",
+                    EllaiClientOperationStatus.Unavailable => "Ellai is temporarily unavailable. No session was created. Try again shortly.",
+                    _ => "The session start outcome is unknown. The server did not provide a session ID, and this page has no lookup to reconcile it. Do not start another session; contact support to reconcile the remote state."
+                };
+                Phase = EllaiStatusPhases.Blocked;
+                return;
+            }
+
+            if (_cancelRequestedWhileStarting)
+            {
+                _sessionView = view;
+                var ended = await CancelRemoteSessionAsync(view);
+                if (ended)
+                {
+                    CompleteLocalCancel("Ellai session ended.");
+                }
+                else
+                {
+                    _sessionView = view;
+                    TrackSession(view.SessionId);
+                    ShowComposer = true;
+                    StatusText = "A session was created while you were canceling, and remote cancellation is unconfirmed. Retry Cancel to reconcile it.";
+                    Phase = EllaiStatusPhases.Blocked;
+                }
+
+                return;
+            }
+
+            _sessionView = view;
+            TrackSession(view.SessionId);
+            StatusText = "Ready";
+        }
+        catch (Exception)
+        {
+            _startOutcomeUnknown = true;
+            _showStartFailure = true;
+            ShowComposer = false;
+            StatusText = "The session start outcome is unknown and no session ID or lookup is available to reconcile it. Do not start another session; contact support to reconcile the remote state.";
+            Phase = EllaiStatusPhases.Blocked;
+        }
+        finally
+        {
+            _startingSession = false;
+            await OnModeSelected.InvokeAsync(mode);
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task CreateGuideAsync()
+    {
+        await OnCreateGuide.InvokeAsync();
+    }
+
+    private void OpenEllaiSettings() => Navigation.NavigateTo("/ellai/about");
+
+    private async Task CloseComposerAsync()
+    {
+        await StopAndDiscardVoiceCaptureAsync();
+        StopResponseAudio();
+        ShowComposer = false;
+        if (_sessionView is { Status: "Active" })
+        {
+            StatusText = "Ellai session is still active. Reopen it from the Ellai launcher.";
+        }
+        else if (_guidance is not null && IsActive)
+        {
+            StatusText = "Guidance is still active. Reopen the composer from the Ellai launcher.";
+        }
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private void OnInputChanged(string? value)
+    {
+        CancelGuidanceCountdown();
+        InputText = value;
+        _submissionCorrectionRequired = false;
+    }
+
+    private void OnPositionChanged(EllaiComposerPosition? next)
+    {
+        Position = next;
+    }
+
+    private bool _sendingConfirmedVoice;
+
+    private async Task SendConfirmedVoiceAsync()
+    {
+        _sendingConfirmedVoice = true;
+        try { await OnSend(); }
+        finally { _sendingConfirmedVoice = false; }
+    }
+
+    private async Task OnSend()
+    {
+        if (!CanSubmitText)
+        {
+            StatusText = _authorizationRequired
+                ? "Sign in is required before this message can be sent. Your transcript is still here."
+                : _submissionPolicyBlocked
+                    ? "This message cannot be sent under the current policy. Your transcript is still here."
+                    : _sessionVersionConflict
+                        ? "The session changed before this message could be sent. Review the transcript and try again."
+                        : _sessionView is null || !string.Equals(_sessionView.Status, "Active", StringComparison.Ordinal)
+                            ? "This Ellai session is no longer active. Start a new session to continue."
+                            : "Ellai cannot submit this message right now. Your transcript is still here; try again shortly.";
+            Phase = _authorizationRequired || _submissionPolicyBlocked
+                ? EllaiStatusPhases.Blocked
+                : EllaiStatusPhases.NeedsInput;
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+
+        var session = _sessionView;
+        var text = InputText!.Trim();
+        if (_pendingUtteranceId is null
+            || !string.Equals(_pendingUtteranceText, text, StringComparison.Ordinal))
+        {
+            _pendingUtteranceId = Guid.NewGuid().ToString("N");
+            _pendingUtteranceText = text;
+        }
+
+        var request = new SubmitUtteranceRequest(
+            _pendingUtteranceId!,
+            session!.SessionId,
+            session.SessionVersion,
+            text,
+            TranscriptRef: null,
+            InputSource: "typed",
+            ClientEpoch: session.SessionVersion,
+            ActivePage: EllaiPageContext.FromRelativeUri(Navigation.ToBaseRelativePath(Navigation.Uri)));
+
+        _submissionCts?.Dispose();
+        _submissionCts = CancellationTokenSource.CreateLinkedTokenSource(_cts?.Token ?? CancellationToken.None);
+        var cancellationToken = _submissionCts.Token;
+        _submissionSettled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _submittingUtterance = true;
+        _thinkingUtteranceId = request.ClientUtteranceId;
+        var accepted = false;
+        StatusText = "Sending your message to Ellai…";
+        Phase = EllaiStatusPhases.Active;
+        try
+        {
+            await ReportCurrentUiAsync(cancellationToken);
+            if (!_sendingConfirmedVoice)
+            {
+                await using var languages = await JS.InvokeAsync<IJSObjectReference>("import", cancellationToken,
+                    "./_content/SwiftAid.UI/js/ellai-language-preferences.js");
+                var selected = await languages.InvokeAsync<EllaiLanguagePreferences>("load", cancellationToken);
+                if (selected is not null && selected.IsValid()) request = request with { Languages = selected };
+            }
+            var result = await ReviewClient.SubmitUtteranceAsync(request, cancellationToken);
+            switch (result.Status)
+            {
+                case EllaiClientOperationStatus.Accepted
+                    when result.Session is { } updated
+                        && string.Equals(updated.SessionId, session.SessionId, StringComparison.Ordinal):
+                    _sessionView = updated;
+                    accepted = true;
+                    ShowLatestUserMessage(request.ClientUtteranceId, text);
+                    _pendingUtteranceId = null;
+                    _pendingUtteranceText = null;
+                    if (string.Equals(InputText, text, StringComparison.Ordinal))
+                    {
+                        InputText = null;
+                    }
+
+                    StatusText = "Your message was accepted. Ellai is processing it.";
+                    Phase = EllaiStatusPhases.Active;
+                    break;
+
+                case EllaiClientOperationStatus.Unavailable:
+                    StatusText = "Ellai could not confirm this message. Retry safely with the same text, or cancel the session.";
+                    Phase = EllaiStatusPhases.Blocked;
+                    break;
+
+                case EllaiClientOperationStatus.Conflict:
+                    _sessionVersionConflict = true;
+                    _pendingUtteranceId = null;
+                    _pendingUtteranceText = null;
+                    if (result.Session is { } current
+                        && string.Equals(current.SessionId, session.SessionId, StringComparison.Ordinal))
+                    {
+                        _sessionView = current;
+                        if (string.Equals(current.Status, "Active", StringComparison.Ordinal))
+                        {
+                            _sessionVersionConflict = false;
+                            StatusText = "The session changed. Your message was not sent. Review it, then send again.";
+                        }
+                        else
+                        {
+                            _sessionView = null;
+                            EventPoller.ForgetSession();
+                            _sessionVersionConflict = false;
+                            StatusText = "The session ended. Your message was not sent. Start a new session to continue.";
+                        }
+                    }
+                    else
+                    {
+                        StatusText = "The session changed. Your message was not sent. Its remote state may still be active, and this view cannot refresh it.";
+                    }
+
+                    Phase = EllaiStatusPhases.Blocked;
+                    break;
+
+                case EllaiClientOperationStatus.Unauthorized:
+                    _authorizationRequired = true;
+                    _pendingUtteranceId = null;
+                    _pendingUtteranceText = null;
+                    StatusText = "Sign in again to continue. Ellai did not accept this message.";
+                    Phase = EllaiStatusPhases.Blocked;
+                    break;
+
+                case EllaiClientOperationStatus.InvalidRequest:
+                    _submissionCorrectionRequired = true;
+                    _pendingUtteranceId = null;
+                    _pendingUtteranceText = null;
+                    StatusText = "Ellai did not accept this message. Check the text and try again.";
+                    Phase = EllaiStatusPhases.Blocked;
+                    break;
+
+                case EllaiClientOperationStatus.PolicyBlocked:
+                    _submissionPolicyBlocked = false;
+                    StatusText = "This request was blocked by the current session policy. Your text is still here; check your permissions and try again.";
+                    Phase = EllaiStatusPhases.Blocked;
+                    break;
+
+                case EllaiClientOperationStatus.Accepted:
+                    StatusText = "Ellai could not confirm this message. Retry safely with the same text, or cancel the session.";
+                    Phase = EllaiStatusPhases.Blocked;
+                    break;
+
+                default:
+                    StatusText = "Ellai could not confirm this message. Retry safely with the same text, or cancel the session.";
+                    Phase = EllaiStatusPhases.Blocked;
+                    break;
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            StatusText = "Ellai could not confirm this message. Retry safely with the same text, or cancel the session.";
+            Phase = EllaiStatusPhases.Blocked;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            StatusText = "Ellai could not confirm this message. Retry safely with the same text, or cancel the session.";
+            Phase = EllaiStatusPhases.Blocked;
+        }
+        finally
+        {
+            _submittingUtterance = false;
+            if (!accepted && _thinkingUtteranceId == request.ClientUtteranceId)
+                _thinkingUtteranceId = null;
+            _submissionSettled?.TrySetResult();
+        }
+    }
+
+    private async Task OnCancel()
+    {
+        await StopAndDiscardVoiceCaptureAsync().ConfigureAwait(false);
+        if (_startOutcomeUnknown)
+        {
+            StatusText = "The remote start outcome is unresolved and this page has no session lookup. Contact support before starting another session.";
+            Phase = EllaiStatusPhases.Blocked;
+            return;
+        }
+
+        if (_startingSession)
+        {
+            _cancelRequestedWhileStarting = true;
+            StatusText = "Cancel requested. Waiting for the start result so any created session can be ended.";
+            Phase = EllaiStatusPhases.Active;
+            return;
+        }
+
+        if (_submittingUtterance)
+        {
+            StatusText = "Canceling the message request, then checking the session with the server…";
+            Phase = EllaiStatusPhases.Active;
+            _submissionCts?.Cancel();
+            if (_submissionSettled is { } settled)
+            {
+                await settled.Task;
+            }
+        }
+
+        var token = _cts?.Token ?? CancellationToken.None;
+        if (_sessionView is { } session)
+        {
+            var ended = await CancelRemoteSessionAsync(session);
+            if (!ended)
+            {
+                return;
+            }
+        }
+
+
+        try
+        {
+            if (_guidance is not null)
+            {
+                _stopCommandId ??= $"cancel-{Guid.NewGuid():N}";
+                await Guidance.StopAsync(
+                    _guidance.Position.GuidanceAttemptId,
+                    _guidance.Position.GuidanceVersion,
+                    _guidance.Mode,
+                    token,
+                    _stopCommandId);
+            }
+
+            await Bonboarding.StopAllAsync(BonboardingTourEndReason.Cancelled, token);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        finally
+        {
+            CompleteLocalCancel("Ellai session ended.");
+        }
+    }
+
+    private async Task<bool> CancelRemoteSessionAsync(EllaiSessionView session)
+    {
+        try
+        {
+            var refreshedActiveSession = false;
+            var result = await ReviewClient.CancelSessionAsync(
+                session.SessionId, session.SessionVersion, CancellationToken.None);
+            if (result.Status == EllaiClientOperationStatus.Cancelled)
+            {
+                return true;
+            }
+
+            if (result.Status == EllaiClientOperationStatus.Conflict
+                && result.Session is { } current
+                && string.Equals(current.SessionId, session.SessionId, StringComparison.Ordinal))
+            {
+                if (!string.Equals(current.Status, "Active", StringComparison.Ordinal))
+                {
+                    return true;
+                }
+
+                _sessionView = current;
+                refreshedActiveSession = true;
+            }
+
+            _cancelOutcomeUnknown = !(result.Status == EllaiClientOperationStatus.Conflict && refreshedActiveSession);
+            _sessionVersionConflict = result.Status == EllaiClientOperationStatus.Conflict;
+            _authorizationRequired = result.Status == EllaiClientOperationStatus.Unauthorized;
+            StatusText = result.Status switch
+            {
+                EllaiClientOperationStatus.Unauthorized => "Your sign-in is no longer valid. The remote session may still be active.",
+                EllaiClientOperationStatus.PolicyBlocked => "Policy prevented cancellation. The remote session may still be active.",
+                EllaiClientOperationStatus.InvalidRequest => "Cancellation could not be validated. The remote session may still be active.",
+                EllaiClientOperationStatus.Conflict when refreshedActiveSession => "The session changed. Its current version is loaded, but cancellation was not confirmed. Press Cancel again to retry.",
+                EllaiClientOperationStatus.Conflict => "The session changed and its current state could not be refreshed. Reconcile the session before retrying.",
+                _ => "Cancellation could not be confirmed. Press Cancel again to retry safely."
+            };
+            Phase = EllaiStatusPhases.Blocked;
+            return false;
+        }
+        catch (Exception)
+        {
+            _cancelOutcomeUnknown = true;
+            StatusText = "Cancellation could not be confirmed. The remote session may still be active; press Cancel again to retry safely.";
+            Phase = EllaiStatusPhases.Blocked;
+            return false;
+        }
+    }
+
+    private void CompleteLocalCancel(string status)
+    {
+        _ = RememberSessionAsync(null);
+        _lastDurableTurn = null;
+        _ = StopAndDiscardVoiceCaptureAsync();
+        StopResponseAudio();
+        CancelPriorSession();
+        EventPoller.ForgetSession();
+        _pollCts?.Cancel();
+        _guidance = null;
+        _guidancePaused = false;
+        _stopCommandId = null;
+        _sessionView = null;
+        _voiceCaptureConsentGranted = false;
+        _pendingUtteranceId = null;
+        _pendingUtteranceText = null;
+        _cancelOutcomeUnknown = false;
+        _startOutcomeUnknown = false;
+        _showStartFailure = false;
+        _sessionVersionConflict = false;
+        _submissionPolicyBlocked = false;
+        _authorizationRequired = false;
+        _submissionCorrectionRequired = false;
+        _rejectInProgress = false;
+        _approvalSubmissionInProgress = false;
+        IsActive = false;
+        ShowComposer = false;
+        InputText = null;
+        Phase = EllaiStatusPhases.Ready;
+        StatusText = status;
+    }
+
+    private async ValueTask UpdateNativeVoiceGlowAsync(byte[] pcm)
+    {
+        if (_captureModule is null || System.Diagnostics.Stopwatch.GetElapsedTime(_lastNativeGlowTimestamp).TotalMilliseconds < 60) return;
+        _lastNativeGlowTimestamp = System.Diagnostics.Stopwatch.GetTimestamp();
+        double squared = 0;
+        for (var offset = 0; offset + 1 < pcm.Length; offset += 2)
+        {
+            var sample = System.Buffers.Binary.BinaryPrimitives.ReadInt16LittleEndian(pcm.AsSpan(offset, 2)) / 32768d;
+            squared += sample * sample;
+        }
+        // Visualization only. Silero alone determines speech activity.
+        var level = Math.Clamp((Math.Sqrt(squared / Math.Max(1, pcm.Length / 2)) - 0.008) / 0.16, 0, 1);
+        _nativeGlowLevel = _nativeGlowLevel * 0.58 + level * 0.42;
+        try { await _captureModule.InvokeVoidAsync("setNativeVoiceLevel", _nativeGlowLevel); }
+        catch (Microsoft.JSInterop.JSException) { }
+        catch (Microsoft.JSInterop.JSDisconnectedException) { }
+    }
+
+    private void ObserveOtherNativeBargeIn(ReadOnlySpan<byte> pcm)
+    {
+        if (_nativeVoiceCaptureActive && _isPlayingResponse && _captureEchoCancellationEnabled
+            && _otherNativeBargeInDetector?.ObservePcm24Khz(pcm) == true && _liveVoiceCaptureId is { } captureId)
+            _ = OnClientSileroSpeech(captureId);
+    }
+
+    private void OnNativeSileroSpeech(string captureId) => _ = OnClientSileroSpeech(captureId);
+
+    [JSInvokable]
+    public Task OnClientSileroSpeech(string captureId)
+    {
+        if (captureId == _liveVoiceCaptureId && _isRecordingAudio)
+            _ = InvokeAsync(() => { CancelGuidanceCountdown(); StateHasChanged(); });
+        if (captureId != _liveVoiceCaptureId || !_isRecordingAudio || _captureMode != EllaiVoiceCaptureMode.Live
+            || !_isPlayingResponse || !_captureEchoCancellationEnabled
+            || Interlocked.CompareExchange(ref _localBargeInPending, 1, 0) != 0) return Task.CompletedTask;
+
+        var interruptionTurnId = Guid.NewGuid().ToString("N");
+        var streamEpoch = _lastVoiceTurnStatusEpoch;
+        _ = InvokeAsync(() =>
+        {
+            if (!_isRecordingAudio || _captureMode != EllaiVoiceCaptureMode.Live || !_isPlayingResponse)
+            {
+                Interlocked.Exchange(ref _localBargeInPending, 0);
+                return;
+            }
+
+            StopResponseAudio(interruptionTurnId, streamEpoch);
+            StatusText = "You interrupted Ellai. Keep speaking; I’m listening to the rest of your turn.";
+            Phase = EllaiStatusPhases.Active;
+            StateHasChanged();
+        });
+        return Task.CompletedTask;
+    }
+
+    private void StopResponseAudio(string? interruptionTurnId = null, long streamEpoch = 0)
+    {
+        CancelGuidanceCountdown();
+        _guidanceNarrationCts?.Cancel();
+        if (interruptionTurnId is not null)
+        {
+            _silencedProgressTurnId = _latestUserUtteranceId;
+            _toolActivityText = null;
+        }
+        var sessionId = _sessionView?.SessionId;
+        var sequence = _activeResponseSequence;
+        var playbackId = _activeResponsePlaybackId;
+        _audioPlaybackCts?.Cancel();
+        Interlocked.Exchange(ref _stopResponsePlaybackRequested, 1);
+        _pendingResponseAudioSequences.Clear();
+        _progressAudioSequences.Clear();
+        var previousStop = _responseStopTask;
+        var localStops = new List<Task>();
+        if (sessionId is not null && sequence > 0 && playbackId is not null)
+        {
+            _ = ReviewClient.InterruptResponseAudioAsync(
+                sessionId,
+                sequence,
+                playbackId,
+                CancellationToken.None,
+                interruptionTurnId,
+                streamEpoch);
+        }
+
+
+        if (ReviewClient.UsesGatewayPcmAudioDownload)
+        {
+            var player = Services.GetService<IEllaiPcmAudioPlayer>();
+            if (player is not null)
+            {
+                localStops.Add(player.StopAsync());
+            }
+        }
+
+        if (_speechModule is not null && !string.IsNullOrWhiteSpace(sessionId))
+        {
+            localStops.Add(_speechModule.InvokeVoidAsync("stopResponse", sessionId).AsTask());
+        }
+        _responseStopTask = ObserveLocalStopsAsync(previousStop, localStops);
+
+        _isPlayingResponse = false;
+        _activeResponseSequence = 0;
+        _activeResponsePlaybackId = null;
+    }
+
+    private void PreemptProgressAudio()
+    {
+        if (_progressAudioSequences.Count == 0) return;
+        StopResponseAudio();
+        // A final answer may now continue on the same serialized playback queue.
+        Interlocked.Exchange(ref _stopResponsePlaybackRequested, 0);
+    }
+
+    private static async Task<bool> ObserveLocalStopsAsync(Task<bool> previousStop, IEnumerable<Task> stops)
+    {
+        await previousStop;
+        try { await Task.WhenAll(stops); return true; }
+        catch (Exception) { return false; } // Keep the visible answer; never overlap uncertain playback.
+    }
+
+    private void CancelPriorSession()
+    {
+        _guidanceProposalId = null;
+        _guidanceProposalIsAccepted = false;
+        _guidanceFeatureId = null;
+        _guidanceProposalTurn = null;
+        _pendingGuidanceTurn = null;
+        _lastGuidanceControlProposalId = null;
+        _lastTabSelectionProposalId = null;
+        _guidanceNotice = null;
+        _ = CancelGeneratedGuidanceAsync();
+        _toolActivityText = null;
+        _silencedProgressTurnId = null;
+        _lastDurableTurn = null;
+        _latestResponseText = null;
+        _responseTextUtteranceId = null;
+        _responseSessionId = null;
+        _lastReceivedResponseSequence = 0;
+        _latestResponseSequence = 0;
+        _latestResponseAudioSequences.Clear();
+        _latestUserText = null;
+        _latestUserUtteranceId = null;
+        _readResponsesAloud = false;
+        _guidanceSpeechAutoEnabled = false;
+        _guidanceSpeechMutedByUser = false;
+        _thinkingUtteranceId = null;
+        _settledUtteranceId = null;
+        try
+        {
+            _cts?.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+        finally
+        {
+            _cts?.Dispose();
+            _cts = new CancellationTokenSource();
+        }
+    }
+
+    private CancellationTokenSource? _pollCts;
+    private IDialogReference? _reviewDialog;
+
+    /// <summary>Human edit of the plan under review. Bound by the hosting
+    /// page when a reasoning lane can present a revised plan.</summary>
+    [Parameter]
+    public EventCallback<EllaiReviewDto> OnEditRequested { get; set; }
+
+    /// <summary>Starts tracking one session: polls its event journal and
+    /// opens the approval dialog on validated reviews.</summary>
+    public void TrackSession(string sessionId)
+    {
+        EventPoller.TrackSession(sessionId);
+        _ = RememberSessionAsync(sessionId);
+        RestartPollLoop();
+    }
+
+    private void RestartPollLoop()
+    {
+        _pollCts?.Cancel();
+        _pollCts?.Dispose();
+        _pollCts = new CancellationTokenSource();
+        _ = PollLoopAsync(_pollCts.Token);
+    }
+
+    private async Task PollLoopAsync(CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
+        {
+            try
+            {
+                // Progress long-poll must not hold back response chunks for up to twenty seconds.
+                await EventPoller.PollOnceAsync(0, ct).ConfigureAwait(false);
+                await Task.Delay(TimeSpan.FromSeconds(1), ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+            catch
+            {
+                try
+                {
+                    await Task.Delay(2000, ct).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+            }
+        }
+    }
+
+    private async void OnApprovalRequired(string requestId)
+    {
+        try
+        {
+            await InvokeAsync(async () =>
+            {
+                PreemptProgressAudio();
+                _toolActivityText = "Waiting for your approval";
+                StateHasChanged();
+                await OpenReviewAsync(requestId);
+                _toolActivityText = null;
+                StateHasChanged();
+            }).ConfigureAwait(false);
+        }
+        catch
+        {
+        }
+    }
+
+    private void OnSessionCancelled()
+    {
+        _reviewDialog?.Close();
+        _reviewDialog = null;
+        CompleteLocalCancel("Ellai session ended.");
+        StateHasChanged();
+    }
+
+    private async Task OpenReviewAsync(string requestId)
+    {
+        var sessionId = EventPoller.SessionId;
+        if (sessionId is null || _reviewDialog is not null)
+        {
+            return;
+        }
+
+        IDialogReference? dialog = null;
+        try
+        {
+            var review = await ReviewClient.GetActiveReviewAsync(sessionId, CancellationToken.None).ConfigureAwait(false);
+            if (review is null || review.RequestId != requestId)
+            {
+                return;
+            }
+
+            Phase = EllaiStatusPhases.NeedsInput;
+            StatusText = "Waiting for your approval…";
+            StateHasChanged();
+            await PauseGuidanceForReviewAsync().ConfigureAwait(false);
+
+            var parameters = new DialogParameters
+            {
+                ["RequestId"] = review.RequestId,
+                ["PlanHash"] = review.PlanHash,
+                ["PlanVersion"] = review.PlanVersion,
+                ["ExpiresAtUtc"] = review.ExpiresAtUtc,
+                ["EvidenceText"] = $"Plan {review.PlanHash} version {review.PlanVersion}.",
+                ["Actions"] = review.Actions.Select(action =>
+                    new EllaiApprovalActionRow(action.ActionId, action.Label, action.Detail, false)).ToList(),
+                ["OnApproveSelected"] = EventCallback.Factory.Create<IReadOnlyList<string>>(
+                    this, selected => SubmitSelectionAsync(review, selected)),
+                ["OnReject"] = EventCallback.Factory.Create(this, () => RejectAsync(review)),
+                ["OnEdit"] = EventCallback.Factory.Create(this, () => EditAsync(review)),
+                ["OnCancel"] = EventCallback.Factory.Create(this, DismissReview),
+            };
+            dialog = await Dialogs.ShowAsync<EllaiApprovalDialog>(
+                "Review proposed actions", parameters).ConfigureAwait(false);
+            _reviewDialog = dialog;
+            await dialog.Result.ConfigureAwait(false);
+        }
+        catch
+        {
+            dialog?.Close();
+        }
+        finally
+        {
+            if (ReferenceEquals(_reviewDialog, dialog))
+            {
+                _reviewDialog = null;
+            }
+
+            await ResumeGuidanceAfterReviewAsync().ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>Yields focus to the approval dialog: an active guidance
+    /// attempt pauses and resumes when the dialog closes. Pause/Resume go
+    /// through the ordinary guidance control seam with the current fence.</summary>
+    private bool _guidancePaused;
+
+    private async Task PauseGuidanceForReviewAsync()
+    {
+        if (_guidance is null || _guidancePaused)
+        {
+            return;
+        }
+
+        try
+        {
+            var snapshot = await Guidance.DispatchAsync(
+                _guidance.Position.GuidanceAttemptId,
+                _guidance.Position.GuidanceVersion,
+                GuidanceCommandKind.Pause,
+                _guidance.Mode, null, null, CancellationToken.None).ConfigureAwait(false);
+            if (snapshot is not null)
+            {
+                _guidance = snapshot;
+                _guidancePaused = true;
+            }
+        }
+        catch
+        {
+        }
+    }
+
+    private async Task ResumeGuidanceAfterReviewAsync()
+    {
+        if (!_guidancePaused)
+        {
+            return;
+        }
+
+        _guidancePaused = false;
+        if (_guidance is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var snapshot = await Guidance.DispatchAsync(
+                _guidance.Position.GuidanceAttemptId,
+                _guidance.Position.GuidanceVersion,
+                GuidanceCommandKind.Resume,
+                _guidance.Mode, null, null, CancellationToken.None).ConfigureAwait(false);
+            if (snapshot is not null)
+            {
+                _guidance = snapshot;
+            }
+        }
+        catch
+        {
+        }
+    }
+
+    private void DismissReview()
+    {
+        _reviewDialog?.Close();
+        _reviewDialog = null;
+        StatusText = "Review dismissed.";
+        StateHasChanged();
+    }
+
+    private bool _approvalSubmissionInProgress;
+
+    private async Task SubmitSelectionAsync(EllaiReviewDto review, IReadOnlyList<string> selected)
+    {
+        if (_approvalSubmissionInProgress)
+        {
+            return;
+        }
+
+        var actionIds = selected.ToArray();
+        _approvalSubmissionInProgress = true;
+        StatusText = "Approval outcome pending — checking the authoritative receipts…";
+        StateHasChanged();
+        try
+        {
+            try
+            {
+                await ReviewClient.ApproveSelectedAsync(
+                    review.SessionId, review.RequestId, actionIds, CancellationToken.None);
+            }
+            catch
+            {
+                // The server may have committed before the response failed.
+            }
+
+            IReadOnlyList<EllaiApprovedReceiptDto>? listed = null;
+            try
+            {
+                listed = await ReviewClient.ListReceiptsAsync(
+                    review.SessionId, CancellationToken.None);
+            }
+            catch
+            {
+                // Keep the outcome unknown; never infer that no action occurred.
+            }
+
+            if (EllaiReceiptVerifier.IsReconciled(actionIds, listed))
+            {
+                StatusText = $"Verified — {actionIds.Length} approval(s) recorded.";
+                _reviewDialog?.Close();
+                _reviewDialog = null;
+            }
+            else
+            {
+                StatusText = "Approval outcome unknown. Receipt confirmation is unavailable or incomplete; do not submit this approval again.";
+                Phase = EllaiStatusPhases.Blocked;
+            }
+
+            StateHasChanged();
+        }
+        finally
+        {
+            _approvalSubmissionInProgress = false;
+        }
+    }
+
+    private bool _rejectInProgress;
+
+    private async Task RejectAsync(EllaiReviewDto review)
+    {
+        if (_rejectInProgress)
+        {
+            return;
+        }
+
+        _rejectInProgress = true;
+        StatusText = "Checking whether the review was rejected…";
+        Phase = EllaiStatusPhases.Active;
+        StateHasChanged();
+        try
+        {
+            var rejected = await ReviewClient.RejectReviewAsync(
+                review.SessionId, review.RequestId, CancellationToken.None);
+            if (rejected)
+            {
+                _reviewDialog?.Close();
+                _reviewDialog = null;
+                StatusText = "Review rejected.";
+                Phase = EllaiStatusPhases.Ready;
+                _rejectInProgress = false;
+                return;
+            }
+        }
+        catch
+        {
+            // Rejection may have completed before the response was lost.
+        }
+
+        EllaiReviewDto? activeReview = null;
+        try
+        {
+            activeReview = await ReviewClient.GetActiveReviewAsync(
+                review.SessionId, CancellationToken.None);
+        }
+        catch
+        {
+            // A failed read does not prove rejection or that it did not occur.
+        }
+
+        var stillActive = activeReview is not null
+            && string.Equals(activeReview.RequestId, review.RequestId, StringComparison.Ordinal);
+        StatusText = !stillActive
+            ? "Rejection outcome unknown. The review is no longer available to verify; do not repeat the rejection."
+            : "Rejection outcome unknown. The review is still available; do not repeat the rejection. Cancel or close this review and reconcile with staff.";
+        Phase = EllaiStatusPhases.Blocked;
+        StateHasChanged();
+        _rejectInProgress = false;
+    }
+
+    private async Task EditAsync(EllaiReviewDto review)
+    {
+        _reviewDialog?.Close();
+        _reviewDialog = null;
+        StatusText = "Editing the plan…";
+        StateHasChanged();
+        await OnEditRequested.InvokeAsync(review).ConfigureAwait(false);
+    }
+
+    public void Dispose()
+    {
+        if (Services.GetService<EllaiValidationGuidance>() is { } validation)
+            validation.Changed -= OnValidationGuidanceChanged;
+        Navigation.LocationChanged -= TrackNavigation;
+        _uiObservationLifetime.Cancel();
+        _ = CancelGeneratedGuidanceAsync();
+        if (_sessionContinuity is not null) _ = _sessionContinuity.DisposeAsync();
+        _otherNativeBargeInDetector?.Dispose();
+        if (_sileroFactory is not null) _sileroFactory.SpeechConfirmed -= OnNativeSileroSpeech;
+        if (_nativeVoiceCapture is not null)
+        {
+            _nativeVoiceCapture.Interrupted -= OnNativeVoiceCaptureInterrupted;
+            _nativeVoiceCapture.RouteChanged -= OnNativeVoiceRouteChanged;
+        }
+        Launcher.Requested -= OnLauncherRequested;
+        EventPoller.ApprovalRequired -= OnApprovalRequired;
+        EventPoller.SessionCancelled -= OnSessionCancelled;
+        EventPoller.ActivityUpdated -= OnActivityUpdated;
+        EventPoller.ResponseReceived -= OnResponseReceived;
+        EventPoller.ConversationUpdated -= OnConversationUpdated;
+        EventPoller.ResponseStreamReset -= OnResponseStreamReset;
+        _pollCts?.Cancel();
+        _pollCts?.Dispose();
+        try
+        {
+            _cts?.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+
+        _cts?.Dispose();
+        _submissionCts?.Cancel();
+        _submissionCts?.Dispose();
+        _ = DisposeConnectivityMonitoringAsync();
+        _captureDotnetReference?.Dispose();
+        _isRecordingAudio = false;
+        _voiceTurnStatusCts?.Cancel();
+        if (_captureModule is not null)
+        {
+            _ = _captureModule.InvokeVoidAsync("cancelCapture");
+            _ = _captureModule.DisposeAsync();
+        }
+        _ = CancelLiveVoiceStreamAsync();
+        DiscardCapturedAudio();
+        StopResponseAudio();
+        if (_speechModule is not null)
+        {
+            _ = _speechModule.InvokeVoidAsync("disposeAudioPlayback");
+            _ = _speechModule.DisposeAsync();
+        }
+    }
+
+    private async Task StopAndDiscardVoiceCaptureAsync()
+    {
+        _isRecordingAudio = false;
+        _voiceCaptureConsentGranted = false;
+        await StopVoiceTurnStatusPollingAsync();
+        try
+        {
+            if (_captureModule is not null)
+            {
+                await _captureModule.InvokeVoidAsync("cancelCapture");
+            }
+        }
+        catch (Microsoft.JSInterop.JSException)
+        {
+        }
+        await CancelLiveVoiceStreamAsync();
+        DiscardCapturedAudio();
+    }
+
+    private async Task DisposeConnectivityMonitoringAsync()
+    {
+        var subscription = _connectivitySubscription;
+        _connectivitySubscription = null;
+        if (subscription is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await subscription.InvokeVoidAsync("dispose");
+        }
+        catch (Microsoft.JSInterop.JSException)
+        {
+            // The browser context may already be unavailable during component disposal.
+        }
+
+        try
+        {
+            await subscription.DisposeAsync();
+        }
+        catch (Microsoft.JSInterop.JSException)
+        {
+        }
+    }
+}

@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <ItemGroup>
+    <ProjectReference Include="..\SwiftAid.Contracts\SwiftAid.Contracts.csproj" />
+    <ProjectReference Include="..\SwiftAid.Application\SwiftAid.Application.csproj" />
+    <ProjectReference Include="..\SwiftAid.Infrastructure\SwiftAid.Infrastructure.csproj" />
+    <ProjectReference Include="..\SwiftAid.Intelligence\SwiftAid.Intelligence.csproj" />
+    <ProjectReference Include="..\SwiftAid.Client\SwiftAid.Client.csproj" />
+    <ProjectReference Include="..\SwiftAid.Browser\SwiftAid.Browser.csproj" />
+    <ProjectReference Include="..\SwiftAid.UI\SwiftAid.UI.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="MudBlazor" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.Server" />
+    <PackageReference Include="CommunityToolkit.Datasync.Server" />
+    <PackageReference Include="NATS.Net" />
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" />
+    <Content Include="Ellai\Voice\Models\silero_vad_16k_op15.onnx"
+             CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest"
+             Link="Ellai\Voice\Models\silero_vad_16k_op15.onnx" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
+  </PropertyGroup>
+
+</Project>

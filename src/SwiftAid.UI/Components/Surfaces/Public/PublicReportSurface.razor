@@ -1,0 +1,213 @@
+@using SwiftAid.Contracts.Ellai
+@using SwiftAid.Contracts.Intake
+@using SwiftAid.UI.Components.Geography
+@using SwiftAid.UI.Components.Public
+@using SwiftAid.UI.Components.Public.GuidedReportStepper
+
+<div class="public-report-surface">
+    <GuidedReportStepper Draft="Draft"
+                         CurrentDraftId="CurrentDraftId"
+                         Countries="Countries"
+                         CountryCatalogueVersion="@CountryCatalogueVersion"
+                         CountryCatalogueIsCurrent="CountryCatalogueIsCurrent"
+                         PrivacyNoticeReference="@PrivacyNoticeReference"
+                         ProcessingPolicyReference="@ProcessingPolicyReference"
+                         ProcessingPolicyVersion="@ProcessingPolicyVersion"
+                         ProcessingPolicyNotice="@ProcessingPolicyNotice"
+                         ProcessingPolicyNoticeText="@ProcessingPolicyNoticeText"
+                         ProcessingPolicyAcknowledgementLabel="@ProcessingPolicyAcknowledgementLabel"
+                         PrivacyNoticeIsCurrent="PrivacyNoticeIsCurrent"
+                         PlaceSearchFunc="PlaceSearchFunc"
+                         PlaceChildrenFunc="PlaceChildrenFunc"
+                         GeoCountries="GeoCountries"
+                         OnSaveDraft="OnSaveDraft"
+                         DraftSavingAvailable="DraftSavingAvailable"
+                         SubmitButtonLabel="Send report"
+                         SubmitProgressLabel="Sending…"
+                         DraftSaveButtonLabel="Save draft on this device"
+                         DraftSavingLabel="Saving draft…"
+                         DraftSavedMessage="Your report draft is saved on this device. It has not been sent."
+                         OnSubmit="@(SubmitAvailable ? OnSendReport : default)">
+        <DetailsLeadContent>
+            @if (ShowVoiceCapture)
+            {
+                <section class="public-report-voice" aria-labelledby="public-report-voice-title">
+                    <div class="public-report-voice__heading">
+                        <div>
+                            <MudText id="public-report-voice-title" data-ellai-control="report.voice-note" data-bonboarding-anchor='@EllaiReportUiManifest.AnchorFor("report.voice-note")' Typo="Typo.subtitle1" HtmlTag="h3">Optional original voice note</MudText>
+                            <MudText Typo="Typo.body2">A recording can help explain what you noticed. It is not required.</MudText>
+                        </div>
+                        <MudChip T="string" Size="Size.Small">Optional</MudChip>
+                    </div>
+
+                    @if (VoiceState == PublicVoiceCaptureState.Recording)
+                    {
+                        <div class="public-report-voice__recording">
+                            <span class="public-report-voice__recording-dot" aria-hidden="true"></span>
+                            <span>Recording · @VoiceElapsed.ToString(@"mm\:ss")</span>
+                        </div>
+                        <MudButton Variant="Variant.Text" Color="Color.Error" StartIcon="@Icons.Material.Filled.Stop" OnClick="OnStopRecording">
+                            Stop recording
+                        </MudButton>
+                    }
+                    else if (VoiceState == PublicVoiceCaptureState.Playing)
+                    {
+                        <MudButton Variant="Variant.Text" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Stop" OnClick="OnStopPlayback">
+                            Stop playback
+                        </MudButton>
+                    }
+                    else if (VoiceState == PublicVoiceCaptureState.ReadyToSave)
+                    {
+                        <div class="public-report-voice__actions">
+                            <MudButton Variant="Variant.Text" Color="Color.Primary" StartIcon="@Icons.Material.Filled.PlayArrow" OnClick="OnPlayRecording">
+                                Play recording
+                            </MudButton>
+                            @if (!VoiceSaved)
+                            {
+                                <MudButton Variant="Variant.Text" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save"
+                                           Disabled="@(!DraftSavingAvailable)" OnClick="OnSaveRecording">
+                                    Save with draft
+                                </MudButton>
+                            }
+                        </div>
+                    }
+                    else if (VoiceState == PublicVoiceCaptureState.Unsupported)
+                    {
+                        <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true">
+                            Voice recording is not available here. You can continue with typed observations.
+                        </MudAlert>
+                    }
+                    else
+                    {
+                        <MudButton Variant="Variant.Text" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Mic"
+                                   Disabled="@(!DraftSavingAvailable || !OnStartRecording.HasDelegate)" OnClick="OnStartRecording">
+                            Record a voice note
+                        </MudButton>
+                    }
+
+                    @if (!string.IsNullOrWhiteSpace(VoiceMessage))
+                    {
+                        <MudAlert Severity="@(TemporaryCleanupPending || (VoiceState is PublicVoiceCaptureState.PermissionDenied or PublicVoiceCaptureState.Failed) ? Severity.Warning : Severity.Info)"
+                                  Variant="Variant.Outlined" Dense="true" role="status" aria-live="polite">
+                            @VoiceMessage
+                        </MudAlert>
+                    }
+                    @if (VoiceSaved)
+                    {
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">Saved with this draft on this device. It has not been sent with the report.</MudText>
+                    }
+                    @if (TemporaryCleanupPending)
+                    {
+                        <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true" role="alert" aria-live="assertive"
+                                  Class="public-report-voice__cleanup">
+                            <div>
+                                <MudText Typo="Typo.body2">A temporary audio file could not be removed from this device. Keep this screen open and retry cleanup.</MudText>
+                                @if (_temporaryCleanupRetryFailed)
+                                {
+                                    <MudText Typo="Typo.caption">Cleanup could not be retried. You can try again.</MudText>
+                                }
+                            </div>
+                            @if (OnRetryTemporaryCleanup.HasDelegate)
+                            {
+                                <MudButton Variant="Variant.Text" Color="Color.Warning"
+                                           Disabled="_temporaryCleanupRetrying" OnClick="RetryTemporaryCleanupAsync" StartIcon="@Icons.Material.Filled.Cancel">
+                                    @(_temporaryCleanupRetrying ? "Trying again…" : "Retry cleanup")
+                                </MudButton>
+                            }
+                        </MudAlert>
+                    }
+                </section>
+            }
+
+        </DetailsLeadContent>
+        <DetailsContent>
+            <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true">
+                Photo and document attachments are not available here yet. You can save or send the report without them.
+            </MudAlert>
+        </DetailsContent>
+    </GuidedReportStepper>
+
+    @if (!string.IsNullOrWhiteSpace(Feedback))
+    {
+        <MudAlert Severity="FeedbackIsError ? Severity.Warning : Severity.Info"
+                  Variant="Variant.Outlined" Dense="true" role="status" aria-live="polite">
+            @Feedback
+        </MudAlert>
+    }
+
+    @if (Receipt is not null)
+    {
+        <PublicReportReceipt Receipt="Receipt" />
+    }
+</div>
+
+@code {
+    private bool _temporaryCleanupRetrying;
+    private bool _temporaryCleanupRetryFailed;
+
+    [Parameter] public IReadOnlyList<PublicCountryOption> Countries { get; set; } = [];
+    [Parameter] public Func<string, string?, CancellationToken, Task<GeoPlaceQueryResult>>? PlaceSearchFunc { get; set; }
+    [Parameter] public Func<string, CancellationToken, Task<GeoPlaceQueryResult>>? PlaceChildrenFunc { get; set; }
+    [Parameter] public IReadOnlyList<GeoPlaceCountry> GeoCountries { get; set; } = [];
+    [Parameter] public string? CountryCatalogueVersion { get; set; }
+    [Parameter] public bool CountryCatalogueIsCurrent { get; set; }
+    [Parameter] public string? PrivacyNoticeReference { get; set; }
+    [Parameter] public string? ProcessingPolicyReference { get; set; }
+    [Parameter] public string? ProcessingPolicyVersion { get; set; }
+    [Parameter] public string? ProcessingPolicyNotice { get; set; }
+    [Parameter] public string? ProcessingPolicyNoticeText { get; set; }
+    [Parameter] public string? ProcessingPolicyAcknowledgementLabel { get; set; }
+    [Parameter] public bool PrivacyNoticeIsCurrent { get; set; }
+    [Parameter] public bool DraftSavingAvailable { get; set; }
+    [Parameter] public bool SubmitAvailable { get; set; }
+    [Parameter] public Guid? CurrentDraftId { get; set; }
+    [Parameter, EditorRequired] public PublicReportDraft Draft { get; set; } = default!;
+    [Parameter] public EventCallback<PublicReportSaveRequest> OnSaveDraft { get; set; }
+    [Parameter] public EventCallback<IntakeSubmission> OnSendReport { get; set; }
+    [Parameter] public string? Feedback { get; set; }
+    [Parameter] public bool FeedbackIsError { get; set; }
+    [Parameter] public IntakeReceipt? Receipt { get; set; }
+    [Parameter] public bool ShowVoiceCapture { get; set; }
+    [Parameter] public PublicVoiceCaptureState VoiceState { get; set; } = PublicVoiceCaptureState.Unsupported;
+    [Parameter] public TimeSpan VoiceElapsed { get; set; }
+    [Parameter] public string? VoiceMessage { get; set; }
+    [Parameter] public bool VoiceSaved { get; set; }
+    [Parameter] public bool TemporaryCleanupPending { get; set; }
+    [Parameter] public EventCallback OnRetryTemporaryCleanup { get; set; }
+    [Parameter] public EventCallback OnStartRecording { get; set; }
+    [Parameter] public EventCallback OnStopRecording { get; set; }
+    [Parameter] public EventCallback OnPlayRecording { get; set; }
+    [Parameter] public EventCallback OnStopPlayback { get; set; }
+    [Parameter] public EventCallback OnSaveRecording { get; set; }
+
+    protected override void OnParametersSet()
+    {
+        if (!TemporaryCleanupPending)
+        {
+            _temporaryCleanupRetryFailed = false;
+        }
+    }
+
+    private async Task RetryTemporaryCleanupAsync()
+    {
+        if (!TemporaryCleanupPending || _temporaryCleanupRetrying || !OnRetryTemporaryCleanup.HasDelegate)
+        {
+            return;
+        }
+
+        _temporaryCleanupRetrying = true;
+        _temporaryCleanupRetryFailed = false;
+        try
+        {
+            await OnRetryTemporaryCleanup.InvokeAsync();
+        }
+        catch (Exception)
+        {
+            _temporaryCleanupRetryFailed = true;
+        }
+        finally
+        {
+            _temporaryCleanupRetrying = false;
+        }
+    }
+}

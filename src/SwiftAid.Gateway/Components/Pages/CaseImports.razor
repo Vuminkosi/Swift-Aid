@@ -1,0 +1,330 @@
+@page "/workspace/imports"
+@using System.Text
+@using SwiftAid.Application.Intake.Imports
+@using SwiftAid.Client.Presentation
+@using SwiftAid.Client.Presentation.PublicWorkflows
+@using SwiftAid.Contracts.Intake
+@using SwiftAid.Gateway.Ingestion
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@implements IDisposable
+@inject IWorkspaceImportClient Imports
+@inject IPublicIntakeMetadataClient Metadata
+@inject IPublicIntakeProcessingPolicyClient Policy
+
+<PageTitle>Imports | SwiftAid</PageTitle>
+<MudContainer MaxWidth="MaxWidth.Large" Class="workspace-page case-imports">
+    <SwiftAidPageHeading Eyebrow="Workspace" Title="Import cases"
+                         Description="Add case reports from a CSV file and return to saved progress if an import is interrupted."
+                         HeadingId="imports-heading" />
+    @if (_loading)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Primary" aria-label="Loading import access" />
+    }
+    else if (_destinations.Count == 0 || _catalogue is null || _policy is null)
+    {
+        <MudAlert Severity="Severity.Info">@(_message ?? "No workspace is linked to your current organization memberships.")</MudAlert>
+        <MudButton OnClick="LoadAsync" Variant="Variant.Text" Color="Color.Primary">Refresh access</MudButton>
+    }
+    else
+    {
+        <MudGrid Spacing="3" Class="mt-2">
+            <MudItem xs="12" md="7">
+                <MudPaper Outlined="true" Elevation="0" Class="pa-4">
+                    <MudStack Spacing="3">
+                        <MudSelect T="ImportDestination" Label="Organization and workspace" Value="_destination" ValueChanged="SelectDestinationAsync"
+                                   Disabled="@(_busy || _importId.HasValue)" Variant="Variant.Outlined" ToStringFunc="DestinationLabel">
+                            @foreach (var destination in _destinations)
+                            {
+                                <MudSelectItem T="ImportDestination" Value="destination">@DestinationLabel(destination)</MudSelectItem>
+                            }
+                        </MudSelect>
+                        <MudSelect T="string" Label="Occurrence country" Value="_country" ValueChanged="SelectCountryAsync"
+                                   Disabled="@(_busy || _importId.HasValue)" Variant="Variant.Outlined">
+                            @foreach (var country in _catalogue.Countries)
+                            {
+                                <MudSelectItem T="string" Value="@country.Code">@country.Label</MudSelectItem>
+                            }
+                        </MudSelect>
+                        @if (_destination is not null && !string.IsNullOrEmpty(_country) && _workspace is null)
+                        {
+                            <MudAlert Severity="Severity.Info">Your account does not yet have case-import access for this workspace and country.</MudAlert>
+                        }
+                        <div class="case-imports__file">
+                            <label for="case-import-file">Case reports file</label>
+                            <InputFile @key="_filePickerGeneration" id="case-import-file" OnChange="SelectFile" accept=".csv,text/csv" disabled="@(_busy || _summary?.State == "Completed")" />
+                            <MudText Typo="Typo.caption">CSV, up to 64 MB. Use the same unchanged file when resuming.</MudText>
+                        </div>
+                        @if (_importId.HasValue && _summary?.State != "Completed")
+                        {
+                            <MudText Typo="Typo.body2">Resume from report @(_summary?.NextRow ?? 1). Saved cases will not be added again.</MudText>
+                        }
+                        <MudCheckBox T="bool" @bind-Value="_reviewed" Disabled="_busy"
+                                     Label="I have reviewed these reports and confirmed their occurrence country." />
+                        <MudCheckBox T="bool" @bind-Value="_confirmed" Disabled="_busy"
+                                     Label="@(_policy.AcknowledgementLabel ?? "I confirm these reports may be processed under the report-handling terms.")" />
+                        @if (!string.IsNullOrWhiteSpace(_policy.NoticeText))
+                        {
+                            <MudText Typo="Typo.caption">@_policy.NoticeText</MudText>
+                        }
+                        <MudStack Row="true" Wrap="Wrap.Wrap" Spacing="2">
+                            <MudButton OnClick="StartAsync" Disabled="@(!CanStart)" Variant="Variant.Filled" Color="Color.Primary"
+                                       StartIcon="@Icons.Material.Filled.UploadFile">@(_summary?.State == "Completed" ? "Import finished" : _importId.HasValue ? "Resume import" : "Import cases")</MudButton>
+                            @if (_busy)
+                            {
+                                <MudButton OnClick="Pause" Variant="Variant.Outlined">Pause</MudButton>
+                            }
+                            else if (_importId.HasValue)
+                            {
+                                <MudButton OnClick="NewImport" Variant="Variant.Text">New import</MudButton>
+                            }
+                        </MudStack>
+                    </MudStack>
+                </MudPaper>
+            </MudItem>
+            <MudItem xs="12" md="5">
+                <MudPaper Outlined="true" Elevation="0" Class="pa-4" aria-live="polite" aria-atomic="true">
+                    <MudText Typo="Typo.h6" HtmlTag="h2">Import progress</MudText>
+                    @if (_busy)
+                    {
+                        <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="my-3" aria-label="Importing reports" />
+                    }
+                    <MudText Typo="Typo.body2">@(_message ?? "Choose your file to begin.")</MudText>
+                    @if (_summary is not null)
+                    {
+                        <MudText Typo="Typo.caption">Import @ShortReference(_summary.ImportId)</MudText>
+                        <dl class="case-imports__counts">
+                            <dt>Cases saved</dt><dd>@_summary.Accepted.ToString("N0")</dd>
+                            <dt>Reports not imported</dt><dd>@_summary.Rejected.ToString("N0")</dd>
+                            <dt>Awaiting retry</dt><dd>@((_summary.Retryable + _summary.Unresolved).ToString("N0"))</dd>
+                        </dl>
+                        <MudButton Href="/my-cases" Color="Color.Primary" Variant="Variant.Text">View cases</MudButton>
+                    }
+                </MudPaper>
+            </MudItem>
+        </MudGrid>
+        @if (_issues.Count > 0)
+        {
+            <MudPaper Outlined="true" Elevation="0" Class="pa-4 mt-4">
+                <MudText Typo="Typo.h6" HtmlTag="h2">Reports to review</MudText>
+                <MudText Typo="Typo.caption">Showing up to 20 reports at a time. Other saved cases remain available.</MudText>
+                <ul>
+                    @foreach (var issue in _issues)
+                    {
+                        <li>Report @issue.RowNumber: @IssueLabel(issue)</li>
+                    }
+                </ul>
+                @if (_issues.Count == 20)
+                {
+                    <MudButton OnClick="NextIssuesAsync" Disabled="_busy" Variant="Variant.Text" Color="Color.Primary">Next reports</MudButton>
+                }
+            </MudPaper>
+        }
+        <MudPaper Outlined="true" Elevation="0" Class="pa-4 mt-4">
+            <MudText Typo="Typo.h6" HtmlTag="h2">Your recent imports</MudText>
+            <MudText Typo="Typo.caption">For the selected workspace and country.</MudText>
+            @if (_recent.Count == 0)
+            {
+                <MudText Typo="Typo.body2" Class="mt-2">No imports yet.</MudText>
+            }
+            @foreach (var item in _recent)
+            {
+                <div class="case-imports__history">
+                    <div><MudText Typo="Typo.body2">Import @ShortReference(item.ImportId)</MudText><MudText Typo="Typo.caption">@item.UpdatedAtUtc.ToLocalTime().ToString("g") · @StateLabel(item.State)</MudText></div>
+                    <MudButton OnClick="@(() => RestoreAsync(item))" Disabled="_busy" Color="Color.Primary" Variant="Variant.Text">
+                        @(item.State == "Completed" ? "View result" : "Resume")
+                    </MudButton>
+                </div>
+            }
+        </MudPaper>
+    }
+</MudContainer>
+
+@code {
+    private readonly CancellationTokenSource _lifetime = new();
+    private CancellationTokenSource? _run;
+    private IReadOnlyList<CaseImportWorkspace> _workspaces = [];
+    private IReadOnlyList<ImportDestination> _destinations = [];
+    private ImportDestination? _destination;
+    private string? _country;
+    private IReadOnlyList<CaseImportHistoryItem> _recent = [];
+    private readonly List<CaseImportRowOutcome> _issues = [];
+    private CaseImportWorkspace? _workspace;
+    private PublicIntakeCountryCatalogue? _catalogue;
+    private PublicReportProcessingPolicy? _policy;
+    private CaseImportSummary? _summary;
+    private CaseImportContext? _context;
+    private IBrowserFile? _file;
+    private Guid? _importId;
+    private int _filePickerGeneration;
+    private bool _loading = true, _busy, _reviewed, _confirmed, _pause;
+    private string? _message;
+    private bool CanStart => !_busy && _workspace is not null && _file is not null && _reviewed && _confirmed && _summary?.State != "Completed";
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        try
+        {
+            _workspaces = await Imports.GetWorkspacesAsync(_lifetime.Token);
+            _destinations = await Imports.GetDestinationsAsync(_lifetime.Token);
+            var countries = await Metadata.GetCountriesAsync(_lifetime.Token);
+            var policy = await Policy.GetPolicyAsync(_lifetime.Token);
+            _catalogue = countries.Succeeded && countries.Metadata.IsAvailable ? countries.Value : null;
+            _policy = policy.Succeeded && policy.Metadata.IsAvailable && policy.Metadata.Provenance == UiCapabilityProvenance.LiveService ? policy.Value : null;
+            var first = _workspaces.FirstOrDefault();
+            _country = first?.CountryCode;
+            await SelectDestinationAsync(_destinations.FirstOrDefault(d => d.WorkspaceId == first?.WorkspaceId && d.OrganizationId == first?.OrganizationId)
+                ?? _destinations.FirstOrDefault());
+            _message = _catalogue is null || _policy is null ? "Import settings could not be loaded. Refresh to try again." : null;
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            _workspaces = [];
+            _destinations = [];
+            _message = "Import access could not be loaded. Refresh to try again.";
+        }
+        finally { _loading = false; }
+    }
+
+    private static string DestinationLabel(ImportDestination? destination) => destination is null ? string.Empty :
+        $"{destination.OrganizationId} / {destination.WorkspaceId}";
+
+    private async Task SelectDestinationAsync(ImportDestination? destination)
+    {
+        if (_busy || _importId.HasValue) return;
+        _destination = destination;
+        await UpdateSelectionAsync();
+    }
+
+    private async Task SelectCountryAsync(string? country)
+    {
+        if (_busy || _importId.HasValue) return;
+        _country = country;
+        await UpdateSelectionAsync();
+    }
+
+    private async Task UpdateSelectionAsync()
+    {
+        _workspace = _workspaces.FirstOrDefault(w => w.WorkspaceId == _destination?.WorkspaceId &&
+            w.OrganizationId == _destination?.OrganizationId && w.CountryCode == _country);
+        _reviewed = _confirmed = false;
+        _recent = [];
+        try { if (_workspace is not null) _recent = await Imports.GetRecentAsync(_workspace, _lifetime.Token); }
+        catch (Exception exception) when (exception is not OutOfMemoryException) { _message = "Recent imports could not be loaded."; }
+    }
+
+    private void SelectFile(InputFileChangeEventArgs args)
+    {
+        _file = null;
+        _message = null;
+        if (args.File.Size > 64L * 1024 * 1024 || !args.File.Name.EndsWith(".csv", StringComparison.OrdinalIgnoreCase))
+        { _message = "Choose a CSV file no larger than 64 MB."; return; }
+        _file = args.File;
+    }
+
+    private async Task StartAsync()
+    {
+        if (!CanStart || _catalogue is null || _policy is null) return;
+        _busy = true;
+        _pause = false;
+        _issues.Clear();
+        _run = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
+        _importId ??= Guid.NewGuid();
+        try
+        {
+            _summary = await Imports.GetAsync(_importId.Value, _run.Token);
+            _context ??= new(_workspace!.WorkspaceId, new(true, _workspace.CountryCode, _catalogue.Version,
+                true, true, _policy.Reference, _policy.Version, null, null, null),
+                _summary is null ? _workspace.OrganizationId : _summary.OrganizationId);
+            if (_summary?.State == "Completed") { _message = CompletionMessage(); return; }
+            await using var stream = _file!.OpenReadStream(64L * 1024 * 1024, _run.Token);
+            using var reader = new StreamReader(stream, new UTF8Encoding(false, true), false, 4096, leaveOpen: true);
+            await foreach (var batch in CaseCsvBatchReader.ReadAsync(reader, _summary?.NextRow ?? 1, _run.Token))
+            {
+                _message = $"Importing from report {batch.StartRow:N0}…";
+                await InvokeAsync(StateHasChanged);
+                var result = await Imports.ImportAsync(_importId.Value, _context, batch, _run.Token);
+                _summary = result.Summary;
+                _issues.AddRange(result.Rows.Where(row => row.Status is not ("Accepted" or "Replayed")).Take(20 - _issues.Count));
+                if (result.ErrorCode is not null) { _message = FailureMessage(result.ErrorCode); break; }
+                _message = _summary?.State == "Completed" ? CompletionMessage() : $"Saved {_summary?.Accepted:N0} cases.";
+                await InvokeAsync(StateHasChanged);
+                if (_pause) { _message = "Paused. Select Resume import to continue with the same file."; break; }
+            }
+        }
+        catch (InvalidDataException) { _message = "The file format needs review. Saved cases are safe; check the CSV before continuing."; }
+        catch (OperationCanceledException) { _message = "Import interrupted. Saved cases are safe; resume with the same file."; }
+        catch (CaseImportException exception) { _message = FailureMessage(exception.Code); }
+        catch (Exception exception) when (exception is not OutOfMemoryException) { _message = "Import interrupted. Saved cases are safe; resume with the same file."; }
+        finally
+        {
+            _busy = false;
+            _run.Dispose();
+            _run = null;
+            try { _recent = await Imports.GetRecentAsync(_workspace!, _lifetime.Token); }
+            catch (Exception exception) when (exception is not OutOfMemoryException) { }
+        }
+    }
+
+    private async Task RestoreAsync(CaseImportHistoryItem item)
+    {
+        NewImport();
+        _importId = item.ImportId;
+        try
+        {
+            _summary = await Imports.GetAsync(item.ImportId, _lifetime.Token);
+            _issues.AddRange(await Imports.GetIssuesAsync(item.ImportId, 0, _lifetime.Token));
+            _message = _summary?.State == "Completed" ? CompletionMessage() : "Select the original file and confirm its details to resume.";
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException) { _message = "This import could not be loaded. Refresh your access and try again."; }
+    }
+
+    private void NewImport()
+    {
+        _importId = null; _summary = null; _context = null; _file = null;
+        _filePickerGeneration++;
+        _reviewed = _confirmed = false; _issues.Clear(); _message = null;
+    }
+
+    private void Pause() { _pause = true; _message = "Pausing after the current batch…"; }
+    private static string ShortReference(Guid id) => id.ToString("N")[..8].ToUpperInvariant();
+    private async Task NextIssuesAsync()
+    {
+        if (_importId is null || _issues.Count == 0) return;
+        try
+        {
+            var issues = await Imports.GetIssuesAsync(_importId.Value, _issues[^1].RowNumber, _lifetime.Token);
+            if (issues.Count == 0) { _message = "No further reports to review."; return; }
+            _issues.Clear(); _issues.AddRange(issues);
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException) { _message = "Reports to review could not be loaded. Try again."; }
+    }
+    private string CompletionMessage() => _summary?.Rejected > 0 ? "Import finished with reports to review." : "Import complete. Your cases are saved.";
+    private static string StateLabel(string state) => state switch { "Completed" => "Finished", "Running" => "In progress", "Failed" => "Needs review", _ => "Paused" };
+    private static string FailureMessage(string code) => code switch
+    {
+        "not-authorized" or "registration-denied" => "Your current access does not permit this import. Saved cases remain available to authorized members.",
+        "import-busy" => "This import is already running. Wait for it to finish before resuming.",
+        "import-context-conflict" => "The workspace, country or report-handling terms differ from the original import. Review the original import before continuing.",
+        "row-content-conflict" => "The selected file differs from the original import. Resume using the unchanged original file.",
+        _ => "Import paused. Saved cases are safe; check the file and resume to retry."
+    };
+    private static string IssueLabel(CaseImportRowOutcome row) => row.Status switch
+    {
+        "Denied" => "Your access does not permit this report.",
+        "Conflict" => "This report conflicts with a previously submitted report.",
+        "RetryableFailure" => "Temporarily unavailable; resume to retry.",
+        "Failed" => "Could not be saved after repeated attempts.",
+        _ => row.ErrorCode switch
+        {
+            "current-policy-or-country" => "Check the country and current report-handling terms.",
+            "command-id" => "A valid, unique command_id is required.",
+            "observations-json" => "Observations must be a list of text entries.",
+            _ => "Check the report's required fields and CSV format."
+        }
+    };
+
+    public void Dispose() { _lifetime.Cancel(); _lifetime.Dispose(); }
+}

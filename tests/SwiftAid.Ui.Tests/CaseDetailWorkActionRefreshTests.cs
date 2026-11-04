@@ -1,0 +1,627 @@
+using System.Reflection;
+using Microsoft.AspNetCore.Components;
+using Microsoft.AspNetCore.Components.RenderTree;
+using Microsoft.AspNetCore.Components.Web;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Microsoft.JSInterop;
+using MudBlazor.Services;
+using SwiftAid.Client.Presentation;
+using SwiftAid.Contracts.Cases;
+using SwiftAid.Gateway.Components.Pages;
+using SwiftAid.UI.Components.Surfaces.Operations;
+using SwiftAid.UI.Components.Surfaces.Operations.CaseDetail;
+using SwiftAid.UI.Components.Surfaces.Operations.WorkManagement;
+
+namespace SwiftAid.Ui.Tests;
+
+#pragma warning disable BL0006 // The test renderer inspects component parameters to exercise the real page callback.
+public sealed class CaseDetailWorkActionRefreshTests
+{
+    [Fact]
+    public async Task RecommendedFollowUpSelectsOnlyTheMatchingCurrentCaseWork()
+    {
+        var caseId = Guid.NewGuid();
+        var followUpId = Guid.NewGuid();
+        var key = $"fu:{followUpId:D}";
+        var item = new OperationsWorkManagementSurface.OperationsWorkItem(
+            caseId, key, 2, "Follow-up", OperationsWorkManagementSurface.OperationsWorkKind.FollowUp,
+            OperationsWorkManagementSurface.OperationsWorkStatus.Open, OperationsWorkManagementSurface.OperationsAssignmentStatus.AssignedToYou,
+            "Synthetic follow-up", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, [], []);
+        var detail = new OperationsCaseDetailSurface();
+        SetParameter(detail, nameof(OperationsCaseDetailSurface.CaseId), caseId);
+        SetParameter(detail, nameof(OperationsCaseDetailSurface.WorkState), OperationsSurfaceState.Populated);
+        SetParameter(detail, nameof(OperationsCaseDetailSurface.WorkItems), new[] { item });
+        await (Task)typeof(OperationsCaseDetailSurface).GetMethod("OpenRecommendedFollowUpAsync", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(detail, [followUpId])!;
+        var selection = Assert.IsType<OperationsWorkManagementSurface.WorkSelectionRequest>(GetPrivateField(detail, "_followUpSelection"));
+        Assert.Equal(key, selection.WorkKey);
+        var work = new OperationsWorkManagementSurface();
+        SetParameter(work, nameof(OperationsWorkManagementSurface.Items), new[] { item });
+        SetParameter(work, nameof(OperationsWorkManagementSurface.RequestedSelection), selection);
+        typeof(OperationsWorkManagementSurface).GetMethod("OnParametersSet", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(work, null);
+        Assert.Equal($"{caseId:N}|{key}", GetPrivateField(work, "_selectedWorkKey"));
+        await (Task)typeof(OperationsCaseDetailSurface).GetMethod("OpenRecommendedFollowUpAsync", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(detail, [Guid.NewGuid()])!;
+        Assert.Null(GetPrivateField(detail, "_followUpSelection"));
+        Assert.Contains("not in the current work list", Assert.IsType<string>(GetPrivateField(detail, "_followUpReviewMessage")), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task FollowUpSchedule_UsesAuthorizedCandidateAndSubmitsItsActorReference()
+    {
+        var caseId = Guid.NewGuid();
+        const string actorId = "eligible-follow-up-actor";
+        var candidates = new FakeFollowUpCandidateClient();
+        OperationsWorkManagementSurface.OperationsWorkActionRequest? captured = null;
+        var component = new OperationsWorkManagementSurface();
+        var item = new OperationsWorkManagementSurface.OperationsWorkItem(
+            caseId, "follow-up:synthetic", 2, "Case follow-up", OperationsWorkManagementSurface.OperationsWorkKind.FollowUp,
+            OperationsWorkManagementSurface.OperationsWorkStatus.Open, OperationsWorkManagementSurface.OperationsAssignmentStatus.AssignedToYou,
+            "Synthetic follow-up context", DateTimeOffset.UtcNow, null,
+            [OperationsWorkManagementSurface.OperationsWorkAction.ScheduleFollowUp], []);
+        SetParameter(component, nameof(OperationsWorkManagementSurface.Items), new[] { item });
+        SetParameter(component, nameof(OperationsWorkManagementSurface.CandidatesClient), candidates);
+        SetParameter(component, nameof(OperationsWorkManagementSurface.OnAction),
+            EventCallback.Factory.Create<OperationsWorkManagementSurface.OperationsWorkActionRequest>(
+                new object(), request => captured = request));
+        SetPrivateField(component, "_selectedWorkKey", $"{caseId:N}|{item.WorkKey}");
+
+        var setAction = (Task)typeof(OperationsWorkManagementSurface)
+            .GetMethod("SetActionAsync", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(component, [OperationsWorkManagementSurface.OperationsWorkAction.ScheduleFollowUp])!;
+        await setAction;
+        typeof(OperationsWorkManagementSurface).GetMethod("SetFollowUpAssignee", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(component, [actorId]);
+        SetPrivateField(component, "_followUpDate", new DateTime(2026, 11, 5));
+        SetPrivateField(component, "_followUpTime", new TimeSpan(9, 0, 0));
+        SetPrivateField(component, "_timeZoneId", TimeZoneInfo.Utc.Id);
+        SetPrivateField(component, "_details", "Revisit the reported site and record observations.");
+
+        typeof(OperationsWorkManagementSurface).GetMethod("ReviewAction", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(component, [item]);
+        Assert.True((bool)GetPrivateField(component, "_reviewing")!, (string?)GetPrivateField(component, "_validationMessage"));
+        await InvokePrivateWithArgumentAsync(component, "ConfirmActionAsync", item);
+
+        Assert.Equal(caseId, candidates.CaseId);
+        Assert.True(candidates.FollowUpAssigneesOnly);
+        Assert.NotNull(captured);
+        Assert.Equal(OperationsWorkManagementSurface.OperationsWorkAction.ScheduleFollowUp, captured!.Action);
+        Assert.Equal(actorId, captured.WorkerKey);
+        Assert.Equal("Revisit the reported site and record observations.", captured.Details);
+        Assert.Equal(new DateTimeOffset(2026, 11, 5, 9, 0, 0, TimeSpan.Zero), captured.DueAtUtc);
+    }
+
+    [Fact]
+    public async Task FollowUpTransfer_RequiresDifferentEligibleOwnerAndReason()
+    {
+        var caseId = Guid.NewGuid();
+        const string actorId = "eligible-follow-up-actor";
+        const string currentOwnerId = "current-follow-up-owner";
+        var candidates = new FakeFollowUpCandidateClient();
+        OperationsWorkManagementSurface.OperationsWorkActionRequest? captured = null;
+        var commandIds = new List<Guid?>();
+        var component = new OperationsWorkManagementSurface();
+        var item = new OperationsWorkManagementSurface.OperationsWorkItem(
+            caseId, "fu:synthetic", 2, "Case follow-up", OperationsWorkManagementSurface.OperationsWorkKind.FollowUp,
+            OperationsWorkManagementSurface.OperationsWorkStatus.Scheduled, OperationsWorkManagementSurface.OperationsAssignmentStatus.Assigned,
+            "Synthetic follow-up context", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddDays(1),
+            [OperationsWorkManagementSurface.OperationsWorkAction.TransferFollowUp], [], AssignedWorkerKey: currentOwnerId);
+        SetParameter(component, nameof(OperationsWorkManagementSurface.Items), new[] { item });
+        SetParameter(component, nameof(OperationsWorkManagementSurface.CandidatesClient), candidates);
+        SetParameter(component, nameof(OperationsWorkManagementSurface.OnAction),
+            EventCallback.Factory.Create<OperationsWorkManagementSurface.OperationsWorkActionRequest>(
+                new object(), request => { captured = request; commandIds.Add(request.CommandId); }));
+        SetPrivateField(component, "_selectedWorkKey", $"{caseId:N}|{item.WorkKey}");
+
+        await (Task)typeof(OperationsWorkManagementSurface)
+            .GetMethod("SetActionAsync", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(component, [OperationsWorkManagementSurface.OperationsWorkAction.TransferFollowUp])!;
+
+        Assert.Equal(caseId, candidates.CaseId);
+        Assert.True(candidates.FollowUpAssigneesOnly);
+        var selectOwner = typeof(OperationsWorkManagementSurface)
+            .GetMethod("SetFollowUpAssignee", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        selectOwner.Invoke(component, [currentOwnerId]);
+        SetPrivateField(component, "_details", "Owner has moved to another duty area.");
+        typeof(OperationsWorkManagementSurface).GetMethod("ReviewAction", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(component, [item]);
+        Assert.False((bool)GetPrivateField(component, "_reviewing")!);
+        Assert.Equal("Choose a different staff member from the current owner.", GetPrivateField(component, "_validationMessage"));
+
+        selectOwner.Invoke(component, [actorId]);
+        typeof(OperationsWorkManagementSurface).GetMethod("ReviewAction", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(component, [item]);
+        Assert.True((bool)GetPrivateField(component, "_reviewing")!, (string?)GetPrivateField(component, "_validationMessage"));
+        await InvokePrivateWithArgumentAsync(component, "ConfirmActionAsync", item);
+
+        Assert.NotNull(captured);
+        Assert.Equal(OperationsWorkManagementSurface.OperationsWorkAction.TransferFollowUp, captured!.Action);
+        Assert.Equal(actorId, captured.WorkerKey);
+        Assert.Null(captured.Details);
+        Assert.Equal("Owner has moved to another duty area.", captured.Reason);
+        Assert.Null(captured.DueAtUtc);
+
+        typeof(OperationsWorkManagementSurface).GetMethod("ReviewAction", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(component, [item]);
+        await InvokePrivateWithArgumentAsync(component, "ConfirmActionAsync", item);
+        Assert.Equal(2, commandIds.Count);
+        Assert.NotNull(commandIds[0]);
+        Assert.Equal(commandIds[0], commandIds[1]);
+    }
+
+    [Fact]
+    public async Task AssistanceRequest_UsesCurrentVersionAndStableRequestIdentity()
+    {
+        var caseId = Guid.NewGuid();
+        var requestId = Guid.NewGuid();
+        OperationsWorkManagementSurface.OperationsWorkActionRequest? captured = null;
+        var component = new OperationsCaseDetailSurface();
+        SetParameter(component, nameof(OperationsCaseDetailSurface.CaseId), caseId);
+        SetParameter(component, nameof(OperationsCaseDetailSurface.WorkVersion), 7L);
+        SetParameter(component, nameof(OperationsCaseDetailSurface.OnWorkAction),
+            EventCallback.Factory.Create<OperationsWorkManagementSurface.OperationsWorkActionRequest>(
+                new object(), request => captured = request));
+        SetPrivateField(component, "_showAssistanceRequest", true);
+        SetPrivateField(component, "_assistanceRequestId", (Guid?)requestId);
+        SetPrivateField(component, "_newAssistanceNeed", OperationsWorkManagementSurface.AssistanceNeed.Transport);
+        SetPrivateField(component, "_newAssistanceDetails", "Transport coordination needed");
+
+        await InvokePrivateAsync(component, "SubmitAssistanceRequestAsync");
+
+        Assert.NotNull(captured);
+        Assert.Equal(caseId, captured!.CaseId);
+        Assert.Equal($"assistance:new:{requestId:D}", captured.WorkKey);
+        Assert.Equal(requestId, captured.CommandId);
+        Assert.Equal(7, captured.ExpectedVersion);
+        Assert.Equal(OperationsWorkManagementSurface.OperationsWorkAction.RequestAssistance, captured.Action);
+        Assert.Equal(OperationsWorkManagementSurface.AssistanceNeed.Transport, captured.AssistanceNeed);
+        Assert.Equal("Transport coordination needed", captured.Details);
+    }
+
+    [Fact]
+    public async Task MissingOptionalDiscussionAndEvidenceProvidersDoNotPreventCaseRendering()
+    {
+        var (services, renderer) = CreateRenderer(new FakeWorkManagementClient(failRefresh: false), false);
+        await using (services)
+        await using (renderer)
+        {
+            using var page = await renderer.RenderAsync<CaseDetail>(Guid.NewGuid());
+            Assert.Equal(CaseDetailPanelState.Unavailable, GetSurfaceParameter<CaseDetailDiscussionView>(
+                renderer, page.ComponentId, nameof(OperationsCaseDetailSurface.DiscussionData)).State);
+            Assert.Equal(CaseDetailPanelState.Unavailable, GetSurfaceParameter<CaseDetailEvidenceView>(
+                renderer, page.ComponentId, nameof(OperationsCaseDetailSurface.EvidenceData)).State);
+        }
+    }
+
+    [Fact]
+    public async Task AcceptedAction_WhenRefreshFails_DoesNotClaimWorkWasRefreshed()
+    {
+        var caseId = Guid.NewGuid();
+        var client = new FakeWorkManagementClient(failRefresh: true);
+        var (services, renderer) = CreateRenderer(client);
+        await using (services)
+        await using (renderer)
+        {
+            var page = await renderer.RenderAsync<CaseDetail>(caseId);
+            try
+            {
+                await InvokeActionAsync(renderer, page.ComponentId, caseId);
+
+                var message = GetSurfaceParameter<string>(
+                    renderer,
+                    page.ComponentId,
+                    nameof(OperationsCaseDetailSurface.WorkStatusMessage));
+                var isError = GetSurfaceParameter<bool>(
+                    renderer,
+                    page.ComponentId,
+                    nameof(OperationsCaseDetailSurface.WorkStatusIsError));
+                var state = GetSurfaceParameter<OperationsSurfaceState>(
+                    renderer,
+                    page.ComponentId,
+                    nameof(OperationsCaseDetailSurface.WorkState));
+                var retry = GetSurfaceParameter<EventCallback>(
+                    renderer,
+                    page.ComponentId,
+                    nameof(OperationsCaseDetailSurface.OnWorkRetry));
+
+                Assert.Equal(2, client.GetCalls);
+                Assert.Equal(1, client.ExecuteCalls);
+                Assert.False(string.IsNullOrWhiteSpace(message));
+                Assert.DoesNotContain(
+                    "coordination work is refreshed.",
+                    message,
+                    StringComparison.OrdinalIgnoreCase);
+                Assert.True(isError);
+                Assert.Equal(OperationsSurfaceState.Unavailable, state);
+                Assert.True(retry.HasDelegate);
+            }
+            finally
+            {
+                page.Dispose();
+            }
+        }
+    }
+
+    [Fact]
+    public async Task AcceptedAction_WhenRefreshSucceeds_ShowsRefreshedSuccess()
+    {
+        var caseId = Guid.NewGuid();
+        var client = new FakeWorkManagementClient(failRefresh: false);
+        var (services, renderer) = CreateRenderer(client);
+        await using (services)
+        await using (renderer)
+        {
+            var page = await renderer.RenderAsync<CaseDetail>(caseId);
+            try
+            {
+                await InvokeActionAsync(renderer, page.ComponentId, caseId);
+
+                var message = GetSurfaceParameter<string>(
+                    renderer,
+                    page.ComponentId,
+                    nameof(OperationsCaseDetailSurface.WorkStatusMessage));
+                var isError = GetSurfaceParameter<bool>(
+                    renderer,
+                    page.ComponentId,
+                    nameof(OperationsCaseDetailSurface.WorkStatusIsError));
+
+                Assert.Equal(2, client.GetCalls);
+                Assert.Equal(1, client.ExecuteCalls);
+                Assert.Equal("Action completed. Coordination work is refreshed.", message);
+                Assert.False(isError);
+            }
+            finally
+            {
+                page.Dispose();
+            }
+        }
+    }
+
+    [Fact]
+    public async Task UnavailableMutation_DoesNotReportActionAccepted()
+    {
+        var caseId = Guid.NewGuid();
+        var client = new FakeWorkManagementClient(failRefresh: false, failMutation: true);
+        var (services, renderer) = CreateRenderer(client);
+        await using (services)
+        await using (renderer)
+        {
+            var page = await renderer.RenderAsync<CaseDetail>(caseId);
+            try
+            {
+                await InvokeActionAsync(renderer, page.ComponentId, caseId);
+
+                var message = GetSurfaceParameter<string>(
+                    renderer,
+                    page.ComponentId,
+                    nameof(OperationsCaseDetailSurface.WorkStatusMessage));
+                var state = GetSurfaceParameter<OperationsSurfaceState>(
+                    renderer,
+                    page.ComponentId,
+                    nameof(OperationsCaseDetailSurface.WorkState));
+
+                Assert.Equal(1, client.GetCalls);
+                Assert.Equal(1, client.ExecuteCalls);
+                Assert.DoesNotContain("Action accepted", message, StringComparison.OrdinalIgnoreCase);
+                Assert.Equal(OperationsSurfaceState.Unavailable, state);
+            }
+            finally
+            {
+                page.Dispose();
+            }
+        }
+    }
+
+    private static async Task InvokeActionAsync(TestRenderer renderer, int rootId, Guid caseId)
+    {
+        var action = (EventCallback<OperationsWorkManagementSurface.OperationsWorkActionRequest>?)
+            renderer.GetComponentParameter(
+                rootId,
+                typeof(OperationsCaseDetailSurface),
+                nameof(OperationsCaseDetailSurface.OnWorkAction));
+
+        Assert.True(action.HasValue);
+        await renderer.Dispatcher.InvokeAsync(() => action!.Value.InvokeAsync(new(
+            caseId,
+            "synthetic-follow-up",
+            1,
+            OperationsWorkManagementSurface.OperationsWorkAction.RecordFollowUpOutcome,
+            null,
+            null,
+            "Synthetic outcome",
+            OperationsWorkManagementSurface.FollowUpOutcome.ContactMade,
+            null,
+            null,
+            false)));
+    }
+
+    private static T GetSurfaceParameter<T>(TestRenderer renderer, int rootId, string name)
+    {
+        var value = renderer.GetComponentParameter(rootId, typeof(OperationsCaseDetailSurface), name);
+        Assert.IsType<T>(value);
+        return (T)value!;
+    }
+
+    private static void SetPrivateField(object target, string name, object? value) =>
+        target.GetType().GetField(name, BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(target, value);
+
+    private static object? GetPrivateField(object target, string name) =>
+        target.GetType().GetField(name, BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(target);
+
+    private static void SetParameter(object target, string name, object? value) =>
+        target.GetType().GetProperty(name, BindingFlags.Instance | BindingFlags.Public)!.SetValue(target, value);
+
+    private static async Task InvokePrivateAsync(object target, string name)
+    {
+        var operation = (Task)target.GetType().GetMethod(name, BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(target, null)!;
+        await operation;
+    }
+
+    private static async Task InvokePrivateWithArgumentAsync(object target, string name, object argument)
+    {
+        var operation = (Task)target.GetType().GetMethod(name, BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(target, [argument])!;
+        await operation;
+    }
+
+    private sealed class FakeFollowUpCandidateClient : ICaseCollaboratorCandidatesClient
+    {
+        private readonly CaseCollaboratorCandidatePage _page = new(
+            [
+                new("scope-1", "eligible-follow-up-actor", "Synthetic colleague", ["ReadCase", "ManageFollowUp"]),
+                new("scope-1", "current-follow-up-owner", "Current owner", ["ReadCase", "ManageFollowUp"])
+            ], null);
+        public Guid CaseId { get; private set; }
+        public bool FollowUpAssigneesOnly { get; private set; }
+        public Task<CaseCollaboratorCandidatePage?> GetAsync(Guid caseId, string? search, string? after,
+            CancellationToken cancellationToken = default, bool followUpAssignees = false)
+        {
+            CaseId = caseId;
+            FollowUpAssigneesOnly = followUpAssignees;
+            return Task.FromResult<CaseCollaboratorCandidatePage?>(_page);
+        }
+    }
+
+    private static (ServiceProvider Services, TestRenderer Renderer) CreateRenderer(FakeWorkManagementClient workClient, bool optionalProviders = true)
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddMudServices();
+        services.AddSingleton<NavigationManager, TestNavigationManager>();
+        services.AddSingleton<IJSRuntime, NoOpJsRuntime>();
+        services.AddSingleton<ICaseTimelineClient, EmptyCaseTimelineClient>();
+        if (optionalProviders)
+        {
+            services.AddSingleton<ICaseDiscussionClient, EmptyCaseDiscussionClient>();
+            services.AddSingleton<ICaseEvidenceClient, EmptyCaseEvidenceClient>();
+        }
+        services.AddSingleton<IWorkManagementClient>(workClient);
+
+        var serviceProvider = services.BuildServiceProvider();
+        return (serviceProvider, new TestRenderer(serviceProvider, serviceProvider.GetRequiredService<ILoggerFactory>()));
+    }
+
+    private sealed class FakeWorkManagementClient(bool failRefresh, bool failMutation = false)
+        : IWorkManagementClient
+    {
+        private int _getCalls;
+
+        public int GetCalls => _getCalls;
+        public int ExecuteCalls { get; private set; }
+
+        public Task<UiCapabilityResult<WorkManagementSnapshot>> GetAsync(
+            Guid requestedCaseId,
+            WorkManagementQuery query,
+            CancellationToken cancellationToken = default)
+        {
+            _getCalls++;
+            if (_getCalls > 1 && failRefresh)
+            {
+                return Task.FromResult(UiCapabilityResults.Unavailable<WorkManagementSnapshot>("synthetic-work"));
+            }
+
+            var version = _getCalls > 1 ? 2 : 1;
+            return Task.FromResult(Success(CreateSnapshot(requestedCaseId, version)));
+        }
+
+        public Task<UiCapabilityResult<WorkManagementSnapshot>> ExecuteAsync(
+            WorkManagementCommand command,
+            WorkManagementQuery query,
+            CancellationToken cancellationToken = default)
+        {
+            ExecuteCalls++;
+            if (failMutation)
+            {
+                return Task.FromResult(UiCapabilityResults.Unavailable<WorkManagementSnapshot>("synthetic-work"));
+            }
+
+            return Task.FromResult(Success(CreateSnapshot(command.CaseId, command.ExpectedVersion + 1)));
+        }
+
+        private static WorkManagementSnapshot CreateSnapshot(Guid caseId, long version)
+        {
+            var item = new WorkManagementItem(
+                "synthetic-follow-up",
+                "Synthetic follow-up",
+                WorkManagementKind.FollowUp,
+                WorkManagementStatus.Scheduled,
+                WorkManagementAssignmentStatus.Unassigned,
+                "Synthetic follow-up item for UI regression coverage.",
+                DateTimeOffset.UtcNow,
+                null,
+                [WorkManagementAction.RecordFollowUpOutcome],
+                [],
+                []);
+            return new WorkManagementSnapshot(
+                caseId,
+                version,
+                new Page<WorkManagementItem>([item], 1, 100, 1, false));
+        }
+
+        private static UiCapabilityResult<WorkManagementSnapshot> Success(WorkManagementSnapshot snapshot) => new(
+            UiCapabilityResultCode.Success,
+            snapshot,
+            new UiCapabilityMetadata(
+                "synthetic-work",
+                "1",
+                UiCapabilityProvenance.SyntheticDevelopment,
+                DateTimeOffset.UtcNow,
+                IsAvailable: true));
+    }
+
+    private sealed class EmptyCaseTimelineClient : ICaseTimelineClient
+    {
+        public Task<CaseTimelineResult> GetAsync(Guid caseId, int? limit, CancellationToken cancellationToken = default, long? beforeAggregateVersion = null) =>
+            Task.FromResult(new CaseTimelineResult(CaseTimelineAccess.NotFoundOrNotAuthorized, null));
+    }
+
+    private sealed class EmptyCaseDiscussionClient : ICaseDiscussionClient
+    {
+        public Task<UiCapabilityResult<CaseDiscussionSnapshot>> GetAsync(
+            Guid caseId,
+            CaseDiscussionQuery query,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(UiCapabilityResults.Unavailable<CaseDiscussionSnapshot>("synthetic-discussion"));
+    }
+
+    private sealed class EmptyCaseEvidenceClient : ICaseEvidenceClient
+    {
+        public Task<UiCapabilityResult<CaseEvidenceSnapshot>> GetAsync(
+            Guid caseId,
+            CaseEvidenceQuery query,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(UiCapabilityResults.Unavailable<CaseEvidenceSnapshot>("synthetic-evidence"));
+
+        public Task<UiCapabilityResult<CaseEvidenceDetail>> GetDetailAsync(
+            Guid caseId,
+            string evidenceKey,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(UiCapabilityResults.Unavailable<CaseEvidenceDetail>("synthetic-evidence"));
+
+        public Task<UiCapabilityResult<CaseEvidenceDownload>> DownloadAsync(
+            Guid caseId,
+            string evidenceKey,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(UiCapabilityResults.Unavailable<CaseEvidenceDownload>("synthetic-evidence"));
+    }
+
+    private sealed class TestRenderer(IServiceProvider services, ILoggerFactory loggerFactory)
+        : Renderer(services, loggerFactory)
+    {
+        public override Dispatcher Dispatcher { get; } = Dispatcher.CreateDefault();
+
+        public async Task<RenderedComponent<TComponent>> RenderAsync<TComponent>(Guid caseId)
+            where TComponent : IComponent
+        {
+            TComponent component = default!;
+            var componentId = -1;
+            await Dispatcher.InvokeAsync(async () =>
+            {
+                component = (TComponent)InstantiateComponent(typeof(TComponent));
+                componentId = AssignRootComponentId(component);
+                await RenderRootComponentAsync(
+                    componentId,
+                    ParameterView.FromDictionary(new Dictionary<string, object?>
+                    {
+                        [nameof(CaseDetail.CaseId)] = caseId
+                    }));
+            });
+
+            return new RenderedComponent<TComponent>(this, componentId);
+        }
+
+        public object? GetComponentParameter(int rootId, Type componentType, string name)
+        {
+            var frames = GetCurrentRenderTreeFrames(rootId);
+            for (var index = 0; index < frames.Count; index++)
+            {
+                var frame = frames.Array[index];
+                if (frame.FrameType != RenderTreeFrameType.Component)
+                {
+                    continue;
+                }
+
+                if (componentType.IsAssignableFrom(frame.ComponentType))
+                {
+                    for (var attributeIndex = index + 1; attributeIndex < frames.Count; attributeIndex++)
+                    {
+                        var attribute = frames.Array[attributeIndex];
+                        if (attribute.FrameType != RenderTreeFrameType.Attribute)
+                        {
+                            break;
+                        }
+
+                        if (attribute.AttributeName == name)
+                        {
+                            return attribute.AttributeValue;
+                        }
+                    }
+                }
+
+                var nestedValue = GetComponentParameter(frame.ComponentId, componentType, name);
+                if (nestedValue is not null)
+                {
+                    return nestedValue;
+                }
+            }
+
+            return null;
+        }
+
+        protected override Task UpdateDisplayAsync(in RenderBatch renderBatch) => Task.CompletedTask;
+
+        protected override void HandleException(Exception exception) => throw exception;
+
+        public void Unmount(int componentId) => RemoveRootComponent(componentId);
+    }
+
+    private sealed class RenderedComponent<TComponent>(TestRenderer renderer, int componentId) : IDisposable
+        where TComponent : IComponent
+    {
+        public int ComponentId { get; } = componentId;
+
+        public void Dispose() => renderer.Dispatcher.InvokeAsync(() => renderer.Unmount(ComponentId))
+            .GetAwaiter()
+            .GetResult();
+    }
+
+    private sealed class NoOpJsRuntime : IJSRuntime
+    {
+        public ValueTask<TValue> InvokeAsync<TValue>(string identifier, object?[]? args) =>
+            InvokeAsync<TValue>(identifier, CancellationToken.None, args);
+
+        public ValueTask<TValue> InvokeAsync<TValue>(
+            string identifier,
+            CancellationToken cancellationToken,
+            object?[]? args) =>
+            ValueTask.FromResult(typeof(TValue) == typeof(IJSObjectReference)
+                ? (TValue)(object)new NoOpJsObjectReference()
+                : default!);
+    }
+
+    private sealed class NoOpJsObjectReference : IJSObjectReference
+    {
+        public ValueTask<TValue> InvokeAsync<TValue>(string identifier, object?[]? args) =>
+            InvokeAsync<TValue>(identifier, CancellationToken.None, args);
+
+        public ValueTask<TValue> InvokeAsync<TValue>(
+            string identifier,
+            CancellationToken cancellationToken,
+            object?[]? args) =>
+            ValueTask.FromResult(default(TValue)!);
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    private sealed class TestNavigationManager : NavigationManager
+    {
+        public TestNavigationManager() => Initialize("http://localhost/", "http://localhost/cases");
+
+        protected override void NavigateToCore(string uri, bool forceLoad) => Uri = ToAbsoluteUri(uri).ToString();
+
+        protected override void NavigateToCore(string uri, NavigationOptions options) => Uri = ToAbsoluteUri(uri).ToString();
+    }
+}
+#pragma warning restore BL0006

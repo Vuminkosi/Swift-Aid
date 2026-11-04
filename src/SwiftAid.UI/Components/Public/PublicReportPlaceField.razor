@@ -1,0 +1,36 @@
+@using SwiftAid.Contracts.Geography
+
+<div class="public-report-place">
+    <label class="public-report__label" for="@_stateId">@Label status</label>
+    <select id="@_stateId" class="public-report__control" value="@Presence" @onchange="HandlePresenceChanged">
+        <option value="@PresenceState.Known.ToString()">Known</option>
+        <option value="@PresenceState.Unknown.ToString()">Unknown</option>
+        <option value="@PresenceState.NotApplicable.ToString()">Not applicable</option>
+    </select>
+    @if (Presence == PresenceState.Known)
+    {
+        <label class="public-report__label" for="@_valueId">@Label, in your words</label>
+        <input id="@_valueId" class="public-report__control" maxlength="160" value="@Value" @oninput="HandleValueChanged" />
+    }
+</div>
+
+@code {
+    private readonly string _stateId = $"public-place-state-{Guid.NewGuid():N}";
+    private readonly string _valueId = $"public-place-value-{Guid.NewGuid():N}";
+
+    [Parameter, EditorRequired] public string Label { get; set; } = string.Empty;
+    [Parameter] public PresenceState Presence { get; set; } = PresenceState.Unknown;
+    [Parameter] public EventCallback<PresenceState> PresenceChanged { get; set; }
+    [Parameter] public string? Value { get; set; }
+    [Parameter] public EventCallback<string?> ValueChanged { get; set; }
+
+    private Task HandlePresenceChanged(ChangeEventArgs args)
+    {
+        var value = Enum.TryParse<PresenceState>(args.Value?.ToString(), out var presence)
+            ? presence
+            : PresenceState.Unknown;
+        return PresenceChanged.InvokeAsync(value);
+    }
+
+    private Task HandleValueChanged(ChangeEventArgs args) => ValueChanged.InvokeAsync(args.Value?.ToString());
+}

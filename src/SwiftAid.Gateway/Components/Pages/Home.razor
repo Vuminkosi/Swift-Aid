@@ -1,0 +1,15 @@
+@page "/"
+@layout SwiftAid.Gateway.Components.Layout.PublicWebsiteLayout
+@using Microsoft.AspNetCore.Components.Authorization
+@using SwiftAid.UI.Components.Surfaces.Public
+
+<PageTitle>SwiftAid | Community support</PageTitle>
+
+<AuthorizeView>
+    <Authorized>
+        <WebLandingSurface IsSignedIn="true" />
+    </Authorized>
+    <NotAuthorized>
+        <WebLandingSurface />
+    </NotAuthorized>
+</AuthorizeView>

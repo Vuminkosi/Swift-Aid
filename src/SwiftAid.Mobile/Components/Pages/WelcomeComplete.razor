@@ -1,0 +1,107 @@
+@page "/welcome-complete"
+@using SwiftAid.Client.Authentication
+@using SwiftAid.Client.Navigation
+@using SwiftAid.Client.Presentation
+@using SwiftAid.Mobile.Services.Account
+@using SwiftAid.Mobile.Services.Http
+@using SwiftAid.UI.Components.Surfaces.Account
+@inject IServiceProvider ServiceProvider
+
+<PageTitle>Welcome to SwiftAid | SwiftAid</PageTitle>
+
+<AccountEntrySurface>
+    <WelcomeCompleteSurface Snapshot="_snapshot" ReturnUrl="SafeReturnUrl" OnRefresh="RefreshAsync" />
+</AccountEntrySurface>
+
+@code {
+    [SupplyParameterFromQuery(Name = "returnUrl")]
+    private string? RequestedReturnUrl { get; set; }
+    private string SafeReturnUrl => LocalReturnUrlPolicy.Resolve(RequestedReturnUrl, "/");
+
+    private WelcomeCompleteSnapshot _snapshot = WelcomeCompleteSnapshot.Loading;
+
+    private IUserProfileClient ProfileClient =>
+        (IUserProfileClient?)ServiceProvider.GetService(typeof(IUserProfileClient))
+        ?? CreateProfileFallback()
+        ?? new UnavailableUserProfileClient();
+
+    private IOrganizationMembershipClient MembershipClient =>
+        (IOrganizationMembershipClient?)ServiceProvider.GetService(typeof(IOrganizationMembershipClient))
+        ?? CreateMembershipFallback()
+        ?? new UnavailableOrganizationMembershipClient();
+
+    private IUserProfileClient? CreateProfileFallback()
+    {
+        var address = GatewayAddress();
+        return string.IsNullOrWhiteSpace(address)
+            ? null
+            : new HttpUserProfileClient(CookieSessionHttpClient.Shared(address));
+    }
+
+    private IOrganizationMembershipClient? CreateMembershipFallback()
+    {
+        var address = GatewayAddress();
+        return string.IsNullOrWhiteSpace(address)
+            ? null
+            : new HttpOrganizationMembershipClient(CookieSessionHttpClient.Shared(address));
+    }
+
+    private string? GatewayAddress()
+    {
+        var options = (NativeSessionHttpOptions?)ServiceProvider.GetService(typeof(NativeSessionHttpOptions));
+        return options?.GatewayBaseAddress?.ToString();
+    }
+
+    protected override async Task OnInitializedAsync() => await SafeRefreshAsync();
+
+    private async Task SafeRefreshAsync()
+    {
+        try
+        {
+            await RefreshAsync();
+        }
+        catch (Exception)
+        {
+            _snapshot = WelcomeCompleteSnapshot.Unavailable;
+        }
+    }
+
+    private async Task RefreshAsync()
+    {
+        var profile = await ProfileClient.GetAsync();
+        if (profile.Value is null)
+        {
+            _snapshot = profile.Code == UiCapabilityResultCode.Denied
+                ? WelcomeCompleteSnapshot.SignedOut
+                : WelcomeCompleteSnapshot.Unavailable with
+                {
+                    StatusMessage = profile.Message ?? WelcomeCompleteSnapshot.Unavailable.StatusMessage
+                };
+            return;
+        }
+
+        if (!profile.Value.IsSignedIn)
+        {
+            _snapshot = WelcomeCompleteSnapshot.SignedOut;
+            return;
+        }
+
+        // Concurrent: independent HTTP calls with no shared data context on the native path.
+        var membershipsTask = MembershipClient.GetMineAsync();
+        var requestsTask = MembershipClient.GetMyRequestsAsync();
+        await Task.WhenAll(membershipsTask, requestsTask).ConfigureAwait(false);
+        var memberships = membershipsTask.Result;
+        var requests = requestsTask.Result;
+        if (memberships.Value is null || requests.Value is null)
+        {
+            _snapshot = WelcomeCompleteSnapshot.Unavailable;
+            return;
+        }
+
+        _snapshot = new WelcomeCompleteSnapshot(
+            WelcomeCompleteViewState.Ready,
+            profile.Value.DisplayName,
+            memberships.Value.Any(entry => entry.WorkspaceIds.Count > 0),
+            requests.Value.Any(entry => string.Equals(entry.Status, "Pending", StringComparison.OrdinalIgnoreCase)));
+    }
+}

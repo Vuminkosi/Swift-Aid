@@ -1,0 +1,88 @@
+.operations-work-management {
+    display: grid;
+    gap: 1rem;
+    min-width: 0;
+}
+
+.operations-work-management__header,
+.operations-work-management__detail-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+}
+
+.operations-work-management__grid {
+    align-items: flex-start;
+}
+
+.operations-work-management__filters {
+    align-items: flex-end;
+}
+
+.operations-work-management__filter {
+    flex: 1 1 12rem;
+    min-width: min(100%, 12rem);
+}
+
+.operations-work-management__pagination {
+    gap: 0.75rem;
+}
+
+.operations-work-management__queue,
+.operations-work-management__detail {
+    min-width: 0;
+    padding: 1rem;
+}
+
+.operations-work-management__queue-items {
+    margin-top: 0.75rem;
+}
+
+.operations-work-management__queue-item {
+    height: auto;
+    min-height: 5rem;
+    justify-content: flex-start;
+    padding: 0.65rem;
+    text-align: left;
+    text-transform: none;
+}
+
+.operations-work-management__queue-copy {
+    width: 100%;
+    min-width: 0;
+    white-space: normal;
+}
+
+.operations-work-management__context,
+.operations-work-management__section-title {
+    margin-top: 0.75rem;
+}
+
+.operations-work-management__field {
+    width: 100%;
+    margin-top: 0.75rem;
+}
+
+.operations-work-management__date-fields {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.75rem;
+    margin-top: 0.75rem;
+}
+
+@media (max-width: 599.98px) {
+    .operations-work-management__header,
+    .operations-work-management__detail-header {
+        flex-direction: column;
+    }
+
+    .operations-work-management__date-fields {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .operations-work-management__queue,
+    .operations-work-management__detail {
+        padding: 0.75rem;
+    }
+}

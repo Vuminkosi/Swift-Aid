@@ -1,0 +1,16 @@
+.case-queue {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.case-queue__state {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 1rem 0;
+}
+
+.case-queue__notice {
+    display: block;
+}

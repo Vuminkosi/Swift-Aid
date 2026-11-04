@@ -1,0 +1,708 @@
+@using SwiftAid.Contracts.Ellai
+@using System.Globalization
+@implements IEllaiUiContextProvider
+<SwiftAid.UI.Ellai.Guidance.EllaiSemanticContext Provider="this" />
+
+@using SwiftAid.UI.Components.Theme
+
+<section class="operations-dashboard" aria-labelledby="operations-dashboard-title">
+    <header class="operations-dashboard__header">
+        <div>
+            <h1 id="operations-dashboard-title" data-ellai-control="dashboard.overview" data-bonboarding-anchor="ellai-dashboard-overview">Dashboard</h1>
+            <p class="operations-dashboard__scope">@AuthorizedScopeLabel <span aria-hidden="true">·</span> @PeriodLabel</p>
+        </div>
+        <div class="operations-dashboard__header-actions">
+            @Actions
+            <MudIconButton Icon="@Icons.Material.Filled.Refresh" Color="Color.Primary" OnClick="OnRetryAll"
+                           data-ellai-control="dashboard.refresh" data-bonboarding-anchor="ellai-dashboard-refresh" aria-label="Refresh dashboard" title="Refresh dashboard" />
+        </div>
+    </header>
+
+    <div class="operations-dashboard__toolbar">
+        <div class="operations-dashboard__sector-filter" data-ellai-control="dashboard.sector" data-bonboarding-anchor="ellai-dashboard-sector" role="group" aria-label="Choose health sector">
+            @foreach (var sector in SectorOptions)
+            {
+                <MudButton Variant="Variant.Text" StartIcon="@SectorIcon(sector.Value)"
+                           Color="@(Sector == sector.Value ? Color.Primary : Color.Default)"
+                           Size="Size.Small" aria-pressed="@(Sector == sector.Value)"
+                           OnClick="() => OnSectorChanged.InvokeAsync(sector.Value)">
+                    @sector.Label
+                </MudButton>
+            }
+        </div>
+        <div class="operations-dashboard__selects">
+            <MudSelect T="DashboardPeriodView" Label="Period" data-ellai-control="dashboard.period" data-bonboarding-anchor="ellai-dashboard-period" Value="Period" ValueChanged="OnPeriodChanged"
+                       Dense="true" Variant="Variant.Outlined" Margin="Margin.Dense" Class="operations-dashboard__select">
+                <MudSelectItem Value="@ThirtyDays">Last 30 days</MudSelectItem>
+                <MudSelectItem Value="@NinetyDays">Last 90 days</MudSelectItem>
+            </MudSelect>
+            <MudSelect T="string" Label="Country" data-ellai-control="dashboard.country" data-bonboarding-anchor="ellai-dashboard-country" Value="RegionCode" ValueChanged="OnRegionChanged"
+                       Dense="true" Variant="Variant.Outlined" Margin="Margin.Dense" Class="operations-dashboard__select">
+                <MudSelectItem Value="@AllRegions">All countries</MudSelectItem>
+                @foreach (var region in RegionOptions)
+                {
+                    <MudSelectItem Value="@region.AreaCode">@region.AreaLabel</MudSelectItem>
+                }
+            </MudSelect>
+        </div>
+    </div>
+
+    @if (OverviewState != OperationsSurfaceState.Populated)
+    {
+        <SwiftAidStatePanel State="OverviewState.ToSwiftAidViewState()" Title="@OverviewStateTitle"
+                            Description="@OverviewStateDescription" OnRetry="OnRetryAll" />
+    }
+    else if (Overview is null)
+    {
+        <SwiftAidStatePanel State="SwiftAidViewState.Empty" Title="No dashboard information"
+                            Description="There is no dashboard information to show for this period." />
+    }
+    else
+    {
+        var evaluatedFreshness = EvaluateFreshness();
+        <div class="operations-dashboard__kpis" data-ellai-control="dashboard.summary" data-bonboarding-anchor="ellai-dashboard-summary" aria-label="Case and service summary">
+            @foreach (var kind in KpiOrder)
+            {
+                var metric = Overview.Kpis.FirstOrDefault(item => item.Kind == kind);
+                if (metric is not null)
+                {
+                    <article class="operations-dashboard__kpi operations-dashboard__kpi--@KpiClass(kind)"
+                             title="@metric.Definition" aria-label="@($"{KpiLabel(kind)}. {metric.Definition}")">
+                        <div class="operations-dashboard__kpi-head">
+                            <span>@KpiLabel(kind)</span>
+                            <MudIcon Icon="@KpiIcon(kind)" aria-hidden="true" />
+                        </div>
+                        @if (CanShowKpi(kind, metric) && metric.Value is long kpiValue)
+                        {
+                            <strong class="operations-dashboard__kpi-value">@kpiValue.ToString("N0")</strong>
+                        }
+                        else
+                        {
+                    <strong class="operations-dashboard__kpi-value operations-dashboard__kpi-value--unknown">@KpiStateLabel(metric.State)</strong>
+                        }
+                        <span class="operations-dashboard__kpi-caption">@KpiCaption(kind)</span>
+                    </article>
+                }
+            }
+        </div>
+
+        <section class="operations-dashboard__panel operations-dashboard__cases" aria-labelledby="dashboard-cases-title" data-ellai-control="dashboard.recent-cases" data-bonboarding-anchor="ellai-dashboard-recent-cases">
+                <div class="operations-dashboard__panel-heading">
+                    <div>
+                        <h2 id="dashboard-cases-title">Recent cases</h2>
+                        <p>@Overview.AuthorizedScopeLabel · Updated @Overview.AsOfUtc.ToLocalTime().ToString("g")</p>
+                    </div>
+                    <MudLink Href="/my-cases">View all</MudLink>
+                </div>
+                @if (Overview.RecentCases.Count == 0)
+                {
+                    <SwiftAidStatePanel State="@(IsPartial ? SwiftAidViewState.Information : SwiftAidViewState.Empty)"
+                                        Title="@(IsPartial ? "Recent cases unavailable" : "No recent cases")"
+                                        Description="@(IsPartial ? "Some case information is unavailable for this scope." : "There are no cases in this selected scope.")" />
+                }
+                else
+                {
+                    <div class="operations-dashboard__case-table-wrap">
+                        <table class="operations-dashboard__case-table">
+                            <caption class="operations-dashboard__table-caption">Most recently reported cases you can access</caption>
+                            <thead><tr><th scope="col">Case / type</th><th scope="col">Observations / classification</th><th scope="col">Location</th><th scope="col">Status</th><th scope="col">Reported</th><th scope="col"><span class="operations-dashboard__sr-only">Open case</span></th></tr></thead>
+                            <tbody>
+                                @foreach (var item in Overview.RecentCases.OrderByDescending(item => item.ReportedAtUtc).Take(6))
+                                {
+                                    <tr @key="item.CaseId">
+                                        <td data-label="Case">
+                                            @if (DashboardCaseView.GetCaseHref(item.CaseId) is { } caseHref)
+                                            {
+                                                <MudLink Href="@caseHref"
+                                                         Class="operations-dashboard__case-reference"
+                                                         aria-label="@($"Open case {item.DisplayReference}")">
+                                                    @item.DisplayReference
+                                                </MudLink>
+                                            }
+                                            else
+                                            {
+                                                <span class="operations-dashboard__case-reference">@item.DisplayReference</span>
+                                            }
+                                            <span class="operations-dashboard__case-sector">@SectorLabel(item.SubjectSector)</span>
+                                        </td>
+                                        <td data-label="Condition">
+                                            <span class="operations-dashboard__condition-name">@(item.ObservationPreview ?? item.ReportedConditionLabel)</span>
+                                            <span class="operations-dashboard__condition-kind">@item.ClassificationLabel</span>
+                                        </td>
+                                        <td data-label="Location">@if (item.LocationHref is not null) { <MudLink Href="@item.LocationHref">@item.RegionLabel</MudLink> } else { @item.RegionLabel }</td>
+                                        <td data-label="Status">
+                                            <span class="operations-dashboard__status @WorkflowClass(item.WorkflowState)">@WorkflowLabel(item.WorkflowState)</span>
+                                            @if (item.AdministrativePriority == DashboardPriorityView.High)
+                                            {
+                                            <span class="operations-dashboard__priority" title="Administrative priority">High priority</span>
+                                            }
+                                        </td>
+                                        <td data-label="Reported"><time datetime="@item.ReportedAtUtc.ToString("O")" title="@item.ReportedAtUtc.ToLocalTime().ToString("f")">@RelativeTime(item.ReportedAtUtc)</time><span class="operations-dashboard__condition-kind">@item.ReportedAtUtc.ToLocalTime().ToString("dd MMM yyyy")</span></td>
+                                        <td data-label="Open">
+                                            @if (DashboardCaseView.GetCaseHref(item.CaseId) is { } detailHref)
+                                            {
+                                                <MudIconButton Href="@detailHref" Icon="@Icons.Material.Filled.ChevronRight" Size="Size.Small" aria-label="@($"View {item.DisplayReference}")" />
+                                            }
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+        </section>
+
+        <div class="operations-dashboard__primary-grid">
+            <section class="operations-dashboard__panel operations-dashboard__conditions" aria-labelledby="dashboard-conditions-title">
+                <div class="operations-dashboard__panel-heading">
+                    <div>
+                        <h2 id="dashboard-conditions-title">@ConditionChartTitle</h2>
+                        <p>Reported conditions · @PeriodLabel</p>
+                    </div>
+                    <MudLink Href="/reports">View reports</MudLink>
+                </div>
+                @{ var conditionGroups = BuildConditionGroups(); var chartTicks = ChartTicks(); }
+                @if (conditionGroups.Count == 0)
+                {
+                    <SwiftAidStatePanel State="@(IsPartial ? SwiftAidViewState.Information : SwiftAidViewState.Empty)"
+                                        Title="@(IsPartial ? "Condition totals incomplete" : "No condition reports")"
+                                        Description="@(IsPartial ? "Some condition totals are unavailable for this scope." : "There are no condition reports in this selected scope.")" />
+                }
+                else if (conditionGroups.Count == 1)
+                {
+                    var group = conditionGroups[0];
+                    <div class="operations-dashboard__condition-summary">
+                        <span class="operations-dashboard__condition-classification">@group.ClassificationLabel</span>
+                        <div class="operations-dashboard__condition-counts">
+                            @if (Sector != DashboardSectorView.Animal)
+                            {
+                                <div><strong>@(group.Human is { IsSuppressed: false, HumanCaseCount: { } human } ? human.ToString("N0") : SeriesUnavailableLabel(group.Human))</strong><span>Human cases</span></div>
+                            }
+                            @if (Sector != DashboardSectorView.Human)
+                            {
+                                <div><strong>@(group.Animal is { IsSuppressed: false, AnimalReportCount: { } animal } ? animal.ToString("N0") : SeriesUnavailableLabel(group.Animal))</strong><span>Animal reports</span></div>
+                            }
+                        </div>
+                        <p>@group.CategoryLabel <span aria-hidden="true">·</span> @PeriodLabel</p>
+                    </div>
+                }
+                else
+                {
+                    <div class="operations-dashboard__chart-frame" role="group" aria-label="Reported conditions by selected health sector">
+                        <div class="operations-dashboard__chart-axis" aria-hidden="true">
+                            <span class="operations-dashboard__chart-axis-title">Count</span>
+                            <div class="operations-dashboard__chart-axis-ticks">
+                                @foreach (var tick in chartTicks.AsEnumerable().Reverse())
+                                {
+                                    <span>@tick.ToString("N0")</span>
+                                }
+                            </div>
+                        </div>
+                        <div class="operations-dashboard__chart-main">
+                            <div class="operations-dashboard__chart-plot">
+                                <div class="operations-dashboard__chart-grid" aria-hidden="true">
+                                    @foreach (var tick in chartTicks)
+                                    {
+                                        <span class="operations-dashboard__chart-grid-line" style="bottom:@ChartTickPosition(tick).ToString("0.###", CultureInfo.InvariantCulture)%"></span>
+                                    }
+                                </div>
+                                <div class="operations-dashboard__vertical-chart @(Sector == DashboardSectorView.OneHealth ? "operations-dashboard__vertical-chart--one-health" : "")" style="@($"--condition-count:{Math.Min(conditionGroups.Count, 8)}")" role="list" aria-label="Condition totals">
+                                    @foreach (var group in conditionGroups.Take(8))
+                                    {
+                                        <div class="operations-dashboard__bar-group" role="listitem" aria-label="@ConditionGroupAccessibleLabel(group)">
+                                            <div class="operations-dashboard__bar-local-axis" role="group" aria-label="Count scale">
+                                                <span>Count</span>
+                                                <div class="operations-dashboard__bar-local-axis-ticks">
+                                                    @foreach (var tick in chartTicks.AsEnumerable().Reverse())
+                                                    {
+                                                        <span aria-label="Count @tick.ToString("N0")" title="@tick.ToString("N0")">@ChartTickLabel(tick)</span>
+                                                    }
+                                                </div>
+                                            </div>
+                                            <div class="operations-dashboard__bar-pair @(Sector == DashboardSectorView.OneHealth ? "" : "operations-dashboard__bar-pair--single")">
+                                                <div class="operations-dashboard__bar-local-grid" aria-hidden="true">
+                                                    @foreach (var tick in chartTicks)
+                                                    {
+                                                        <span class="operations-dashboard__chart-grid-line" style="bottom:@ChartTickPosition(tick).ToString("0.###", CultureInfo.InvariantCulture)%"></span>
+                                                    }
+                                                </div>
+                                                @if (Sector != DashboardSectorView.Animal)
+                                                {
+                                                    @if (group.Human is null || group.Human.IsSuppressed || !group.Human.HumanCaseCount.HasValue)
+                                                    {
+                                                        <div class="operations-dashboard__bar-series operations-dashboard__bar-series--human">
+                                                            <span class="operations-dashboard__bar-value operations-dashboard__bar-value--state">@(SeriesUnavailableLabel(group.Human))</span>
+                                                        </div>
+                                                    }
+                                                    else
+                                                    {
+                                                        <div class="operations-dashboard__bar-series operations-dashboard__bar-series--human" role="img" aria-label="@SeriesAccessibleLabel(group.CategoryLabel, group.ClassificationLabel, group.Human, DashboardSectorView.Human)">
+                                                            <span class="operations-dashboard__bar-value" title="@group.Human.HumanCaseCount.Value.ToString("N0")" style="top:@BarLabelTop(group.Human.HumanCaseCount.Value)">@ChartValueLabel(group.Human.HumanCaseCount.Value)</span>
+                                                            <span class="operations-dashboard__bar-track" aria-hidden="true">
+                                                                @if (group.Human.HumanCaseCount.Value > 0)
+                                                                {
+                                                                    <span class="operations-dashboard__bar-fill operations-dashboard__bar-fill--human" style="height:@BarHeight(group.Human.HumanCaseCount.Value).ToString("0.###", CultureInfo.InvariantCulture)%"></span>
+                                                                }
+                                                            </span>
+                                                        </div>
+                                                    }
+                                                }
+                                                @if (Sector != DashboardSectorView.Human)
+                                                {
+                                                    @if (group.Animal is null || group.Animal.IsSuppressed || !group.Animal.AnimalReportCount.HasValue)
+                                                    {
+                                                        <div class="operations-dashboard__bar-series operations-dashboard__bar-series--animal">
+                                                            <span class="operations-dashboard__bar-value operations-dashboard__bar-value--state">@(SeriesUnavailableLabel(group.Animal))</span>
+                                                        </div>
+                                                    }
+                                                    else
+                                                    {
+                                                        <div class="operations-dashboard__bar-series operations-dashboard__bar-series--animal" role="img" aria-label="@SeriesAccessibleLabel(group.CategoryLabel, group.ClassificationLabel, group.Animal, DashboardSectorView.Animal)">
+                                                            <span class="operations-dashboard__bar-value" title="@group.Animal.AnimalReportCount.Value.ToString("N0")" style="top:@BarLabelTop(group.Animal.AnimalReportCount.Value)">@ChartValueLabel(group.Animal.AnimalReportCount.Value)</span>
+                                                            <span class="operations-dashboard__bar-track" aria-hidden="true">
+                                                                @if (group.Animal.AnimalReportCount.Value > 0)
+                                                                {
+                                                                    <span class="operations-dashboard__bar-fill operations-dashboard__bar-fill--animal" style="height:@BarHeight(group.Animal.AnimalReportCount.Value).ToString("0.###", CultureInfo.InvariantCulture)%"></span>
+                                                                }
+                                                            </span>
+                                                        </div>
+                                                    }
+                                                }
+                                            </div>
+                                        </div>
+                                    }
+                                </div>
+                            </div>
+                            <div class="operations-dashboard__chart-labels @(Sector == DashboardSectorView.OneHealth ? "operations-dashboard__chart-labels--one-health" : "")" style="@($"--condition-count:{Math.Min(conditionGroups.Count, 8)}")" aria-hidden="true">
+                                @foreach (var group in conditionGroups.Take(8))
+                                {
+                                    <div class="operations-dashboard__chart-label-group">
+                                        <span class="operations-dashboard__bar-category">@group.CategoryLabel</span>
+                                        <span class="operations-dashboard__bar-classification">@group.ClassificationLabel</span>
+                                        @if (Sector != DashboardSectorView.Animal)
+                                        {
+                                            <span class="operations-dashboard__chart-denominator">Human total: @DenominatorLabel(group.Human, DashboardSectorView.Human)</span>
+                                        }
+                                        @if (Sector != DashboardSectorView.Human)
+                                        {
+                                            <span class="operations-dashboard__chart-denominator">Animal total: @DenominatorLabel(group.Animal, DashboardSectorView.Animal)</span>
+                                            <span class="operations-dashboard__animal-affected">Animals affected: @AnimalsAffectedLabel(group.Animal)</span>
+                                        }
+                                    </div>
+                                }
+                            </div>
+                        </div>
+                    </div>
+                }
+                <div class="operations-dashboard__chart-legend" role="group" aria-label="Chart legend">
+                    @if (Sector != DashboardSectorView.Animal)
+                    {
+                        <span><i class="operations-dashboard__legend-dot operations-dashboard__legend-dot--human"></i>Human cases</span>
+                    }
+                    @if (Sector != DashboardSectorView.Human)
+                    {
+                        <span><i class="operations-dashboard__legend-dot operations-dashboard__legend-dot--animal"></i>Animal reports</span>
+                        <span>Animals affected are shown separately</span>
+                    }
+                </div>
+            </section>
+
+            <section class="@($"operations-dashboard__panel operations-dashboard__map-panel operations-dashboard__map-panel--{Sector.ToString().ToLowerInvariant()}")" aria-labelledby="dashboard-map-title" data-ellai-control="dashboard.map" data-bonboarding-anchor="ellai-dashboard-map">
+                <div class="operations-dashboard__panel-heading">
+                    <div>
+                        <h2 id="dashboard-map-title">Map of recent reports</h2>
+                        <p>@SectorLabel(Sector) totals · @PeriodLabel</p>
+                    </div>
+                    <MudLink Href="/surveillance">Open map</MudLink>
+                </div>
+                <OperationsMapSurface Eyebrow="Authorized area totals" Title="Map of recent reports" HeadingTag="h3"
+                                      Description="Privacy-protected counts by area."
+                                      State="MapState" Areas="MapAreas" Details="MapDetails" FocusCountry="@(string.IsNullOrEmpty(RegionCode) ? "SZ" : RegionCode)" UpdatedAtUtc="UpdatedAtUtc"
+                                      ContractVersion="1" PeriodLabel="@PeriodLabel" CompactPreview="true"
+                                      OnRetry="OnRetryAll" />
+            </section>
+        </div>
+
+        <div class="operations-dashboard__secondary-grid">
+            <section class="operations-dashboard__panel operations-dashboard__alerts" aria-labelledby="dashboard-alerts-title">
+                <div class="operations-dashboard__panel-heading">
+                    <div>
+                        <h2 id="dashboard-alerts-title">Recent alerts</h2>
+                        <p>Administrative events in your scope</p>
+                    </div>
+                    <MudLink Href="/monitoring">Open actions</MudLink>
+                </div>
+                @if (Overview.RecentAlerts.Count == 0)
+                {
+                    <SwiftAidStatePanel State="@(IsPartial ? SwiftAidViewState.Information : SwiftAidViewState.Empty)"
+                                        Title="@(IsPartial ? "Alerts unavailable" : "No recent alerts")"
+                                        Description="@(IsPartial ? "Some administrative events are unavailable for this scope." : "There are no administrative events in this selected scope.")" />
+                }
+                else
+                {
+                    <ul class="operations-dashboard__alert-list">
+                        @foreach (var alert in Overview.RecentAlerts.OrderByDescending(alert => alert.OccurredAtUtc).Take(5))
+                        {
+                            <li>
+                                <span class="operations-dashboard__alert-icon" aria-hidden="true"><MudIcon Icon="@AlertIcon(alert.Kind)" /></span>
+                                <div class="operations-dashboard__alert-copy">
+                                    <strong>@alert.Label</strong>
+                                    <span>@alert.RegionLabel · @alert.OccurredAtUtc.ToLocalTime().ToString("g")</span>
+                                </div>
+                            </li>
+                        }
+                    </ul>
+                }
+            </section>
+        </div>
+
+        <footer class="operations-dashboard__freshness @FreshnessClass(evaluatedFreshness)" role="status">
+            <span>@Overview.AuthorizedScopeLabel</span>
+            <span>@(Overview.Completeness == DashboardCompletenessView.Complete ? "Complete reporting" : "Partial reporting")</span>
+            <span>@FreshnessLabel(evaluatedFreshness) · Updated @Overview.AsOfUtc.ToLocalTime().ToString("g")</span>
+        </footer>
+    }
+</section>
+
+@code {
+    public string ComponentId => EllaiDashboardUiManifest.Definition.ComponentId;
+    public EllaiUiManifest Describe() => EllaiDashboardUiManifest.Definition;
+    public EllaiUiState GetState() => new(ComponentId, OverviewState == OperationsSurfaceState.Loading, false,
+        EllaiDashboardUiManifest.Controls.Select(control => new UiControlState(control.ControlId,
+            control.ControlId is "dashboard.summary" or "dashboard.recent-cases" or "dashboard.map"
+                ? OverviewState == OperationsSurfaceState.Populated && Overview is not null
+                    ? UiObservationState.Ready : UiObservationState.Unmounted
+                : UiObservationState.Ready)).ToArray());
+
+    private static readonly DashboardPeriodView ThirtyDays = DashboardPeriodView.Days30;
+    private static readonly DashboardPeriodView NinetyDays = DashboardPeriodView.Days90;
+    private static readonly string AllRegions = string.Empty;
+    private static readonly DashboardKpiViewKind[] KpiOrder =
+    [
+        DashboardKpiViewKind.ActiveCases,
+        DashboardKpiViewKind.AdministrativeHighPriorityCases,
+        DashboardKpiViewKind.NewOperationalAlerts,
+        DashboardKpiViewKind.ClosedInWindow
+    ];
+    private static readonly (DashboardSectorView Value, string Label)[] SectorOptions =
+    [
+        (DashboardSectorView.Human, "Human Health"),
+        (DashboardSectorView.Animal, "Animal Health"),
+        (DashboardSectorView.OneHealth, "One Health")
+    ];
+
+    [Parameter] public DashboardOverviewView? Overview { get; set; }
+    [Parameter] public OperationsSurfaceState OverviewState { get; set; } = OperationsSurfaceState.Loading;
+    [Parameter] public SwiftAid.Contracts.Surveillance.SurveillanceMapDetails? MapDetails { get; set; }
+    [Parameter] public OperationsSurfaceState MapState { get; set; } = OperationsSurfaceState.Unavailable;
+    [Parameter] public IReadOnlyList<OperationsMapSurface.AreaAggregateView> MapAreas { get; set; } = Array.Empty<OperationsMapSurface.AreaAggregateView>();
+    [Parameter] public IReadOnlyList<OperationsMapSurface.AreaAggregateView> RegionOptions { get; set; } = Array.Empty<OperationsMapSurface.AreaAggregateView>();
+    [Parameter] public DashboardPeriodView Period { get; set; } = DashboardPeriodView.Days30;
+    [Parameter] public DashboardSectorView Sector { get; set; } = DashboardSectorView.Human;
+    [Parameter] public string RegionCode { get; set; } = AllRegions;
+    [Parameter] public DateTimeOffset? UpdatedAtUtc { get; set; }
+    [Parameter] public string PeriodLabel { get; set; } = "Last 30 days";
+    [Parameter] public EventCallback<DashboardPeriodView> OnPeriodChanged { get; set; }
+    [Parameter] public EventCallback<DashboardSectorView> OnSectorChanged { get; set; }
+    [Parameter] public EventCallback<string> OnRegionChanged { get; set; }
+    [Parameter] public EventCallback OnRetryAll { get; set; }
+    [Parameter] public RenderFragment? Actions { get; set; }
+
+    private string AuthorizedScopeLabel => Overview?.AuthorizedScopeLabel ?? "Authorized scope";
+    private string OverviewStateTitle => StateTitle(OverviewState);
+    private string OverviewStateDescription => OverviewState switch
+    {
+        OperationsSurfaceState.Loading => "Loading current information.",
+        OperationsSurfaceState.Offline => "Reconnect and try again to refresh this information.",
+        OperationsSurfaceState.Denied => "Your account does not have access to this information.",
+        OperationsSurfaceState.Error => "Check your connection and try again.",
+        _ => "Dashboard information is not available right now."
+    };
+
+    private static string SectorCountLabel(DashboardSectorView sector) => sector == DashboardSectorView.Human ? "human cases" : "animal reports";
+    private static string SectorLabel(DashboardSectorView sector) => sector switch
+    {
+        DashboardSectorView.Human => "Human",
+        DashboardSectorView.Animal => "Animal",
+        _ => "One Health"
+    };
+
+    private static string SectorIcon(DashboardSectorView sector) => sector switch
+    {
+        DashboardSectorView.Human => Icons.Material.Filled.Person,
+        DashboardSectorView.Animal => Icons.Material.Filled.Pets,
+        _ => Icons.Material.Filled.Public
+    };
+    private string ConditionChartTitle => Sector switch
+    {
+        DashboardSectorView.Human => "Cases by reported condition",
+        DashboardSectorView.Animal => "Animal reports by category",
+        _ => "Human cases and animal reports by condition"
+    };
+    private IReadOnlyList<DashboardConditionGroup> BuildConditionGroups() =>
+        (Overview?.Categories ?? Array.Empty<DashboardCategoryView>())
+            .GroupBy(category => (category.CategoryLabel, category.ClassificationLabel))
+            .Select(group => new DashboardConditionGroup(
+                group.Key.CategoryLabel,
+                group.Key.ClassificationLabel,
+                group.FirstOrDefault(category => category.Sector == DashboardSectorView.Human),
+                group.FirstOrDefault(category => category.Sector == DashboardSectorView.Animal)))
+            .OrderBy(group => group.CategoryLabel, StringComparer.CurrentCultureIgnoreCase)
+            .ThenBy(group => group.ClassificationLabel, StringComparer.CurrentCultureIgnoreCase)
+            .ToArray();
+
+    private (double Maximum, double Step) ChartScale
+    {
+        get
+        {
+            var dataMaximum = (Overview?.Categories ?? Array.Empty<DashboardCategoryView>())
+            .Where(category => !category.IsSuppressed)
+            .SelectMany(category => Sector switch
+            {
+                DashboardSectorView.Human => new[] { category.HumanCaseCount },
+                DashboardSectorView.Animal => new[] { category.AnimalReportCount },
+                _ => new[] { category.HumanCaseCount, category.AnimalReportCount }
+            })
+            .Where(count => count.HasValue)
+            .Select(count => count!.Value)
+            .DefaultIfEmpty(0)
+            .Max();
+
+            if (dataMaximum <= 0)
+                return (0, 1);
+
+            if (dataMaximum <= 4)
+                return (Math.Ceiling((double)dataMaximum), 1);
+
+            var rawStep = dataMaximum / 4d;
+            var magnitude = Math.Pow(10, Math.Floor(Math.Log10(rawStep)));
+            var normalized = rawStep / magnitude;
+            var multiplier = new[] { 1d, 2d, 5d, 10d }
+                .OrderBy(candidate => Math.Abs(candidate - normalized))
+                .First();
+            var step = multiplier * magnitude;
+            var maximum = Math.Ceiling(dataMaximum / step) * step;
+            return (maximum, step);
+        }
+    }
+
+    private IReadOnlyList<double> ChartTicks()
+    {
+        var scale = ChartScale;
+        if (scale.Maximum <= 0)
+            return [0];
+
+        var intervalCount = (int)Math.Round(scale.Maximum / scale.Step);
+        return Enumerable.Range(0, intervalCount + 1).Select(index => index * scale.Step).ToArray();
+    }
+
+    private double ChartTickPosition(double tick) => ChartScale.Maximum <= 0
+        ? 0
+        : Math.Clamp(tick / ChartScale.Maximum * 100, 0, 100);
+
+    private double BarHeight(long value) => ChartScale.Maximum <= 0 || value <= 0
+        ? 0
+        : Math.Clamp(value / ChartScale.Maximum * 100, 0, 100);
+
+    private string BarLabelTop(long value)
+    {
+        var labelTopRem = 1.2 + (100 - BarHeight(value)) / 100d * 8.8 - 1.1;
+        return Math.Max(0.05, labelTopRem).ToString("0.##", CultureInfo.InvariantCulture) + "rem";
+    }
+
+    private static string ChartValueLabel(long value)
+    {
+        if (value < 1_000_000)
+            return value.ToString("N0");
+
+        var divisor = value >= 1_000_000_000 ? 1_000_000_000d : 1_000_000d;
+        var suffix = value >= 1_000_000_000 ? "B" : "M";
+        return $"{(value / divisor).ToString("0.#")} {suffix}".Replace(" ", string.Empty, StringComparison.Ordinal);
+    }
+
+    private static string ChartTickLabel(double value)
+    {
+        if (value < 1_000)
+            return value.ToString("N0");
+
+        var divisor = value >= 1_000_000_000 ? 1_000_000_000d
+            : value >= 1_000_000 ? 1_000_000d
+            : 1_000d;
+        var suffix = value >= 1_000_000_000 ? "B"
+            : value >= 1_000_000 ? "M"
+            : "k";
+        return $"{(value / divisor).ToString("0.#")}{suffix}";
+    }
+
+    private static string SeriesUnavailableLabel(DashboardCategoryView? category) => category switch
+    {
+        null => "Unavailable",
+        { IsSuppressed: true } => "Withheld",
+        _ => "Unavailable"
+    };
+
+    private static string SeriesAccessibleLabel(string condition, string classification, DashboardCategoryView category, DashboardSectorView sector)
+    {
+        var count = sector == DashboardSectorView.Human ? category.HumanCaseCount : category.AnimalReportCount;
+        var valueLabel = sector == DashboardSectorView.Human ? "human cases" : "animal reports";
+        var result = $"{condition}, {classification}: {count.GetValueOrDefault():N0} {valueLabel}; " +
+            $"total {DenominatorLabel(category, sector)}";
+        if (sector == DashboardSectorView.Animal)
+        {
+            result += category.AnimalsAffected.HasValue
+                ? $"; {category.AnimalsAffected.Value:N0} animals affected"
+                : "; animals affected unavailable";
+        }
+        return result;
+    }
+
+    private string ConditionGroupAccessibleLabel(DashboardConditionGroup group)
+    {
+        var human = group.Human is null || group.Human.IsSuppressed || !group.Human.HumanCaseCount.HasValue
+            ? $"Human: {SeriesUnavailableLabel(group.Human)}"
+            : $"Human: {group.Human.HumanCaseCount.Value:N0} cases";
+        var animal = group.Animal is null || group.Animal.IsSuppressed || !group.Animal.AnimalReportCount.HasValue
+            ? $"Animal: {SeriesUnavailableLabel(group.Animal)}"
+            : $"Animal: {group.Animal.AnimalReportCount.Value:N0} reports; " +
+                (group.Animal.AnimalsAffected.HasValue
+                    ? $"{group.Animal.AnimalsAffected.Value:N0} animals affected"
+                    : "animals affected unavailable");
+        human += $"; total {DenominatorLabel(group.Human, DashboardSectorView.Human)}";
+        animal += $"; total {DenominatorLabel(group.Animal, DashboardSectorView.Animal)}";
+        var classification = $"Classification: {group.ClassificationLabel}.";
+        return Sector switch
+        {
+            DashboardSectorView.Human => $"{group.CategoryLabel}. {classification} {human}.",
+            DashboardSectorView.Animal => $"{group.CategoryLabel}. {classification} {animal}.",
+            _ => $"{group.CategoryLabel}. {classification} {human}. {animal}."
+        };
+    }
+
+    private static string DenominatorLabel(DashboardCategoryView? category, DashboardSectorView sector) =>
+        category is null ? "unavailable" :
+        category.IsSuppressed ? "withheld" :
+        category.Denominator.HasValue ? $"{category.Denominator.Value:N0} {SectorCountLabel(sector)}" : "unavailable";
+
+    private static string AnimalsAffectedLabel(DashboardCategoryView? category) =>
+        category is null ? "unavailable" :
+        category.IsSuppressed ? "withheld" :
+        category.AnimalsAffected.HasValue ? category.AnimalsAffected.Value.ToString("N0") : "unavailable";
+
+    private sealed record DashboardConditionGroup(
+        string CategoryLabel,
+        string ClassificationLabel,
+        DashboardCategoryView? Human,
+        DashboardCategoryView? Animal);
+
+    private static string KpiLabel(DashboardKpiViewKind kind) => kind switch
+    {
+        DashboardKpiViewKind.ActiveCases => "Active cases",
+        DashboardKpiViewKind.AdministrativeHighPriorityCases => "High priority",
+        DashboardKpiViewKind.NewOperationalAlerts => "New alerts",
+        DashboardKpiViewKind.ClosedInWindow => "Closed cases",
+        _ => "Cases"
+    };
+    private static string KpiCaption(DashboardKpiViewKind kind) => kind switch
+    {
+        DashboardKpiViewKind.ActiveCases => "Currently open",
+        DashboardKpiViewKind.AdministrativeHighPriorityCases => "Administrative priority",
+        DashboardKpiViewKind.NewOperationalAlerts => "In selected period",
+        DashboardKpiViewKind.ClosedInWindow => "In selected period",
+        _ => string.Empty
+    };
+    private static string KpiClass(DashboardKpiViewKind kind) => kind switch
+    {
+        DashboardKpiViewKind.AdministrativeHighPriorityCases => "warning",
+        DashboardKpiViewKind.NewOperationalAlerts => "alert",
+        DashboardKpiViewKind.ClosedInWindow => "success",
+        _ => "primary"
+    };
+    private static string KpiIcon(DashboardKpiViewKind kind) => kind switch
+    {
+        DashboardKpiViewKind.ActiveCases => Icons.Material.Filled.FolderOpen,
+        DashboardKpiViewKind.AdministrativeHighPriorityCases => Icons.Material.Filled.PriorityHigh,
+        DashboardKpiViewKind.NewOperationalAlerts => Icons.Material.Filled.NotificationsActive,
+        DashboardKpiViewKind.ClosedInWindow => Icons.Material.Filled.TaskAlt,
+        _ => Icons.Material.Filled.Assessment
+    };
+    private static bool CanShowKpi(DashboardKpiViewKind kind, DashboardKpiView metric) =>
+        metric.Kind == kind && metric.State == DashboardValueViewState.Available && metric.Value.HasValue;
+
+    private static string KpiStateLabel(DashboardValueViewState state) =>
+        state == DashboardValueViewState.Suppressed ? "Withheld" : "Unavailable";
+
+    private static string FreshnessLabel(DashboardFreshnessView state) => state switch
+    {
+        DashboardFreshnessView.Current => "Current",
+        DashboardFreshnessView.Stale => "May be out of date",
+        _ => "Update time unavailable"
+    };
+    private static string FreshnessClass(DashboardFreshnessView state) => state switch
+    {
+        DashboardFreshnessView.Stale => "operations-dashboard__freshness--stale",
+        DashboardFreshnessView.Unknown => "operations-dashboard__freshness--unknown",
+        _ => "operations-dashboard__freshness--current"
+    };
+
+    private bool IsPartial => Overview?.Completeness == DashboardCompletenessView.Partial;
+    private DashboardFreshnessView EvaluateFreshness()
+    {
+        if (Overview is null || Overview.Freshness == DashboardFreshnessView.Unknown || !Overview.FreshnessExpiresAtUtc.HasValue)
+            return DashboardFreshnessView.Unknown;
+
+        return Overview.Freshness == DashboardFreshnessView.Stale ||
+            Overview.FreshnessExpiresAtUtc.Value <= DateTimeOffset.UtcNow
+            ? DashboardFreshnessView.Stale
+            : DashboardFreshnessView.Current;
+    }
+
+    private static string AlertIcon(DashboardAlertViewKind kind) => kind switch
+    {
+        DashboardAlertViewKind.NewCaseReceived => Icons.Material.Filled.FiberNew,
+        DashboardAlertViewKind.PriorityReviewRequested => Icons.Material.Filled.PriorityHigh,
+        DashboardAlertViewKind.FollowUpDue => Icons.Material.Filled.EventNote,
+        _ => Icons.Material.Filled.Notifications
+    };
+    private static string WorkflowLabel(DashboardWorkflowViewState state) => state switch
+    {
+        DashboardWorkflowViewState.Open => "New",
+        DashboardWorkflowViewState.UnderReview => "In progress",
+        DashboardWorkflowViewState.FollowUp => "Follow-up",
+        DashboardWorkflowViewState.Escalated => "Escalated",
+        DashboardWorkflowViewState.Closed => "Closed",
+        _ => "Open"
+    };
+    private static string RelativeTime(DateTimeOffset value)
+    {
+        var elapsed = DateTimeOffset.UtcNow - value.ToUniversalTime();
+        if (elapsed < TimeSpan.Zero)
+            return "Recently";
+        if (elapsed < TimeSpan.FromHours(1))
+            return $"{Math.Max(1, (int)elapsed.TotalMinutes)} min ago";
+        if (elapsed < TimeSpan.FromDays(1))
+            return $"{(int)elapsed.TotalHours} hr ago";
+        if (elapsed < TimeSpan.FromDays(7))
+        {
+            var days = Math.Max(1, (int)elapsed.TotalDays);
+            return days == 1 ? "1 day ago" : $"{days} days ago";
+        }
+        return value.ToLocalTime().ToString("d");
+    }
+    private static string WorkflowClass(DashboardWorkflowViewState state) => state switch
+    {
+        DashboardWorkflowViewState.Open => "operations-dashboard__status--new",
+        DashboardWorkflowViewState.UnderReview => "operations-dashboard__status--active",
+        DashboardWorkflowViewState.FollowUp => "operations-dashboard__status--followup",
+        DashboardWorkflowViewState.Escalated => "operations-dashboard__status--escalated",
+        DashboardWorkflowViewState.Closed => "operations-dashboard__status--closed",
+        _ => string.Empty
+    };
+    private static string StateTitle(OperationsSurfaceState state) => state switch
+    {
+        OperationsSurfaceState.Loading => "Loading dashboard",
+        OperationsSurfaceState.Offline => "You are offline",
+        OperationsSurfaceState.Denied => "You do not have access to this information",
+        OperationsSurfaceState.Error => "Could not load dashboard",
+        _ => "Dashboard unavailable"
+    };
+}

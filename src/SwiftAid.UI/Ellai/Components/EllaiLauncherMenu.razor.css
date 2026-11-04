@@ -1,0 +1,44 @@
+.ellai-launcher-menu {
+    position: fixed;
+    z-index: 15;
+    inset-block-end: 20vh;
+    inset-inline-end: max(1rem, env(safe-area-inset-right));
+}
+
+.ellai-launcher-menu ::deep .mud-fab {
+    box-shadow: none;
+}
+
+.ellai-launcher-menu ::deep .ellai-launcher-menu__button {
+    inline-size: 2.75rem;
+    min-inline-size: 2.75rem;
+    block-size: 2.75rem;
+    min-block-size: 2.75rem;
+    padding: 0;
+}
+
+.ellai-launcher-menu ::deep .mud-fab-menu-item {
+    inline-size: max-content;
+    min-inline-size: 3rem;
+    block-size: 3rem;
+    min-block-size: 3rem;
+    padding-inline: 0.5rem;
+    white-space: nowrap;
+    box-shadow: none;
+}
+
+.ellai-launcher-menu ::deep .mud-fab-menu-open .mud-fab-menu-item {
+    opacity: 1 !important;
+    transform: translate(0) !important;
+    transition: none !important;
+}
+
+.ellai-launcher-menu ::deep .mud-fab-menu-item .mud-icon-root {
+    color: inherit;
+}
+
+.ellai-launcher-menu ::deep .ellai-launcher-menu__button:focus-visible,
+.ellai-launcher-menu ::deep .mud-fab-menu-item:focus-visible {
+    outline: 3px solid var(--sa-focus);
+    outline-offset: 2px;
+}

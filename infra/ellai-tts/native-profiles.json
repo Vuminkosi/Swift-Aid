@@ -1,0 +1,26 @@
+[
+    {
+        "voiceId":  "swiftaid-mms-sna-v1",
+        "language":  "sna",
+        "modelId":  "facebook/mms-tts-sna",
+        "revision":  "129b8ba61c8dbce8daaeb1a134e2cb45c29870ad",
+        "sha256":  "b5260f7ee0fcf240fdebe2b2d09c517c472eaaba568fbb8a2dda06b9c2eb5e1c",
+        "directory":  "/native/mms-tts-sna/129b8ba61c8dbce8daaeb1a134e2cb45c29870ad"
+    },
+    {
+        "voiceId":  "swiftaid-mms-nya-v1",
+        "language":  "nya",
+        "modelId":  "facebook/mms-tts-nya",
+        "revision":  "bd19fd2c0facbd46412426a262ca6f04af74e32c",
+        "sha256":  "961c7c280547a63abf631167897c09f153bd8c8adaa8fe6eb5bb7db0409007c9",
+        "directory":  "/native/mms-tts-nya/bd19fd2c0facbd46412426a262ca6f04af74e32c"
+    },
+    {
+        "voiceId":  "swiftaid-mms-tso-v1",
+        "language":  "tso",
+        "modelId":  "facebook/mms-tts-tso",
+        "revision":  "4eee11614c5a79417a5f41309af5398ae39ace2b",
+        "sha256":  "79509b0959ae9b57d81d665ce59df5b496ce64983ffe1697b29e42dd1ff60894",
+        "directory":  "/native/mms-tts-tso/4eee11614c5a79417a5f41309af5398ae39ace2b"
+    }
+]

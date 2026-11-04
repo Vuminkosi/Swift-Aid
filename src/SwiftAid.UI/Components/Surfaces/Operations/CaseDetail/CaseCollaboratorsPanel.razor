@@ -1,0 +1,190 @@
+@using SwiftAid.Contracts.Cases
+@using Microsoft.Extensions.DependencyInjection
+@inject IServiceProvider Services
+@implements IDisposable
+
+@if (_loading || _failed || _timeline?.Collaboration is not null || _message is not null)
+{
+    <section class="collaborators" aria-labelledby="collaborators-heading" aria-busy="@(_loading || _sending).ToString().ToLowerInvariant()">
+        <div class="collaborators__heading">
+            <MudText Typo="Typo.subtitle1" HtmlTag="h2" id="collaborators-heading">Collaborator access</MudText>
+            <MudButton Variant="Variant.Text" Disabled="@(_loading || _sending || _pending is not null || _grantEditing)" OnClick="LoadAsync">Refresh access</MudButton>
+        </div>
+        @if (_loading)
+        {
+            <MudText role="status">Loading collaborator access…</MudText>
+        }
+        else if (_failed)
+        {
+            <MudText role="status">Access details could not be loaded. Try Refresh access.</MudText>
+        }
+        else if (_timeline?.Collaboration is { } view)
+        {
+            <MudText Typo="Typo.body2">These grants apply only to this case. The accountable owner stays the same.</MudText>
+            @if (view.CanGrant && _selected is null)
+            {
+                <CaseCollaboratorGrantForm @key="CaseId" CaseId="CaseId" ExpectedVersion="_timeline.Header.AggregateVersion"
+                    CandidatesClient="CandidatesClient" CommandClient="CommandClient" OnChanged="LoadAsync" OnStatus="@(value => _message = value)" OnEditingChanged="@(value => _grantEditing = value)" />
+            }
+            @if (view.Grants.Count == 0)
+            {
+                <MudText Typo="Typo.body2">No collaborator grants have been recorded through case management.</MudText>
+            }
+            <ul class="collaborators__list">
+                @foreach (var grant in view.Grants)
+                {
+                    <li @key="grant.GrantId">
+                        <div><strong>@(grant.SafeActorDisplayLabel ?? "Name unavailable")</strong><span class="collaborators__status">@Status(grant)</span></div>
+                        <p>@string.Join(", ", grant.Operations.Select(OperationLabel))</p>
+                        <p>Expires @grant.ExpiresAtUtc.ToUniversalTime().ToString("u") (UTC)</p>
+                        @if (!grant.IsRevoked && _selected is null && !_grantEditing)
+                        {
+                            <MudButton Variant="Variant.Outlined" Color="Color.Warning" Class="collaborators__action" OnClick="@(() => Select(grant))">Review revocation</MudButton>
+                        }
+                    </li>
+                }
+            </ul>
+            @if (_selected is { } selected)
+            {
+                <div class="collaborators__review" role="group" aria-label="Review collaborator revocation">
+                    <MudText Typo="Typo.subtitle2">Revoke access for @(selected.SafeActorDisplayLabel ?? "this collaborator")?</MudText>
+                    <MudText Typo="Typo.body2">This removes this grant. Other permissions may still allow access. Offline devices reconcile when they reconnect.</MudText>
+                    <MudTextField @ref="_reasonField" T="string" Label="Reason for revocation" @bind-Value="_reason" Immediate="true" Required="true" MaxLength="2000" Lines="3" Disabled="@(_sending || _pending is not null)" />
+                    <div class="collaborators__buttons">
+                        <MudButton Variant="Variant.Filled" Color="Color.Warning" Class="collaborators__action" Disabled="@(_sending || string.IsNullOrWhiteSpace(_reason))" OnClick="RevokeAsync">@(_sending ? "Submitting…" : _pending is not null ? "Retry revocation" : "Confirm revocation")</MudButton>
+                        <MudButton Variant="Variant.Text" Disabled="@(_sending || _pending is not null)" OnClick="Cancel">Cancel</MudButton>
+                    </div>
+                </div>
+            }
+        }
+        @if (_message is not null)
+        {
+            <MudText role="status" aria-live="polite">@_message</MudText>
+        }
+    </section>
+}
+
+@code {
+    [Parameter] public Guid CaseId { get; set; }
+    [Parameter] public ICaseTimelineClient? TimelineClient { get; set; }
+    [Parameter] public ICaseCommandClient? CommandClient { get; set; }
+    [Parameter] public ICaseCollaboratorCandidatesClient? CandidatesClient { get; set; }
+    private bool _grantEditing;
+    private CaseTimeline? _timeline;
+    private CaseCollaboratorGrantView? _selected;
+    private CaseCommandInput? _pending;
+    private MudTextField<string>? _reasonField;
+    private string _reason = "";
+    private string? _message;
+    private Guid? _loadedCase;
+    private bool _loading, _failed, _sending, _disposed, _focusReason;
+    private long _generation;
+    private CancellationTokenSource _lifetime = new();
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loadedCase != CaseId)
+        {
+            _lifetime.Cancel();
+            _lifetime.Dispose();
+            _lifetime = new CancellationTokenSource();
+            _generation++;
+            _loadedCase = CaseId;
+            _selected = null;
+            _pending = null;
+            _message = null;
+            _sending = false;
+            _grantEditing = false;
+            await LoadAsync();
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_focusReason && _reasonField is not null)
+        {
+            _focusReason = false;
+            await _reasonField.FocusAsync();
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        var generation = ++_generation;
+        var id = CaseId;
+        var token = _lifetime.Token;
+        _timeline = null;
+        _loading = true;
+        _failed = false;
+        try
+        {
+            var client = TimelineClient ?? Services.GetService<ICaseTimelineClient>();
+            if (client is null) throw new InvalidOperationException();
+            var result = await client.GetAsync(id, 1, token);
+            if (_disposed || generation != _generation) return;
+            if (result.Access == CaseTimelineAccess.Found && result.Timeline?.Header.CaseId == id)
+                _timeline = result.Timeline;
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { }
+        catch (Exception) { if (!_disposed && generation == _generation) _failed = true; }
+        finally { if (!_disposed && generation == _generation) _loading = false; }
+    }
+
+    private void Select(CaseCollaboratorGrantView grant)
+    {
+        _selected = grant;
+        _reason = "";
+        _message = null;
+        _focusReason = true;
+    }
+
+    private void Cancel() { _selected = null; _reason = ""; }
+
+    private async Task RevokeAsync()
+    {
+        if (_sending || _selected is null || _timeline?.Collaboration is null || string.IsNullOrWhiteSpace(_reason)) return;
+        var generation = _generation;
+        var token = _lifetime.Token;
+        var id = CaseId;
+        _pending ??= new CaseCommandInput("RevokeCaseCollaborator", null, _reason.Trim(), null, null, null,
+            _timeline.Header.AggregateVersion, CommandId: Guid.NewGuid(), GrantId: _selected.GrantId);
+        _sending = true;
+        try
+        {
+            var client = CommandClient ?? Services.GetService<ICaseCommandClient>();
+            if (client is null) throw new InvalidOperationException();
+            var result = await client.SendAsync(id, _pending, token);
+            if (_disposed || generation != _generation) return;
+            if (result.Status is CaseCommandStatus.Accepted or CaseCommandStatus.Replayed)
+            {
+                _message = "Collaborator grant revoked.";
+                _pending = null;
+                Cancel();
+                _sending = false;
+                await LoadAsync();
+            }
+            else if (result.Status is CaseCommandStatus.Conflict or CaseCommandStatus.Denied or CaseCommandStatus.Invalid)
+            {
+                _message = "Revocation was not accepted. Review the refreshed access details before trying again.";
+                _pending = null;
+                Cancel();
+                _sending = false;
+                await LoadAsync();
+            }
+            else _message = "The result is not confirmed. Retry sends the same revocation request.";
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { }
+        catch (Exception) { if (!_disposed && generation == _generation) _message = "The result is not confirmed. Retry sends the same revocation request."; }
+        finally { if (!_disposed && generation == _generation) _sending = false; }
+    }
+
+    private static string Status(CaseCollaboratorGrantView grant) => grant.IsRevoked ? "Revoked" : grant.ExpiresAtUtc <= DateTimeOffset.UtcNow ? "Expired" : "Active";
+    private static string OperationLabel(string operation) => operation switch
+    {
+        "ReadCase" => "Read case", "ReadAttachment" => "Read attachments", "Synchronize" => "Offline sync",
+        "RecordObservation" => "Record observations", "ManageFollowUp" => "Manage follow-ups", "ManageEscalation" => "Manage escalations",
+        _ => "Unknown permission"
+    };
+
+    public void Dispose() { _disposed = true; _generation++; _lifetime.Cancel(); _lifetime.Dispose(); }
+}

@@ -359,6 +359,9 @@ paket-files/
 **/__pycache__/
 *.pyc
 
+# uv-managed project environments stay local; .python-version is the committed pin
+**/.venv/
+
 # Cake - Uncomment if you are using it
 #tools/**
 #!tools/packages.config
@@ -450,16 +453,50 @@ FodyWeavers.xsd
 
 # Local environment credentials
 /.env
+/.mcp.json
+/.nats-overrides.env
+# Firebase keys and platform service configs are local secrets and stay untracked.
+/secrets/
+firebase-adminsdk*.json
+swiftaid-fcm-service-account.json
+**/google-services.json
+**/GoogleService-Info.plist
 *.zip
 /.codex-temp
 /.codex
+/designs
+/docs/ellai
+/design
+infra/.env-backup
+/.tmp-smoke
+/infra/testing
 
-
-docs/CHANGELOG.md
-docs/COMPETITION-CHECKLIST.md
-docs/DOCUMENT-INTEGRITY.md
-docs/document-validation.json
-docs/RULES-DECISIONS.md
-docs/RULES-SOURCE-REGISTER.md
+# Keep the owner-requested Ellai policy updates visible while retaining the
+# directory's existing ignore-by-default behavior.
+!/docs/ellai/
+/docs/ellai/*
+!/docs/ellai/DECISIONS.md
+!/docs/ellai/KNOWN-LIMITATIONS.md
+!/docs/ellai/CAPABILITIES.md
+!/docs/ellai/RUNBOOK.md
+!/docs/ellai/REPOSITORY-MAP.md
+!/docs/ellai/IMPLEMENTATION-STATUS.md
+!/docs/ellai/ellai-spec.md
+!/docs/ellai/ellai-implementation.md
+!/docs/ellai/ellai-system-instruction.md
+!/docs/ellai/requirements/
+/docs/ellai/requirements/*
+!/docs/ellai/requirements/ellai-voice-implementation.md
+!/docs/ellai/requirements/ellai-real-tools-multiturn-progress.md
+/docs/ellai
+implementation.md
 implementation.md
 spec.md
+src/SwiftAid.Intelligence/packages.lock.json
+src/SwiftAid.Application/packages.lock.json
+src/SwiftAid.Client/packages.lock.json
+src/SwiftAid.Contracts/packages.lock.json
+src/SwiftAid.Domain/packages.lock.json
+src/SwiftAid.GuestIntake/packages.lock.json
+src/SwiftAid.Intelligence/packages.lock.json
+checklist.md

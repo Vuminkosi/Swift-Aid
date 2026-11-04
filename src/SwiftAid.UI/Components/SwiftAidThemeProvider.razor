@@ -1,0 +1,88 @@
+@implements IAsyncDisposable
+@inject IJSRuntime JSRuntime
+@inject IServiceProvider Services
+@using SwiftAid.UI.Components.Theme
+
+<MudThemeProvider Theme="_theme" IsDarkMode="_isDarkMode" />
+
+@code {
+    private readonly MudTheme _theme = SwiftAidBrandTheme.Create();
+    private IJSObjectReference? _themeModule;
+    private DotNetObjectReference<SwiftAidThemeProvider>? _dotNetReference;
+    private bool _isDarkMode;
+    private string _preference = "system";
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        try
+        {
+            _themeModule = await JSRuntime.InvokeAsync<IJSObjectReference>(
+                "import",
+                "./_content/SwiftAid.UI/Components/SwiftAidThemeProvider.razor.js");
+            _dotNetReference = DotNetObjectReference.Create(this);
+            _isDarkMode = await _themeModule.InvokeAsync<bool>("watchSystemTheme", _dotNetReference);
+            _preference = await _themeModule.InvokeAsync<string>("getThemePreference");
+            await ApplyHostThemeAsync();
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (JSException)
+        {
+            // Keep the accessible light palette when system theme detection is unavailable.
+        }
+        catch (InvalidOperationException)
+        {
+            // Static prerendering does not provide a JavaScript runtime.
+        }
+    }
+
+    [JSInvokable]
+    public Task SetThemeState(string preference, bool isDarkMode) => InvokeAsync(async () =>
+    {
+        _preference = NormalizePreference(preference);
+        _isDarkMode = isDarkMode;
+        await ApplyHostThemeAsync();
+        StateHasChanged();
+    });
+
+    private async Task ApplyHostThemeAsync()
+    {
+        if (Services.GetService(typeof(IThemeAppearanceSink)) is not IThemeAppearanceSink sink)
+        {
+            return;
+        }
+
+        try
+        {
+            await sink.ApplyAsync(_preference, _isDarkMode);
+        }
+        catch (Exception)
+        {
+            // Native chrome is supplementary; CSS and MudBlazor retain the selected theme.
+        }
+    }
+
+    private static string NormalizePreference(string? preference) => preference is "light" or "dark" ? preference : "system";
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_themeModule is not null)
+        {
+            try
+            {
+                await _themeModule.InvokeVoidAsync("stopWatchingSystemTheme");
+                await _themeModule.DisposeAsync();
+            }
+            catch (JSDisconnectedException)
+            {
+                // The browser circuit or native WebView is already closing.
+            }
+        }
+
+        _dotNetReference?.Dispose();
+    }
+}

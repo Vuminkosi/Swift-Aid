@@ -1,0 +1,30 @@
+<div class="account-entry-surface">
+    <header class="account-entry-surface__header">
+        <a class="account-entry-surface__back" href="/" aria-label="Back to SwiftAid home">
+            <MudIcon Icon="@Icons.Material.Filled.ArrowBack" aria-hidden="true" />
+            <span>Back</span>
+        </a>
+        <a class="account-entry-surface__brand-lockup" href="/" aria-label="SwiftAid home">
+            <img src="_content/SwiftAid.UI/assets/swiftaid-icon.png" alt="" />
+            <span>SwiftAid</span>
+        </a>
+        <span class="account-entry-surface__header-balance" aria-hidden="true"></span>
+    </header>
+    <section class="account-entry-surface__brand" aria-label="About SwiftAid">
+        <div class="account-entry-surface__emblem" aria-hidden="true">
+            <img src="_content/SwiftAid.UI/assets/swiftaid-icon.png" alt="" />
+        </div>
+        <p class="account-entry-surface__eyebrow">One Health. Stronger communities.</p>
+        <h2>Healthier people.<br />Safer communities.<br />Brighter tomorrows.</h2>
+        <p>Share a concern, find community support, and make the next step clearer.</p>
+        <a href="/report">Report a concern without signing in <span aria-hidden="true">→</span></a>
+    </section>
+    <div class="account-entry-surface__content">
+        @ChildContent
+    </div>
+</div>
+
+@code {
+    [Parameter]
+    public RenderFragment? ChildContent { get; set; }
+}

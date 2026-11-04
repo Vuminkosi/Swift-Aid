@@ -1,0 +1,54 @@
+.mobile-welcome {
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+    padding: 1.25rem 1.25rem calc(1.25rem + env(safe-area-inset-bottom));
+    padding-left: calc(1.25rem + env(safe-area-inset-left));
+    padding-right: calc(1.25rem + env(safe-area-inset-right));
+    max-width: 32rem;
+    margin: 0 auto;
+    min-height: 100%;
+}
+
+.mobile-welcome__carousel {
+    border-radius: 1.25rem;
+}
+
+.mobile-welcome__slide {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    gap: 0.75rem;
+    height: 100%;
+    padding: 1.5rem 2.5rem 3rem;
+    background-color: var(--sa-surface-subtle);
+}
+
+.mobile-welcome__slide .swiftaid-page-heading__title {
+    font-size: clamp(1.5rem, 6vw, 2.125rem);
+}
+
+.mobile-welcome__brand-mark {
+    width: 4rem;
+    height: 4rem;
+    border-radius: 1rem;
+}
+
+.mobile-welcome__medallion {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 4.5rem;
+    height: 4.5rem;
+    border-radius: 999px;
+    background-color: var(--sa-status-info-soft);
+}
+
+.mobile-welcome__actions {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    padding-bottom: 0.5rem;
+}

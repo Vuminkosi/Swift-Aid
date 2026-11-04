@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "eventId": "eb730cec-851e-7843-d4a4-6fb6d667c9b9",
+  "eventType": "ActionOwnerChanged",
+  "caseId": "10000000-0000-0000-0000-000000000001",
+  "aggregateVersion": 4,
+  "reportRevision": 1,
+  "commandId": "20000000-0000-0000-0000-000000000016",
+  "actorId": "officer-1",
+  "occurredAtUtc": null,
+  "recordedAtUtc": "2026-10-26T08:01:00+00:00",
+  "payload": {
+    "actionKind": "FollowUp",
+    "actionId": "40000000-0000-0000-0000-000000000002",
+    "previousOwnerId": "worker-1",
+    "newOwnerId": "worker-2",
+    "reason": "coverage handoff"
+  }
+}

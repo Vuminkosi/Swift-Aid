@@ -1,0 +1,51 @@
+using SwiftAid.Application.Authorization;
+using SwiftAid.Contracts.Ellai;
+
+namespace SwiftAid.Application.Ellai;
+
+/// <summary>Fresh server authority for UI metadata. Navigation grants no case read or action permission.</summary>
+public sealed class EllaiUiAuthorityResolver(IScopeService? scopes = null, TimeProvider? clock = null,
+    IEllaiUiIdentityAuthority? identityAuthority = null)
+{
+    public async ValueTask<EllaiUiEntitlements> ResolveAsync(ActorContext? actor, string scopeEpoch, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        HashSet<string> features = [EllaiReportUiManifest.FeatureId, EllaiCommunityUiManifest.FeatureId];
+        HashSet<string> capabilities = [];
+        if (actor is not null && (identityAuthority is not null || scopes is not null))
+        {
+            try
+            {
+                var now = (clock ?? TimeProvider.System).GetUtcNow();
+                var current = false;
+                if (identityAuthority is not null)
+                {
+                    current = await identityAuthority.IsCurrentAsync(actor, ct).ConfigureAwait(false);
+                }
+                else if (scopes is not null)
+                {
+                    var scope = await scopes.GetAsync(actor, ct).ConfigureAwait(false);
+                    current = scope.AccessEpoch == actor.AccessEpoch && scope.ExpiresAtUtc > now &&
+                        scope.Grants.Any(grant => grant.ValidFromUtc <= now && grant.ExpiresAtUtc > now);
+                }
+                if (current)
+                {
+                    features.Add(EllaiNavigationManifest.FeatureId);
+                    features.Add(EllaiDashboardUiManifest.FeatureId);
+                    features.Add(EllaiCaseListUiManifest.FeatureId);
+                    features.Add(EllaiCaseDetailUiManifest.FeatureId);
+                    features.Add(EllaiSurveillanceUiManifest.FeatureId);
+                    features.Add(EllaiInvestigationUiManifest.FeatureId);
+                    features.Add(EllaiMonitoringUiManifest.FeatureId);
+                    features.Add(EllaiOrganizationUiManifest.FeatureId);
+                    capabilities.Add(EllaiNavigationManifest.Capability);
+                }
+            }
+            catch (ScopeUnavailableException)
+            {
+                // Public help remains available; missing/revoked scope never grants private navigation.
+            }
+        }
+        return new(actor?.ActorId ?? string.Empty, scopeEpoch, features, capabilities);
+    }
+}

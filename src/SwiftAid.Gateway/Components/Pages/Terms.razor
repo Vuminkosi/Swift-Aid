@@ -1,0 +1,122 @@
+@page "/terms"
+@inject Microsoft.Extensions.Configuration.IConfiguration Configuration
+
+<PageTitle>Terms | @ServiceName</PageTitle>
+
+<HeadContent>
+    <link rel="canonical" href="@CanonicalUrl" />
+    <meta name="description" content="What to expect when using SwiftAid public information and reporting." />
+</HeadContent>
+
+<MudContainer MaxWidth="MaxWidth.Medium" Class="py-8 px-4">
+    <MudStack Spacing="4">
+        <SwiftAidPageHeading Eyebrow="Using the service"
+                             Title="Terms"
+                             Description="@($"What {ServiceName} can and cannot provide.")"
+                             HeadingId="terms-heading" />
+
+        <section aria-labelledby="terms-purpose-heading">
+            <MudText Typo="Typo.h5" HtmlTag="h2" id="terms-purpose-heading">Purpose</MudText>
+            <MudText Typo="Typo.body1">
+                @ServiceName is for sharing human or animal concerns and finding public information. A report can be incomplete, and unknown details should stay unknown rather than be guessed.
+            </MudText>
+        </section>
+
+        <section aria-labelledby="terms-limits-heading">
+            <MudText Typo="Typo.h5" HtmlTag="h2" id="terms-limits-heading">Not emergency or clinical care</MudText>
+            <MudText Typo="Typo.body1">
+                @ServiceName is not an emergency response service and does not provide medical or veterinary diagnosis or treatment advice. Sending a report does not mean that it has been reviewed, that support is available or that anyone will respond within a particular time. For urgent needs, use an appropriate local emergency or professional service.
+            </MudText>
+        </section>
+
+        <section aria-labelledby="terms-reports-heading">
+            <MudText Typo="Typo.h5" HtmlTag="h2" id="terms-reports-heading">Reports and access</MudText>
+            <MudText Typo="Typo.body1">
+                Share only information you are permitted to provide and include identifying details only when they are needed. A report is not a confirmed case or a promise of service. Signing in does not by itself grant access to an organization’s private records; that access requires separate authorization.
+            </MudText>
+        </section>
+
+        <section aria-labelledby="terms-availability-heading">
+            <MudText Typo="Typo.h5" HtmlTag="h2" id="terms-availability-heading">Availability</MudText>
+            <MudText Typo="Typo.body1">
+                Public information, local service coverage and responses may be unavailable. Do not rely on this service as the only way to request urgent help or confirm that a message has reached a worker.
+            </MudText>
+        </section>
+
+        <section id="data-deletion" aria-labelledby="terms-deletion-heading">
+            <MudText Typo="Typo.h5" HtmlTag="h2" id="terms-deletion-heading">Requesting data deletion</MudText>
+            <MudText Typo="Typo.body1">
+                To request deletion of SwiftAid data, email the address below with the subject “SwiftAid data deletion.” Include only the minimum account or sign-in reference needed to identify your request. Do not include passwords, access codes or health details.
+            </MudText>
+            <MudText Typo="Typo.body1">
+                The service may need to verify the request and clarify which information it covers. This request does not guarantee a reply by a certain time or that information will be removed automatically. Authorized case records may be retained where actual obligations require it. Disconnecting Facebook sign-in is separate from requesting deletion of SwiftAid data.
+            </MudText>
+            @if (DataDeletionMailTo is not null && SupportContactEmail is not null)
+            {
+                <MudLink Href="@DataDeletionMailTo">Email a data deletion request</MudLink>
+            }
+            else
+            {
+                <MudText Typo="Typo.body1">Contact information has not been configured.</MudText>
+            }
+        </section>
+
+        <section aria-labelledby="terms-contact-heading">
+            <MudText Typo="Typo.h5" HtmlTag="h2" id="terms-contact-heading">Questions</MudText>
+            @if (SupportContactEmail is not null)
+            {
+                <MudText Typo="Typo.body1">
+                    Support: <MudLink Href="@MailTo(SupportContactEmail)">@SupportContactEmail</MudLink>
+                </MudText>
+            }
+            else
+            {
+                <MudText Typo="Typo.body1">Contact information has not been configured.</MudText>
+            }
+        </section>
+    </MudStack>
+</MudContainer>
+
+@code {
+    private const string DataDeletionSubject = "SwiftAid data deletion";
+
+    private string ServiceName => Configuration["PublicSite:ServiceName"] ?? "SwiftAid";
+
+    private string? SupportContactEmail => GetValidEmail(Configuration["PublicSite:SupportContactEmail"]);
+
+    private string? DataDeletionMailTo => SupportContactEmail is null
+        ? null
+        : $"mailto:{SupportContactEmail}?subject={Uri.EscapeDataString(DataDeletionSubject)}";
+
+    private string CanonicalUrl => BuildCanonicalUrl();
+
+    private string BuildCanonicalUrl()
+    {
+        var configuredBaseUrl = Configuration["PublicSite:BaseUrl"];
+        if (!Uri.TryCreate(configuredBaseUrl, UriKind.Absolute, out var baseUri) ||
+            !string.Equals(baseUri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) ||
+            !string.IsNullOrEmpty(baseUri.UserInfo) ||
+            !string.Equals(baseUri.AbsolutePath, "/", StringComparison.Ordinal) ||
+            !string.IsNullOrEmpty(baseUri.Query) ||
+            !string.IsNullOrEmpty(baseUri.Fragment))
+        {
+            return "/terms";
+        }
+
+        return new Uri(baseUri, "terms").AbsoluteUri;
+    }
+
+    private static string? GetValidEmail(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value) ||
+            !System.Net.Mail.MailAddress.TryCreate(value, out var address) ||
+            !string.Equals(address.Address, value, StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        return address.Address;
+    }
+
+    private static string MailTo(string address) => $"mailto:{address}";
+}

@@ -1,0 +1,286 @@
+html,
+body {
+    min-width: 320px;
+    min-height: 100%;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    color: var(--sa-text-primary);
+    background: var(--sa-canvas);
+    font-family: var(--ais-font-sans, system-ui, "Segoe UI", sans-serif);
+}
+
+#app {
+    width: 100%;
+    min-height: 100dvh;
+    margin: 0;
+    padding: 0;
+}
+
+a,
+.btn-link {
+    color: var(--sa-link);
+}
+
+.btn-primary {
+    color: var(--sa-action-foreground);
+    background-color: var(--sa-action-primary);
+    border-color: var(--sa-action-primary);
+}
+
+.btn-primary:hover {
+    color: var(--sa-action-foreground);
+    background-color: var(--sa-action-hover);
+    border-color: var(--sa-action-hover);
+}
+
+.btn-primary:active {
+    color: var(--sa-action-foreground);
+    background-color: var(--sa-action-active);
+    border-color: var(--sa-action-active);
+}
+
+.form-control,
+.form-select {
+    border-color: var(--ais-border-control);
+    border-radius: var(--ais-radius-control);
+    color: var(--ais-text-primary);
+    background-color: var(--ais-bg-surface);
+}
+
+.form-control::placeholder {
+    color: var(--ais-text-muted);
+    opacity: 1;
+}
+
+.form-control:disabled,
+.form-select:disabled {
+    border-color: var(--ais-border-default);
+    color: var(--ais-text-disabled);
+    background-color: var(--ais-bg-disabled);
+}
+
+.form-check-input {
+    border-color: var(--ais-border-control);
+    background-color: var(--ais-bg-surface);
+}
+
+.form-check-input:checked {
+    border-color: var(--ais-action-primary);
+    background-color: var(--ais-action-primary);
+}
+
+.dropdown-menu,
+.modal-content,
+.card {
+    border-color: var(--ais-border-default);
+    color: var(--ais-text-primary);
+    background-color: var(--ais-bg-surface);
+}
+
+.form-control:focus-visible,
+.form-check-input:focus-visible {
+    outline: 2px solid var(--sa-focus);
+    outline-offset: 2px;
+    box-shadow: none;
+}
+
+.btn:focus,
+.btn:active:focus,
+.btn-link.nav-link:focus,
+.form-control:focus,
+.form-check-input:focus {
+    box-shadow: 0 0 0 0.15rem var(--sa-surface), 0 0 0 0.3rem var(--sa-focus);
+}
+
+.content {
+    padding-top: 1.1rem;
+}
+
+/* Mobile identity routes reuse the same branded account-entry surface as web. */
+.mobile-auth-page {
+    display: flex;
+    width: 100%;
+    min-height: 100dvh;
+    min-width: 0;
+    justify-content: stretch;
+    margin: 0;
+    padding: 0;
+}
+
+.mobile-auth-page .account-entry-surface {
+    box-sizing: border-box !important;
+    width: 100% !important;
+    max-width: none !important;
+    min-height: 100dvh !important;
+    margin: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+}
+
+.mobile-auth-page .account-entry-surface__header {
+    min-height: 5.5rem !important;
+    padding-block-start: max(1.5rem, env(safe-area-inset-top));
+    border-block-end-color: var(--ais-border-default);
+    background: var(--ais-bg-sidebar);
+    color: var(--ais-text-primary);
+}
+
+.mobile-auth-page .account-entry-surface__back,
+.mobile-auth-page .account-entry-surface__brand-lockup {
+    color: inherit !important;
+}
+
+@media (max-width: 960px) {
+    .swiftaid-app-shell__header {
+        min-height: 5rem !important;
+        padding-block-start: max(1.5rem, env(safe-area-inset-top));
+        background: var(--ais-bg-sidebar);
+        color: var(--ais-text-primary);
+    }
+}
+
+.mobile-auth-page .mobile-auth-panel {
+    display: grid;
+    align-content: start;
+    width: 100%;
+    gap: 1rem;
+    padding: clamp(1rem, 5vw, 1.5rem) !important;
+    background: transparent;
+}
+
+.mobile-auth-page .mobile-auth-password {
+    display: grid;
+    width: 100%;
+    gap: .55rem;
+}
+
+.mobile-auth-page .mobile-auth-privacy-note {
+    padding: .75rem .85rem;
+    border-inline-start: 3px solid var(--sa-border);
+    color: var(--sa-text-muted);
+}
+
+.mobile-auth-page .mobile-auth-divider-text {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: .75rem;
+    color: var(--sa-text-muted);
+    text-align: center;
+}
+
+.mobile-auth-page .mobile-auth-divider-text::before,
+.mobile-auth-page .mobile-auth-divider-text::after {
+    flex: 1;
+    border-block-start: 1px solid var(--sa-border);
+    content: "";
+}
+
+.mobile-auth-page .mobile-auth-divider {
+    margin-block: .25rem;
+}
+
+.mobile-auth-page .mobile-auth-validation-summary {
+    color: var(--sa-danger);
+}
+
+.mobile-auth-page .auth-cta {
+    min-height: 3rem;
+}
+
+h1:focus {
+    outline: none;
+}
+
+.valid.modified:not([type=checkbox]) {
+    outline: 1px solid var(--sa-success);
+}
+
+.invalid {
+    outline: 1px solid var(--sa-danger);
+}
+
+.validation-message {
+    color: var(--sa-danger);
+}
+
+#blazor-error-ui {
+    background: var(--sa-status-error-soft);
+    color: var(--sa-status-error);
+    bottom: 0;
+    box-shadow: 0 -1px 2px rgba(0, 0, 0, 0.2);
+    box-sizing: border-box;
+    display: none;
+    left: 0;
+    padding: 0.6rem 1.25rem 0.7rem 1.25rem;
+    position: fixed;
+    width: 100%;
+    z-index: 1000;
+}
+
+#blazor-error-ui .dismiss {
+    min-width: 2.75rem;
+    min-height: 2.75rem;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    font-size: 1.25rem;
+    cursor: pointer;
+    position: absolute;
+    right: 0.75rem;
+    top: 0.5rem;
+}
+
+#blazor-error-ui .dismiss:focus-visible {
+    outline: 3px solid var(--sa-focus);
+    outline-offset: 2px;
+}
+
+.blazor-error-boundary {
+    background: var(--sa-status-error);
+    padding: 1rem 1rem 1rem 3.7rem;
+    color: var(--sa-action-foreground);
+}
+
+.blazor-error-boundary::after {
+    content: "An error has occurred.";
+}
+
+.darker-border-checkbox.form-check-input {
+    border-color: var(--sa-border);
+}
+
+.form-floating > .form-control-plaintext::placeholder,
+.form-floating > .form-control::placeholder {
+    color: var(--sa-text-muted);
+    text-align: end;
+}
+
+.form-floating > .form-control-plaintext:focus::placeholder,
+.form-floating > .form-control:focus::placeholder {
+    text-align: start;
+}
+
+.status-bar-safe-area {
+    display: none;
+}
+
+@supports (-webkit-touch-callout: none) {
+    .status-bar-safe-area {
+        display: flex;
+        position: sticky;
+        top: 0;
+        height: env(safe-area-inset-top);
+        background-color: var(--sa-canvas);
+        width: 100%;
+        z-index: 1;
+    }
+
+    .flex-column,
+    .navbar-brand {
+        padding-left: env(safe-area-inset-left);
+    }
+}

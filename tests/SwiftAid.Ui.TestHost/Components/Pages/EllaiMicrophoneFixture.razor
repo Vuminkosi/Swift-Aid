@@ -1,0 +1,28 @@
+@page "/ellai-microphone-fixture"
+@using SwiftAid.UI.Ellai.Components
+@using SwiftAid.UI.Components.Theme
+
+<SwiftAidThemeProvider />
+<MudPopoverProvider />
+<main data-fixture-ready="@_ready.ToString().ToLowerInvariant()">
+<EllaiCompactComposer StatusText="Ready" CanPlayResponse="true" IsListeningEnabled="_voice"
+    CanUseRealtimeMicrophone="true" IsLiveSpeaking="_microphone" IsRecordingAudio="_microphone"
+    OnStartRealtimeVoice="Start" OnStopVoice="Stop" OnToggleResponseAudio="ToggleVoice" />
+<output id="capture-starts">@_starts</output>
+<output id="capture-stops">@_stops</output>
+</main>
+
+@code {
+    private bool _voice = true;
+    private bool _ready;
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (firstRender) { _ready = true; StateHasChanged(); }
+    }
+    private bool _microphone;
+    private int _starts;
+    private int _stops;
+    private void Start() { _microphone = true; _starts++; }
+    private void Stop() { _microphone = false; _stops++; }
+    private void ToggleVoice() => _voice = !_voice;
+}
