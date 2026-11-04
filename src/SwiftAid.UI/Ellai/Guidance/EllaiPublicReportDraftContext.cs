@@ -11,16 +11,32 @@ public sealed class EllaiPublicReportDraftContext
     private Func<int, bool>? _setAge;
     private Func<string, bool>? _addObservation;
     private Func<string, bool>? _setLocality;
+    private Func<string, bool>? _appendNarrative;
 
-    public void Register(object owner, Func<int, bool> setAge, Func<string, bool> addObservation, Func<string, bool>? setLocality = null)
+    public void Register(object owner, Func<int, bool> setAge, Func<string, bool> addObservation,
+        Func<string, bool>? setLocality = null, Func<string, bool>? appendNarrative = null)
     {
-        lock (_gate) { _owner = owner; _setAge = setAge; _addObservation = addObservation; _setLocality = setLocality ?? (_ => false); }
+        lock (_gate)
+        {
+            _owner = owner;
+            _setAge = setAge;
+            _addObservation = addObservation;
+            _setLocality = setLocality ?? (_ => false);
+            _appendNarrative = appendNarrative ?? (_ => false);
+        }
     }
 
     public void Remove(object owner)
     {
         lock (_gate)
-            if (ReferenceEquals(_owner, owner)) { _owner = null; _setAge = null; _addObservation = null; _setLocality = null; }
+            if (ReferenceEquals(_owner, owner))
+            {
+                _owner = null;
+                _setAge = null;
+                _addObservation = null;
+                _setLocality = null;
+                _appendNarrative = null;
+            }
     }
 
     public bool ApplyAgeCorrection(string? utterance)
@@ -60,5 +76,19 @@ public sealed class EllaiPublicReportDraftContext
         Func<string, bool>? setLocality;
         lock (_gate) setLocality = _setLocality;
         return setLocality?.Invoke(match.Groups[1].Value.Trim()) == true;
+    }
+
+    public bool ApplyReportNarrativeStatement(string? utterance)
+    {
+        if (utterance is null || utterance.Length > 500 || utterance.Contains('\r') || utterance.Contains('\n')) return false;
+        const RegexOptions options = RegexOptions.IgnoreCase | RegexOptions.CultureInvariant;
+        var isConcern = Regex.IsMatch(utterance,
+            @"^\s*I\s+(?:want|would\s+like)\s+to\s+report\s+a\s+suspected\s+[^.!?\r\n]+\s+case[.!?]?\s*$", options);
+        var isOnset = Regex.IsMatch(utterance,
+            @"^\s*It\s+(?:started|began)\s+(?:yesterday|today|on\s+[^.!?\r\n]+)[.!?]?\s*$", options);
+        if (!isConcern && !isOnset) return false;
+        Func<string, bool>? appendNarrative;
+        lock (_gate) appendNarrative = _appendNarrative;
+        return appendNarrative?.Invoke(utterance.Trim()) == true;
     }
 }

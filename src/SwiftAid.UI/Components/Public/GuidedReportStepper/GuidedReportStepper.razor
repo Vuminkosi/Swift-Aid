@@ -728,6 +728,18 @@
                 Draft.LocationUnknown = false;
                 NotifyPlaceFieldsChanged();
                 return true;
+            }, statement =>
+            {
+                var current = Draft.Narrative?.Trim();
+                var lines = string.IsNullOrEmpty(current)
+                    ? Array.Empty<string>()
+                    : current.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                if (lines.Contains(statement, StringComparer.Ordinal)) return true;
+                var updated = string.Join(Environment.NewLine, lines.Append(statement));
+                if (updated.Length > MaximumNarrativeCharacters) return false;
+                Draft.Narrative = updated;
+                _editContext.NotifyFieldChanged(new FieldIdentifier(Draft, nameof(Draft.Narrative)));
+                return true;
             });
         if (ReferenceEquals(Draft, _observedDraft) && CurrentDraftId == _observedDraftId)
         {

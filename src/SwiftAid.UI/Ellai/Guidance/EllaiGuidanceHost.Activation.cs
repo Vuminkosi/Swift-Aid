@@ -111,7 +111,7 @@ public partial class EllaiGuidanceHost
         if (draftEdits.Length > 0)
         {
             if (draftEdits.Length == 1 && newlyCompleted && draftEdits[0].ProposalId != _lastReportDraftEditProposalId &&
-                draftEdits[0].Proposal is { FeatureId: "report", ResourceId: null, ControlId: "report.age-years" or "report.other-observations" or "report.locality", Arguments.Count: 0 } &&
+                draftEdits[0].Proposal is { FeatureId: "report", ResourceId: null, ControlId: "report.age-years" or "report.other-observations" or "report.locality" or "report.original-statement", Arguments.Count: 0 } &&
                 turn.UserText is { } userText)
             {
                 _lastReportDraftEditProposalId = draftEdits[0].ProposalId;
@@ -121,18 +121,24 @@ public partial class EllaiGuidanceHost
                     ? context?.ApplyAgeCorrection(userText) == true
                     : controlId == "report.other-observations"
                         ? context?.ApplyReportedObservation(userText) == true
-                        : context?.ApplyReportedLocality(userText) == true;
+                        : controlId == "report.locality"
+                            ? context?.ApplyReportedLocality(userText) == true
+                            : context?.ApplyReportNarrativeStatement(userText) == true;
                 _guidanceNotice = applied
                     ? controlId == "report.age-years"
                         ? "Updated the reported age in the open report draft. Review it before submitting."
                         : controlId == "report.other-observations"
                             ? "Added your reported observation to the open report draft. Review it before submitting."
-                            : "Added the reported locality to the open report draft. Review it before submitting."
+                            : controlId == "report.locality"
+                                ? "Added the reported locality to the open report draft. Review it before submitting."
+                                : "Added your reported statement to the open report draft. Review it before submitting."
                     : controlId == "report.age-years"
                         ? "I could not update the age. Open the report details and enter it there."
                         : controlId == "report.other-observations"
                             ? "I could not add that statement as an observation. Enter it in the report details instead."
-                            : "I could not add that locality. Enter it in the report details instead.";
+                            : controlId == "report.locality"
+                                ? "I could not add that locality. Enter it in the report details instead."
+                                : "I could not add that statement to the report details.";
             }
             return;
         }
