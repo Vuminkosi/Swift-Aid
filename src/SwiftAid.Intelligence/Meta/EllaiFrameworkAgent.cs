@@ -230,7 +230,7 @@ public sealed class EllaiFrameworkAgent
                 }
             }
             tools.Add(AIFunctionFactory.Create(DelegateCase, name: "ellai_delegate_case",
-                description: "Delegate one bounded question about the authorized owned-case queue or a case timeline."));
+                description: "Delegate one bounded question about the authorized owned-case queue, a case timeline, or possible related-case suggestions and their review status. Suggestions do not establish identity or causation."));
         }
         if (enableAnalyticsSpecialist && context.Actor is not null &&
             context.AllowedTools?.Contains(EllaiToolNames.OwnedCaseCount) == true)
