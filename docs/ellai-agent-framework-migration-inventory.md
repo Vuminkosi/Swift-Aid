@@ -617,6 +617,12 @@ mounted read-only. Initial attempts failed before inference because the
 container-to-host HTTP request used an invalid host header; the fixture now
 uses the loopback Gateway authority. The framework reasoning model was scripted;
 this does not establish deployed behavior or clinical validity.
+The same isolated JetStream/BART fixture now also runs with live Muse. It
+passed 1/1 before and after commit: the worker handled the synthetic notice,
+persisted real BART inference and its delivery evidence, and Muse requested
+the persisted result through the authorized framework tool. The captured tool
+result omitted the synthetic source narrative. This establishes one local
+integrated route, not model interpretation quality or deployed acceptance.
 The `ClassificationRegistryTests` filter also passed 10/10 against the same
 fixture using `--no-build --no-restore` and the same test-project options.
 
