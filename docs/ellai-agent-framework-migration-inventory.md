@@ -4381,8 +4381,9 @@ PostGIS 17 with NATS disabled. The first turn searched for Rusape, the browser
 refreshed, and the follow-up recalled the place. Both turns completed, session
 cancellation succeeded and the browser reported zero page errors. A read-only
 database query confirmed `ellai_locations` and a protected replay scope in both
-turn traces. This exercised first-use registry seeding and subsequent location
-reads on the current Gateway; it did not inject a noncooperative database call.
+turn traces. This exercised location reads on the current Gateway against a
+freshly migrated database; the run did not instrument which read seeded the
+registry or inject a noncooperative database call.
 
 The synthetic place name was also present, case-insensitively, in public
 registry `ResourceId` and `EvidenceId` values in both traces. Protecting replay
