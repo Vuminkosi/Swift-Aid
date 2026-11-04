@@ -39,6 +39,25 @@ public sealed class EllaiCaseSpecialist(IChatClient client, IEllaiFrameworkAgent
             if (result.Allowed) observations.Add((request, result));
             return result;
         }
+        var revalidationFailed = false;
+        async Task<bool> RevalidateObservations(CancellationToken token)
+        {
+            foreach (var (request, original) in observations)
+            {
+                if (!await isCurrent(token).ConfigureAwait(false)) { revalidationFailed = true; return false; }
+                EllaiToolResult fresh;
+                try { fresh = await (revalidate ?? invoke)(context, request, token).ConfigureAwait(false); }
+                catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
+                catch (Exception error) when (error is not OutOfMemoryException) { revalidationFailed = true; return false; }
+                if (!fresh.Allowed || fresh.ToolName != original.ToolName || fresh.Truncated != original.Truncated ||
+                    fresh.ItemCount != original.ItemCount || fresh.ResultSummary != original.ResultSummary ||
+                    !fresh.Evidence.SequenceEqual(original.Evidence) || fresh.CaseTimelineReplayScope != original.CaseTimelineReplayScope)
+                { revalidationFailed = true; return false; }
+            }
+            var current = await isCurrent(token).ConfigureAwait(false);
+            if (!current) revalidationFailed = true;
+            return current;
+        }
         var agent = new EllaiFrameworkAgent(client, agentFactory);
         EllaiDecision? decision;
         try
@@ -54,13 +73,14 @@ public sealed class EllaiCaseSpecialist(IChatClient client, IEllaiFrameworkAgent
                 "evidence copied exactly from the tool result: sourceKind, resourceId, version, fieldPath, evidenceId. " +
                 "Use empty arrays and null for unused fields.",
                 [new ChatMessage(ChatRole.User, task)], 2048, isCurrent, InvokeCaseTool, usage, ct,
-                revalidateTool: revalidate ?? invoke, maxModelCalls: profile.MaxModelCalls, allowEmptyCaseQueue: true).ConfigureAwait(false);
+                revalidateTool: revalidate ?? invoke, revalidateStreamObservations: RevalidateObservations, maxModelCalls: profile.MaxModelCalls, allowEmptyCaseQueue: true).ConfigureAwait(false);
         }
         finally { onModelCalls?.Invoke(agent.LastModelCallCount); }
         var verifiedEmpty = observations.Count == 1 &&
             EllaiFrameworkAgent.IsEmptyQueueObservation(observations[0].Request, observations[0].Result) &&
             decision?.DisplayText == "No matching cases were found in your current owned-case queue." &&
             decision.SpokenText == decision.DisplayText;
+        if (revalidationFailed) return new(EllaiSpecialistOutcome.Stale, null);
         if (decision is null || decision.Kind != DecisionKind.Answer || decision.Claims.Count == 0 && !verifiedEmpty ||
             decision.UiIntents.Count != 0 || decision.PlanProposal is not null ||
             decision.Claims.Any(claim => claim.Kind != ClaimKind.Observed || claim.Evidence.Count == 0 ||

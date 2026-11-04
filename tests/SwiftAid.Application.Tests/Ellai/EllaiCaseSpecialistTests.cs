@@ -71,11 +71,11 @@ public sealed class EllaiCaseSpecialistTests
                 return Task.FromResult(new EllaiToolResult(request.ToolName, true, null,
                     [new EvidenceRef("CaseQueue", caseId.ToString("D"), "3", null, caseId.ToString("D"))],
                     "Assignment acknowledged.", 1, false));
-            }, Usage(), default, enableCaseSpecialist: true);
+            }, Usage(), default, revalidateStreamObservations: _ => Task.FromResult(true), enableCaseSpecialist: true);
 
         Assert.NotNull(decision);
         Assert.Equal(caseId.ToString("D"), Assert.Single(Assert.Single(decision.Claims).Evidence).ResourceId);
-        Assert.Equal(2, calls);
+        Assert.Equal(4, calls);
         Assert.Equal(4, agent.LastModelCallCount);
     }
 
@@ -104,7 +104,7 @@ public sealed class EllaiCaseSpecialistTests
                 return Task.FromResult(new EllaiToolResult(request.ToolName, true, null,
                     [new EvidenceRef("CaseQueue", caseId.ToString("D"), version, null, caseId.ToString("D"))],
                     "Assignment acknowledged.", 1, false));
-            }, Usage(), default, enableCaseSpecialist: true);
+            }, Usage(), default, revalidateStreamObservations: _ => Task.FromResult(true), enableCaseSpecialist: true);
         if (failureMode != 0)
         {
             try { Assert.Null(await Run()); }
@@ -116,7 +116,7 @@ public sealed class EllaiCaseSpecialistTests
             Assert.NotNull(decision);
             Assert.Equal(caseId.ToString("D"), Assert.Single(Assert.Single(decision.Claims).Evidence).ResourceId);
         }
-        Assert.Equal(2, calls);
+        Assert.Equal(failureMode == 0 ? 4 : 2, calls);
     }
 
     [Theory]

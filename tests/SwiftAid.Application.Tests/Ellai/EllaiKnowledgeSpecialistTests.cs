@@ -28,7 +28,7 @@ public sealed class EllaiKnowledgeSpecialistTests
 
         Assert.Equal(EllaiSpecialistOutcome.Completed, result.Outcome);
         Assert.NotNull(result.Decision);
-        Assert.Equal(1, calls);
+        Assert.Equal(3, calls);
         Assert.Equal(new[] { EllaiToolNames.DocsGet }, model.AvailableTools);
     }
 
@@ -125,11 +125,11 @@ public sealed class EllaiKnowledgeSpecialistTests
                 Assert.Equal(EllaiToolNames.DocsGet, request.ToolName);
                 return Task.FromResult(new EllaiToolResult(request.ToolName, true, null,
                     [new EvidenceRef("Documentation", "safe", "v1", null, "proof-1")], "Observed.", 1, false));
-            }, Usage(), default, enableKnowledgeSpecialist: true);
+            }, Usage(), default, revalidateStreamObservations: _ => Task.FromResult(true), enableKnowledgeSpecialist: true);
 
         Assert.NotNull(result);
         Assert.Equal("proof-1", Assert.Single(Assert.Single(result.Claims).Evidence).EvidenceId);
-        Assert.Equal(1, calls);
+        Assert.Equal(3, calls);
         Assert.Equal(4, model.Calls);
         Assert.Equal(4, agent.LastModelCallCount);
     }
@@ -153,7 +153,7 @@ public sealed class EllaiKnowledgeSpecialistTests
             new EllaiToolBroker(new EllaiPolicyService(), new EllaiConsentService()),
             new EllaiUsageLedger(), new InMemoryEllaiUsageStore(), enableKnowledgeSpecialist: true);
         var request = new EllaiLoopRequest(Context(), "Find documentation", new EllaiRoleOverlay("ask", "help"),
-            "help", 512, "cycle", 1);
+            "help", 512, "cycle", 1) { RevalidateStreamObservations = (_, _) => Task.FromResult(true) };
         var result = await executor.RunAsync(request, default, invokeToolAsync: (_, tool, _) =>
             Task.FromResult(new EllaiToolResult(tool.ToolName, true, null,
                 [new EvidenceRef("Documentation", "safe", "v1", null, "proof-1")], "Observed.", 1, false)));

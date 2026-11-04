@@ -38,6 +38,7 @@ execute/approve/sql/shell.
 
 | Tool | Purpose |
 |---|---|
+| `ellai_case_timeline` | Read the authorized timeline for a specific managed case, subject to current case access. |
 | `ellai_state` | Minimized feature projection; `projection=queue` runs the ordinary scoped "my cases" query for the trusted actor. |
 | `ellai_evidence` | Bounded authorized source items and versions. |
 | `ellai_topic` | Session topic candidates with checkpoints. |

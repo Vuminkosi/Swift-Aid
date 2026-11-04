@@ -145,7 +145,12 @@ public sealed class EllaiFrameworkAgent
                 {
                     var result = await new EllaiKnowledgeSpecialist(_client, _agentFactory).RunAsync(task,
                         instructions, true, context, usage, Current, InvokeGuardedTool, deadline.Token,
-                        calls => Interlocked.Add(ref delegatedModelCalls, calls)).ConfigureAwait(false);
+                        calls => Interlocked.Add(ref delegatedModelCalls, calls), revalidateTool ?? invoke).ConfigureAwait(false);
+                    if (result.Outcome == EllaiSpecialistOutcome.Stale)
+                    {
+                        Interlocked.Exchange(ref invalidDelegation, 1);
+                        return "Documentation changed while it was being checked.";
+                    }
                     if (result.Outcome != EllaiSpecialistOutcome.Completed || result.Decision is null)
                         return "Knowledge specialist could not verify an answer.";
                     var json = System.Text.Json.JsonSerializer.Serialize(result.Decision);
