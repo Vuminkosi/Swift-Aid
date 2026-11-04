@@ -37,7 +37,7 @@ public static class EllaiSpecialistRegistry
             new EllaiSpecialistProfile(Reporting, 1, "Ellai:Specialists:Reporting:Enabled",
                 new[] { EllaiToolNames.UiCatalogue, EllaiToolNames.UiObserve }.ToFrozenSet(StringComparer.Ordinal)),
             new EllaiSpecialistProfile(Surveillance, 1, "Ellai:Specialists:Surveillance:Enabled",
-                new[] { EllaiToolNames.ClassificationSnapshot }.ToFrozenSet(StringComparer.Ordinal)),
+                new[] { EllaiToolNames.ClassificationSnapshot, EllaiToolNames.SurveillanceSignals }.ToFrozenSet(StringComparer.Ordinal)),
             new EllaiSpecialistProfile(CommunitySessions, 1, "Ellai:Specialists:CommunitySessions:Enabled",
                 new[] { EllaiToolNames.PublicSessions }.ToFrozenSet(StringComparer.Ordinal))
         }.ToFrozenDictionary(profile => profile.AgentId, StringComparer.Ordinal);

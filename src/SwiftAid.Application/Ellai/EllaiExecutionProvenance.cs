@@ -34,7 +34,7 @@ public sealed record EllaiObservedToolResult(
     EllaiClassificationReplayScope? ClassificationReplayScope = null,
     string? ImportDestinationsDigest = null,
     EllaiLocationReplayScope? LocationReplayScope = null, string? PublicSessionsDigest = null,
-    string? PublicSessionsStatus = null)
+    string? PublicSessionsStatus = null, EllaiSignalReplayScope? SignalReplayScope = null)
 {
     public const string CurrentStaticFeatureVersion = "state-feature/1";
     public const string CurrentClockVersion = "server-clock/1";
@@ -125,7 +125,14 @@ public sealed record EllaiObservedToolResult(
             publicSessionsDigest,
             publicSessionsDigest is not null && request.Arguments.Count == 1 &&
                 request.Arguments.TryGetValue("status", out var publicStatus) && IsPublicSessionStatus(publicStatus)
-                    ? publicStatus : null);
+                    ? publicStatus : null,
+            request.ToolName == EllaiToolNames.SurveillanceSignals && result.ToolName == request.ToolName &&
+                result.Allowed && result.DenialReason is null && result.ReasonCode == EllaiToolReasonCodes.Ok &&
+                !result.Truncated && result.ItemCount is > 0 and <= 10 && result.Evidence.Count == result.ItemCount &&
+                request.Arguments.Count == 1 && request.Arguments.TryGetValue("case_id", out var signalCaseId) &&
+                Guid.TryParseExact(signalCaseId, "D", out var signalCase) && signalCase != Guid.Empty &&
+                result.Evidence.All(reference => reference.SourceKind == "SurveillanceSignal" && reference.ResourceId == signalCase.ToString("D"))
+                    ? new EllaiSignalReplayScope(signalCase, ResultFingerprint(result)) : null);
     }
 
     public static bool IsPublicSessionStatus(string? status) => status is "Scheduled" or "Completed" or "Cancelled";
@@ -160,6 +167,13 @@ public sealed record EllaiCaseTimelineReplayScope(string CaseId, string Digest)
 
 /// <summary>Authorized classification case and result fingerprint, without retaining result text.</summary>
 public sealed record EllaiClassificationReplayScope(Guid CaseId, string ResultDigest)
+{
+    public bool IsValid() => CaseId != Guid.Empty && ResultDigest is { Length: 64 } &&
+        ResultDigest.All(character => character is >= '0' and <= '9' or >= 'A' and <= 'F');
+}
+
+/// <summary>Authorized case and fingerprint for re-reading linked review signals.</summary>
+public sealed record EllaiSignalReplayScope(Guid CaseId, string ResultDigest)
 {
     public bool IsValid() => CaseId != Guid.Empty && ResultDigest is { Length: 64 } &&
         ResultDigest.All(character => character is >= '0' and <= '9' or >= 'A' and <= 'F');

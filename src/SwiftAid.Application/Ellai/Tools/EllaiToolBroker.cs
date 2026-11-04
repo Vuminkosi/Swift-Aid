@@ -51,6 +51,7 @@ public static class EllaiToolNames
     public const string ImportStatus = "ellai_import_status";
     public const string ClassificationEvidence = "ellai_classification_evidence";
     public const string ClassificationSnapshot = "ellai_classification_snapshot";
+    public const string SurveillanceSignals = "ellai_surveillance_signals";
     public const string OwnedCaseCount = "ellai_owned_case_count";
     public const string CaseTimeline = "ellai_case_timeline";
     public const string PublicSessions = "ellai_public_sessions";
@@ -59,7 +60,7 @@ public static class EllaiToolNames
     {
         State, Evidence, Topic, Capabilities, Receipts, ProductFacts, Now,
         DocsSearch, DocsGet, UiCatalogue, UiObserve, IngestionSchema, ValidateObservations, Locations,
-        ImportDestinations, Imports, ImportStatus, ClassificationEvidence, ClassificationSnapshot, OwnedCaseCount, CaseTimeline, PublicSessions
+        ImportDestinations, Imports, ImportStatus, ClassificationEvidence, ClassificationSnapshot, SurveillanceSignals, OwnedCaseCount, CaseTimeline, PublicSessions
     };
 }
 
@@ -214,6 +215,7 @@ public sealed class EllaiToolBroker
         $"{EllaiToolNames.UiObserve}(controls, view=current, context?, feature?) — live mounted-control facts.",
         $"{EllaiToolNames.IngestionSchema}() — canonical case CSV fields, capture requirements and authority boundaries; no submission.",
         $"{EllaiToolNames.ValidateObservations}(observations_json) — validate a bounded JSON array of original reported strings; no inference or submission.",
+        $"{EllaiToolNames.SurveillanceSignals}(case_id) - read authorized persisted review signals linked to one case; not an outbreak declaration.",
         $"{EllaiToolNames.ClassificationSnapshot}(case_id) - read authorized persisted classification records for one case; never a diagnosis.",
         $"{EllaiToolNames.PublicSessions}(status?) - list published public sessions, optionally filtered by Scheduled, Completed, or Cancelled; no registration or scheduling.",
         $"{EllaiToolNames.Locations}(q, country?, limit?) — search the public geographic registry; present matches for user selection, never guess a location.",
@@ -440,6 +442,8 @@ public sealed class EllaiToolBroker
             return Bound(await ReadClassificationAsync(context, request, ct).ConfigureAwait(false));
         if (canonical == EllaiToolNames.ClassificationSnapshot)
             return Bound(await ReadClassificationSnapshotAsync(context, request, ct).ConfigureAwait(false));
+        if (canonical == EllaiToolNames.SurveillanceSignals)
+            return Bound(await ReadSurveillanceSignalsAsync(context, request, ct).ConfigureAwait(false));
         if (canonical == EllaiToolNames.PublicSessions)
             return Bound(await ReadPublicSessionsAsync(request, ct).ConfigureAwait(false));
         if (canonical == EllaiToolNames.Evidence)
@@ -654,6 +658,39 @@ public sealed class EllaiToolBroker
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch (Exception error) when (error is not OutOfMemoryException)
         { return Deny(request.ToolName, "Public sessions are unavailable.", EllaiToolReasonCodes.Unavailable); }
+    }
+
+    private async Task<EllaiToolResult> ReadSurveillanceSignalsAsync(EllaiToolContext context, EllaiToolRequest request, CancellationToken ct)
+    {
+        if (context.Actor is null || _signals?.Enabled != true)
+            return Deny(request.ToolName, "Surveillance information is unavailable.", EllaiToolReasonCodes.Unavailable);
+        if (!request.Arguments.TryGetValue("case_id", out var rawCaseId) ||
+            !Guid.TryParseExact(rawCaseId, "D", out var caseId) || caseId == Guid.Empty)
+            return Deny(request.ToolName, "A valid case ID is required.", EllaiToolReasonCodes.InvalidArguments);
+        try
+        {
+            // The service independently requires current access to every contributing case.
+            var signals = await _signals.ForCaseAsync(context.Actor, caseId, ct).ConfigureAwait(false);
+            if (signals is not { Count: > 0 and <= 10 })
+                return Deny(request.ToolName, "A bounded authorized signal result is unavailable.", EllaiToolReasonCodes.Unavailable);
+            var evidence = signals.Select(signal => new EvidenceRef("SurveillanceSignal", caseId.ToString("D"),
+                signal.Version.ToString(CultureInfo.InvariantCulture), "signal", signal.SignalId.ToString("D"))).ToArray();
+            var lines = signals.Select(signal => $"case {caseId:D} signal {signal.SignalId:D}: " +
+                JsonSerializer.Serialize(new { signal.State, signal.Version, signal.Assessment.Method,
+                    signal.Assessment.Area, signal.Assessment.Syndrome, signal.Assessment.WindowStartUtc,
+                    signal.Assessment.WindowEndUtc, signal.Assessment.Observed, signal.Assessment.ReportingActivity,
+                    signal.Assessment.IndependentSources, signal.Assessment.Expected, signal.Assessment.Comparison,
+                    signal.Assessment.Candidate, signal.Assessment.Limitations }) +
+                (signal.Assessment.Method.Contains("synthetic", StringComparison.OrdinalIgnoreCase)
+                    ? "; synthetic evaluation method; not evidence of a validated real-world detector"
+                    : "; method-specific validation must be reviewed") +
+                "; report-based review signal, not prevalence, a diagnosis, or a confirmed outbreak; other signals may exist.");
+            return new EllaiToolResult(request.ToolName, true, null, evidence, string.Join("\n", lines), signals.Count,
+                false, EllaiToolReasonCodes.Ok);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        catch (Exception error) when (error is not OutOfMemoryException)
+        { return Deny(request.ToolName, "Surveillance information is unavailable.", EllaiToolReasonCodes.Unavailable); }
     }
 
     private async Task<EllaiToolResult> ReadClassificationSnapshotAsync(EllaiToolContext context, EllaiToolRequest request, CancellationToken ct)

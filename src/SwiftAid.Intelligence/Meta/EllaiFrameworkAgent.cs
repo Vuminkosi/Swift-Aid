@@ -374,7 +374,8 @@ public sealed class EllaiFrameworkAgent
             tools.Add(AIFunctionFactory.Create(DelegateCommunitySessions, name: "ellai_delegate_community_sessions",
                 description: "Read published public sessions; cannot schedule or execute actions."));
         }
-        if (enableSurveillanceSpecialist && context.AllowedTools?.Contains(EllaiToolNames.ClassificationSnapshot) == true)
+        if (enableSurveillanceSpecialist && context.AllowedTools is { } surveillanceTools &&
+            (surveillanceTools.Contains(EllaiToolNames.ClassificationSnapshot) || surveillanceTools.Contains(EllaiToolNames.SurveillanceSignals)))
         {
             var delegationCount = 0;
             async Task<string> DelegateSurveillance(string task, CancellationToken token)
@@ -405,7 +406,7 @@ public sealed class EllaiFrameworkAgent
                 { Interlocked.Exchange(ref invalidDelegation, 1); return "Surveillance specialist could not complete the request."; }
             }
             tools.Add(AIFunctionFactory.Create(DelegateSurveillance, name: "ellai_delegate_surveillance",
-                description: "Read authorized persisted classification records for one case, without making a diagnosis."));
+                description: "Read authorized persisted classification and review signals for one case, without making a diagnosis."));
         }
         if (enableReportingSpecialist && context.AllowedTools is { } reportingTools &&
             (reportingTools.Contains(EllaiToolNames.UiCatalogue) || reportingTools.Contains(EllaiToolNames.UiObserve)))
@@ -765,6 +766,13 @@ public sealed class EllaiFrameworkAgent
                 yield return line;
             yield break;
         }
+        if (toolName == EllaiToolNames.SurveillanceSignals && reference.SourceKind == "SurveillanceSignal")
+        {
+            var prefix = $"case {reference.ResourceId} signal {reference.EvidenceId}: ";
+            foreach (var line in lines.Where(line => line.StartsWith(prefix, StringComparison.Ordinal)))
+                yield return line;
+            yield break;
+        }
         if (toolName == EllaiToolNames.ClassificationSnapshot && reference.SourceKind == "CaseClassification")
         {
             var prefix = $"case {reference.ResourceId} classification {reference.EvidenceId}: ";
@@ -797,7 +805,9 @@ public sealed class EllaiFrameworkAgent
         {
             var text = value.Trim();
             bool Matches(EvidenceRef reference, IReadOnlyList<string> lines) =>
-                (reference.SourceKind == "ProductFact" || (reference.SourceKind is "UiCatalogue" or "UiObservation") &&
+                (reference.SourceKind == "ProductFact" || reference.SourceKind == "SurveillanceSignal" &&
+                    text.StartsWith($"case {reference.ResourceId} signal {reference.EvidenceId}:", StringComparison.Ordinal) ||
+                 (reference.SourceKind is "UiCatalogue" or "UiObservation") &&
                     text.StartsWith($"control {reference.ResourceId} ·", StringComparison.Ordinal) || reference.SourceKind == "CaseClassification" &&
                     text.StartsWith($"case {reference.ResourceId} classification {reference.EvidenceId}:", StringComparison.Ordinal) || reference.SourceKind == "PublicSession" &&
                     text.StartsWith($"session {reference.ResourceId} ·", StringComparison.Ordinal) || reference.SourceKind == "CaseQueue" &&

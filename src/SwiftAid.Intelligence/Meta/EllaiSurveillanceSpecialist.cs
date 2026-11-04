@@ -5,7 +5,7 @@ using SwiftAid.Contracts.Ellai;
 
 namespace SwiftAid.Intelligence.Meta;
 
-/// <summary>Reads authorized persisted classification records without making clinical claims.</summary>
+/// <summary>Reads authorized persisted classification and review-signal records without making clinical claims.</summary>
 public sealed class EllaiSurveillanceSpecialist(IChatClient client, IEllaiFrameworkAgentFactory? agentFactory = null)
 {
     public async Task<EllaiSpecialistResult> RunAsync(string task, string trustedPolicy, EllaiToolContext parent,
@@ -40,10 +40,10 @@ public sealed class EllaiSurveillanceSpecialist(IChatClient client, IEllaiFramew
         try
         {
             decision = await agent.RunAsync(context, trustedPolicy +
-                "\nYou are the surveillance specialist. Read only persisted case classification records. " +
+                "\nYou are the surveillance specialist. Read only persisted classification and review-signal records. " +
                 "Never infer a diagnosis, outbreak, personal risk, urgency or confirmed incident. " +
                 "Return only a grounded Answer in the required final_decision JSON schema. " +
-                "Each claim must exactly match one returned classification line and cite its matching evidence. " +
+                "Each claim must exactly match one returned record line and cite its matching evidence. " +
                 "Set displayText and spokenText to the claim texts joined by a newline, with no other prose.",
                 [new ChatMessage(ChatRole.User, task)], 2048, isCurrent, Read, usage, ct,
                 maxModelCalls: profile.MaxModelCalls).ConfigureAwait(false);
@@ -52,7 +52,7 @@ public sealed class EllaiSurveillanceSpecialist(IChatClient client, IEllaiFramew
         if (decision is null || decision.Kind != DecisionKind.Answer || decision.Claims.Count == 0 ||
             decision.UiIntents.Count != 0 || decision.PlanProposal is not null ||
             decision.Claims.Any(claim => claim.Kind != ClaimKind.Observed || claim.Evidence.Count == 0 ||
-                claim.Evidence.Any(reference => reference.SourceKind != "CaseClassification")))
+                claim.Evidence.Any(reference => reference.SourceKind is not ("CaseClassification" or "SurveillanceSignal"))))
             return new(EllaiSpecialistOutcome.Unverified, null);
 
         var grounded = new HashSet<(EvidenceRef Reference, string Line)>();
@@ -69,7 +69,7 @@ public sealed class EllaiSurveillanceSpecialist(IChatClient client, IEllaiFramew
                 return new(EllaiSpecialistOutcome.Stale, null);
             foreach (var reference in original.Evidence)
                 foreach (var line in original.ResultSummary.Split('\n'))
-                    if (line.StartsWith($"case {reference.ResourceId} classification {reference.EvidenceId}: ", StringComparison.Ordinal))
+                    if (line.StartsWith($"case {reference.ResourceId} {(reference.SourceKind == "CaseClassification" ? "classification" : "signal")} {reference.EvidenceId}: ", StringComparison.Ordinal))
                         grounded.Add((reference, line));
         }
         if (decision.Claims.Any(claim => claim.Evidence.Any(reference => !grounded.Contains((reference, claim.Text)))) ||

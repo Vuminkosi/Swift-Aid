@@ -359,6 +359,35 @@ public static class EllaiAuthorizedConversationContext
                     }
                     continue;
                 }
+                if (observation.ToolName == EllaiToolNames.SurveillanceSignals)
+                {
+                    var scope = observation.SignalReplayScope;
+                    if (scope is null || !scope.IsValid() || observation.ReasonCode != EllaiToolReasonCodes.Ok ||
+                        observation.Evidence.Count is < 1 or > 10 || observation.Evidence.Any(reference =>
+                            reference.SourceKind != "SurveillanceSignal" || reference.ResourceId != scope.CaseId.ToString("D")) ||
+                        toolContext is null || invokeTool is null || toolContext.SessionId != turn.SessionId ||
+                        toolContext.Actor is null || toolContext.Actor.ActorId != actor.ActorId ||
+                        toolContext.Actor.AccessEpoch != actor.AccessEpoch)
+                        return decisions[turn.ClientUtteranceId] = false;
+                    try
+                    {
+                        var request = new EllaiToolRequest(EllaiToolNames.SurveillanceSignals,
+                            new Dictionary<string, string> { ["case_id"] = scope.CaseId.ToString("D") });
+                        var current = await invokeTool(toolContext, request, ct).ConfigureAwait(false);
+                        ct.ThrowIfCancellationRequested();
+                        if (!current.Allowed || current.ToolName != request.ToolName || current.DenialReason is not null ||
+                            current.ReasonCode != EllaiToolReasonCodes.Ok || current.Truncated ||
+                            !current.Evidence.SequenceEqual(observation.Evidence) ||
+                            EllaiObservedToolResult.ResultFingerprint(current) != scope.ResultDigest)
+                            return decisions[turn.ClientUtteranceId] = false;
+                    }
+                    catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+                    catch (Exception error) when (error is not OutOfMemoryException)
+                    {
+                        return decisions[turn.ClientUtteranceId] = false;
+                    }
+                    continue;
+                }
                 if (observation.ToolName == EllaiToolNames.Receipts)
                 {
                     var digest = observation.ReceiptListDigest;
