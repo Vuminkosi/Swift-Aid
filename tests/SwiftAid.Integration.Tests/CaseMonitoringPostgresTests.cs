@@ -1,6 +1,8 @@
 using System.Security.Claims;
 using System.Runtime.CompilerServices;
 using Microsoft.Agents.AI;
+using Microsoft.AspNetCore.Components.Authorization;
+using SwiftAid.Gateway.Cases;
 using Microsoft.Extensions.AI;
 using SwiftAid.Gateway.Ellai;
 using SwiftAid.Intelligence.Meta;
@@ -140,6 +142,14 @@ public sealed class CaseMonitoringPostgresTests
         finally { await hosted.StopAsync(default); }
     }
 
+    private sealed class OfficerAuthenticationStateProvider : AuthenticationStateProvider
+    {
+        public override Task<AuthenticationState> GetAuthenticationStateAsync() => Task.FromResult(new AuthenticationState(
+            new ClaimsPrincipal(new ClaimsIdentity([
+                new Claim(ClaimTypes.NameIdentifier, "officer-1"),
+                new Claim(ActorContext.AccessEpochClaimType, "7")], "fixture"))));
+    }
+
     private sealed class FollowUpNoInferenceClient : IChatClient
     {
         public int Calls { get; private set; }
@@ -232,10 +242,13 @@ public sealed class CaseMonitoringPostgresTests
         var reviewerPolicy = new CaseAccessPolicy(new PostgresCurrentAccessGrantStore(reviewerDb, reviewerUnit),
             new PostgresCaseAccessDescriptorStore(reviewerDb, reviewerUnit));
         var secondReviewer = new PostgresFollowUpRecommendationReviewService(reviewerDb, reviewerUnit, reviewerPolicy);
-        var reviews = await Task.WhenAll(reviewer.ReviewAsync(actor, caseId, activity.ActivityId, commandId, default),
-            secondReviewer.ReviewAsync(actor, caseId, activity.ActivityId, commandId, default));
-        Assert.Single(reviews, outcome => outcome == FollowUpRecommendationReviewOutcome.Recorded);
-        Assert.Single(reviews, outcome => outcome == FollowUpRecommendationReviewOutcome.Replayed);
+        using var reviewServices = new ServiceCollection().AddSingleton<IFollowUpRecommendationReviewService>(secondReviewer).BuildServiceProvider();
+        var reviewClient = new FollowUpReviewGatewayClient(new OfficerAuthenticationStateProvider(), reviewServices);
+        var directReview = reviewer.ReviewAsync(actor, caseId, activity.ActivityId, commandId, default);
+        var gatewayReview = reviewClient.ReviewAsync(caseId, activity.ActivityId, commandId, default);
+        await Task.WhenAll(directReview, gatewayReview);
+        Assert.True((directReview.Result == FollowUpRecommendationReviewOutcome.Recorded && gatewayReview.Result.Status == FollowUpReviewStatus.Replayed) ||
+            (directReview.Result == FollowUpRecommendationReviewOutcome.Replayed && gatewayReview.Result.Status == FollowUpReviewStatus.Recorded));
         Assert.Equal(FollowUpRecommendationReviewOutcome.Replayed, await reviewer.ReviewAsync(actor, caseId, activity.ActivityId, commandId, default));
         Assert.Equal(FollowUpRecommendationReviewOutcome.Conflict, await reviewer.ReviewAsync(actor, caseId, Guid.NewGuid(), commandId, default));
         Assert.Equal(FollowUpRecommendationReviewOutcome.AlreadyReviewed, await reviewer.ReviewAsync(actor, caseId, activity.ActivityId, Guid.NewGuid(), default));

@@ -1,6 +1,12 @@
 @using SwiftAid.Contracts.Cases
+@using Microsoft.Extensions.DependencyInjection
+@inject IServiceProvider Services
 
 <section class="case-timeline" aria-label="Case history">
+    @if (_reviewMessage is not null)
+    {
+        <MudAlert Severity="@(_reviewError ? Severity.Warning : Severity.Success)" Variant="Variant.Outlined" role="status">@_reviewMessage</MudAlert>
+    }
     @if (_loading)
     {
         <div class="case-timeline__state" role="status" aria-live="polite">
@@ -113,6 +119,10 @@
                                                 else if (activity.RoleId == "ops.followup" && activity.FollowUpIsCurrent == true && activity.FollowUpId is { } followUpId && OnReviewFollowUp.HasDelegate)
                                                 {
                                                     <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="@(() => OnReviewFollowUp.InvokeAsync(followUpId))" aria-label="Review the recommended follow-up">Review follow-up</MudButton>
+                                                }
+                                                @if (activity.RoleId == "ops.followup" && activity.FollowUpIsCurrent == true && activity.FollowUpReviewedAtUtc is null && ReviewClient is not null)
+                                                {
+                                                    <MudButton Variant="Variant.Text" Color="Color.Primary" Disabled="@(_reviewingId is not null)" OnClick="@(() => RecordReviewAsync(activity.ActivityId))" aria-label="Mark this recommendation as reviewed">Mark reviewed</MudButton>
                                                 }
                                             </li>
                                         }
@@ -242,6 +252,12 @@
     private DateTime? _throughLocalDate;
     private CaseTimelineEntry? _selectedEntry;
     private bool _detailsOpen;
+    private IFollowUpRecommendationReviewClient? _reviewClient;
+    private IFollowUpRecommendationReviewClient? ReviewClient => _reviewClient ??= Services.GetService<IFollowUpRecommendationReviewClient>();
+    private Guid? _reviewingId;
+    private string? _reviewMessage;
+    private bool _reviewError;
+    private readonly Dictionary<Guid, Guid> _reviewCommandIds = [];
 
     private IReadOnlyList<(string FilterValue, string Label)> EventTypeOptions
     {
@@ -281,6 +297,8 @@
         if (CaseId != Guid.Empty && CaseId != _loadedCaseId)
         {
             _loadedCaseId = CaseId;
+            _reviewCommandIds.Clear();
+            _reviewMessage = null;
             _selectedEventType = AllEventsFilter;
             _fromLocalDate = null;
             _throughLocalDate = null;
@@ -288,6 +306,39 @@
             _detailsOpen = false;
             await RefreshAsync();
         }
+    }
+
+    private async Task RecordReviewAsync(Guid recommendationId)
+    {
+        if (_reviewingId is not null || CaseId == Guid.Empty || recommendationId == Guid.Empty) return;
+        var client = ReviewClient;
+        if (client is null) return;
+        var caseId = CaseId;
+        if (!_reviewCommandIds.TryGetValue(recommendationId, out var commandId))
+            _reviewCommandIds[recommendationId] = commandId = Guid.NewGuid();
+        _reviewingId = recommendationId;
+        _reviewMessage = null;
+        try
+        {
+            var result = await client.ReviewAsync(caseId, recommendationId, commandId);
+            if (CaseId != caseId) return;
+            _reviewError = result.Status is not (FollowUpReviewStatus.Recorded or FollowUpReviewStatus.Replayed or FollowUpReviewStatus.AlreadyReviewed);
+            _reviewMessage = result.Status switch
+            {
+                FollowUpReviewStatus.Recorded or FollowUpReviewStatus.Replayed or FollowUpReviewStatus.AlreadyReviewed => "Review recorded. No follow-up action was submitted.",
+                FollowUpReviewStatus.Stale => "This recommendation is no longer current. Refresh the follow-up before taking action.",
+                FollowUpReviewStatus.Denied => "The recommendation is unavailable or you cannot review it.",
+                FollowUpReviewStatus.Conflict => "The review request conflicted with an earlier request. Refresh before trying again.",
+                _ => "We couldn't confirm the review. Try again when connected."
+            };
+            if (result.Status != FollowUpReviewStatus.Unavailable) _reviewCommandIds.Remove(recommendationId);
+            if (result.Status != FollowUpReviewStatus.Unavailable) await RefreshAsync();
+        }
+        catch (Exception error) when (error is not OutOfMemoryException)
+        {
+            if (CaseId == caseId) { _reviewError = true; _reviewMessage = "We couldn't confirm the review. Try again when connected."; }
+        }
+        finally { _reviewingId = null; }
     }
 
     /// <summary>Reloads the timeline; called by hosting pages after a successful command.</summary>

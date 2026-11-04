@@ -102,7 +102,9 @@ A case-authorized review service records one immutable staff review against an
 exact current recommendation; retries with the same command ID replay and changed
 or completed schedules are rejected. The review records no clinical decision or
 follow-up action. Timeline and Ellai history show the review time and refresh
-the replay digest. The service is registered internally but is not yet exposed
-through an endpoint or review button. Durable operational metrics remain outstanding.
+the replay digest. Authorized staff can mark a current recommendation reviewed
+from the case timeline; the authenticated endpoint and Gateway and mobile clients
+preserve the command identity on retries. This records review only, not a follow-up
+outcome or escalation. Durable operational metrics remain outstanding.
 Production grants, migration deployment, rendered UI and deployed worker operation
 are not verified. No user or officer messages are sent by this work unit.

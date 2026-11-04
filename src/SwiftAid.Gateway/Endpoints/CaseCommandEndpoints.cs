@@ -666,7 +666,7 @@ public static class CaseCommandEndpoints
         throw new RequestBodyTooLargeException();
     }
 
-    private static async Task<bool> RequiresAntiforgeryAsync(HttpContext context)
+    internal static async Task<bool> RequiresAntiforgeryAsync(HttpContext context)
     {
         // Authenticate against the configured server schemes instead of trusting request headers
         // or caller-provided fields to distinguish browser and native clients. If a valid browser

@@ -103,6 +103,7 @@ builder.Services.AddScoped<IPublicIntakeMetadataClient, WebPublicIntakeMetadataC
 builder.Services.AddScoped<IPublicCommunitySessionClient, WebPublicCommunitySessionClient>();
 builder.Services.AddScoped<SwiftAid.Contracts.Intake.IIntakeCoordinationClient, IntakeCoordinationGatewayClient>();
 builder.Services.AddScoped<SwiftAid.Contracts.Cases.ICaseTimelineClient, SwiftAid.Gateway.Cases.CaseTimelineGatewayClient>();
+builder.Services.AddScoped<SwiftAid.Contracts.Cases.IFollowUpRecommendationReviewClient, SwiftAid.Gateway.Cases.FollowUpReviewGatewayClient>();
 builder.Services.AddScoped<SwiftAid.Contracts.Cases.ICaseCollaboratorCandidatesClient, SwiftAid.Gateway.Cases.CaseCollaboratorCandidatesGatewayClient>();
 builder.Services.AddScoped<SwiftAid.Contracts.Cases.ICaseQueueClient, SwiftAid.Gateway.Cases.CaseQueueGatewayClient>();
 builder.Services.AddScoped<SwiftAid.Contracts.Cases.IMonitoringQueueClient, SwiftAid.Gateway.Cases.MonitoringQueueGatewayClient>();
@@ -306,6 +307,7 @@ app.MapCaseClassificationEndpoints();
 app.MapCaseTranslationEndpoints();
 app.MapSurveillanceSignalEndpoints();
 app.MapCaseTimelineEndpoints();
+app.MapFollowUpReviewEndpoints();
 app.MapCaseDetailEndpoints();
 app.MapCaseQueueEndpoints();
 app.MapMapAggregateEndpoints();
