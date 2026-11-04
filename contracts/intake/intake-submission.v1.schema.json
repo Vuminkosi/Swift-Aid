@@ -35,6 +35,7 @@
     },
     "capturedAt": { "$ref": "#/$defs/reportedTime" },
     "occurrence": { "$ref": "#/$defs/reportedTime" },
+    "onset": { "oneOf": [{ "$ref": "#/$defs/reportedTime" }, { "type": "null" }], "description": "Optional reporter-supplied symptom or sign onset. Omit or leave unknown when the reporter does not know; never derive it from capture or upload time." },
     "location": {
       "type": "object",
       "additionalProperties": false,

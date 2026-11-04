@@ -52,6 +52,9 @@ public interface ICaseTimelineStore
 
     Task<IReadOnlyList<CaseOfficerEscalationRow>> GetCurrentOfficerEscalationsAsync(ICaseCommandLease lease, Guid caseId,
         CancellationToken ct) => Task.FromResult<IReadOnlyList<CaseOfficerEscalationRow>>([]);
+    /// <summary>Minimum attribution metadata for the original report event; no actor ID or report content.</summary>
+    Task<CaseReportAttributionRow?> GetReportAttributionAsync(Guid caseId, CancellationToken ct) =>
+        Task.FromResult<CaseReportAttributionRow?>(null);
 }
 
 public interface ICaseTimelineQuery

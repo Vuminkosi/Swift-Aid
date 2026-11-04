@@ -18,15 +18,46 @@ function isDisabled(element) {
 // Value-only snapshots, keyed by a disposable component instance token.
 // No .NET component references, callbacks, field values or labels are retained.
 const components = new Map();
+export function invalidateComponent(instanceId) {
+    const previous = components.get(instanceId);
+    if (!previous) return;
+    components.set(instanceId, { ...previous, validationInputIds: [], inputStates: [], controls: previous.controls.map(control => ({
+        controlId: control.controlId, state: 0, completionAccepted: false
+    })) });
+}
+
 export function updateComponent(instanceId, snapshot) {
-    if (typeof instanceId !== 'string' || instanceId.length > 120 || !instanceId ||
-        !semanticId.test(snapshot?.componentId ?? '') || !Array.isArray(snapshot.controls) ||
-        snapshot.controls.length > 20) return false;
+    if (typeof instanceId !== 'string' || instanceId.length > 120 || !instanceId) return false;
+    if (!semanticId.test(snapshot?.componentId ?? '') || !Array.isArray(snapshot.controls) ||
+        snapshot.controls.length > 20) {
+        invalidateComponent(instanceId);
+        return false;
+    }
     if (!components.has(instanceId) && components.size >= 128) return false;
-    const controls = snapshot.controls.map(control => ({ controlId: control.controlId, state: control.state, completionAccepted: control.completionAccepted === true }));
+    const controls = snapshot.controls.map(control => ({ controlId: control?.controlId, state: control?.state, completionAccepted: control?.completionAccepted === true }));
     if (controls.some(control => !semanticId.test(control.controlId ?? '') ||
-        !Number.isInteger(control.state) || control.state < 0 || control.state > 6)) return false;
-    components.set(instanceId, { path: location.pathname, controls });
+        !Number.isInteger(control.state) || control.state < 0 || control.state > 6)) {
+        invalidateComponent(instanceId);
+        return false;
+    }
+    const validationInputIds = snapshot.validationIssues ?? [];
+    if (!Array.isArray(validationInputIds) || validationInputIds.length > 20 ||
+        validationInputIds.some(issue => !semanticId.test(issue?.inputId ?? '')) ||
+        new Set(validationInputIds.map(issue => issue.inputId)).size !== validationInputIds.length) {
+        invalidateComponent(instanceId);
+        return false;
+    }
+    const inputStates = snapshot.inputStates ?? [];
+    if (!Array.isArray(inputStates) || inputStates.length > 20 || inputStates.some(input =>
+        !semanticId.test(input?.inputId ?? '') || !controls.some(control => control.controlId === input?.controlId) ||
+        !Number.isInteger(input?.presence) || input.presence < 0 || input.presence > 4) ||
+        new Set(inputStates.map(input => `${input.controlId}:${input.inputId}`)).size !== inputStates.length) {
+        invalidateComponent(instanceId);
+        return false;
+    }
+    components.set(instanceId, { path: location.pathname, controls,
+        inputStates: inputStates.map(({ controlId, inputId, presence }) => ({ controlId, inputId, presence })),
+        validationInputIds: validationInputIds.map(issue => issue.inputId) });
     return true;
 }
 
@@ -88,11 +119,32 @@ export function collect(requestedControls = null) {
     const completedControlIds = [...completionOwners.entries()]
         .filter(([, owners]) => owners.length === 1 && owners[0])
         .map(([id]) => id).sort().slice(0, 20);
-    const stateKey = JSON.stringify({ controlStates, completedControlIds });
+    const validationOwners = new Map();
+    for (const component of components.values()) {
+        if (component.path !== location.pathname) continue;
+        if (requested !== null && !component.controls.some(control => requested.has(control.controlId))) continue;
+        for (const id of component.validationInputIds ?? [])
+            validationOwners.set(id, (validationOwners.get(id) ?? 0) + 1);
+    }
+    const validationInputIds = [...validationOwners.entries()]
+        .filter(([, owners]) => owners === 1).map(([id]) => id).slice(0, 20);
+    const inputOwners = new Map();
+    for (const component of components.values()) {
+        if (component.path !== location.pathname) continue;
+        for (const input of component.inputStates ?? []) {
+            if (!controlStates.some(control => control.controlId === input.controlId && control.state === 4)) continue;
+            const key = `${input.controlId}:${input.inputId}`;
+            const owners = inputOwners.get(key) ?? [];
+            owners.push(input);
+            inputOwners.set(key, owners);
+        }
+    }
+    const inputStates = [...inputOwners.values()].filter(owners => owners.length === 1).map(owners => owners[0]).slice(0, 20);
+    const stateKey = JSON.stringify({ controlStates, completedControlIds, validationInputIds, inputStates });
     if (stateKey !== previousState) {
         previousState = stateKey;
         contextStamp = crypto.randomUUID();
     }
     return { viewInstanceId, contextStamp, platform: "web",
-        mountedControlIds: controlStates.map(c => c.controlId), controlStates, completedControlIds };
+        mountedControlIds: controlStates.map(c => c.controlId), controlStates, completedControlIds, validationInputIds, inputStates };
 }

@@ -18,7 +18,17 @@ public sealed record IntakeSubmission(
     /// <summary>Age in completed years as reported for a human subject; null means unknown.</summary>
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public int? AgeYears { get; init; }
+
+    /// <summary>Gender as explicitly reported for a human subject; null means not provided or unknown.</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public ReportedGender? Gender { get; init; }
+
+    /// <summary>Reporter-supplied symptom or sign onset; null means the older draft did not capture it.</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public ReportedTime? Onset { get; init; }
 }
+
+public enum ReportedGender { Female, Male, Other }
 
 public enum IntakeSubjectScope
 {
@@ -81,7 +91,18 @@ public sealed record PublicIntakeMetadata(
     string CountryCatalogueVersion,
     string CountryCatalogueReference,
     string PrivacyNoticeVersion,
-    string PrivacyNoticeReference);
+    string PrivacyNoticeReference)
+{
+    /// <summary>Current server-side text limits; null when served by an older Gateway.</summary>
+    public PublicIntakeTextLimits? TextLimits { get; init; }
+}
+
+/// <summary>Public, non-sensitive validation bounds for report text.</summary>
+public sealed record PublicIntakeTextLimits(int MaximumNarrativeCharacters, int MaximumObservations, int MaximumObservationCharacters)
+{
+    public bool IsValid() => MaximumNarrativeCharacters is >= 1 and <= 20000 &&
+        MaximumObservations is >= 1 and <= 100 && MaximumObservationCharacters is >= 1 and <= 2000;
+}
 
 public sealed record PublicIntakeCountry(string Code, string Label);
 

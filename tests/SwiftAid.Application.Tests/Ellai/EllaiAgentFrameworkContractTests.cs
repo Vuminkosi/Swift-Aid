@@ -2085,12 +2085,12 @@ public sealed class EllaiAgentFrameworkContractTests
     }
 
     [Theory]
-    [InlineData("Done.")]
-    [InlineData("Unsupported case detail.")]
-    public async Task EvidenceFreeSegmentIsBufferedUntilFinalDecision(string provisionalText)
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task VerifiedSegmentArrivesBeforeProviderCompletes(bool structured)
     {
-        using var client = new VerifiedSegmentStreamingClient(provisionalText);
-        var agent = new EllaiFrameworkAgent(client);
+        using var client = new VerifiedSegmentStreamingClient();
+        var agent = new EllaiFrameworkAgent(client, structured ? new EllaiStructuredFrameworkAgentFactory() : null);
         var context = new EllaiToolContext("session", "epoch", "cases", null, 4, true,
             AllowedTools: new HashSet<string>(StringComparer.Ordinal));
         var received = new List<string>();
@@ -2107,21 +2107,21 @@ public sealed class EllaiAgentFrameworkContractTests
         }
         finally { client.Release.TrySetResult(); }
         Assert.Equal("Done.", (await run)?.DisplayText);
-        Assert.Equal("Done.", string.Concat(received));
+        Assert.Equal(structured, client.SawStructuredResponse);
     }
 
     private sealed class VerifiedSegmentStreamingClient(string provisionalText) : IChatClient
     {
         public TaskCompletionSource FirstPart { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public bool SawStructuredResponse { get; private set; }
         public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null,
             CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages,
             ChatOptions? options = null, [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
-            yield return new ChatResponseUpdate(ChatRole.Assistant, "{\"stream_segments\":[{\"text\":" +
-                System.Text.Json.JsonSerializer.Serialize(provisionalText) + ",\"claims\":[]}]");
-            FirstPart.TrySetResult();
+            SawStructuredResponse = options?.ResponseFormat is ChatResponseFormatJson { Schema: not null };
+            yield return new ChatResponseUpdate(ChatRole.Assistant, "{\"stream_segments\":[{\"text\":\"Done.\",\"claims\":[]}]");
             await Release.Task.WaitAsync(cancellationToken);
             yield return new ChatResponseUpdate(ChatRole.Assistant, "," + ValidDecision.TrimStart()[1..]);
         }

@@ -176,6 +176,8 @@ public sealed class EllaiReasoningAdapter(HttpClient http, EllaiOptions options)
             var promptTokens = 0;
             var completionTokens = 0;
             var reasoningTokens = 0;
+            var finishReason = string.Empty;
+            var completed = false;
             await using var stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
             using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: false,
                 bufferSize: 4096, leaveOpen: false);
@@ -194,6 +196,7 @@ public sealed class EllaiReasoningAdapter(HttpClient http, EllaiOptions options)
                 var data = line.AsSpan(5).Trim();
                 if (data.SequenceEqual("[DONE]"))
                 {
+                    completed = true;
                     break;
                 }
                 if (data.IsEmpty)
@@ -232,6 +235,11 @@ public sealed class EllaiReasoningAdapter(HttpClient http, EllaiOptions options)
                     }
 
                     var choice = choices[0];
+                    if (choice.TryGetProperty("finish_reason", out var finish)
+                        && finish.ValueKind == JsonValueKind.String)
+                    {
+                        finishReason = finish.GetString() ?? string.Empty;
+                    }
                     if (!choice.TryGetProperty("delta", out var delta)
                         || !delta.TryGetProperty("content", out var content)
                         || content.ValueKind != JsonValueKind.String)
@@ -253,7 +261,12 @@ public sealed class EllaiReasoningAdapter(HttpClient http, EllaiOptions options)
                 }
             }
 
-            return new EllaiReasoningResult(text.ToString(), model, "stop",
+            if (!completed)
+            {
+                throw new InvalidOperationException("Ellai reasoning stream ended before completion.");
+            }
+
+            return new EllaiReasoningResult(text.ToString(), model, finishReason,
                 new EllaiReasoningUsage(promptTokens, completionTokens,
                     promptTokens + completionTokens, reasoningTokens));
         }

@@ -89,7 +89,21 @@ public sealed record UiObservationReport(
     string? CurrentNavigationId = null,
     IReadOnlyList<string>? CompletedControlIds = null)
 {
+    /// <summary>Value-free component validation identifiers for the active client presentation.</summary>
+    public IReadOnlyList<string>? ValidationInputIds { get; init; }
+
+    /// <summary>Client-reported presence only; never field values or persistence evidence.</summary>
+    public IReadOnlyList<UiInputState>? InputStates { get; init; }
+
     public bool IsValid() =>
+        (InputStates is null || InputStates.Count <= 20 &&
+            InputStates.All(input => input is not null && MountedControlIds is not null &&
+                MountedControlIds.Contains(input.ControlId) && !string.IsNullOrWhiteSpace(input.InputId) &&
+                input.InputId.Length <= 120 && Enum.IsDefined(input.Presence)) &&
+            InputStates.Select(input => (input.ControlId, input.InputId)).Distinct().Count() == InputStates.Count) &&
+        (ValidationInputIds is null || ValidationInputIds.Count <= 20 &&
+            ValidationInputIds.All(id => !string.IsNullOrWhiteSpace(id) && id.Length <= 120) &&
+            ValidationInputIds.Distinct(StringComparer.Ordinal).Count() == ValidationInputIds.Count) &&
         (CompletedControlIds is null || CompletedControlIds.Count <= 20 &&
             CompletedControlIds.All(id => !string.IsNullOrWhiteSpace(id) && id.Length <= 120) &&
             CompletedControlIds.Distinct(StringComparer.Ordinal).Count() == CompletedControlIds.Count) &&
@@ -105,6 +119,11 @@ public sealed record UiObservationReport(
             ControlStates.All(state => state is not null && MountedControlIds.Contains(state.ControlId) && Enum.IsDefined(state.State)) &&
             ControlStates.Select(state => state.ControlId).Distinct(StringComparer.Ordinal).Count() == ControlStates.Count);
 }
+
+public enum UiInputPresence { NotProvided, Entered, Unknown, Invalid, Confirmed }
+
+/// <summary>Untrusted presentation state, not proof of a business action.</summary>
+public sealed record UiInputState(string ControlId, string InputId, UiInputPresence Presence);
 
 /// <summary>Presentation evidence only; never grants authorization or proves a business action.</summary>
 public sealed record UiControlState(string ControlId, UiObservationState State, bool CompletionAccepted = false);

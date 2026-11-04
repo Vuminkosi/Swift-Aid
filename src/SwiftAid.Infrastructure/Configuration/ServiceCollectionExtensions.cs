@@ -155,7 +155,7 @@ public static class ServiceCollectionExtensions
         intakeMetadataOptions.Validate();
         services.TryAddSingleton(intakeMetadataOptions);
         services.TryAddSingleton<IIntakePublicMetadataProvider>(
-            _ => new IntakePublicMetadataProvider(intakeMetadataOptions));
+            _ => new IntakePublicMetadataProvider(intakeMetadataOptions, intakeLimits));
         var demoDataOptions = ReadDemoDataOptions(configuration);
         demoDataOptions.Validate();
         services.TryAddSingleton(demoDataOptions);
@@ -436,6 +436,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IEligibleHealthOfficerQuery>(provider => new EligibleHealthOfficerQuery(
             provider.GetRequiredService<IEligibleHealthOfficerStore>(), provider.GetRequiredService<ICaseAccessPolicy>(),
             provider.GetRequiredService<ICaseCommandUnitOfWork>(), provider.GetRequiredService<IOptions<HealthOfficerDirectoryOptions>>().Value));
+        services.AddScoped<ICaseReportAttributionQuery, CaseReportAttributionQuery>();
         services.AddScoped<ICaseCollaboratorCandidatesStore, PostgresCaseCollaboratorCandidatesStore>();
         services.AddScoped<ICaseCollaboratorCandidatesQuery, CaseCollaboratorCandidatesQuery>();
         services.AddScoped<ICaseQueueStore, PostgresCaseQueueStore>();
@@ -448,6 +449,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ICaseSummaryStore, PostgresCaseSummaryStore>();
         services.AddScoped<ICaseSummaryQuery, CaseSummaryQuery>();
         services.AddScoped<ICaseReportReadQuery, CaseReportReadQuery>();
+        services.AddScoped<ICaseOccurrenceLocationQuery, CaseReportReadQuery>();
         services.AddScoped<ICaseMapCandidateStore, PostgresCaseQueueStore>();
         services.AddScoped<ICaseCorrectionReadQuery, CaseCorrectionReadQuery>();
         services.AddScoped<IHomeOverviewStore, PostgresHomeOverviewStore>();

@@ -31,6 +31,153 @@ public sealed class GuestSubmissionJourneyTests
     }
 
     [Fact]
+    public async Task LocalAudioIsNotQueuedOrSentWithoutAnUploadPath()
+    {
+        var persistence = new MemorySubmissionPersistence();
+        var transport = new ScriptedTransport();
+        var store = new GuestDraftStore(persistence, transport: transport);
+        var attachmentId = Guid.NewGuid();
+        var submission = ValidSubmission() with { OriginalAudioAttachmentIds = [attachmentId] };
+        var draft = await store.CreateDraftAsync(submission);
+        var record = (await persistence.GetAsync(draft.ClientSubmissionId, default))!;
+        await persistence.SaveAsync(record with
+        {
+            AudioAssets = [new(attachmentId, new string('A', 64), "audio/wav", 6, 900, GuestAudioLocalState.LocalOnly)]
+        }, default);
+
+        Assert.True((await store.GetAsync(draft.ClientSubmissionId))!.HasLocalAudio);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => store.QueueAsync(draft.ClientSubmissionId));
+        var unchanged = (await persistence.GetAsync(draft.ClientSubmissionId, default))!;
+        Assert.Equal(GuestSubmissionLocalState.Draft, unchanged.State);
+        Assert.Contains(attachmentId, unchanged.Submission.OriginalAudioAttachmentIds);
+
+        await persistence.SaveAsync(unchanged with { State = GuestSubmissionLocalState.Queued }, default);
+        var sync = await new GuestSubmissionCoordinator(persistence, transport).SubmitPendingAsync();
+        Assert.Equal(1, sync.NeedsAttention);
+        Assert.Equal(0, transport.CreateSessionCalls);
+        Assert.Equal(0, transport.SubmitCalls);
+        Assert.Contains(attachmentId, (await persistence.GetAsync(draft.ClientSubmissionId, default))!.Submission.OriginalAudioAttachmentIds);
+    }
+
+    [Fact]
+    public async Task EditableDraftCanBeRevisedAndExplicitlyCompletedWithoutQueuingRawValues()
+    {
+        var persistence = new MemorySubmissionPersistence();
+        var transport = new ScriptedTransport();
+        var store = new GuestDraftStore(persistence, transport: transport);
+        var firstSnapshot = new GuestDraftFormSnapshot(1, "{\"occurrenceTime\":\"not yet\"}");
+        var created = await store.CreateEditableDraftAsync(ValidSubmission(), firstSnapshot);
+        Assert.True(created.RequiresEditing);
+        var loaded = await store.GetEditableDraftAsync(created.ClientSubmissionId);
+        Assert.Equal(firstSnapshot, loaded!.FormSnapshot);
+        Assert.False(loaded.Submission.Confirmations.ReportReviewConfirmed);
+        Assert.False(loaded.Submission.Confirmations.OccurrenceCountryConfirmed);
+        Assert.False(loaded.Submission.Confirmations.ProcessingConfirmed);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => store.QueueAsync(created.ClientSubmissionId));
+
+        var secondSnapshot = new GuestDraftFormSnapshot(1, "{\"occurrenceTime\":\"still editing\"}");
+        var revised = await store.CreateEditableRevisionAsync(created.ClientSubmissionId, ValidSubmission(), secondSnapshot);
+        Assert.Null(await store.GetEditableDraftAsync(created.ClientSubmissionId));
+        Assert.Equal(secondSnapshot, (await store.GetEditableDraftAsync(revised.ClientSubmissionId))!.FormSnapshot);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => store.CreateRevisionAsync(revised.ClientSubmissionId, ValidSubmission()));
+
+        var completed = await store.CompleteEditableDraftAsync(revised.ClientSubmissionId, ValidSubmission());
+        Assert.False(completed.RequiresEditing);
+        Assert.Null(await store.GetEditableDraftAsync(completed.ClientSubmissionId));
+        Assert.NotNull(await store.GetDraftAsync(completed.ClientSubmissionId));
+        Assert.Equal(GuestSubmissionLocalState.Queued, (await store.QueueAsync(completed.ClientSubmissionId)).State);
+        Assert.Equal(0, transport.SubmitCalls);
+    }
+
+    [Theory]
+    [InlineData(4, "{}")]
+    [InlineData(1, "[]")]
+    [InlineData(1, "{")]
+    public async Task InvalidEditableSnapshotsAreRejectedWithoutCreatingDraft(int version, string json)
+    {
+        var persistence = new MemorySubmissionPersistence();
+        var store = new GuestDraftStore(persistence);
+        await Assert.ThrowsAsync<ArgumentException>(() => store.CreateEditableDraftAsync(ValidSubmission(), new(version, json)));
+        Assert.Empty(await store.GetAllAsync());
+    }
+
+    [Fact]
+    public async Task SnapshotDraftCannotBeOpenedRevisedOrQueuedByLegacyEditor()
+    {
+        var persistence = new MemorySubmissionPersistence();
+        var store = new GuestDraftStore(persistence, transport: new ScriptedTransport());
+        var created = await store.CreateDraftAsync(ValidSubmission());
+        var record = (await persistence.GetAsync(created.ClientSubmissionId, default))!;
+        var snapshot = new GuestDraftFormSnapshot(1, "{\"occurrenceTime\":\"unfinished\"}");
+        await persistence.SaveAsync(record with { FormSnapshot = snapshot }, default);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => store.GetDraftAsync(created.ClientSubmissionId));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => store.CreateRevisionAsync(created.ClientSubmissionId, ValidSubmission()));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => store.QueueAsync(created.ClientSubmissionId));
+        var preserved = (await persistence.GetAsync(created.ClientSubmissionId, default))!;
+        Assert.Equal(snapshot, preserved.FormSnapshot);
+        Assert.Equal(GuestSubmissionLocalState.Draft, preserved.State);
+    }
+
+    [Fact]
+    public async Task SnapshotOnQueuedRecordNeverReachesTransport()
+    {
+        var persistence = new MemorySubmissionPersistence();
+        var transport = new ScriptedTransport();
+        var store = new GuestDraftStore(persistence, transport: transport);
+        var draft = await store.CreateDraftAsync(ValidSubmission());
+        await store.QueueAsync(draft.ClientSubmissionId);
+        var queued = (await persistence.GetAsync(draft.ClientSubmissionId, default))!;
+        await persistence.SaveAsync(queued with { FormSnapshot = new(1, "{\"occurrenceTime\":\"unfinished\"}") }, default);
+
+        var result = await new GuestSubmissionCoordinator(persistence, transport).SubmitPendingAsync();
+
+        Assert.Equal(1, result.NeedsAttention);
+        Assert.Equal(0, transport.CreateSessionCalls);
+        Assert.Equal(0, transport.SubmitCalls);
+        Assert.NotNull((await persistence.GetAsync(draft.ClientSubmissionId, default))!.FormSnapshot);
+    }
+
+    [Theory]
+    [InlineData(1, "{}", true)]
+    [InlineData(2, "{}", true)]
+    [InlineData(3, "{}", true)]
+    [InlineData(4, "{}", false)]
+    [InlineData(1, "[]", false)]
+    [InlineData(1, "{", false)]
+    public void SnapshotValidationIsBoundedAndVersioned(int version, string json, bool valid)
+    {
+        Assert.Equal(valid, new GuestDraftFormSnapshot(version, json).IsValid());
+        Assert.False(new GuestDraftFormSnapshot(1, new string('x', GuestDraftFormSnapshot.MaximumJsonCharacters + 1)).IsValid());
+    }
+
+    [Fact]
+    public async Task UnverifiedCountryDraftSurvivesAndCannotQueueUntilReconfirmed()
+    {
+        var persistence = new MemorySubmissionPersistence();
+        var store = new GuestDraftStore(persistence, transport: new ScriptedTransport());
+        var original = ValidSubmission();
+        var unverified = original with
+        {
+            Location = original.Location with { CatalogueVersion = null },
+            Confirmations = original.Confirmations with
+            {
+                OccurrenceCountryConfirmed = false,
+                OccurrenceCountryCatalogueVersion = string.Empty
+            }
+        };
+        var saved = await store.CreateDraftAsync(unverified);
+        var loaded = await store.GetDraftAsync(saved.ClientSubmissionId);
+        Assert.Equal(unverified.Location.CountryCode, loaded!.Submission.Location.CountryCode);
+        Assert.False(loaded.Submission.Confirmations.OccurrenceCountryConfirmed);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => store.QueueAsync(saved.ClientSubmissionId));
+        Assert.Equal(GuestSubmissionLocalState.Draft, (await store.GetAsync(saved.ClientSubmissionId))!.State);
+
+        var reconfirmed = await store.CreateRevisionAsync(saved.ClientSubmissionId, original);
+        Assert.Equal(GuestSubmissionLocalState.Queued, (await store.QueueAsync(reconfirmed.ClientSubmissionId)).State);
+    }
+
+    [Fact]
     public async Task Queue_WhenCountryLeavesCatalogue_ThrowsAndKeepsDraftUntouched()
     {
         var persistence = new MemorySubmissionPersistence();

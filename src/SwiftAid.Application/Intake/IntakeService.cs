@@ -9,6 +9,8 @@ using SwiftAid.Domain.Intake;
 
 namespace SwiftAid.Application.Intake;
 
+internal sealed class IntakeReportValidationException() : ArgumentException("The intake report is invalid.");
+
 public sealed class IntakeSubmissionValidator(
     IIntakeCountryCatalogue countries,
     IIntakeConsentPolicy consentPolicy) : IIntakeSubmissionValidator
@@ -18,7 +20,14 @@ public sealed class IntakeSubmissionValidator(
 
     public async Task<bool> ValidateAsync(IntakeSubmission submission, IntakeLimits limits, CancellationToken ct)
     {
-        IntakeSubmissionRules.Validate(submission, limits);
+        try
+        {
+            IntakeSubmissionRules.Validate(submission, limits);
+        }
+        catch (ArgumentException)
+        {
+            throw new IntakeReportValidationException();
+        }
         if (!await _countries.IsKnownCountryAsync(
             submission.Location.CountryCode,
             submission.Location.CatalogueVersion!,
@@ -139,7 +148,16 @@ public sealed class IntakeService : IIntakeService
             throw new IntakeSubmissionException(IntakeErrorCode.PayloadTooLarge);
         }
 
-        if (!await _validator.ValidateAsync(command, _limits, ct).ConfigureAwait(false))
+        bool valid;
+        try
+        {
+            valid = await _validator.ValidateAsync(command, _limits, ct).ConfigureAwait(false);
+        }
+        catch (IntakeReportValidationException)
+        {
+            throw new IntakeSubmissionException(IntakeErrorCode.InvalidReport);
+        }
+        if (!valid)
         {
             throw new IntakeSubmissionException(IntakeErrorCode.InvalidReport);
         }

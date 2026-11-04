@@ -19,6 +19,8 @@ public sealed partial class GuidedReportDraftPersistenceTests
         Assert.False(Completed());
         await InvokeSaveDraftAsync(component);
         Assert.False(Completed());
+        Assert.Equal("Unconfirmed", GetSaveState(component));
+        Assert.Equal("Observed concern; report details remain in the form.", component.Draft.Narrative);
         stored = true;
         await InvokeSaveDraftAsync(component);
         Assert.True(Completed());
@@ -90,7 +92,8 @@ public sealed partial class GuidedReportDraftPersistenceTests
     [Fact]
     public async Task SwitchingAfterSuccessfulSaveClearsSavedState()
     {
-        var component = CreateStepper(CreateDraft(), _ => Task.CompletedTask, currentDraftId: Guid.NewGuid());
+        var id = Guid.NewGuid();
+        var component = CreateStepper(CreateDraft(), request => { request.ConfirmPersisted(id); return Task.CompletedTask; }, currentDraftId: id);
         await InvokeSaveDraftAsync(component);
         Assert.Equal("Saved", GetSaveState(component));
         component.CurrentDraftId = Guid.NewGuid();

@@ -99,7 +99,8 @@ public sealed record EllaiToolContext(
     string DataClassification = EllaiProcessingClassification.UnknownOrigin,
     ActorContext? Actor = null,
     IReadOnlySet<string>? AllowedTools = null,
-    string ConsentPurpose = EllaiToolBroker.ToolReadPurpose)
+    string ConsentPurpose = EllaiToolBroker.ToolReadPurpose,
+    bool RevalidationOnly = false)
 {
     /// <summary>Server-owned absolute deadline for the current tool invocation.</summary>
     [System.Text.Json.Serialization.JsonIgnore]
@@ -264,6 +265,9 @@ public sealed class EllaiToolBroker
     private readonly EllaiConsentService _consent;
     private readonly EllaiTechnicalDocs? _docs;
     private readonly ICaseQueueQuery? _queue;
+    private readonly ICaseOccurrenceLocationQuery? _occurrenceLocations;
+    private readonly ICaseReportReadQuery? _caseReports;
+    private readonly ICaseReportAttributionQuery? _caseAttributions;
     private readonly IEllaiApprovalStore? _receipts;
     private readonly EllaiTopicService? _topics;
     private readonly IEllaiExactReferenceIndex? _referenceIndex;
@@ -307,12 +311,17 @@ public sealed class EllaiToolBroker
         EllaiUiAuthorityResolver? uiAuthority = null, IEllaiExactReferenceIndex? referenceIndex = null,
         IDashboardAggregateQuery? dashboard = null, ICaseTimelineQuery? timeline = null, IEllaiLocationReplayProtector? locationReplayProtector = null,
         ICommunitySessionService? communitySessions = null, OwnedCaseSpatialAnalysis? spatial = null,
-        IApprovedHealthSourceRegistry? healthSources = null, CaseCorrelationQuery? correlations = null)
+        IApprovedHealthSourceRegistry? healthSources = null, CaseCorrelationQuery? correlations = null,
+        ICaseOccurrenceLocationQuery? occurrenceLocations = null, ICaseReportReadQuery? caseReports = null,
+        ICaseReportAttributionQuery? caseAttributions = null)
     {
         _policy = policy ?? throw new ArgumentNullException(nameof(policy));
         _consent = consent ?? throw new ArgumentNullException(nameof(consent));
         _docs = docs;
         _queue = queue;
+        _occurrenceLocations = occurrenceLocations;
+        _caseReports = caseReports;
+        _caseAttributions = caseAttributions;
         _receipts = receipts;
         _topics = topics;
         _referenceIndex = referenceIndex;
@@ -713,7 +722,7 @@ public sealed class EllaiToolBroker
     private async Task<EllaiToolResult> ReadEvidenceAsync(
         EllaiToolContext context, EllaiToolRequest request, IEllaiExactReferenceIndex? referenceIndex, CancellationToken ct)
     {
-        if (!string.Equals(request.Arguments["ref"], EllaiCaseResultMemory.Reference, StringComparison.Ordinal))
+        if (request.Arguments["ref"] is not (EllaiCaseResultMemory.Reference or EllaiCaseResultMemory.OriginalReference))
         {
             return Deny(request.ToolName, "Only the current session's retained case-results reference is supported.",
                 EllaiToolReasonCodes.InvalidArguments);
@@ -732,16 +741,50 @@ public sealed class EllaiToolBroker
         }
 
         var field = request.Arguments.GetValueOrDefault("field");
-        if (field is not null && field is not ("country" or "workflow"))
+        if (field is not null && field is not ("country" or "workflow" or "observations" or "submitter"))
         {
-            return Deny(request.ToolName, "field must be country or workflow.",
+            return Deny(request.ToolName, "field must be country, workflow, observations or submitter.",
                 EllaiToolReasonCodes.InvalidArguments);
         }
+        var country = request.Arguments.GetValueOrDefault("country");
+        var placeId = request.Arguments.GetValueOrDefault("place_id");
+        var classificationFilter = request.Arguments.GetValueOrDefault("classification_filter");
+        var groupBy = request.Arguments.GetValueOrDefault("group_by");
+        var caseIdText = request.Arguments.GetValueOrDefault("case_id");
+        Guid? selectedCaseId = null;
+        if (caseIdText is not null && (!Guid.TryParseExact(caseIdText, "D", out var parsedCaseId) ||
+            parsedCaseId == Guid.Empty || field != "submitter"))
+            return Deny(request.ToolName, "case_id must identify a retained case when field=submitter.",
+                EllaiToolReasonCodes.InvalidArguments);
+        if (caseIdText is not null) selectedCaseId = Guid.ParseExact(caseIdText, "D");
+        if ((country is null) != (placeId is null) ||
+            placeId is not null && (placeId.Length is < 1 or > 120 || placeId != placeId.Trim() ||
+                field is not null and not "observations" || classificationFilter is not null && field != "observations") ||
+            classificationFilter is not null && field is not null and not "observations")
+        {
+            return Deny(request.ToolName, "place_id requires country; place and classification filters can combine only with field=observations.",
+                EllaiToolReasonCodes.InvalidArguments);
+        }
+        if (groupBy is not null && (groupBy is not ("region" or "locality" or "reported-day" or "onset-day") || field is not null || placeId is not null || caseIdText is not null))
+            return Deny(request.ToolName, "Grouping can only be used on retained cases without a field or exact-place filter.",
+                EllaiToolReasonCodes.InvalidArguments);
+
+        if (field == "observations" && _caseReports is null)
+            return Deny(request.ToolName, "Authorized report observations are unavailable for this session.",
+                EllaiToolReasonCodes.Unavailable);
+        if (groupBy == "onset-day" && _caseReports is null)
+            return Deny(request.ToolName, "Authorized reporter-supplied onset dates are unavailable for this session.",
+                EllaiToolReasonCodes.Unavailable);
+        if (field == "submitter" && _caseAttributions is null)
+            return Deny(request.ToolName, "Authorized case attribution is unavailable for this session.",
+                EllaiToolReasonCodes.Unavailable);
 
         try
         {
-            var result = await new EllaiCaseResultMemory(_topics, _queue, referenceIndex)
-                .RecallAsync(context, ct, field).ConfigureAwait(false);
+            var result = await new EllaiCaseResultMemory(_topics, _queue, referenceIndex, _occurrenceLocations, _caseReports, _caseAttributions)
+                .RecallAsync(context, ct, field, classificationFilter,
+                    original: request.Arguments["ref"] == EllaiCaseResultMemory.OriginalReference,
+                    country: country, placeId: placeId, caseId: selectedCaseId, groupBy: groupBy).ConfigureAwait(false);
             return result with { ToolName = request.ToolName };
         }
         catch (OperationCanceledException)
@@ -845,23 +888,15 @@ public sealed class EllaiToolBroker
         { return Deny(request.ToolName, "Classification information is unavailable.", EllaiToolReasonCodes.Unavailable); }
     }
 
-    private async Task<EllaiToolResult> ReadClassificationAsync(EllaiToolContext context, EllaiToolRequest request, CancellationToken ct)
+    private Task<EllaiToolResult> ReadClassificationAsync(EllaiToolContext context, EllaiToolRequest request, CancellationToken ct)
     {
-        if (context.Actor is null) return Deny(request.ToolName, "Current staff case access is required.", EllaiToolReasonCodes.DeniedByPolicy);
-        if (request.Arguments.Count != 1 || !request.Arguments.TryGetValue("case_id", out var value) || !Guid.TryParse(value, out var caseId))
-            return Deny(request.ToolName, "Supply one case_id.", EllaiToolReasonCodes.InvalidArguments);
-        if (_classification is null) return Deny(request.ToolName, "Classification evidence is unavailable.", EllaiToolReasonCodes.Unavailable);
-        try
-        {
-            var items = await _classification.GetAsync(context.Actor, caseId, ct).ConfigureAwait(false);
-            var signals = items is not null && _signals?.Enabled == true
-                ? await _signals.ForCaseAsync(context.Actor, caseId, ct).ConfigureAwait(false) : null;
-            return items is null ? Deny(request.ToolName, "That case is unavailable.", EllaiToolReasonCodes.DeniedByPolicy) :
-                new(request.ToolName, true, null, [], JsonSerializer.Serialize(new { items, signals,
-                    interpretation = "Uncalibrated semantic patterns in reported evidence. Not clinical classification, diagnosis, urgency or outbreak confirmation. No new inference was performed." }), 1, false);
-        }
-        catch (Exception error) when (error is not OperationCanceledException and not OutOfMemoryException)
-        { return Deny(request.ToolName, "Classification evidence is unavailable.", EllaiToolReasonCodes.Unavailable); }
+        ct.ThrowIfCancellationRequested();
+        if (context.Actor is null) return Task.FromResult(Deny(request.ToolName, "Current staff case access is required.", EllaiToolReasonCodes.DeniedByPolicy));
+        if (request.Arguments.Count != 1 || !request.Arguments.TryGetValue("case_id", out var value) || !Guid.TryParse(value, out _))
+            return Task.FromResult(Deny(request.ToolName, "Supply one case_id.", EllaiToolReasonCodes.InvalidArguments));
+        // A user-message processing label is not provenance for case-derived evidence.
+        // No source-specific provider approval is currently available at this boundary.
+        return Task.FromResult(Deny(request.ToolName, "Classification evidence is unavailable for this reasoning route.", EllaiToolReasonCodes.Unavailable));
     }
 
     private async Task<EllaiToolResult> ReadImportsAsync(EllaiToolContext context, EllaiToolRequest request, CancellationToken ct)
@@ -969,9 +1004,9 @@ public sealed class EllaiToolBroker
 
     /// <summary>Live <c>ellai_state</c> projections. Without a projection
     /// argument the static permitted-feature description applies. The
-    /// <c>queue</c> projection runs the ordinary scoped "my cases" query for
-    /// the trusted actor: same handlers, same per-case authorization, no
-    /// Ellai-only query path.</summary>
+    /// <c>queue</c> projection runs the ordinary scoped case search for
+    /// the trusted actor: candidates are grant-bounded and each result is
+    /// reauthorized for Search and ReadCase.</summary>
     private async Task<EllaiToolResult> ReadStateAsync(
         EllaiToolContext context, EllaiToolRequest request, ICaseQueueQuery? queue, CancellationToken ct,
         Func<EllaiToolContext, IReadOnlyList<CaseQueueItem>, CancellationToken, Task<bool>>? rememberCaseResults)
@@ -1005,24 +1040,146 @@ public sealed class EllaiToolBroker
                 EllaiToolReasonCodes.InvalidArguments);
         }
 
-        if (request.Arguments.Keys.Any(key => key is not ("projection" or "limit" or "country" or "workflow" or "sort")))
-            return Deny(request.ToolName, "This queue supports country, workflow and sort filters only.",
+        if (request.Arguments.Keys.Any(key => key is not ("projection" or "limit" or "country" or "workflow" or "sort" or "place_id" or "reported_from" or "reported_before" or "group_by" or "observed_term")))
+            return Deny(request.ToolName, "This queue supports country, workflow, sort, exact place, region or locality grouping, reported-date filters and literal reported-observation filtering only.",
                 EllaiToolReasonCodes.InvalidArguments);
 
         request.Arguments.TryGetValue("country", out var country);
         request.Arguments.TryGetValue("workflow", out var workflow);
         request.Arguments.TryGetValue("sort", out var sort);
+        request.Arguments.TryGetValue("place_id", out var placeId);
+        request.Arguments.TryGetValue("reported_from", out var reportedFromText);
+        request.Arguments.TryGetValue("reported_before", out var reportedBeforeText);
+        request.Arguments.TryGetValue("group_by", out var groupBy);
+        request.Arguments.TryGetValue("observed_term", out var observedTerm);
+        if (observedTerm is not null && (observedTerm.Length is < 1 or > 80 || observedTerm != observedTerm.Trim() || observedTerm.Any(char.IsControl)))
+            return Deny(request.ToolName, "observed_term must be a trimmed literal substring of 1 to 80 printable characters.",
+                EllaiToolReasonCodes.InvalidArguments);
+        if (observedTerm is not null && _caseReports is null)
+            return Deny(request.ToolName, "Authorized report observations are unavailable for this session.", EllaiToolReasonCodes.Unavailable);
+        if (observedTerm is not null && (groupBy is not null || placeId is not null))
+            return Deny(request.ToolName, "observed_term cannot be combined with grouped or exact-place queue searches.", EllaiToolReasonCodes.InvalidArguments);
+        if (!TryReportedRange(reportedFromText, reportedBeforeText, out var reportedFromUtc, out var reportedBeforeUtc))
+            return Deny(request.ToolName, "reported_from and reported_before must be a valid inclusive/exclusive UTC date pair spanning at most 365 days.",
+                EllaiToolReasonCodes.InvalidArguments);
         if ((country is not null && (country.Length != 2 || country.Any(c => c is < 'A' or > 'Z')))
             || (workflow is not null && workflow is not ("Reported" or "UnderReview" or "Active" or "AwaitingFollowUp" or "Resolved"))
             || (sort is not null && sort is not ("latest-reported" or "latest-updated")))
             return Deny(request.ToolName, "Use a two-letter country, a recorded workflow and latest-reported or latest-updated sort.",
                 EllaiToolReasonCodes.InvalidArguments);
 
+        if (groupBy is not null)
+        {
+            if (groupBy is not ("region" or "locality") || country is null || placeId is not null || sort == "latest-updated")
+                return Deny(request.ToolName, "Region or locality grouping requires a country, and cannot be combined with an exact place or latest-updated ordering.",
+                    EllaiToolReasonCodes.InvalidArguments);
+            if (_occurrenceLocations is null)
+                return Deny(request.ToolName, "Occurrence location search is unavailable.", EllaiToolReasonCodes.Unavailable);
+            var grouped = await new CaseOccurrenceGrouping(queue, _occurrenceLocations).GroupAsync(
+                context.Actor, country, groupBy, limit, reportedFromUtc, reportedBeforeUtc, ct).ConfigureAwait(false);
+            if (grouped.Access != CaseQueueAccess.Allowed)
+                return Deny(request.ToolName, "Location grouping is unavailable.", EllaiToolReasonCodes.Unavailable);
+            var visibleCaseIds = grouped.Groups.SelectMany(group => group.CaseIds).ToHashSet();
+            var visibleCases = grouped.Cases.Where(item => visibleCaseIds.Contains(item.CaseId)).ToArray();
+            var groupEvidence = visibleCases
+                .Select(item => new EvidenceRef("CaseQueue", item.CaseId.ToString("D"),
+                item.AggregateVersion.ToString(System.Globalization.CultureInfo.InvariantCulture), null, item.CaseId.ToString("D"))).ToArray();
+            var groupRecallNotice = string.Empty;
+            var retainedItems = new List<CaseQueueItem>(20);
+            if (_topics is not null && !context.RevalidationOnly)
+            {
+                var casesById = visibleCases.ToDictionary(item => item.CaseId);
+                for (var index = 0; retainedItems.Count < 20; index++)
+                {
+                    var foundAtIndex = false;
+                    foreach (var group in grouped.Groups)
+                    {
+                        if (index >= group.CaseIds.Count) continue;
+                        foundAtIndex = true;
+                        if (casesById.TryGetValue(group.CaseIds[index], out var item)) retainedItems.Add(item);
+                        if (retainedItems.Count == 20) break;
+                    }
+                    if (!foundAtIndex) break;
+                }
+                var retentionIncomplete = grouped.Truncated || grouped.UnknownLocations || visibleCases.Length > 20;
+                try
+                {
+                    await new EllaiCaseResultMemory(_topics, queue, _referenceIndex).RememberAsync(context, retainedItems,
+                        ct, searchIncomplete: retentionIncomplete, unknownLocations: grouped.UnknownLocations).ConfigureAwait(false);
+                    groupRecallNotice = retainedItems.Count < visibleCases.Length
+                        ? " A bounded subset of supporting case references was retained; later case-level follow-up may be incomplete."
+                        : " Supporting case references were retained for this session.";
+                }
+                catch (Exception error) when (error is not OperationCanceledException and not OutOfMemoryException)
+                {
+                    groupRecallNotice = " Supporting case references could not be retained; do not claim they were remembered.";
+                }
+            }
+            else if (_topics is null && !context.RevalidationOnly)
+                groupRecallNotice = " Supporting case references could not be retained; do not claim they were remembered.";
+            var summary = JsonSerializer.Serialize(new
+            {
+                groupBy,
+                country,
+                scannedCandidates = grouped.ScannedCandidates,
+                groups = grouped.Groups.Select(group => groupBy == "region"
+                    ? (object)new { regionId = group.LocationId, reportedRegion = group.Label, caseCount = group.Count, caseIds = group.CaseIds }
+                    : new { localityId = group.LocationId, reportedLocality = group.Label, caseCount = group.Count, caseIds = group.CaseIds }),
+                unknownLocations = grouped.UnknownLocations,
+                incomplete = grouped.Truncated,
+                caseReferenceRetentionIncomplete = grouped.Truncated || grouped.UnknownLocations || visibleCases.Length > 20,
+                caseReferenceNotice = groupRecallNotice
+            });
+            return new(request.ToolName, true, null, groupEvidence, summary, groupEvidence.Length,
+                grouped.Truncated, EllaiToolReasonCodes.Ok);
+        }
+
+        if (placeId is not null)
+        {
+            if (country is null || workflow is not null || sort != "latest-reported" ||
+                string.IsNullOrWhiteSpace(placeId) || placeId != placeId.Trim())
+                return Deny(request.ToolName, "A place search requires a country and latest-reported sort; workflow filters are not supported.", EllaiToolReasonCodes.InvalidArguments);
+            if (_occurrenceLocations is null)
+                return Deny(request.ToolName, "Occurrence location search is unavailable.", EllaiToolReasonCodes.Unavailable);
+            var found = await new CaseOccurrenceSearch(queue, _occurrenceLocations).SearchAsync(context.Actor, country,
+                placeId, limit, ct, reportedFromUtc, reportedBeforeUtc).ConfigureAwait(false);
+            if (found.Access != CaseQueueAccess.Allowed)
+                return Deny(request.ToolName, "Occurrence location search is unavailable.", EllaiToolReasonCodes.Unavailable);
+            var foundItems = found.Items.Select(item => item.Case).ToArray();
+            var placeRecallNotice = "";
+            if (_topics is not null && !context.RevalidationOnly)
+            {
+                try
+                {
+                    await new EllaiCaseResultMemory(_topics, queue, _referenceIndex).RememberAsync(context, foundItems, ct,
+                        searchIncomplete: found.Truncated, unknownLocations: found.UnknownLocations).ConfigureAwait(false);
+                    placeRecallNotice = " Result references retained for this session; recall with ellai_evidence(ref=case-results).";
+                }
+                catch (Exception error) when (error is not OperationCanceledException and not OutOfMemoryException)
+                {
+                    placeRecallNotice = " Result references could not be retained; do not claim they were remembered.";
+                }
+            }
+            var foundEvidence = foundItems.Select(item => new EvidenceRef("CaseQueue", item.CaseId.ToString("D"),
+                item.AggregateVersion.ToString(System.Globalization.CultureInfo.InvariantCulture), null, item.CaseId.ToString("D"))).ToArray();
+            var foundLines = foundItems.Select(item => $"case {item.CaseId:D}; workflow {item.Workflow}; country {item.CountryCode}; v{item.AggregateVersion}");
+            return new(request.ToolName, true, null, foundEvidence,
+                "Searchable, readable cases matching the recorded occurrence place. " +
+                (reportedFromUtc is null ? string.Empty : $"Managed-case report time is from {reportedFromText} inclusive to {reportedBeforeText} exclusive (UTC); this is not event occurrence time. ") +
+                (found.UnknownLocations ? "Some readable cases have unknown or incomplete locations. " : "") +
+                (found.LocationReadUnavailable ? "A case location could not be checked; remaining cases were not searched. " : "") +
+                (found.Truncated ? "The scan or result is incomplete. " : "") + placeRecallNotice + "\n" + string.Join("\n", foundLines),
+                foundItems.Length, found.Truncated || found.UnknownLocations);
+        }
+
         CaseQueueResult result;
         try
         {
-            result = await queue.GetMineAsync(context.Actor, limit,
-                new CaseQueueFilter(country, workflow, sort != "latest-updated"), ct).ConfigureAwait(false);
+            result = await queue.GetSearchableAsync(context.Actor, limit,
+                country is null && workflow is null && sort is null && reportedFromUtc is null
+                    ? null
+                    : new CaseQueueFilter(country, workflow, sort == "latest-reported" || sort is null && reportedFromUtc is not null,
+                        ReportedFromUtc: reportedFromUtc, ReportedBeforeUtc: reportedBeforeUtc), null, ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -1047,8 +1204,40 @@ public sealed class EllaiToolBroker
                 EllaiToolReasonCodes.DeniedByPolicy);
         }
 
-        var items = result.Items.Take(limit).ToList();
+        var candidates = result.Items.Take(limit).ToList();
+        if (candidates.Any(item => item.CaseId == Guid.Empty) || candidates.Select(item => item.CaseId).Distinct().Count() != candidates.Count)
+            return Deny(request.ToolName, "The work queue returned an inconsistent result. Try again.", EllaiToolReasonCodes.Unavailable);
+        var observationSearchIncomplete = false;
+        var items = candidates;
+        if (observedTerm is not null)
+        {
+            items = [];
+            foreach (var candidate in candidates)
+            {
+                ct.ThrowIfCancellationRequested();
+                CaseReportDetails? report;
+                try
+                {
+                    report = await _caseReports!.GetAsync(context.Actor, candidate.CaseId, ct).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+                catch (Exception error) when (error is not OutOfMemoryException)
+                {
+                    observationSearchIncomplete = true;
+                    continue;
+                }
+                ct.ThrowIfCancellationRequested();
+                if (report is null || report.CaseId != candidate.CaseId)
+                {
+                    observationSearchIncomplete = true;
+                    continue;
+                }
+                if (report.Observations.Any(observation => observation.Contains(observedTerm, StringComparison.OrdinalIgnoreCase)))
+                    items.Add(candidate);
+            }
+        }
         var recallNotice = "";
+        var queueSearchIncomplete = result.NextCursor is not null || result.Items.Count > limit;
         if (_topics is not null)
         {
             try
@@ -1062,7 +1251,9 @@ public sealed class EllaiToolBroker
 
                 async Task<bool> RememberDirectlyAsync()
                 {
-                    await new EllaiCaseResultMemory(_topics, queue, _referenceIndex).RememberAsync(context, items, ct).ConfigureAwait(false);
+                    await new EllaiCaseResultMemory(_topics, queue, _referenceIndex, _occurrenceLocations, _caseReports, _caseAttributions)
+                        .RememberAsync(context, items, ct,
+                            searchIncomplete: queueSearchIncomplete || observationSearchIncomplete).ConfigureAwait(false);
                     return true;
                 }
             }
@@ -1078,9 +1269,30 @@ public sealed class EllaiToolBroker
             "CaseQueue", item.CaseId.ToString("D"), item.AggregateVersion.ToString(System.Globalization.CultureInfo.InvariantCulture), null,
             item.CaseId.ToString("D"))).ToList();
         return new EllaiToolResult(request.ToolName, true, null, evidence,
-            "Owned cases only; review status is not supplied." + recallNotice + "\n" +
-            (items.Count == 0 ? "The permitted work queue is empty." : string.Join("\n", lines)),
-            items.Count, items.Count >= limit, EllaiToolReasonCodes.Ok);
+            "Cases require current Search and ReadCase permission; review status is not supplied." +
+            (reportedFromUtc is null ? string.Empty : $" Managed-case report time is from {reportedFromText} inclusive to {reportedBeforeText} exclusive (UTC); this is not event occurrence time.") +
+            (observedTerm is null ? string.Empty : $" Filtered to currently readable reports whose verbatim observation text contains the literal substring '{observedTerm}' (case-insensitive); this is not a diagnosis or inferred classification." +
+                (queueSearchIncomplete ? " The search checked only a bounded page and more cases remain, so additional matches may exist." : "") +
+                (observationSearchIncomplete ? " Some observations could not be checked, so matching cases may be missing." : "")) +
+            recallNotice + "\n" +
+            (items.Count == 0 ? observedTerm is null ? "The permitted work queue is empty." : "No matching reported observations were found in the checked cases." : string.Join("\n", lines)),
+            items.Count, queueSearchIncomplete || observationSearchIncomplete, EllaiToolReasonCodes.Ok);
+    }
+
+    private static bool TryReportedRange(string? fromText, string? beforeText,
+        out DateTimeOffset? fromUtc, out DateTimeOffset? beforeUtc)
+    {
+        fromUtc = null;
+        beforeUtc = null;
+        if (fromText is null && beforeText is null) return true;
+        if (fromText is null || beforeText is null ||
+            !DateOnly.TryParseExact(fromText, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var from) ||
+            !DateOnly.TryParseExact(beforeText, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var before) ||
+            before <= from || before.DayNumber - from.DayNumber > 365)
+            return false;
+        fromUtc = new DateTimeOffset(from.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc));
+        beforeUtc = new DateTimeOffset(before.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc));
+        return true;
     }
 
     /// <summary>Measures the model-visible envelope exactly as serialized for
@@ -1199,12 +1411,14 @@ public sealed class EllaiToolBroker
                 EllaiToolReasonCodes.InvalidArguments);
         }
 
-        if (string.Equals(reference.Trim(), EllaiCaseResultMemory.Reference, StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(reference.Trim(), EllaiCaseResultMemory.Reference, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(reference.Trim(), EllaiCaseResultMemory.OriginalReference, StringComparison.OrdinalIgnoreCase))
         {
             if (_queue is null) return Deny(request.ToolName, "Case recall is unavailable.", EllaiToolReasonCodes.Unavailable);
             try
             {
-                return await new EllaiCaseResultMemory(_topics, _queue, referenceIndex).RecallAsync(context, ct).ConfigureAwait(false);
+                return await new EllaiCaseResultMemory(_topics, _queue, referenceIndex).RecallAsync(context, ct,
+                    original: string.Equals(reference.Trim(), EllaiCaseResultMemory.OriginalReference, StringComparison.OrdinalIgnoreCase)).ConfigureAwait(false);
             }
             catch (Exception error) when (error is not OperationCanceledException)
             {
@@ -1285,7 +1499,8 @@ public sealed class EllaiToolBroker
         if (items.Count == 0)
         {
             var empty = Allow(request.ToolName, "No entitled controls are registered for this feature.", 0, false);
-            return goalTags.Length == 0 ? empty with { UiCatalogueReplayScope = EllaiUiCatalogueReplayScope.Create(feature, limit, empty) } : empty;
+            return goalTags.Length == 0 || unmatchedGoal
+                ? empty with { UiCatalogueReplayScope = EllaiUiCatalogueReplayScope.Create(feature, limit, empty) } : empty;
         }
 
         var lines = items.Select(d =>
@@ -1307,8 +1522,15 @@ public sealed class EllaiToolBroker
         // Arbitrary model text is never copied into durable replay provenance.
         var replayGoal = goalTags.Length == 1 && !unmatchedGoal
             ? items.SelectMany(item => item.GoalTags).FirstOrDefault(tag => tag == goalTags[0]) : null;
-        return !result.Truncated && (goalTags.Length == 0 || replayGoal is not null)
-            ? result with { UiCatalogueReplayScope = EllaiUiCatalogueReplayScope.Create(feature, limit, result, replayGoal) }
+        // An unmatched hint returns the full, unfiltered catalogue. Revalidate that
+        // same projection without retaining the arbitrary hint in durable history.
+        var replayResult = unmatchedGoal ? result with
+        {
+            ResultSummary = result.ResultSummary.Replace(
+                " No exact goal tag matched; showing the bounded entitled feature catalogue instead.", "", StringComparison.Ordinal)
+        } : result;
+        return !result.Truncated && (goalTags.Length == 0 || replayGoal is not null || unmatchedGoal)
+            ? result with { UiCatalogueReplayScope = EllaiUiCatalogueReplayScope.Create(feature, limit, replayResult, replayGoal) }
             : result;
     }
 
@@ -1374,9 +1596,9 @@ public sealed class EllaiToolBroker
         if (report is null)
         {
             var empty = Allow(request.ToolName, "No client UI observation has been reported for this session.", 0, false);
-            var replay = new EllaiUiObservationReplayScope(feature, string.Join(",", requested),
-                goalTags.Count == 0 ? null : string.Join(",", goalTags),
-                Convert.ToHexString(System.Security.Cryptography.SHA256.HashData("no-client-report"u8)));
+            var replay = new EllaiUiObservationReplayScope(feature, requested.ToArray(),
+                Convert.ToHexString(System.Security.Cryptography.SHA256.HashData("no-client-report"u8)),
+                GoalTags: goalTags.Count == 0 ? null : string.Join(",", goalTags));
             return unknown.Count == 0 && goalTags.All(knownGoals.Contains) && replay.IsValid()
                 ? empty with { UiObservationReplayScope = replay } : empty;
         }
@@ -1399,6 +1621,21 @@ public sealed class EllaiToolBroker
         var stale = age < TimeSpan.Zero || age > TimeSpan.FromSeconds(45) ||
             !string.Equals(report.ViewInstanceId, view.Trim(), StringComparison.Ordinal);
         var ordered = requested.Select(id => stale ? byId[id] with { State = UiObservationState.Stale } : byId[id]).ToList();
+        var issue = !stale && feature == EllaiReportUiManifest.FeatureId
+            ? report.ValidationInputIds?.Select(EllaiReportValidationGuidance.Find).FirstOrDefault(item => item is not null)
+            : null;
+        var issueControl = issue is null ? null : EllaiReportValidationGuidance.ControlFor(issue.InputId);
+        var visibleIssue = issueControl is not null && requested.Contains(issueControl) &&
+            byId.TryGetValue(issueControl, out var issueObservation) && issueObservation.State == UiObservationState.Ready
+            ? issue : null;
+        var inputLines = stale ? [] : (report.InputStates ?? [])
+            .Where(input => requested.Contains(input.ControlId) && byId[input.ControlId].State == UiObservationState.Ready &&
+                eligible[input.ControlId].Semantics?.Inputs.Any(descriptor => descriptor.InputId == input.InputId) == true)
+            .Select(input =>
+            {
+                var descriptor = eligible[input.ControlId].Semantics!.Inputs.First(item => item.InputId == input.InputId);
+                return $"input {input.InputId} ({descriptor.Label}): {input.Presence}";
+            }).ToList();
         var lines = ordered.Select(o =>
             $"control {o.ControlId} · {o.State} · view {o.ViewInstanceId} · {o.Platform}" +
             $"; client form validation accepted {!stale && eligible[o.ControlId].ProofPolicyId == "proof-ui-validated" && report.CompletedControlIds?.Contains(o.ControlId) == true}");
@@ -1411,25 +1648,20 @@ public sealed class EllaiToolBroker
                 ? string.Empty
                 : $" Requested view '{view.Trim()}' differs from the latest report.");
         var result = new EllaiToolResult(request.ToolName, true, null, evidence,
-            header + "\n" + string.Join("\n", lines),
+            header + "\n" + string.Join("\n", lines) +
+            (visibleIssue is null ? string.Empty : $"\nFirst client-reported validation issue ({visibleIssue.InputId}): {visibleIssue.Message}") +
+            (inputLines.Count == 0 ? string.Empty : "\nInput state is client-reported and does not prove a draft was saved or submitted. " +
+                "Only reported visible inputs on requested controls are included; omitted inputs have unknown status.\n" + string.Join("\n", inputLines)),
             ordered.Count, false, EllaiToolReasonCodes.Ok);
-        // Persist only registry-owned references, never arbitrary model text or
-        // client report contents. A fresh call must resolve the same report.
-        if (string.Equals(report.ViewInstanceId, view.Trim(), StringComparison.Ordinal) && goalTags.All(knownGoals.Contains))
+        if (stale) return result;
+        var canonical = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(new
         {
-            // The receipt time changes on every heartbeat. Freshness is already
-            // reflected in the observed states and validation flags in lines.
-            var content = JsonSerializer.SerializeToUtf8Bytes(new
-            {
-                report.ViewInstanceId, report.ContextStamp, report.Platform,
-                Lines = lines.ToArray(), Evidence = evidence
-            });
-            var replay = new EllaiUiObservationReplayScope(feature, string.Join(",", requested),
-                goalTags.Count == 0 ? null : string.Join(",", goalTags),
-                Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(content)));
-            if (replay.IsValid()) result = result with { UiObservationReplayScope = replay };
-        }
-        return result;
+            report.ViewInstanceId, report.ContextStamp, report.Platform, report.CurrentNavigationId,
+            Controls = lines.ToArray(), Inputs = inputLines, Issue = visibleIssue?.InputId
+        });
+        return result with { UiObservationReplayScope = new(feature, requested.ToArray(),
+            Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(canonical)),
+            GoalTags: goalTags.Count == 0 ? null : string.Join(",", goalTags)) };
     }
 
     private EllaiToolResult SearchDocs(EllaiToolRequest request)

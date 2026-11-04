@@ -262,6 +262,10 @@ public sealed class MobileEllaiReviewClient : IEllaiReviewClient
         string sessionId, string proposalId, CancellationToken cancellationToken) =>
         ClientFor(sessionId).PrepareGuidancePlanAsync(sessionId, proposalId, cancellationToken);
 
+    public Task<EllaiGuidancePlanDto?> RevalidateGuidancePlanAsync(
+        string sessionId, string proposalId, string planId, string stepId, CancellationToken cancellationToken) =>
+        ClientFor(sessionId).RevalidateGuidancePlanAsync(sessionId, proposalId, planId, stepId, cancellationToken);
+
     public Task<EllaiGuidanceAdmissionDto?> ReadGuidanceAdmissionAsync(
         string sessionId, string proposalId, CancellationToken cancellationToken) =>
         ClientFor(sessionId).ReadGuidanceAdmissionAsync(sessionId, proposalId, cancellationToken);

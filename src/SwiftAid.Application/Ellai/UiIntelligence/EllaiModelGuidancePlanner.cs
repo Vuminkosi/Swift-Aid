@@ -46,6 +46,8 @@ public sealed class EllaiModelGuidancePlanner(IEllaiTurnCompletionClient complet
                 "Explain the applicable fields within their existing section steps; do not invent one step per field or change validation. " +
                 "A conditional field is only requested when applicableWhen holds. Required applies within that condition. " +
                 "For a complete submission include subject, narrative/observations, time/location and all review confirmations. " +
+                "For a request only to save a report draft, guide the user through the subject and save controls and their declared prerequisites. " +
+                "A draft can be saved without a narrative, location, review or confirmations; do not add those steps or submission unless the user also requested them. " +
                 "Start on a Ready control. Later public report wizard steps may be Unmounted only when their registered prerequisites " +
                 "appear earlier in the sequence. A later GuideHuman step with allowDeferredEnablement=true may currently be Disabled " +
                 "only when all its registered prerequisites appear earlier; it must wait for actual enablement before interaction. " +

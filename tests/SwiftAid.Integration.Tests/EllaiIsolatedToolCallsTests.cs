@@ -108,11 +108,33 @@ public sealed class EllaiIsolatedToolCallsTests
         Assert.Equal(filter, queue.Filter);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task IsolatedQueueForwardsContinuation(bool filtered)
+    {
+        var queue = new CapturingQueue();
+        await using var provider = new ServiceCollection().AddSingleton<ICaseQueueQuery>(queue).BuildServiceProvider();
+        var actor = ActorContext.FromValidatedPrincipal(new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim(ClaimTypes.NameIdentifier, "queue-owner"), new Claim(ActorContext.AccessEpochClaimType, "1")], "test")));
+        var filter = new CaseQueueFilter("SZ", NewestReportedFirst: true);
+        var isolated = new EllaiIsolatedCaseQueueQuery(provider, new EllaiIsolatedToolCalls());
+        var result = filtered
+            ? await isolated.GetMineAsync(actor, 50, filter, "next-page", default)
+            : await isolated.GetMineAsync(actor, 50, "next-page", default);
+        Assert.Equal(CaseQueueAccess.Allowed, result.Access);
+        Assert.Equal("next-page", queue.Cursor);
+        Assert.Equal(filtered ? filter : null, queue.Filter);
+        Assert.Same(actor, queue.Actor);
+        Assert.Equal(50, queue.Limit);
+    }
+
     private sealed class CapturingQueue : ICaseQueueQuery
     {
         public ActorContext? Actor { get; private set; }
         public int? Limit { get; private set; }
         public CaseQueueFilter? Filter { get; private set; }
+        public string? Cursor { get; private set; }
         public Task<CaseQueueResult> GetMineAsync(ActorContext actor, int? limit, CancellationToken ct) =>
             GetMineAsync(actor, limit, new CaseQueueFilter(), ct);
         public Task<CaseQueueResult> GetMineAsync(ActorContext actor, int? limit, CaseQueueFilter filter, CancellationToken ct)
@@ -120,6 +142,16 @@ public sealed class EllaiIsolatedToolCallsTests
             Actor = actor;
             Limit = limit;
             Filter = filter;
+            return Task.FromResult(new CaseQueueResult(CaseQueueAccess.Allowed, []));
+        }
+        public Task<CaseQueueResult> GetMineAsync(ActorContext actor, int? limit, string? cursor, CancellationToken ct)
+        {
+            Actor = actor; Limit = limit; Filter = null; Cursor = cursor;
+            return Task.FromResult(new CaseQueueResult(CaseQueueAccess.Allowed, []));
+        }
+        public Task<CaseQueueResult> GetMineAsync(ActorContext actor, int? limit, CaseQueueFilter filter, string? cursor, CancellationToken ct)
+        {
+            Actor = actor; Limit = limit; Filter = filter; Cursor = cursor;
             return Task.FromResult(new CaseQueueResult(CaseQueueAccess.Allowed, []));
         }
     }

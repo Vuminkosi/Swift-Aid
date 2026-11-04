@@ -9,6 +9,9 @@ public partial class EllaiGuidanceHost
     private readonly SemaphoreSlim _uiObservationGate = new(1, 1);
     private IJSObjectReference? _uiObservationModule;
     private UiObservationReport? _latestGuidanceObservation;
+    private long _uiNavigationEpoch;
+    private string? _unavailableObservedStepId;
+    private const string UnavailableTargetNotice = "The current control is unavailable. Find another way to continue.";
 
     private async Task MonitorUiObservationsAsync()
     {
@@ -40,6 +43,9 @@ public partial class EllaiGuidanceHost
         try
         {
             await ReportCurrentUiAsync(token);
+            await UpdateValidationGuidanceAsync(token);
+            await RetryGuidanceNarrationAsync(token);
+            UpdateUnavailableGuidanceTarget();
             await AdvanceValidatedInputAsync(token);
         }
         catch (OperationCanceledException) when (!token.IsCancellationRequested)
@@ -57,15 +63,102 @@ public partial class EllaiGuidanceHost
         }
     }
 
-    private Task ReportCurrentUiAsync(CancellationToken token) => ReportUiForFeatureAsync(_guidanceFeatureId, token);
+    private async Task UpdateValidationGuidanceAsync(CancellationToken token)
+    {
+        if (_guidanceFeatureId != EllaiReportUiManifest.FeatureId || _generatedTour is not { } tour ||
+            CurrentGuidanceStep is not { } step || _guidanceAnchors is null ||
+            _latestGuidanceObservation is not { } observation) return;
+        var issue = observation.ValidationInputIds?.Select(EllaiReportValidationGuidance.Find)
+            .FirstOrDefault(item => item is not null);
+        var nextId = issue?.InputId;
+        if (_validationInputId == nextId && _validationTargetControlId == (issue is null ? null : step.ControlId))
+        {
+            return;
+        }
+        if (_validationTargetControlId is { } previous &&
+            EllaiReportUiManifest.All.FirstOrDefault(control => control.ControlId == previous) is { } descriptor)
+            _guidanceAnchors[previous] = descriptor.AnchorBindingKey;
+        _validationInputId = nextId;
+        _validationGuidanceText = issue?.Message;
+        _validationTargetControlId = issue is null ? null : step.ControlId;
+        if (issue is not null) _guidanceAnchors[step.ControlId] = issue.Anchor;
+        CancelGuidanceCountdown();
+        // Bit.Bonboarding 10.7 RefreshAsync measures the previously resolved target.
+        // Re-enter the same presentation step to resolve its dynamic anchor again;
+        // this does not advance the durable application checkpoint.
+        await tour.GoToAsync(step.StepKey, token);
+        StateHasChanged();
+        if (ReferenceEquals(tour, _generatedTour) && _narrateValidation is { } narrate)
+            await narrate(issue?.InputId, issue is null ? null : observation.ContextStamp, token);
+    }
 
-    private async Task ReportUiForFeatureAsync(string? featureId, CancellationToken token)
+    private async Task RetryGuidanceNarrationAsync(CancellationToken token)
+    {
+        if (!_guidanceNarrationRetryPending || _guidanceNarrationEventId is not null || _guidanceNarrationCts is not null ||
+            DateTimeOffset.UtcNow < _guidanceNarrationRetryAtUtc || _narrateValidation is not { } retry ||
+            _generatedTour?.Status != Bit.Bonboarding.BonboardingTourStatus.Running ||
+            CurrentGuidanceStep is not { } step || _latestGuidanceObservation is not { } observation) return;
+        var issue = _guidanceFeatureId == EllaiReportUiManifest.FeatureId
+            ? observation.ValidationInputIds?.Select(EllaiReportValidationGuidance.Find).FirstOrDefault(item => item is not null)
+            : null;
+        if (issue?.InputId != _validationInputId ||
+            issue is not null && _validationTargetControlId != step.ControlId) return;
+        await retry(issue?.InputId, issue is null ? null : observation.ContextStamp, token);
+    }
+
+
+    private void UpdateUnavailableGuidanceTarget()
+    {
+        if (_generatedTour?.Status is not (Bit.Bonboarding.BonboardingTourStatus.Running or Bit.Bonboarding.BonboardingTourStatus.Waiting) ||
+            CurrentGuidanceStep is not { } step || _latestGuidanceObservation is not { } observation) return;
+        if (_unavailableObservedStepId is { } previous &&
+            (previous != step.StepKey || _validationGuidanceText is not null))
+            ClearUnavailableObservedTarget();
+        if (_validationGuidanceText is not null) return;
+        if (step.ControlId is "report.submit" or "report.receipt" &&
+            Services.GetService(typeof(EllaiDisplayedReceiptContext)) is EllaiDisplayedReceiptContext { Current: not null })
+        {
+            if (_unavailableObservedStepId == step.StepKey) ClearUnavailableObservedTarget();
+            return;
+        }
+        // Accepted input can legitimately disappear when the wizard moves forward.
+        var completed = observation.CompletedControlIds?.Contains(step.ControlId) == true;
+        var state = observation.ControlStates?.SingleOrDefault(item => item.ControlId == step.ControlId);
+        if (completed || state?.State == UiObservationState.Ready)
+        {
+            if (_unavailableObservedStepId == step.StepKey)
+                ClearUnavailableObservedTarget();
+            return;
+        }
+        if (_guidanceReplanRequired) return;
+        _guidanceReplanRequired = true;
+        _unavailableObservedStepId = step.StepKey;
+        _guidanceNotice = UnavailableTargetNotice;
+        StateHasChanged();
+    }
+
+    private void ClearUnavailableObservedTarget()
+    {
+        _unavailableObservedStepId = null;
+        if (!_guidanceReplanRequired || _guidanceNotice != UnavailableTargetNotice) return;
+        _guidanceReplanRequired = false;
+        _guidanceNotice = null;
+        StateHasChanged();
+    }
+
+    private Task ReportCurrentUiAsync(CancellationToken token) => ReportUiForFeatureAsync(_guidanceFeatureId, token, includeCurrentReport: true);
+
+    private async Task ReportUiForFeatureAsync(string? featureId, CancellationToken token, bool includeCurrentReport = false)
     {
         _latestGuidanceObservation = null;
         if (_sessionView is not { Status: "Active" } session) return;
         await _uiObservationGate.WaitAsync(token);
         try
         {
+            var navigationEpoch = Interlocked.Read(ref _uiNavigationEpoch);
+            var observedUri = Navigation.Uri;
+            bool IsCurrent() => Interlocked.Read(ref _uiNavigationEpoch) == navigationEpoch &&
+                Navigation.Uri == observedUri && _sessionView?.SessionId == session.SessionId && _sessionView.Status == "Active";
             _uiObservationModule ??= await JS.InvokeAsync<IJSObjectReference>("import", token,
                 "./_content/SwiftAid.UI/js/ellai-ui-observations.js");
             var requestedControls = featureId switch
@@ -82,17 +175,30 @@ public partial class EllaiGuidanceHost
                 EllaiOrganizationUiManifest.FeatureId => EllaiOrganizationUiManifest.Controls.Select(control => control.ControlId).ToArray(),
                 _ => null,
             };
+            var path = ("/" + Navigation.ToBaseRelativePath(observedUri).Split('?', '#')[0].TrimEnd('/')).ToLowerInvariant();
+            if (includeCurrentReport && string.Equals(path, "/report", StringComparison.OrdinalIgnoreCase) &&
+                requestedControls is not null && featureId != EllaiReportUiManifest.FeatureId)
+            {
+                // A previously started tour can belong to another feature. Keep
+                // its current target observable while including the report that
+                // the user is now viewing, within the existing wire bound.
+                var currentControl = CurrentGuidanceStep?.ControlId;
+                requestedControls = EllaiReportUiManifest.All.Select(control => control.ControlId)
+                    .Concat(currentControl is null ? [] : [currentControl])
+                    .Concat(requestedControls)
+                    .Distinct(StringComparer.Ordinal)
+                    .Take(20).ToArray();
+            }
             var report = await _uiObservationModule.InvokeAsync<UiObservationReport>("collect", token,
                 new object?[] { requestedControls });
-            if (report is null) return;
-            var path = "/" + Navigation.ToBaseRelativePath(Navigation.Uri).Split('?', '#')[0].TrimEnd('/');
-            report = report with { CurrentNavigationId = path == "/report" ? EllaiReportUiManifest.NavigationId :
+            if (report is null || !IsCurrent()) return;
+            report = report with { CurrentNavigationId = string.Equals(path, "/report", StringComparison.OrdinalIgnoreCase) ? EllaiReportUiManifest.NavigationId :
                 EllaiNavigationManifest.ResolveNavigationId(path) };
             report = report with { Platform = OperatingSystem.IsAndroid() ? "android" : OperatingSystem.IsIOS() ? "ios" : "web" };
-            if (report.IsValid() && _sessionView?.SessionId == session.SessionId)
+            if (report.IsValid() && IsCurrent())
             {
                 var accepted = await ReviewClient.ReportUiObservationAsync(session.SessionId, report, token);
-                if (accepted && _sessionView?.SessionId == session.SessionId && _sessionView.Status == "Active")
+                if (accepted && IsCurrent())
                     _latestGuidanceObservation = report;
             }
         }

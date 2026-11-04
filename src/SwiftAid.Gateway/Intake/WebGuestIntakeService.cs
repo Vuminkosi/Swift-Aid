@@ -10,8 +10,8 @@ namespace SwiftAid.Gateway.Intake;
 /// Circuit-scoped anonymous web submit flow for the server-rendered report page.
 /// Holds the intake session id, receipt proof, and opaque capability in server memory only,
 /// which is the secure HttpOnly-session mapping from the P2.4 capability design: proof and
-/// capability bytes never reach the browser, logs, or analytics. Sessions renew once on
-/// expiry; anything else surfaces as an <see cref="IntakeSubmissionException"/> the page
+/// capability bytes never reach the browser, logs, or analytics. Capabilities renew once on
+/// expiry within the same session; anything else surfaces as an <see cref="IntakeSubmissionException"/> the page
 /// turns into an honest message.
 /// </summary>
 public sealed class WebGuestIntakeService
@@ -55,7 +55,7 @@ public sealed class WebGuestIntakeService
             try { return await intake.SubmitAsync(submission, capability, ct).ConfigureAwait(false); }
             catch (IntakeSubmissionException exception) when (exception.Code == IntakeErrorCode.CapabilityInvalid)
             {
-                Reset();
+                _opaqueCapability = null;
                 var renewed = await EnsureCapabilityAsync(sessions, ct).ConfigureAwait(false);
                 return await intake.SubmitAsync(submission, renewed, ct).ConfigureAwait(false);
             }
@@ -84,50 +84,34 @@ public sealed class WebGuestIntakeService
 
     private async Task<IntakeCapability> EnsureCapabilityAsync(IIntakeSessionEndpointService sessions, CancellationToken ct)
     {
-        if (_sessionId is { } sessionId && _proof is { } proof && _opaqueCapability is { } opaque)
+        if (_sessionId is null)
         {
-            var existing = await sessions
-                .ResolveCapabilityAsync(opaque, sessionId, proof, ct)
-                .ConfigureAwait(false);
-            if (existing is not null)
-            {
-                return existing;
-            }
-
-            Reset();
+            _sessionId = Guid.NewGuid();
+            _proof = RandomNumberGenerator.GetBytes(32);
+        }
+        var sessionId = _sessionId.Value;
+        var proof = _proof ?? throw new InvalidOperationException("The intake session proof is unavailable.");
+        if (_opaqueCapability is { } opaque)
+        {
+            var existing = await sessions.ResolveCapabilityAsync(opaque, sessionId, proof, ct).ConfigureAwait(false);
+            if (existing is not null && existing.SessionId == sessionId) return existing;
+            _opaqueCapability = null;
         }
 
-        _sessionId = Guid.NewGuid();
-        _proof = RandomNumberGenerator.GetBytes(32);
-        var response = await sessions.CreateAsync(_sessionId.Value, _proof, ct).ConfigureAwait(false);
+        var response = await sessions.CreateAsync(sessionId, proof, ct).ConfigureAwait(false);
         if (response is null)
         {
-            Reset();
             throw new IntakeSubmissionException(IntakeErrorCode.CapabilityInvalid);
         }
 
-        _opaqueCapability = response.Capability;
         var capability = await sessions
-            .ResolveCapabilityAsync(_opaqueCapability, _sessionId.Value, _proof, ct)
+            .ResolveCapabilityAsync(response.Capability, sessionId, proof, ct)
             .ConfigureAwait(false);
-        if (capability is null)
+        if (capability is null || capability.SessionId != sessionId)
         {
-            Reset();
             throw new IntakeSubmissionException(IntakeErrorCode.CapabilityInvalid);
         }
-
+        _opaqueCapability = response.Capability;
         return capability;
-    }
-
-    private void Reset()
-    {
-        _sessionId = null;
-        if (_proof is not null)
-        {
-            CryptographicOperations.ZeroMemory(_proof);
-            _proof = null;
-        }
-
-        _opaqueCapability = null;
     }
 }

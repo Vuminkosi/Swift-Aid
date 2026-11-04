@@ -11,6 +11,26 @@ namespace SwiftAid.Client.Tests;
 public sealed class EncryptedGuestAudioPersistenceTests
 {
     [Fact]
+    public async Task EditableSnapshotRemainsEncryptedAndSurvivesStoreRestart()
+    {
+        using var root = new TemporaryRoot();
+        var keys = new TestInstallKeyStore();
+        var persistence = new EncryptedGuestSubmissionStore(root.Path, keys);
+        var fixture = new GuestAudioFixture(root.Path, keys, persistence);
+        var draft = await fixture.Drafts.CreateDraftAsync(fixture.NewSubmission(includeAudio: false));
+        var existing = (await persistence.GetAsync(draft.ClientSubmissionId, default))!;
+        const string syntheticValue = "SYNTHETIC-INCOMPLETE-TIME";
+        var snapshot = new GuestDraftFormSnapshot(1, "{\"occurrenceTime\":\"" + syntheticValue + "\"}");
+        await persistence.SaveAsync(existing with { FormSnapshot = snapshot, Version = existing.Version + 1 }, default);
+
+        var restarted = new EncryptedGuestSubmissionStore(root.Path, keys);
+        Assert.Equal(snapshot, (await restarted.GetAsync(draft.ClientSubmissionId, default))!.FormSnapshot);
+        var encrypted = await File.ReadAllBytesAsync(Path.Combine(root.Path, "guest-intake", "submissions.v1.bin"));
+        Assert.DoesNotContain(syntheticValue, System.Text.Encoding.UTF8.GetString(encrypted), StringComparison.Ordinal);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => new GuestDraftStore(restarted).GetDraftAsync(draft.ClientSubmissionId));
+    }
+
+    [Fact]
     public async Task CleanupJournalPersistsPendingAndTerminalStateAcrossInstances()
     {
         using var root = new TemporaryRoot();

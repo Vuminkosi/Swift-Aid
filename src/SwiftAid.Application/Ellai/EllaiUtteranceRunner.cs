@@ -159,8 +159,7 @@ public static class EllaiUtteranceRunner
                     work.Actor, services.CaseQueue, fenceCt, services.TechnicalDocs, services.Imports, services.ImportWorkspaces,
                     services.Dashboard, context, services.InvokeToolAsync, services.LocationReplayProtector).ConfigureAwait(false);
                 fenceCt.ThrowIfCancellationRequested();
-                var currentlyAuthorizedIds = currentHistory.RetainedTurnIds.ToHashSet(StringComparer.Ordinal);
-                if (authorizedHistory.RetainedTurnIds.Any(id => !currentlyAuthorizedIds.Contains(id)))
+                if (!authorizedHistory.IsStillAuthorizedBy(currentHistory))
                     return false;
             }
             if (services.Sessions is null)

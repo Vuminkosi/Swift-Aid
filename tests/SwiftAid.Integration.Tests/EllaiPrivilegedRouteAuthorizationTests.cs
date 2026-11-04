@@ -615,6 +615,17 @@ public sealed class EllaiPrivilegedRouteAuthorizationTests
         Merge(started);
         var session = (await started.Content.ReadFromJsonAsync<EllaiSessionView>())!;
         var store = app.Services.GetRequiredService<CountingEllaiSessionStore>();
+        var observation = new ReportUiObservationApiRequest(session.SessionId, "view", "validation", "web", ["report.narrative"],
+            [new("report.narrative", UiObservationState.Ready)], ValidationInputIds: ["report.original-statement"],
+            InputStates: [new("report.narrative", "report.original-statement", UiInputPresence.Invalid)]);
+        using (var observationResponse = await PostAsync($"/api/v1/ellai/guest/sessions/{session.SessionId}/ui-observations", observation, token))
+            Assert.Equal(System.Net.HttpStatusCode.OK, observationResponse.StatusCode);
+        var observed = await app.Services.GetRequiredService<IEllaiUiObservationStore>().LatestAsync(session.SessionId, default);
+        Assert.Equal("report.original-statement", Assert.Single(observed!.ValidationInputIds!));
+        Assert.Equal(UiInputPresence.Invalid, Assert.Single(observed.InputStates!).Presence);
+        using (var foreignObservation = await PostAsync("/api/v1/ellai/guest/sessions/session-1/ui-observations",
+            observation with { SessionId = "session-1" }, token))
+            Assert.Equal(System.Net.HttpStatusCode.NotFound, foreignObservation.StatusCode);
         async Task<EllaiSessionView> SendTurnAsync(string id, string text, EllaiSessionView current, int ordinal)
         {
             using var response = await PostAsync($"/api/v1/ellai/guest/sessions/{session.SessionId}/utterances",
@@ -634,12 +645,28 @@ public sealed class EllaiPrivilegedRouteAuthorizationTests
             Assert.Equal("Synthetic HTTP answer.", turn.AssistantText);
             return accepted;
         }
-        var first = await SendTurnAsync("http-turn-1", "First question", session, 1);
-        await SendTurnAsync("http-turn-2", "Follow-up question", first, 2);
         var model = app.Services.GetRequiredService<FrameworkHttpClient>();
-        Assert.Contains("First question", model.LastMessages);
+        model.ObserveNext = true;
+        var first = await SendTurnAsync("http-turn-1", "The synthetic patient is 24 years old.", session, 1);
+        var savedSession = (await store.GetAsync(session.SessionId, default))!;
+        var firstTurn = (await store.ReadConversationAsync(session.SessionId, savedSession.OwnerActorId!, default))
+            .Single(turn => turn.ClientUtteranceId == "http-turn-1");
+        Assert.True(EllaiToolTrace.TryRead(firstTurn.ToolTraceJson!, out var firstTrace));
+        Assert.Contains(firstTrace!.Observations, item => item.ToolName == EllaiToolNames.UiObserve &&
+            item.Allowed && item.UiObservationReplayScope is not null);
+        var second = await SendTurnAsync("http-turn-2", "They reported vomiting.", first, 2);
+        Assert.Contains("The synthetic patient is 24 years old.", model.LastMessages);
         Assert.Contains("Synthetic HTTP answer.", model.LastMessages);
-        Assert.Contains("Follow-up question", model.LastMessages);
+        Assert.Contains("They reported vomiting.", model.LastMessages);
+        using (var changed = await PostAsync($"/api/v1/ellai/guest/sessions/{session.SessionId}/ui-observations",
+            observation with { ContextStamp = "changed", ValidationInputIds = [],
+                InputStates = [new("report.narrative", "report.original-statement", UiInputPresence.Entered)] }, token))
+            Assert.Equal(System.Net.HttpStatusCode.OK, changed.StatusCode);
+        await SendTurnAsync("http-turn-3", "Continue after editing", second, 3);
+        Assert.Contains("The synthetic patient is 24 years old.", model.LastMessages);
+        Assert.Contains("They reported vomiting.", model.LastMessages);
+        Assert.DoesNotContain("Synthetic HTTP answer.", model.LastMessages);
+        Assert.Contains(model.LastMessages, text => text.Contains("earlier screen state has changed or expired", StringComparison.Ordinal));
         using var feedRequest = new HttpRequestMessage(HttpMethod.Get, $"/api/v1/ellai/guest/sessions/{session.SessionId}/responses?cursor=0");
         feedRequest.Headers.TryAddWithoutValidation("Cookie", CookieHeader());
         using var feed = await client.SendAsync(feedRequest);
@@ -651,6 +678,7 @@ public sealed class EllaiPrivilegedRouteAuthorizationTests
 
     private sealed class FrameworkHttpClient : IChatClient
     {
+        public bool ObserveNext { get; set; }
         public IReadOnlyList<string> LastMessages { get; private set; } = [];
         public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null,
@@ -660,6 +688,13 @@ public sealed class EllaiPrivilegedRouteAuthorizationTests
             cancellationToken.ThrowIfCancellationRequested();
             LastMessages = messages.Where(message => message.Role == ChatRole.User || message.Role == ChatRole.Assistant)
                 .Select(message => message.Text).ToArray();
+            if (ObserveNext)
+            {
+                ObserveNext = false;
+                yield return new ChatResponseUpdate(ChatRole.Assistant, [new FunctionCallContent("observe", EllaiToolNames.UiObserve,
+                    new Dictionary<string, object?> { ["feature"] = "report", ["controls"] = "report.narrative", ["view"] = "current" })]);
+                yield break;
+            }
             yield return new ChatResponseUpdate(ChatRole.Assistant, """{"final_decision":{"schemaVersion":2,"kind":"Answer","displayText":"Synthetic HTTP answer.","spokenText":"Synthetic HTTP answer.","claims":[],"questions":[],"uiIntents":[],"planProposal":null,"topicRefs":[],"resumeSuggestion":null,"stopReason":null}}""");
             yield return new ChatResponseUpdate(ChatRole.Assistant, [new UsageContent(new UsageDetails { InputTokenCount = 5, OutputTokenCount = 4 })]);
         }
@@ -1177,6 +1212,64 @@ public sealed class EllaiPrivilegedRouteAuthorizationTests
         Assert.Equal(System.Net.HttpStatusCode.NotFound, denied.StatusCode);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ValidationObservationsRespectSessionOwnershipForHttpAndInProcessClients(bool foreign)
+    {
+        await using var app = await StartApplicationAsync(sessionOwnerId: foreign ? "another-owner" : "test-owner");
+        using var http = app.GetTestClient();
+        var httpClient = new EllaiReviewHttpClient(http);
+        var inProcess = new EllaiReviewGatewayClient(new FixedAuthenticationStateProvider(TestPrincipal()), app.Services);
+        var report = new UiObservationReport("view", "context", "web", ["report.narrative", "report.time-location"],
+            [new("report.narrative", UiObservationState.Ready), new("report.time-location", UiObservationState.Ready)])
+            { ValidationInputIds = ["report.original-statement"],
+                InputStates = [new("report.narrative", "report.original-statement", UiInputPresence.Invalid)] };
+
+        Assert.Equal(!foreign, await httpClient.ReportUiObservationAsync("session-1", report, default));
+        var store = app.Services.GetRequiredService<IEllaiUiObservationStore>();
+        var afterHttp = await store.LatestAsync("session-1", default);
+        if (foreign) Assert.Null(afterHttp);
+        else
+        {
+            Assert.Equal("report.original-statement", Assert.Single(afterHttp!.ValidationInputIds!));
+            Assert.Equal(UiInputPresence.Invalid, Assert.Single(afterHttp.InputStates!).Presence);
+        }
+
+        var next = report with { ContextStamp = "next", ValidationInputIds = ["report.occurrence-date"],
+            InputStates = [new("report.time-location", "report.occurrence-date", UiInputPresence.Entered)] };
+        Assert.Equal(!foreign, await inProcess.ReportUiObservationAsync("session-1", next, default));
+        var afterInProcess = await store.LatestAsync("session-1", default);
+        if (foreign) Assert.Null(afterInProcess);
+        else
+        {
+            Assert.Equal("report.occurrence-date", Assert.Single(afterInProcess!.ValidationInputIds!));
+            Assert.Equal(UiInputPresence.Entered, Assert.Single(afterInProcess.InputStates!).Presence);
+            var invalid = next with { ContextStamp = "invalid", InputStates = [new("report.other", "report.occurrence-date", UiInputPresence.Entered)] };
+            Assert.False(await httpClient.ReportUiObservationAsync("session-1", invalid, default));
+            Assert.False(await inProcess.ReportUiObservationAsync("session-1", invalid, default));
+            Assert.Equal("next", (await store.LatestAsync("session-1", default))!.ContextStamp);
+        }
+    }
+
+    [Fact]
+    public async Task SupersededUiObservationIsRejectedForHttpAndInProcessClients()
+    {
+        await using var app = await StartApplicationAsync();
+        using var http = app.GetTestClient();
+        var httpClient = new EllaiReviewHttpClient(http);
+        var inProcess = new EllaiReviewGatewayClient(new FixedAuthenticationStateProvider(TestPrincipal()), app.Services);
+        var store = app.Services.GetRequiredService<IEllaiUiObservationStore>();
+        Assert.True(await store.RecordAsync(new("session-1", "new-view", "new-context", "web", ["report.entry"],
+            DateTimeOffset.UtcNow.AddMinutes(1), [new("report.entry", UiObservationState.Ready)]), default));
+        var old = new UiObservationReport("old-view", "old-context", "web", ["report.entry"],
+            [new("report.entry", UiObservationState.Ready)]);
+
+        Assert.False(await httpClient.ReportUiObservationAsync("session-1", old, default));
+        Assert.False(await inProcess.ReportUiObservationAsync("session-1", old, default));
+        Assert.Equal("new-context", (await store.LatestAsync("session-1", default))!.ContextStamp);
+    }
+
     [Fact]
     public async Task ForeignOwnerCannotSubmitUtteranceOrMutateSession()
     {
@@ -1375,7 +1468,14 @@ public sealed class EllaiPrivilegedRouteAuthorizationTests
             if (frameworkFixture is null) builder.Services.AddSingleton<IEllaiUsageStore, InMemoryEllaiUsageStore>();
             else builder.Services.AddScoped<IEllaiUsageStore, PostgresEllaiUsageStore>();
             builder.Services.AddScoped(_ => new EllaiPromptBuilder("Synthetic test policy", "fixture"));
-            builder.Services.AddScoped(sp => new EllaiToolBroker(new EllaiPolicyService(), sp.GetRequiredService<EllaiConsentService>()));
+            builder.Services.AddScoped(sp =>
+            {
+                var registry = new EllaiUiRegistry();
+                EllaiReportGuidanceDescriptors.RegisterAll(registry);
+                return new EllaiToolBroker(new EllaiPolicyService(), sp.GetRequiredService<EllaiConsentService>(),
+                    uiRegistry: registry, uiDiscovery: new EllaiUiDiscoveryService(),
+                    uiObservations: sp.GetRequiredService<IEllaiUiObservationStore>());
+            });
             var modelOptions = liveModel ? EllaiOptions.Bind(Environment.GetEnvironmentVariable) : new EllaiOptions
             {
                 Enabled = true, ApiKey = "synthetic", ApiUrl = "https://fixture.invalid", ReasoningModel = "fixture"

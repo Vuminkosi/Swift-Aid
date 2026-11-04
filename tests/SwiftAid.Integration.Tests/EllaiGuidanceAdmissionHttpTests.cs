@@ -11,6 +11,7 @@ using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.Extensions.DependencyInjection;
 using SwiftAid.Application.Ellai;
 using SwiftAid.Gateway.Ellai;
+using SwiftAid.Gateway.Endpoints;
 using SwiftAid.Contracts.Ellai;
 
 namespace SwiftAid.Integration.Tests;
@@ -112,6 +113,11 @@ public sealed class EllaiGuidanceAdmissionHttpTests
         builder.Services.AddScoped<EllaiGuidancePlanValidator>();
         builder.Services.AddScoped<IEllaiUiDiscoveryService, EllaiUiDiscoveryService>();
         builder.Services.AddSingleton<EllaiUsageLedger>();
+        var speech = new SyntheticSpeech();
+        builder.Services.AddSingleton<IEllaiSpeechSynthesisClient>(speech);
+        builder.Services.AddSingleton<EllaiPreparedResponseAudio>();
+        builder.Services.AddSingleton<IEllaiResponseAudioPreparation>(services => services.GetRequiredService<EllaiPreparedResponseAudio>());
+        builder.Services.AddHostedService(services => services.GetRequiredService<EllaiPreparedResponseAudio>());
         builder.Services.AddSingleton<EllaiSessionResponseStore>();
         builder.Services.AddSingleton<IEllaiUsageStore, InMemoryEllaiUsageStore>();
         await using var app = builder.Build();
@@ -130,8 +136,8 @@ public sealed class EllaiGuidanceAdmissionHttpTests
         app.MapPost("/sessions/{sessionId}/guidance/control", controlHandler);
         Delegate narrationHandler = (Func<HttpContext, string, EllaiGuidanceNarrationRequest, IServiceProvider, CancellationToken, Task<IResult>>)EllaiGuidanceProposalEndpoint.NarrateAsync;
         app.MapPost("/sessions/{sessionId}/guidance/narration", narrationHandler);
-        Delegate validationNarrationHandler = (Func<HttpContext, string, EllaiValidationNarrationRequest, IServiceProvider, CancellationToken, Task<IResult>>)EllaiGuidanceProposalEndpoint.NarrateValidationAsync;
-        app.MapPost("/sessions/{sessionId}/guidance/validation-narration", validationNarrationHandler);
+        Delegate observationHandler = (Func<string, ReportUiObservationApiRequest?, IEllaiUiObservationStore, CancellationToken, Task<IResult>>)EllaiEndpoints.ReportUiObservationAsync;
+        app.MapPost("/sessions/{sessionId}/ui-observations", observationHandler);
         await app.StartAsync();
         try
         {
@@ -151,9 +157,69 @@ public sealed class EllaiGuidanceAdmissionHttpTests
             Assert.Equal(HttpStatusCode.NotFound, foreign.StatusCode);
             Assert.Equal(1, completion.Calls);
             var checkpoint = EllaiGuidanceCheckpoint.Deserialize((await store.GetAsync("owned", default))!.GuidanceJson)!;
+            if (feature == "report")
+            {
+                var observed = new ReportUiObservationApiRequest("owned", "view", "validation-context", "web",
+                    [control], [new(control, UiObservationState.Ready)], ValidationInputIds: ["report.original-statement", "report.occurrence-date"]);
+                using var observationResponse = await client.PostAsJsonAsync("/sessions/owned/ui-observations", observed);
+                Assert.Equal(HttpStatusCode.OK, observationResponse.StatusCode);
+                var stored = await observations.LatestAsync("owned", default);
+                Assert.Equal(observed.ValidationInputIds, stored!.ValidationInputIds);
+                var validationRequest = new EllaiGuidanceNarrationRequest(proposal.ProposalId, checkpoint.Plan!.PlanId, "entry", checkpoint.Version)
+                    { ValidationInputId = "report.original-statement", ObservationContextStamp = "validation-context" };
+                using var validationResponse = await client.PostAsJsonAsync("/sessions/owned/guidance/narration", validationRequest);
+                Assert.Equal(HttpStatusCode.OK, validationResponse.StatusCode);
+                var validation = (await validationResponse.Content.ReadFromJsonAsync<EllaiSessionResponseDto>())!;
+                Assert.Equal(EllaiReportValidationGuidance.Find("report.original-statement")!.Message, validation.Text);
+                var prepared = app.Services.GetRequiredService<EllaiPreparedResponseAudio>();
+                using (var firstAudio = await prepared.OpenAsync("owned", validation.Sequence, default).WaitAsync(TimeSpan.FromSeconds(5)))
+                    Assert.NotEmpty(await firstAudio.Content.ReadAsByteArrayAsync());
+                Assert.Contains(speech.Requests, item => item.RequestId.StartsWith($"owned-{validation.Sequence}-", StringComparison.Ordinal) &&
+                    item.Text.Contains("Describe what happened", StringComparison.Ordinal) && item.VoiceId == "af_heart");
+                using var wrongIssue = await client.PostAsJsonAsync("/sessions/owned/guidance/narration",
+                    validationRequest with { ValidationInputId = "report.occurrence-date" });
+                Assert.Equal(HttpStatusCode.NotFound, wrongIssue.StatusCode);
+                var nextObservation = observed with { ContextStamp = "validation-next", ValidationInputIds = ["report.occurrence-date"] };
+                using var nextObservationResponse = await client.PostAsJsonAsync("/sessions/owned/ui-observations", nextObservation);
+                Assert.Equal(HttpStatusCode.OK, nextObservationResponse.StatusCode);
+                using var staleIssue = await client.PostAsJsonAsync("/sessions/owned/guidance/narration", validationRequest);
+                Assert.Equal(HttpStatusCode.NotFound, staleIssue.StatusCode);
+                using var nextIssue = await client.PostAsJsonAsync("/sessions/owned/guidance/narration", validationRequest with
+                    { ValidationInputId = "report.occurrence-date", ObservationContextStamp = "validation-next", EnglishVoiceId = "am_michael" });
+                Assert.Equal(HttpStatusCode.OK, nextIssue.StatusCode);
+                var nextValidation = (await nextIssue.Content.ReadFromJsonAsync<EllaiSessionResponseDto>())!;
+                Assert.Equal(EllaiReportValidationGuidance.Find("report.occurrence-date")!.Message, nextValidation.Text);
+                using (var nextAudio = await prepared.OpenAsync("owned", nextValidation.Sequence, default).WaitAsync(TimeSpan.FromSeconds(5)))
+                    Assert.NotEmpty(await nextAudio.Content.ReadAsByteArrayAsync());
+                Assert.Contains(speech.Requests, item => item.RequestId.StartsWith($"owned-{nextValidation.Sequence}-", StringComparison.Ordinal) &&
+                    item.Text.Contains("reported date", StringComparison.Ordinal) && item.VoiceId == "am_michael");
+                foreach (var inputId in new[] { "report.original-statement-too-long", "report.too-many-observations",
+                             "report.observation-too-long", "report.observations-total-too-long",
+                             "report.country-catalogue-unavailable", "report.privacy-notice-unavailable", "report.processing-policy-unavailable",
+                             "report.invalid-draft-country", "report.invalid-exact-occurrence" })
+                {
+                    var contextStamp = $"context-{inputId}";
+                    using var issueObservation = await client.PostAsJsonAsync("/sessions/owned/ui-observations",
+                        observed with { ContextStamp = contextStamp, ValidationInputIds = [inputId, "report.occurrence-date"] });
+                    Assert.Equal(HttpStatusCode.OK, issueObservation.StatusCode);
+                    using var issueResponse = await client.PostAsJsonAsync("/sessions/owned/guidance/narration", validationRequest with
+                        { ValidationInputId = inputId, ObservationContextStamp = contextStamp });
+                    Assert.Equal(HttpStatusCode.OK, issueResponse.StatusCode);
+                    var issueNarration = (await issueResponse.Content.ReadFromJsonAsync<EllaiSessionResponseDto>())!;
+                    Assert.Equal(EllaiReportValidationGuidance.Find(inputId)!.Message, issueNarration.Text);
+                    using var laterIssue = await client.PostAsJsonAsync("/sessions/owned/guidance/narration", validationRequest with
+                        { ValidationInputId = "report.occurrence-date", ObservationContextStamp = contextStamp });
+                    Assert.Equal(HttpStatusCode.NotFound, laterIssue.StatusCode);
+                }
+            }
             await observations.RecordAsync(new("owned", "refreshed-view", "refreshed-context", "web", [control], DateTimeOffset.UtcNow,
                 [new(control, UiObservationState.Ready)]), default);
-            using var restoredResponse = await client.PostAsJsonAsync("/sessions/owned/guidance/plan", new EllaiGuidancePlanRequest(proposal.ProposalId));
+            using var wrongPlanResponse = await client.PostAsJsonAsync("/sessions/owned/guidance/plan", new EllaiGuidancePlanRequest(proposal.ProposalId)
+                { ExistingPlanId = "other-plan", CurrentStepId = "entry" });
+            Assert.Equal("Stale", (await wrongPlanResponse.Content.ReadFromJsonAsync<EllaiGuidancePlanDto>())!.Status);
+            Assert.Equal(checkpoint.Version, EllaiGuidanceCheckpoint.Deserialize((await store.GetAsync("owned", default))!.GuidanceJson)!.Version);
+            using var restoredResponse = await client.PostAsJsonAsync("/sessions/owned/guidance/plan", new EllaiGuidancePlanRequest(proposal.ProposalId)
+                { ExistingPlanId = checkpoint.Plan!.PlanId, CurrentStepId = "entry" });
             var restored = (await restoredResponse.Content.ReadFromJsonAsync<EllaiGuidancePlanDto>())!;
             Assert.Equal(checkpoint.Plan!.PlanId, restored.Plan!.PlanId);
             Assert.Equal("entry", restored.CurrentStepId);
@@ -254,6 +320,24 @@ public sealed class EllaiGuidanceAdmissionHttpTests
             Assert.Equal(HttpStatusCode.NotFound, deniedProgress.StatusCode);
         }
         finally { await app.StopAsync(); }
+    }
+
+    private sealed class SyntheticSpeech : IEllaiSpeechSynthesisClient
+    {
+        public bool IsConfigured => true;
+        public System.Collections.Concurrent.ConcurrentQueue<(string RequestId, string Text, string? VoiceId)> Requests { get; } = new();
+        public Task<HttpResponseMessage> SynthesizeAsync(string requestId, string text, CancellationToken ct) =>
+            SynthesizeAsync(requestId, text, "eng", "af_heart", ct);
+        public Task<HttpResponseMessage> SynthesizeAsync(string requestId, string text, string language, string? voiceId, CancellationToken ct)
+        {
+            ct.ThrowIfCancellationRequested();
+            Requests.Enqueue((requestId, text, voiceId));
+            var response = new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent([1, 2, 3, 4]) };
+            response.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/vnd.swiftaid.pcm");
+            response.Headers.Add("X-SwiftAid-Voice-Id", voiceId ?? "test");
+            response.Headers.Add("X-SwiftAid-Sample-Rate", "16000");
+            return Task.FromResult(response);
+        }
     }
 
     private sealed class CurrentScopes : IScopeService

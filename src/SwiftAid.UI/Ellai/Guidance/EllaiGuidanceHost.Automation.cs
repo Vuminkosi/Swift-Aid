@@ -22,7 +22,7 @@ public partial class EllaiGuidanceHost
     {
         if (_generatedTour is not { Status: BonboardingTourStatus.Running } tour ||
             _guidanceNarrationEventId is not { } eventId || sequence != _latestResponseSequence ||
-            _isPlayingResponse || !string.IsNullOrWhiteSpace(InputText)) return;
+            _isPlayingResponse || _validationGuidanceText is not null || !string.IsNullOrWhiteSpace(InputText)) return;
         CancelGuidanceCountdown();
         _ = RunGuidanceCountdownAsync(tour, eventId, sequence);
     }

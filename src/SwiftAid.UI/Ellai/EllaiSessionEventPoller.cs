@@ -944,13 +944,24 @@ public sealed class EllaiReviewHttpClient(HttpClient http, bool useGuestRoutes =
 
     public async Task<EllaiGuidancePlanDto?> PrepareGuidancePlanAsync(
         string sessionId, string proposalId, CancellationToken cancellationToken)
+        => await SendGuidancePlanRequestAsync(sessionId, new(proposalId), cancellationToken).ConfigureAwait(false);
+
+    public async Task<EllaiGuidancePlanDto?> RevalidateGuidancePlanAsync(
+        string sessionId, string proposalId, string planId, string stepId, CancellationToken cancellationToken)
+        => await SendGuidancePlanRequestAsync(sessionId, new(proposalId)
+        {
+            ExistingPlanId = planId, CurrentStepId = stepId
+        }, cancellationToken).ConfigureAwait(false);
+
+    private async Task<EllaiGuidancePlanDto?> SendGuidancePlanRequestAsync(
+        string sessionId, EllaiGuidancePlanRequest request, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
-        ArgumentException.ThrowIfNullOrWhiteSpace(proposalId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.ProposalId);
         try
         {
             using var response = await PostAsJsonAsync($"{SessionRoute(sessionId)}/guidance/plan",
-                new EllaiGuidancePlanRequest(proposalId), cancellationToken).ConfigureAwait(false);
+                request, cancellationToken).ConfigureAwait(false);
             return response.IsSuccessStatusCode
                 ? await response.Content.ReadFromJsonAsync<EllaiGuidancePlanDto>(Json, cancellationToken).ConfigureAwait(false)
                 : null;
@@ -988,7 +999,7 @@ public sealed class EllaiReviewHttpClient(HttpClient http, bool useGuestRoutes =
         {
             using var response = await PostAsJsonAsync(
                 $"{SessionRoute(sessionId)}/ui-observations",
-                new { sessionId, report.ViewInstanceId, report.ContextStamp, report.Platform, report.MountedControlIds, report.ControlStates, report.CurrentNavigationId, report.CompletedControlIds },
+                new { sessionId, report.ViewInstanceId, report.ContextStamp, report.Platform, report.MountedControlIds, report.ControlStates, report.CurrentNavigationId, report.CompletedControlIds, report.ValidationInputIds, report.InputStates },
                 cancellationToken).ConfigureAwait(false);
             return response.IsSuccessStatusCode;
         }

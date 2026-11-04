@@ -6,6 +6,32 @@ namespace SwiftAid.Application.Tests.Ellai;
 public sealed class EllaiSessionResponseStoreTests
 {
     [Fact]
+    public async Task ConcurrentGuidanceRetriesShareOneResponseAndOneAudioPreparation()
+    {
+        var audio = new CountingAudio();
+        var store = new EllaiSessionResponseStore(audioPreparation: audio);
+        var progress = new SwiftAid.Contracts.Ellai.EllaiInteractionProgressDto(
+            "validation-event", "Guidance", "Guidance", true, 1, DateTimeOffset.UtcNow.AddMinutes(1));
+        var attempts = Enumerable.Range(0, 20).Select(_ => Task.Run(() =>
+            store.PublishOrGetProgress("session", "turn", "Describe what happened.", progress, "af_heart")));
+        var results = await Task.WhenAll(attempts);
+        Assert.All(results, item => Assert.NotNull(item));
+        Assert.Single(results.Select(item => item!.Sequence).Distinct());
+        Assert.Single(store.ReadSince("session", 0).Responses);
+        Assert.Equal(1, audio.Count);
+        Assert.NotNull(store.PublishOrGetProgress("other-session", "turn", "Other.", progress));
+        Assert.Equal(2, audio.Count);
+    }
+
+    private sealed class CountingAudio : IEllaiResponseAudioPreparation
+    {
+        private int _count;
+        public int Count => Volatile.Read(ref _count);
+        public void Published(SwiftAid.Contracts.Ellai.EllaiSessionResponseDto response) => Interlocked.Increment(ref _count);
+        public void Clear(string sessionId) { }
+    }
+
+    [Fact]
     public void ProvisionalDeliveryRequiresCurrentAttemptLeaseAndEpoch()
     {
         var store = new EllaiSessionResponseStore();

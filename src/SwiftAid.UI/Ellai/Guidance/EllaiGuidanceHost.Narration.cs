@@ -44,36 +44,60 @@ public partial class EllaiGuidanceHost
         _validationNarrationEventId = null;
         _validationNarrationCts?.Cancel();
     }
+    private DateTimeOffset _guidanceNarrationRetryAtUtc;
+    private bool _guidanceNarrationRetryPending;
 
-    private async Task NarrateGuidanceStepAsync(IBonboardingTourSession tour, long version)
+    private async Task NarrateGuidanceStepAsync(IBonboardingTourSession tour, long version,
+        string? validationInputId = null, string? observationContextStamp = null)
     {
         if (!ReferenceEquals(tour, _generatedTour) || tour.Status != BonboardingTourStatus.Running ||
             _sessionView is null || _generatedPlan is null || _guidanceProposalId is null) return;
+        if (validationInputId is null && _validationInputId is not null)
+        {
+            validationInputId = _validationInputId;
+            observationContextStamp = _latestGuidanceObservation?.ContextStamp;
+        }
         var step = _generatedPlan.Steps.SingleOrDefault(item => item.StepKey == tour.CurrentStep?.Id);
         if (step is null) return;
         var request = new EllaiGuidanceNarrationRequest(_guidanceProposalId, _generatedPlan.PlanId,
-            step.StepKey, version, _speechPreferences.EnglishVoiceId);
+            step.StepKey, version, _speechPreferences.EnglishVoiceId)
+        { ValidationInputId = validationInputId, ObservationContextStamp = observationContextStamp };
         if (_guidanceNarrationEventId == request.EventId) return;
+        _guidanceNarrationCts?.Cancel();
+        _guidanceNarrationRetryPending = false;
         StopResponseAudio();
         _guidanceNarrationEventId = request.EventId;
-        _latestResponseText = step.Explanation;
+        _latestResponseText = validationInputId is null ? step.Explanation : _validationGuidanceText;
         _latestResponseSequence = 0;
         _latestResponseAudioSequences.Clear();
         var sessionId = _sessionView.SessionId;
         using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(_uiObservationLifetime.Token);
         _guidanceNarrationCts = cancellation;
+        var accepted = false;
         try
         {
             await ReportCurrentUiAsync(cancellation.Token);
             var response = await ReviewClient.PrepareGuidanceNarrationAsync(sessionId, request, cancellation.Token);
             if (!cancellation.IsCancellationRequested && ReferenceEquals(tour, _generatedTour) &&
                 _sessionView?.SessionId == sessionId && _guidanceNarrationEventId == request.EventId && response is not null)
+            {
+                accepted = true;
                 OnResponseReceived(response);
+            }
         }
         catch (OperationCanceledException) { }
         catch (HttpRequestException) { /* The validated step remains readable and usable. */ }
         finally
         {
+            if (!accepted && !cancellation.IsCancellationRequested && ReferenceEquals(tour, _generatedTour) &&
+                _sessionView?.SessionId == sessionId && _guidanceNarrationEventId == request.EventId)
+            {
+                // A failed request may have been accepted remotely; a later retry uses the
+                // same event identity so the server can return its existing response.
+                _guidanceNarrationEventId = null;
+                _guidanceNarrationRetryPending = true;
+                _guidanceNarrationRetryAtUtc = DateTimeOffset.UtcNow.AddSeconds(5);
+            }
             if (ReferenceEquals(_guidanceNarrationCts, cancellation)) _guidanceNarrationCts = null;
             if (!_uiObservationLifetime.IsCancellationRequested) await InvokeAsync(StateHasChanged);
         }
@@ -83,6 +107,7 @@ public partial class EllaiGuidanceHost
     {
         CancelValidationNarration();
         CancelGuidanceCountdown();
+        _guidanceNarrationRetryPending = false;
         if (_guidanceNarrationEventId is null) return;
         _guidanceNarrationEventId = null;
         StopResponseAudio();

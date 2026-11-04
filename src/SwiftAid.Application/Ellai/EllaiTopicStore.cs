@@ -33,6 +33,15 @@ public interface IEllaiTopicStore
 
     async Task<EllaiTopicEntry?> GetAsync(string sessionId, string topicId, CancellationToken ct) =>
         (await ListAsync(sessionId, ct).ConfigureAwait(false)).SingleOrDefault(topic => topic.TopicId == topicId);
+
+    /// <summary>Atomically replace an existing topic payload only when its prior payload and version still match.</summary>
+    Task<bool> CompareExchangePayloadAsync(string sessionId, string topicId, string? expectedRef,
+        string? expectedVersion, string newRef, string newVersion, DateTimeOffset now, CancellationToken ct) =>
+        throw new NotSupportedException("Atomic topic payload updates are unavailable.");
+
+    Task<bool> TryCreateAsync(string sessionId, string title, IReadOnlyList<string> aliases,
+        string entityRef, string entityVersion, DateTimeOffset now, CancellationToken ct) =>
+        throw new NotSupportedException("Atomic topic creation is unavailable.");
 }
 
 /// <summary>Thread-safe in-memory topic store with the same semantics as the
@@ -83,6 +92,44 @@ public sealed class InMemoryEllaiTopicStore : IEllaiTopicStore
                     .Where(e => string.Equals(e.SessionId, sessionId, StringComparison.Ordinal))
                     .OrderBy(e => e.CreatedAtUtc)
                     .ToList());
+        }
+    }
+
+    public Task<bool> CompareExchangePayloadAsync(string sessionId, string topicId, string? expectedRef,
+        string? expectedVersion, string newRef, string newVersion, DateTimeOffset now, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(topicId);
+        ArgumentNullException.ThrowIfNull(newRef);
+        ArgumentException.ThrowIfNullOrWhiteSpace(newVersion);
+        lock (_gate)
+        {
+            ct.ThrowIfCancellationRequested();
+            if (!_byId.TryGetValue(topicId, out var current) || current.SessionId != sessionId ||
+                current.EntityRef != expectedRef || current.EntityVersion != expectedVersion)
+                return Task.FromResult(false);
+            _byId[topicId] = current with { EntityRef = newRef, EntityVersion = newVersion, UpdatedAtUtc = now };
+            return Task.FromResult(true);
+        }
+    }
+
+    public Task<bool> TryCreateAsync(string sessionId, string title, IReadOnlyList<string> aliases,
+        string entityRef, string entityVersion, DateTimeOffset now, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(title);
+        ArgumentNullException.ThrowIfNull(aliases);
+        ArgumentNullException.ThrowIfNull(entityRef);
+        ArgumentException.ThrowIfNullOrWhiteSpace(entityVersion);
+        lock (_gate)
+        {
+            ct.ThrowIfCancellationRequested();
+            var id = StableTopicId(sessionId, title);
+            if (_byId.ContainsKey(id)) return Task.FromResult(false);
+            _byId[id] = new(id, sessionId, title, aliases, entityRef, entityVersion, "Partial", null, now, now);
+            return Task.FromResult(true);
         }
     }
 

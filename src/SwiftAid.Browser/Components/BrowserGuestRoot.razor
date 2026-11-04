@@ -107,6 +107,7 @@ else
         {
             <div class="browser-guest__report">
                 <PublicReportSurface Countries="_countries"
+                                     TextLimits="_textLimits"
                                      CountryCatalogueVersion="@_countryCatalogueVersion"
                                      CountryCatalogueIsCurrent="_countryCatalogueIsCurrent"
                                      GeoCountries="_geoCountries"
@@ -120,11 +121,12 @@ else
                                      ProcessingPolicyNoticeText="@_processingPolicyNoticeText"
                                      ProcessingPolicyAcknowledgementLabel="@_processingPolicyAcknowledgementLabel"
                                      DraftSavingAvailable="_storageAvailable"
-                                     SubmitAvailable="@CanSend"
+                                     SubmitAvailable="@(CanSend && !_activeHasLocalAudio)"
                                      Draft="_draft"
                                      CurrentDraftId="_activeDraftId"
                                      Receipt="_receivedReceipt"
                                      OnSaveDraft="SaveDraftAsync"
+                                     EditableDraftSnapshotsSupported="true"
                                      OnSendReport="SendReportAsync"
                                      Feedback="@_feedback"
                                      FeedbackIsError="_feedbackIsError" />
@@ -150,6 +152,7 @@ else
     private IReadOnlyList<PublicCountryOption> _countries = [];
     private IReadOnlyList<GeoPlaceCountry> _geoCountries = [];
     private string? _countryCatalogueVersion;
+    private PublicIntakeTextLimits? _textLimits;
     private bool _countryCatalogueIsCurrent;
     private bool _privacyNoticeIsCurrent;
     private string? _privacyNoticeReference;
@@ -166,6 +169,7 @@ else
     private bool _isReport;
     private bool _isTracking;
     private Guid? _activeDraftId;
+    private bool _activeHasLocalAudio;
     private IntakeReceipt? _receivedReceipt;
     private IReadOnlyList<PublicReportHistorySurface.HistoryItem> _history = [];
     private bool _historyLoading;
@@ -288,6 +292,7 @@ else
 
     private async Task LoadMetadataAsync()
     {
+        _textLimits = null;
         try
         {
             var metadataTask = IntakeMetadataClient.GetMetadataAsync();
@@ -308,6 +313,7 @@ else
                     .Select(country => new GeoPlaceCountry(country.Code, country.Name))
                     .ToList();
                 _countryCatalogueVersion = catalogue.Version;
+                _textLimits = metadata.TextLimits is { } limits && limits.IsValid() ? limits : null;
                 _countryCatalogueIsCurrent = _countries.Count > 0 &&
                     metadataResult.Metadata.IsAvailable && countriesResult.Metadata.IsAvailable;
                 _privacyNoticeReference = metadata.PrivacyNoticeReference;
@@ -404,14 +410,34 @@ else
         var sourceDraftId = _activeDraftId;
         try
         {
-            var result = request.PreviousDraftId is { } previous
-                ? await SubmissionStore.CreateRevisionAsync(previous, request.Submission)
-                : await SubmissionStore.CreateDraftAsync(request.Submission);
-            request.ConfirmPersisted(result.ClientSubmissionId);
+            var previousEditable = request.PreviousDraftId is { } previousId
+                ? await SubmissionStore.GetEditableDraftAsync(previousId) : null;
+            var previousDraft = request.PreviousDraftId is { } existingId && previousEditable is null
+                ? await SubmissionStore.GetDraftAsync(existingId) : null;
+            if (request.PreviousDraftId is not null && previousEditable is null && previousDraft is null)
+                throw new InvalidOperationException("The saved draft is no longer editable.");
+            var previousSubmission = previousEditable?.Submission ?? previousDraft?.Submission;
+            var submission = previousSubmission is null ? request.Submission : request.Submission with
+            {
+                OriginalAudioAttachmentIds = previousSubmission.OriginalAudioAttachmentIds.ToArray()
+            };
+            var result = request.FormSnapshot is { } snapshot
+                ? request.PreviousDraftId is { } previous
+                    ? await SubmissionStore.CreateEditableRevisionAsync(previous, submission, snapshot)
+                    : await SubmissionStore.CreateEditableDraftAsync(submission, snapshot)
+                : request.PreviousDraftId is { } normalPrevious
+                    ? previousEditable is not null
+                        ? await SubmissionStore.CompleteEditableDraftAsync(normalPrevious, submission)
+                        : await SubmissionStore.CreateRevisionPreservingAudioAsync(normalPrevious, submission)
+                    : await SubmissionStore.CreateDraftAsync(submission);
+            request.ConfirmPersisted(result.ClientSubmissionId, request.FormSnapshot is not null);
             if (ReferenceEquals(_draft, sourceDraft) && _activeDraftId == sourceDraftId)
             {
                 _activeDraftId = result.ClientSubmissionId;
-                _feedback = "Your draft was saved on this device. Save again to include any newer edits. It has not been sent.";
+                _activeHasLocalAudio = result.HasLocalAudio;
+                _feedback = result.HasLocalAudio
+                    ? "Your draft and voice note remain on this device. Voice upload is not available yet."
+                    : "Your draft was saved on this device. Save again to include any newer edits. It has not been sent.";
                 _feedbackIsError = false;
             }
             await ReloadHistoryAsync();
@@ -427,13 +453,25 @@ else
 
     private async Task SendReportAsync(IntakeSubmission submission)
     {
-        if (_busy || !CanSend) return;
+        if (_busy || !CanSend || _activeHasLocalAudio) return;
         _receivedReceipt = null;
         _busy = true;
         try
         {
+            var previousEditable = _activeDraftId is { } prior
+                ? await SubmissionStore.GetEditableDraftAsync(prior) : null;
+            var previousSummary = _activeDraftId is { } previousId ? await SubmissionStore.GetAsync(previousId) : null;
+            if (previousSummary?.HasLocalAudio == true)
+            {
+                _activeHasLocalAudio = true;
+                _feedback = "This report has a voice note saved on this device. Voice upload is not available yet.";
+                _feedbackIsError = false;
+                return;
+            }
             var saved = _activeDraftId is { } previous
-                ? await SubmissionStore.CreateRevisionAsync(previous, submission)
+                ? previousEditable is not null
+                    ? await SubmissionStore.CompleteEditableDraftAsync(previous, submission)
+                    : await SubmissionStore.CreateRevisionPreservingAudioAsync(previous, submission)
                 : await SubmissionStore.CreateDraftAsync(submission);
             _activeDraftId = saved.ClientSubmissionId;
             _draft = PublicReportDraft.FromSubmission(submission with { ClientSubmissionId = saved.ClientSubmissionId });
@@ -471,8 +509,10 @@ else
                     GuestSubmissionLocalState.Received => PublicReportHistorySurface.HistoryState.Received,
                     GuestSubmissionLocalState.NeedsAttention => PublicReportHistorySurface.HistoryState.NeedsAttention,
                     _ => PublicReportHistorySurface.HistoryState.Superseded
-                }, item.CreatedAtUtc, item.Receipt, CanSend && item.State is GuestSubmissionLocalState.Draft or GuestSubmissionLocalState.Queued,
-                SendUnavailableMessage)).ToArray();
+                }, item.CreatedAtUtc, item.Receipt,
+                CanSend && !item.RequiresEditing && !item.HasLocalAudio && item.State is (GuestSubmissionLocalState.Draft or GuestSubmissionLocalState.Queued),
+                item.HasLocalAudio ? "This report has a voice note saved on this device. Voice upload is not available yet."
+                    : item.RequiresEditing ? "Open this draft and finish its details before sending." : SendUnavailableMessage)).ToArray();
             _storageAvailable = true;
         }
         catch (Exception)
@@ -487,11 +527,17 @@ else
     {
         try
         {
-            var draft = await SubmissionStore.GetDraftAsync(id);
-            if (draft is null) { _feedback = "This draft is no longer available on this device."; return; }
+            var editable = await SubmissionStore.GetEditableDraftAsync(id);
+            var draft = editable is null ? await SubmissionStore.GetDraftAsync(id) : null;
+            if (draft is null && editable is null) { _feedback = "This draft is no longer available on this device."; return; }
+            var restored = editable is null ? PublicReportDraft.FromSubmission(draft!.Submission) : PublicReportDraft.FromFormSnapshot(editable.FormSnapshot);
+            var summary = await SubmissionStore.GetAsync(id);
+            if (summary is null) { _feedback = "This draft is no longer available on this device."; return; }
             _activeDraftId = id;
-            _draft = PublicReportDraft.FromSubmission(draft.Submission);
-            _feedback = null;
+            _activeHasLocalAudio = summary.HasLocalAudio;
+            _draft = restored;
+            _feedback = summary.HasLocalAudio ? "This report has a voice note saved on this device. Voice upload is not available yet." : null;
+            _feedbackIsError = false;
             Navigation.NavigateTo("/report");
         }
         catch (Exception) { _feedback = "This draft could not be opened safely."; _feedbackIsError = true; }

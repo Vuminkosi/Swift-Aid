@@ -52,6 +52,18 @@ public sealed record EllaiToolTrace(int Version, bool HistoryIncluded, IReadOnly
                     item.Evidence.All(reference => reference is not null) &&
                     (item.ImportListScope is null || item.ToolName == EllaiToolNames.Imports && item.ImportListScope.IsValid()) &&
                     (item.CaseListQuery is null || item.ToolName == EllaiToolNames.State && item.CaseListQuery.IsValid()) &&
+                    (item.QueueProjectionVersion is null || item.CaseListQuery is not null &&
+                        item.QueueProjectionVersion == EllaiObservedToolResult.CurrentQueueProjectionVersion) &&
+                    (item.CaseListDigest is null || item.CaseListQuery?.PlaceId is not null &&
+                        item.CaseListDigest is { Length: 64 } &&
+                        item.CaseListDigest.All(character => character is >= '0' and <= '9' or >= 'A' and <= 'F')) &&
+                    (item.RetainedClassificationFilter is null || item.ToolName == EllaiToolNames.Evidence &&
+                        item.RetainedClassificationFilter.IsValid() && item.CaseSnapshotExpiresAtUtc is not null) &&
+                    (item.RetainedCaseReplay is null || item.ToolName is EllaiToolNames.Topic or EllaiToolNames.Evidence &&
+                        (item.Truncated || item.RetainedCaseReplay.Field is "observations" or "submitter" ||
+                            item.RetainedCaseReplay.ClassificationFilter is not null || item.RetainedCaseReplay.PlaceId is not null) &&
+                        item.CaseSnapshotExpiresAtUtc is not null && item.RetainedCaseReplay.IsValid() &&
+                        (item.ToolName != EllaiToolNames.Topic || item.RetainedCaseReplay.Field is null)) &&
                     (item.StaticFeatureVersion is null || item.ToolName == EllaiToolNames.State && item.CaseListQuery is null &&
                         item.StaticFeatureVersion == EllaiObservedToolResult.CurrentStaticFeatureVersion) &&
                     (item.CaseSnapshotExpiresAtUtc is null || item.ToolName is EllaiToolNames.Topic or EllaiToolNames.Evidence or EllaiToolNames.CaseTimeline) &&

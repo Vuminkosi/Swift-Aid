@@ -56,6 +56,24 @@ public sealed class EllaiGuidanceAdmissionClientTests
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
+    public async Task RevalidationPostsExistingPlanAndStepWithoutRequestingANewPlan(bool guest)
+    {
+        using var http = new HttpClient(new Handler(request =>
+        {
+            if (request.Method == HttpMethod.Get)
+                return new(HttpStatusCode.OK) { Content = JsonContent.Create(new { requestToken = "synthetic-token" }) };
+            Assert.Equal($"/api/v1/ellai/{(guest ? "guest/" : "")}sessions/session/guidance/plan", request.RequestUri!.AbsolutePath);
+            var payload = request.Content!.ReadFromJsonAsync<EllaiGuidancePlanRequest>().GetAwaiter().GetResult();
+            Assert.Equal(new EllaiGuidancePlanRequest("proposal") { ExistingPlanId = "plan", CurrentStepId = "step" }, payload);
+            return new(HttpStatusCode.OK) { Content = JsonContent.Create(new EllaiGuidancePlanDto("ReplanRequired")) };
+        })) { BaseAddress = new Uri("https://localhost/") };
+        var result = await new EllaiReviewHttpClient(http, guest).RevalidateGuidancePlanAsync("session", "proposal", "plan", "step", default);
+        Assert.Equal("ReplanRequired", result!.Status);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
     public async Task ProgressUsesOwnedRouteAndPreservesVersionFence(bool guest)
     {
         using var http = new HttpClient(new Handler(request =>

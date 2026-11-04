@@ -232,6 +232,43 @@ public sealed class EllaiReasoningBackendTests
         Assert.True(request.RootElement.GetProperty("stream").GetBoolean());
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task StreamingProvidersPreserveOutputLimitAndRejectInterruptedStreams(bool meta)
+    {
+        var options = Bind(new Dictionary<string, string?>
+        {
+            ["Ellai__Enabled"] = "true",
+            ["Ellai__ApiKey"] = "test-key",
+            ["Ellai__ApiUrl"] = "https://api.meta.ai/v1",
+            ["Ellai__ReasoningModel"] = "muse-spark-1.3-contributor",
+            ["Ellai__ReasoningBackend"] = meta ? "meta" : "ollama",
+            ["Ellai__Reasoning__Ollama__Endpoint"] = "http://localhost:11434",
+        });
+        var partial = meta
+            ? "data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n"
+            : "{\"message\":{\"content\":\"partial\"},\"done\":false}\n";
+        var ending = meta
+            ? "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"length\"}]}\n\ndata: [DONE]\n\n"
+            : "{\"done\":true,\"done_reason\":\"length\"}\n";
+
+        async Task<EllaiReasoningResult> Run(string body)
+        {
+            using var http = new HttpClient(new StubHandler(body));
+            var messages = new[] { new EllaiChatMessage("user", "hello") };
+            return meta
+                ? await new EllaiReasoningAdapter(http, options).CompleteStreamingAsync(
+                    messages, 64, (_, _) => ValueTask.CompletedTask, CancellationToken.None)
+                : await new OllamaEllaiReasoningProvider(http, options).CompleteStreamingAsync(
+                    messages, 64, (_, _) => ValueTask.CompletedTask, CancellationToken.None);
+        }
+
+        Assert.Equal("length", (await Run(partial + ending)).FinishReason);
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => Run(partial));
+        Assert.Contains("ended before completion", error.Message, StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task MetaRefusalReportsOnlySafeProviderErrorIdentifiers()
     {

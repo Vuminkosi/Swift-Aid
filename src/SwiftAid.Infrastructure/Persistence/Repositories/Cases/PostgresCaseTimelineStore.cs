@@ -281,4 +281,16 @@ public sealed class PostgresCaseTimelineStore(SwiftAidDbContext dbContext) : ICa
             .Where(item => item.CaseId == caseId)
             .Select(item => (Guid?)item.ReceiptId)
             .SingleOrDefaultAsync(ct);
+
+    public async Task<CaseReportAttributionRow?> GetReportAttributionAsync(Guid caseId, CancellationToken ct)
+    {
+        return await (from item in _dbContext.CaseEvents.AsNoTracking()
+                      where item.CaseId == caseId && item.EventType == "CaseReported"
+                      join profile in _dbContext.UserProfiles.AsNoTracking() on item.ActorId equals profile.UserId into profiles
+                      from profile in profiles.DefaultIfEmpty()
+                      select new CaseReportAttributionRow(item.EventId, item.AggregateVersion,
+                          profile == null ? null : profile.DisplayName,
+                          _dbContext.IntakePromotions.AsNoTracking().Any(promotion => promotion.CaseId == caseId)))
+            .SingleOrDefaultAsync(ct).ConfigureAwait(false);
+    }
 }

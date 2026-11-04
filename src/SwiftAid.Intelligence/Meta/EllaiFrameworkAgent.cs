@@ -1334,6 +1334,37 @@ public sealed class EllaiFrameworkAgentFactory : IEllaiFrameworkAgentFactory
     }
 }
 
+/// <summary>Requests the final decision schema on the Meta-hosted route while retaining native tools.</summary>
+public sealed class EllaiStructuredFrameworkAgentFactory : IEllaiFrameworkAgentFactory
+{
+    private sealed record StreamSegment(string Text, IReadOnlyList<GroundedClaim> Claims);
+    private sealed record DecisionEnvelope(
+        [property: System.Text.Json.Serialization.JsonPropertyName("stream_segments")] IReadOnlyList<StreamSegment>? StreamSegments,
+        [property: System.Text.Json.Serialization.JsonPropertyName("final_decision")] EllaiDecision FinalDecision);
+
+    private static readonly System.Text.Json.JsonElement Schema = CreateSchema();
+
+    private static System.Text.Json.JsonElement CreateSchema()
+    {
+        var json = new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web)
+        {
+            TypeInfoResolver = new System.Text.Json.Serialization.Metadata.DefaultJsonTypeInfoResolver(),
+            Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter(allowIntegerValues: false) }
+        };
+        var schema = System.Text.Json.Schema.JsonSchemaExporter.GetJsonSchemaAsNode(json, typeof(DecisionEnvelope));
+        return System.Text.Json.JsonSerializer.SerializeToElement(schema);
+    }
+
+    public AIAgent Create(IChatClient client, ChatClientAgentOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        options.ChatOptions ??= new ChatOptions();
+        options.ChatOptions.Instructions += "\nThe response schema requires stream_segments; use null when no verified streaming segments are supplied.";
+        options.ChatOptions.ResponseFormat = ChatResponseFormat.ForJsonSchema(Schema, "ellai_decision");
+        return EllaiFrameworkAgentFactory.Instance.Create(client, options);
+    }
+}
+
 /// <summary>Safe, non-provider diagnostic for an unsuccessful framework call.</summary>
 public sealed class EllaiFrameworkFailureException(string code) : InvalidOperationException("Ellai framework execution was stopped.")
 {

@@ -102,6 +102,15 @@ builder.Services.AddScoped<WebGuestIntakeService>(services =>
     new WebGuestIntakeService(services.GetRequiredService<IServiceScopeFactory>()));
 builder.Services.AddScoped<IPublicIntakeSubmissionClient, WebPublicIntakeSubmissionClient>();
 builder.Services.AddScoped<IPublicIntakeMetadataClient, WebPublicIntakeMetadataClient>();
+builder.Services.AddScoped<SwiftAid.Browser.Services.BrowserGuestSubmissionPersistence>();
+builder.Services.AddScoped<SwiftAid.Client.Intake.IGuestSubmissionPersistence>(services =>
+    services.GetRequiredService<SwiftAid.Browser.Services.BrowserGuestSubmissionPersistence>());
+builder.Services.AddScoped<SwiftAid.Client.Intake.IGuestIntakeTransport, GatewayGuestIntakeTransport>();
+builder.Services.AddScoped<SwiftAid.Client.Intake.IGuestSubmissionCoordinator, SwiftAid.Client.Intake.GuestSubmissionCoordinator>();
+builder.Services.AddScoped<SwiftAid.Client.Intake.IGuestSubmissionStore>(services =>
+    new SwiftAid.Client.Intake.GuestDraftStore(
+        services.GetRequiredService<SwiftAid.Client.Intake.IGuestSubmissionPersistence>(),
+        transport: services.GetRequiredService<SwiftAid.Client.Intake.IGuestIntakeTransport>()));
 builder.Services.AddScoped<IPublicCommunitySessionClient, WebPublicCommunitySessionClient>();
 builder.Services.AddScoped<SwiftAid.Contracts.Intake.IIntakeCoordinationClient, IntakeCoordinationGatewayClient>();
 builder.Services.AddScoped<SwiftAid.Contracts.Cases.ICaseTimelineClient, SwiftAid.Gateway.Cases.CaseTimelineGatewayClient>();

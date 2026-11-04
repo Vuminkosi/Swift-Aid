@@ -548,6 +548,17 @@ public sealed class EllaiReviewGatewayClient(
             scope.ServiceProvider, cancellationToken).ConfigureAwait(false);
     }
 
+    public async Task<EllaiGuidancePlanDto?> RevalidateGuidancePlanAsync(
+        string sessionId, string proposalId, string planId, string stepId, CancellationToken cancellationToken)
+    {
+        var state = await _authenticationStateProvider.GetAuthenticationStateAsync().ConfigureAwait(false);
+        var principal = ResolvePrincipal(state.User, sessionId);
+        if (principal is null) return null;
+        await using var scope = _serviceProvider.CreateAsyncScope();
+        return await EllaiGuidanceProposalEndpoint.PrepareOwnedAsync(ActorContext.FromValidatedPrincipal(principal),
+            sessionId, proposalId, scope.ServiceProvider, cancellationToken, planId, stepId).ConfigureAwait(false);
+    }
+
     public async Task<EllaiGuidanceAdmissionDto?> ReadGuidanceAdmissionAsync(
         string sessionId, string proposalId, CancellationToken cancellationToken)
     {
@@ -814,14 +825,13 @@ public sealed class EllaiReviewGatewayClient(
                 return false;
             }
 
-            await observations.RecordAsync(new StoredUiObservationReport(
+            return await observations.RecordAsync(new StoredUiObservationReport(
                 sessionId, report.ViewInstanceId.Trim(), report.ContextStamp.Trim(),
                 report.Platform.Trim(), report.MountedControlIds
                     .Where(id => !string.IsNullOrWhiteSpace(id))
                     .Select(id => id.Trim())
                     .ToList(),
-                DateTimeOffset.UtcNow, report.ControlStates, report.CurrentNavigationId, report.CompletedControlIds), cancellationToken).ConfigureAwait(false);
-            return true;
+                DateTimeOffset.UtcNow, report.ControlStates, report.CurrentNavigationId, report.CompletedControlIds, report.ValidationInputIds, report.InputStates), cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {

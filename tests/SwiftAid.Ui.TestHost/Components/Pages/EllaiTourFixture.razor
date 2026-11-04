@@ -1,0 +1,37 @@
+@page "/ellai-tour-fixture"
+@using Bit.Bonboarding
+@using SwiftAid.Contracts.Ellai
+@using SwiftAid.UI.Ellai.Guidance
+@inject IBonboardingService Bonboarding
+
+<BonboardingRoot />
+<main data-fixture-ready="@_ready.ToString().ToLowerInvariant()">
+    <h1>Guidance fixture</h1>
+    <button @onclick="Start">Start guidance</button>
+    <button data-bonboarding-anchor="fixture-subject" @onclick="Accept">Choose subject</button>
+    <output id="fixture-accepted">@_accepted.ToString().ToLowerInvariant()</output>
+</main>
+
+@code {
+    private bool _accepted;
+    private bool _ready;
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (firstRender) { _ready = true; StateHasChanged(); }
+    }
+
+    private void Accept() => _accepted = true;
+
+    private async Task Start()
+    {
+        var step = new GuidancePlanStep("subject", "report.subject", "choose-report-subject",
+            PlanStepBehavior.GuideHuman, null, null, [], [], "Choose the report subject.", null);
+        var plan = new ValidatedGuidancePlan("fixture", 1, null, "Synthetic fixture", ["subject"], [], [],
+            [step], [], "fixture", "fixture");
+        var definition = new EllaiBonboardingCompiler().Compile(plan,
+            new Dictionary<string, string> { ["report.subject"] = "fixture-subject" },
+            (_, _) => ValueTask.FromResult(_accepted));
+        await Bonboarding.StartAsync(definition, new BonboardingStartOptions { Resume = false });
+    }
+}

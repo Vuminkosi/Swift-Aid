@@ -82,6 +82,23 @@ public sealed class EllaiSessionResponseStore(TimeProvider? timeProvider = null,
         }
     }
 
+    /// <summary>Return the existing event or publish it atomically, so concurrent retries share one response.</summary>
+    public EllaiSessionResponseDto? PublishOrGetProgress(
+        string sessionId, string utteranceId, string text, EllaiInteractionProgressDto progress, string? englishVoiceId = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(utteranceId);
+        ArgumentNullException.ThrowIfNull(progress);
+        lock (_gate)
+        {
+            PruneExpired();
+            if (_sessions.TryGetValue(sessionId, out var session) &&
+                session.Items.FirstOrDefault(item => item.Progress?.EventId == progress.EventId) is { } existing)
+                return existing;
+            return PublishProgress(sessionId, utteranceId, text, progress, englishVoiceId);
+        }
+    }
+
     public EllaiSessionResponseDto? Publish(string sessionId, string clientUtteranceId, string text)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);

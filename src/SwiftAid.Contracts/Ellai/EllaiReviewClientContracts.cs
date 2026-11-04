@@ -235,6 +235,10 @@ public interface IEllaiReviewClient
         string sessionId, string proposalId, CancellationToken cancellationToken) =>
         Task.FromResult<EllaiGuidancePlanDto?>(null);
 
+    Task<EllaiGuidancePlanDto?> RevalidateGuidancePlanAsync(
+        string sessionId, string proposalId, string planId, string stepId, CancellationToken cancellationToken) =>
+        Task.FromResult<EllaiGuidancePlanDto?>(null);
+
     Task<EllaiGuidanceAdmissionDto?> ReadGuidanceAdmissionAsync(
         string sessionId, string proposalId, CancellationToken cancellationToken) =>
         Task.FromResult<EllaiGuidanceAdmissionDto?>(null);
@@ -384,11 +388,22 @@ public interface IEllaiReviewClient
 /// <summary>Readiness for a persisted proposal; never permission to execute an application action.</summary>
 public sealed record EllaiGuidanceAdmissionDto(string Status, string? Objective, long InteractionEpoch);
 
-public sealed record EllaiGuidancePlanRequest(string ProposalId);
+public sealed record EllaiGuidancePlanRequest(string ProposalId)
+{
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? ExistingPlanId { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? CurrentStepId { get; init; }
+}
 public sealed record EllaiGuidanceNarrationRequest(string ProposalId, string PlanId, string StepId,
     long ExpectedVersion, string EnglishVoiceId = "af_heart")
 {
-    public string EventId => $"guidance:{PlanId}:{StepId}:{ExpectedVersion}";
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? ValidationInputId { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? ObservationContextStamp { get; init; }
+    public string EventId => ValidationInputId is null ? $"guidance:{PlanId}:{StepId}:{ExpectedVersion}" :
+        $"guidance:{PlanId}:{StepId}:{ExpectedVersion}:{ValidationInputId}:{ObservationContextStamp}";
 }
 public sealed record EllaiValidationNarrationRequest(string ProposalId, string PlanId, string StepId,
     long ExpectedVersion, string ValidationCode, long TimeWindow, string EnglishVoiceId = "af_heart")

@@ -14,6 +14,7 @@ public static class EllaiNavigationManifest
 {
     public const string FeatureId = "navigation";
     public const string Capability = "navigation.authenticated";
+    public const string PublicCapability = "navigation.public";
     public static IReadOnlyList<EllaiNavigationDestination> Destinations { get; } = Array.AsReadOnly<EllaiNavigationDestination>(
     [
         new("home", "/", "Home", "Return to the SwiftAid home page.", "Main"),
@@ -39,7 +40,7 @@ public static class EllaiNavigationManifest
             item.Label, item.Purpose, [item.Label], ["navigation", "system-tour", item.Id], [], item.NavigationId, item.Anchor,
             ["NavigateFeature", "HighlightControl"], UiRiskClass.R0,
             [GuidanceMode.Navigation, GuidanceMode.SystemTour], [], [], "open-" + item.Id, "proof-ui-observed",
-            [Capability], "application-metadata", false)
+            [item.Id == "home" ? PublicCapability : Capability], "application-metadata", false)
         { Semantics = new(item.Purpose, null, [], ["proof-ui-observed"]) }).ToArray());
 
     public static EllaiUiManifest Definition { get; } = new("shell.navigation", "nav-dashboard", null,

@@ -4,6 +4,7 @@
 @using Microsoft.AspNetCore.Components.Forms
 @using SwiftAid.Contracts.Geography
 @using SwiftAid.Contracts.Intake
+@inject SwiftAid.UI.Ellai.Guidance.EllaiPublicReportDraftContext? EllaiDraftContext
 @using SwiftAid.UI.Components.Geography
 @using SwiftAid.UI.Components.Public
 @implements IDisposable
@@ -63,7 +64,8 @@
         {
             <section class="guided-report__panel" aria-labelledby="report-type-title">
                 <h2 id="report-type-title" class="mud-typography mud-typography-h6 guided-report__step-heading" tabindex="-1" @ref="_stepHeading">Who or what is the concern about?</h2>
-                <div class="guided-report__subject-selector @ValidationClass(nameof(PublicReportDraft.SubjectScope))" data-ellai-control="report.subject" data-bonboarding-anchor='@EllaiReportUiManifest.AnchorFor("report.subject")' tabindex="-1" @ref="_subjectValidationTarget">
+                <div class="guided-report__subject-selector" data-ellai-control="report.subject" data-bonboarding-anchor='@EllaiReportUiManifest.AnchorFor("report.subject")'>
+                    <div data-bonboarding-anchor="ellai-report-subject-kind">
                     <MudRadioGroup T="ReportSubjectCategory?" Value="_subjectCategory" ValueChanged="SubjectCategoryChangedAsync" Class="guided-report__subject-group" aria-label="Report subject">
                         <div class="guided-report__choices">
                             <div class="@GetSubjectChoiceClass(ReportSubjectCategory.HumanHealth)">
@@ -78,10 +80,25 @@
                             </div>
                         </div>
                     </MudRadioGroup>
+                    </div>
                 </div>
+                @if (_subjectCategory == ReportSubjectCategory.HumanHealth)
+                {
+                    <div class="guided-report__animal-scope-group" data-bonboarding-anchor="ellai-report-gender">
+                        <MudText Typo="Typo.body2" id="reported-gender-label">Reported gender (optional)</MudText>
+                        <MudRadioGroup T="ReportedGender?" Value="Draft.Gender" ValueChanged="ReportedGenderChangedAsync" aria-labelledby="reported-gender-label">
+                            <div class="guided-report__animal-scope-options">
+                                <MudRadio T="ReportedGender?" Value="@((ReportedGender?)ReportedGender.Female)" Color="Color.Primary">Female</MudRadio>
+                                <MudRadio T="ReportedGender?" Value="@((ReportedGender?)ReportedGender.Male)" Color="Color.Primary">Male</MudRadio>
+                                <MudRadio T="ReportedGender?" Value="@((ReportedGender?)ReportedGender.Other)" Color="Color.Primary">Other</MudRadio>
+                                <MudRadio T="ReportedGender?" Value="@((ReportedGender?)null)" Color="Color.Primary">Unknown / not provided</MudRadio>
+                            </div>
+                        </MudRadioGroup>
+                    </div>
+                }
                 @if (_subjectCategory == ReportSubjectCategory.AnimalHealth)
                 {
-                    <div class="guided-report__animal-scope-group @ValidationClass(nameof(PublicReportDraft.SubjectScope))" tabindex="-1" @ref="_animalScopeValidationTarget">
+                    <div class="guided-report__animal-scope-group" data-bonboarding-anchor="ellai-report-animal-scope">
                         <MudText Typo="Typo.body2" id="animal-scope-label">What is the concern about?</MudText>
                         <MudRadioGroup T="IntakeSubjectScope?" Value="Draft.SubjectScope" ValueChanged="AnimalScopeChangedAsync" aria-labelledby="animal-scope-label">
                             <div class="guided-report__animal-scope-options">
@@ -123,15 +140,18 @@
             <section class="guided-report__panel" aria-labelledby="report-details-title">
                 <h2 id="report-details-title" class="mud-typography mud-typography-h6 guided-report__step-heading" tabindex="-1" @ref="_stepHeading">What did you notice?</h2>
                 @DetailsLeadContent
-                <div class="@ValidationClass(nameof(Draft.Narrative))" tabindex="-1" @ref="_narrativeValidationTarget" data-ellai-control="report.narrative" data-bonboarding-anchor='@EllaiReportUiManifest.AnchorFor("report.narrative")'>
-                    <MudTextField T="string" Label="Describe what happened" Variant="Variant.Outlined" Lines="4" MaxLength="6000"
+                <div data-ellai-control="report.narrative" data-bonboarding-anchor='@EllaiReportUiManifest.AnchorFor("report.narrative")'>
+                    <div data-bonboarding-anchor="ellai-report-original-statement">
+                    <MudTextField T="string" Label="Describe what happened" Variant="Variant.Outlined" Lines="4" MaxLength="@MaximumNarrativeCharacters"
+                                  HelperText="@($"Up to {MaximumNarrativeCharacters:N0} characters.")"
                                   @bind-Value="Draft.Narrative" For="@(() => Draft.Narrative)" />
+                    </div>
                 </div>
                 @if (Draft.SubjectScope == IntakeSubjectScope.Human)
                 {
-                    <div class="@ValidationClass(nameof(Draft.AgeYearsText))" tabindex="-1" @ref="_ageValidationTarget" data-ellai-control="report.narrative" data-ellai-input="report.age-years">
-                        <MudTextField T="string" Label="Age in years (optional)" InputType="InputType.Number" Variant="Variant.Outlined"
-                                      HelperText="Enter completed years, or leave blank if unknown." MaxLength="10"
+                    <div data-bonboarding-anchor="ellai-report-age-years">
+                        <MudTextField T="string" Label="Age in years (optional)" Variant="Variant.Outlined"
+                                      HelperText="Enter completed years, or leave blank if unknown."
                                       @bind-Value="Draft.AgeYearsText" For="@(() => Draft.AgeYearsText)" />
                     </div>
                 }
@@ -204,12 +224,45 @@
                         <MudText Typo="Typo.caption" Color="Color.Error" role="alert">@_observationChoiceMessage</MudText>
                     }
                 </div>
-                <div class="@ValidationClass(nameof(Draft.ObservationsText))" tabindex="-1" @ref="_observationsValidationTarget">
+                <div data-bonboarding-anchor="ellai-report-other-observations">
                 <MudTextField @ref="_observationsField" T="string" Label="Add other observations (optional)"
-                              HelperText="Selected choices appear here. Add other reported observations one per line."
+                              HelperText="@($"One per line; up to {MaximumObservations} observations and {MaximumObservationCharacters:N0} characters each.")"
                               Variant="Variant.Outlined" Lines="3" MaxLength="20000" @bind-Value="Draft.ObservationsText"
                               For="@(() => Draft.ObservationsText)" />
                 </div>
+
+                <MudSelect T="ReportedTimePrecision" Label="When did symptoms or signs start?" Variant="Variant.Outlined" @bind-Value="Draft.OnsetPrecision">
+                    <MudSelectItem Value="ReportedTimePrecision.Unknown">Unknown</MudSelectItem>
+                    <MudSelectItem Value="ReportedTimePrecision.Approximate">Approximate date</MudSelectItem>
+                    <MudSelectItem Value="ReportedTimePrecision.DateOnly">Date only</MudSelectItem>
+                    <MudSelectItem Value="ReportedTimePrecision.Exact">Exact time</MudSelectItem>
+                </MudSelect>
+                @if (Draft.OnsetPrecision != ReportedTimePrecision.Unknown)
+                {
+                    <div data-bonboarding-anchor="ellai-report-onset-date">
+                    <MudTextField T="string" Label="Reported onset date" InputType="InputType.Text" Placeholder="YYYY-MM-DD"
+                                  HelperText="Use the date the reporter says symptoms or signs began. Leave it unknown if not known."
+                                  Variant="Variant.Outlined" Immediate="true"
+                                  Value="@(Draft.OnsetDateText ?? Draft.OnsetDate?.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture))"
+                                  ValueChanged="OnsetDateChangedAsync" For="@(() => Draft.OnsetDateText)" />
+                    </div>
+                }
+                @if (Draft.OnsetPrecision == ReportedTimePrecision.Exact)
+                {
+                    <div class="guided-report__grid">
+                        <div data-bonboarding-anchor="ellai-report-onset-time">
+                        <MudTextField T="string" Label="Reported onset time" InputType="InputType.Text" Placeholder="HH:MM"
+                                      HelperText="Enter the reported 24-hour local time."
+                                      Variant="Variant.Outlined" Immediate="true"
+                                      @bind-Value="Draft.OnsetTime" For="@(() => Draft.OnsetTime)" />
+                        </div>
+                        <div data-bonboarding-anchor="ellai-report-onset-utc-offset">
+                        <MudTextField T="string" Label="Onset time difference from UTC" Placeholder="+02:00"
+                                      HelperText="Enter the reported time difference; do not guess it."
+                                      Variant="Variant.Outlined" @bind-Value="Draft.OnsetOffset" For="@(() => Draft.OnsetOffset)" />
+                        </div>
+                    </div>
+                }
 
                 <MudSelect T="ReportedTimePrecision" Label="When did this happen?" Variant="Variant.Outlined" @bind-Value="Draft.OccurrencePrecision" For="@(() => Draft.OccurrencePrecision)">
                     <MudSelectItem Value="ReportedTimePrecision.Unknown">Unknown</MudSelectItem>
@@ -219,26 +272,32 @@
                 </MudSelect>
                 @if (Draft.OccurrencePrecision != ReportedTimePrecision.Unknown)
                 {
-                    <div class="@ValidationClass(nameof(Draft.OccurrenceDate))" tabindex="-1" @ref="_dateValidationTarget">
-                    <MudTextField T="string" Label="Reported date" InputType="InputType.Date" Variant="Variant.Outlined"
-                                  Value="@ReportedDateInput" ValueChanged="ReportedDateChangedAsync" />
+                    <div data-bonboarding-anchor="ellai-report-occurrence-date">
+                    <MudTextField T="string" Label="Reported date" InputType="InputType.Text" Placeholder="YYYY-MM-DD"
+                                  HelperText="Enter the date as year-month-day, for example 2026-10-01."
+                                  Variant="Variant.Outlined" Immediate="true"
+                                  Value="@(Draft.OccurrenceDateText ?? Draft.OccurrenceDate?.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture))"
+                                  ValueChanged="OccurrenceDateChangedAsync" For="@(() => Draft.OccurrenceDateText)" />
                     </div>
                 }
                 @if (Draft.OccurrencePrecision == ReportedTimePrecision.Exact)
                 {
                     <div class="guided-report__grid">
-                        <div class="@ValidationClass(nameof(Draft.OccurrenceTime))" tabindex="-1" @ref="_timeValidationTarget">
-                        <MudTextField T="string" Label="Reported time" InputType="InputType.Time" Variant="Variant.Outlined"
+                        <div data-bonboarding-anchor="ellai-report-occurrence-time">
+                        <MudTextField T="string" Label="Reported time" InputType="InputType.Text" Placeholder="HH:MM"
+                                      HelperText="Enter a 24-hour time, for example 08:30."
+                                      Variant="Variant.Outlined" Immediate="true"
                                       @bind-Value="Draft.OccurrenceTime" For="@(() => Draft.OccurrenceTime)" />
                         </div>
-                        <div class="@ValidationClass(nameof(Draft.OccurrenceOffset))" tabindex="-1" @ref="_offsetValidationTarget">
+                        <div data-bonboarding-anchor="ellai-report-utc-offset">
                         <MudTextField T="string" Label="Time difference from UTC" Placeholder="+02:00" HelperText="Enter the time difference that was reported."
                                       Variant="Variant.Outlined" @bind-Value="Draft.OccurrenceOffset" For="@(() => Draft.OccurrenceOffset)" />
                         </div>
                     </div>
                 }
 
-                <div class="@ValidationClass(string.Empty)" tabindex="-1" @ref="_locationValidationTarget" data-ellai-control="report.time-location" data-bonboarding-anchor='@EllaiReportUiManifest.AnchorFor("report.time-location")'>
+                <div data-ellai-control="report.time-location" data-bonboarding-anchor='@EllaiReportUiManifest.AnchorFor("report.time-location")'>
+                    <div data-bonboarding-anchor="ellai-report-place">
                     <MudSelect T="string" id="guided-report-country" Label="Country where the event happened" Variant="Variant.Outlined"
                                Value="Draft.CountryCode" ValueChanged="CountryChangedAsync" Disabled="@(!HasCountryCatalogue)" Clearable="true">
                         @foreach (var country in Countries)
@@ -246,6 +305,7 @@
                             <MudSelectItem Value="@country.Code">@country.Name</MudSelectItem>
                         }
                     </MudSelect>
+                    </div>
                 </div>
                 @if (!HasCountryCatalogue)
                 {
@@ -277,15 +337,15 @@
                 {
                     <MudText Typo="Typo.subtitle2">Reported place names</MudText>
                     <div class="guided-report__grid">
-                        <div class="@ValidationClass(nameof(Draft.Region))" tabindex="-1" @ref="_regionValidationTarget">
+                        <div data-bonboarding-anchor="ellai-report-region">
                         <MudTextField T="string" Label="Region" Variant="Variant.Outlined" HelperText="Leave blank when unknown."
                                       Value="Draft.Region" ValueChanged="RegionChangedAsync" For="@(() => Draft.Region)" />
                         </div>
-                        <div class="@ValidationClass(nameof(Draft.Area))" tabindex="-1" @ref="_areaValidationTarget">
+                        <div data-bonboarding-anchor="ellai-report-area">
                         <MudTextField T="string" Label="Area or district" Variant="Variant.Outlined" HelperText="Leave blank when unknown."
                                       Value="Draft.Area" ValueChanged="AreaChangedAsync" For="@(() => Draft.Area)" />
                         </div>
-                        <div class="@ValidationClass(nameof(Draft.Locality))" tabindex="-1" @ref="_localityValidationTarget">
+                        <div data-bonboarding-anchor="ellai-report-locality">
                         <MudTextField T="string" Label="Locality" Variant="Variant.Outlined" HelperText="Leave blank when unknown."
                                       Value="Draft.Locality" ValueChanged="LocalityChangedAsync" For="@(() => Draft.Locality)" />
                         </div>
@@ -324,26 +384,34 @@
                     <div><dt>Subject</dt><dd>@SubjectLabel</dd></div>
                     @if (Draft.SubjectScope == IntakeSubjectScope.Human)
                     {
+                        <div><dt>Reported gender</dt><dd>@GenderSummary</dd></div>
                         <div><dt>Reported age in years</dt><dd>@UnknownIfEmpty(Draft.AgeYearsText)</dd></div>
                     }
-                    <div><dt>Original statement</dt><dd>@UnknownIfEmpty(Draft.Narrative)</dd><dd class="guided-report__provenance">Review entered words and any machine transcript for accuracy.</dd></div>
-                    <div><dt>Separate observations</dt><dd>@ObservationSummary</dd><dd class="guided-report__provenance">Review any suggested observations against the transcript.</dd></div>
-                    <div><dt>Reported time</dt><dd>@TimeSummary</dd><dd class="guided-report__provenance">@(Draft.OccurrencePrecision == ReportedTimePrecision.Unknown ? "Not provided; remains unknown" : "From the time you entered")</dd></div>
-                    <div><dt>Country</dt><dd>@CountrySummary</dd><dd class="guided-report__provenance">@(string.IsNullOrWhiteSpace(Draft.CountryCode) ? "Not provided; remains unknown" : "Review the selected country")</dd></div>
+                    <div><dt>Original statement</dt><dd>@UnknownIfEmpty(Draft.Narrative)</dd><dd class="guided-report__provenance">Your words, shown as entered</dd></div>
+                    <div><dt>Separate observations</dt><dd>@ObservationSummary</dd><dd class="guided-report__provenance">You entered these details. No others were added.</dd></div>
+                    <div><dt>Reported symptom or sign onset</dt><dd>@OnsetSummary</dd><dd class="guided-report__provenance">@OnsetProvenance</dd></div>
+                    <div><dt>Event occurrence time</dt><dd>@TimeSummary</dd><dd class="guided-report__provenance">@(Draft.OccurrencePrecision == ReportedTimePrecision.Unknown ? "Not provided; remains unknown" : "From the time you entered")</dd></div>
+                    <div><dt>Country</dt><dd>@CountrySummary</dd><dd class="guided-report__provenance">@(string.IsNullOrWhiteSpace(Draft.CountryCode) ? "Not provided; remains unknown" : "You selected this")</dd></div>
                     <div><dt>Location</dt><dd>@LocationSummary</dd><dd class="guided-report__provenance">@LocationProvenance</dd></div>
                     <div><dt>Animal type or group</dt><dd>Unknown</dd><dd class="guided-report__provenance">Not asked here; remains unknown.</dd></div>
                     <div><dt>Affected, deceased, and at-risk counts</dt><dd>Unknown</dd><dd class="guided-report__provenance">Not entered; remains unknown.</dd></div>
                 </dl>
+                <div data-bonboarding-anchor="ellai-report-review-confirmed">
                 <MudCheckBox T="bool" Label="I reviewed the original statement and the known or unknown details above." @bind-Value="Draft.ReportReviewConfirmed" Color="Color.Primary" />
+                </div>
+                <div data-bonboarding-anchor="ellai-report-country-confirmed">
                 <MudCheckBox T="bool" Label="I confirm the selected event country." @bind-Value="Draft.CountryConfirmed" Color="Color.Primary"
                              Disabled="@(!CanConfirmCountry)" />
+                </div>
                 @if (HasPrivacyNotice)
                 {
                     <MudLink Href="@PrivacyNoticeReference" Target="_blank" rel="noopener noreferrer">Read SwiftAid’s privacy notice</MudLink>
                 }
                 else
                 {
+                    <div data-bonboarding-anchor="ellai-report-privacy-unavailable">
                     <MudText Typo="Typo.body2">SwiftAid’s privacy notice is unavailable right now. Sending is not available.</MudText>
+                    </div>
                     @if (CanSaveDraft)
                     {
                         <MudText Typo="Typo.caption">You can still save a draft.</MudText>
@@ -368,13 +436,17 @@
                         <MudLink Href="@ProcessingPolicyReference" Target="_blank" rel="noopener noreferrer">Read how this report is handled</MudLink>
                     }
                     <div data-ellai-control="report.confirmations" data-bonboarding-anchor='@EllaiReportUiManifest.AnchorFor("report.confirmations")'>
+                        <div data-bonboarding-anchor="ellai-report-processing-confirmed">
                         <MudCheckBox T="bool" Label="@ProcessingAcknowledgementLabel" @bind-Value="Draft.ProcessingConfirmed"
                                      Color="Color.Primary" />
+                        </div>
                     </div>
                 }
                 else
                 {
+                    <div data-bonboarding-anchor="ellai-report-policy-unavailable">
                     <MudText Typo="Typo.body2">Details about how this report is handled are unavailable. Sending is not available.</MudText>
+                    </div>
                     @if (CanSaveDraft)
                     {
                         <MudText Typo="Typo.caption">You can save a draft.</MudText>
@@ -393,7 +465,9 @@
                 }
             </section>
             <div class="guided-report__actions">
+                <div data-bonboarding-anchor="ellai-report-return-details">
                 <MudButton ButtonType="ButtonType.Button" Variant="Variant.Text" OnClick="GoBack" StartIcon="@Icons.Material.Filled.ArrowBack">Back</MudButton>
+                </div>
                 @if (OnSaveDraft.HasDelegate)
                 {
                     <MudButton ButtonType="ButtonType.Button" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Save" Disabled="@(!CanSaveDraft || _saving)" OnClick="SaveDraftAsync" data-ellai-control="report.save" data-bonboarding-anchor='@EllaiReportUiManifest.AnchorFor("report.save")'>
@@ -437,7 +511,15 @@
             }
             else if (_saveState == DraftSaveState.Failed)
             {
-                <span>Your draft could not be saved. Your entries remain on this screen.</span>
+                <span>The save action failed. Your entries remain on this screen. Check saved reports before trying again.</span>
+            }
+            else if (_saveState == DraftSaveState.Invalid)
+            {
+                <span>The draft was not saved. @(GetValidationGuidance().FirstOrDefault()?.Message) Your entries remain on this screen.</span>
+            }
+            else if (_saveState == DraftSaveState.Unconfirmed)
+            {
+                <span>We could not confirm whether your draft was saved. Your entries remain on this screen. Check saved reports before trying again.</span>
             }
             else if (!DraftSavingAvailable)
             {
@@ -480,9 +562,12 @@
     private bool _focusValidationSummaryAfterRender;
     private int _step;
     private string? _stepError;
+    private bool _detailsValidationAttempted;
+    private bool _saveValidationAttempted;
     private bool _showManualPlaces;
     private string? _observationChoiceMessage;
     private string? _submitError;
+    private long _dismissedServerValidationRevision;
     private bool _saving;
     private Guid? _savingDraftId;
     private Guid? _observedDraftId;
@@ -495,6 +580,7 @@
     private bool _submitting;
     private DraftSaveState _saveState = DraftSaveState.Unsaved;
     private ReportSubjectCategory? _subjectCategory;
+    private readonly List<int> _previousAges = [];
 
     private sealed record ObservationGroup(string Heading, IReadOnlyList<string> Choices);
     private sealed record PendingDraftRefresh(Guid? SourceDraftId, PublicReportDraft SavedDraft, PublicReportDraft SourceDraft,
@@ -624,6 +710,9 @@
     public bool DraftSavingAvailable { get; set; } = true;
 
     [Parameter]
+    public bool EditableDraftSnapshotsSupported { get; set; }
+
+    [Parameter]
     public EventCallback<PublicReportDraft> OnContinue { get; set; }
 
     [Parameter]
@@ -631,6 +720,9 @@
 
     [Parameter]
     public EventCallback<IntakeSubmission> OnSubmit { get; set; }
+
+    [Parameter]
+    public long ServerValidationRevision { get; set; }
 
     [Parameter]
     public string SubmitButtonLabel { get; set; } = "Submit report";
@@ -649,6 +741,9 @@
 
     [Parameter]
     public IReadOnlyList<PublicCountryOption> Countries { get; set; } = [];
+
+    [Parameter]
+    public PublicIntakeTextLimits? TextLimits { get; set; }
 
     [Parameter]
     public Func<string, string?, CancellationToken, Task<GeoPlaceQueryResult>>? PlaceSearchFunc { get; set; }
@@ -708,6 +803,7 @@
                 _subjectCategory = GetSubjectCategory(Draft.SubjectScope);
             }
 
+            RegisterEllaiDraftContext();
             return;
         }
 
@@ -735,12 +831,15 @@
             if (_editContext is not null) _editContext.OnFieldChanged -= HandleFieldChanged;
             _observedDraft = Draft;
             _observedDraftId = CurrentDraftId;
+            _previousAges.Clear();
             _editContext = new EditContext(Draft);
             _messageStore = new ValidationMessageStore(_editContext);
             _editContext.OnFieldChanged += HandleFieldChanged;
             if (!preserveCurrentStepForSaveRefresh)
             {
                 _step = 0;
+                _detailsValidationAttempted = false;
+                _saveValidationAttempted = false;
                 _saveState = DraftSaveState.Unsaved;
             }
             _subjectCategory = GetSubjectCategory(Draft.SubjectScope);
@@ -760,6 +859,109 @@
         {
             Draft.CountryConfirmed = false;
         }
+
+        RegisterEllaiDraftContext();
+    }
+
+    private void RegisterEllaiDraftContext()
+    {
+        if (EllaiDraftContext is null) return;
+        EllaiDraftContext.Register(this, age =>
+        {
+            if (Draft.SubjectScope is not (null or IntakeSubjectScope.Human)) return false;
+            SetReportedAge(age);
+            _editContext.NotifyFieldChanged(new FieldIdentifier(Draft, nameof(Draft.AgeYearsText)));
+            return true;
+        }, observation =>
+        {
+            var existing = Draft.GetObservations();
+            if (existing.Contains(observation, StringComparer.Ordinal)) return true;
+            var updated = existing.Append(observation).ToArray();
+            if (!Draft.HasValidObservations(updated, MaximumObservations, MaximumObservationCharacters)) return false;
+            Draft.ObservationsText = string.Join(Environment.NewLine, updated);
+            _editContext.NotifyFieldChanged(new FieldIdentifier(Draft, nameof(Draft.ObservationsText)));
+            return true;
+        }, locality =>
+        {
+            if (!PublicReportDraft.IsValidPlaceName(PresenceState.Known, locality)) return false;
+            Draft.Locality = locality;
+            Draft.LocalityPresence = PresenceState.Known;
+            Draft.LocalityId = null;
+            Draft.LocationUnknown = false;
+            NotifyPlaceFieldsChanged();
+            return true;
+        }, statement =>
+        {
+            var current = Draft.Narrative?.Trim();
+            var lines = string.IsNullOrEmpty(current)
+                ? Array.Empty<string>()
+                : current.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            if (lines.Contains(statement, StringComparer.Ordinal)) return true;
+            var updated = string.Join(Environment.NewLine, lines.Append(statement));
+            if (updated.Length > MaximumNarrativeCharacters) return false;
+            Draft.Narrative = updated;
+            _editContext.NotifyFieldChanged(new FieldIdentifier(Draft, nameof(Draft.Narrative)));
+            return true;
+        }, gender =>
+        {
+            if (Draft.SubjectScope is not (null or IntakeSubjectScope.Human)) return false;
+            Draft.SubjectScope = IntakeSubjectScope.Human;
+            _subjectCategory = ReportSubjectCategory.HumanHealth;
+            Draft.Gender = gender;
+            _editContext.NotifyFieldChanged(new FieldIdentifier(Draft, nameof(Draft.SubjectScope)));
+            _editContext.NotifyFieldChanged(new FieldIdentifier(Draft, nameof(Draft.Gender)));
+            return true;
+        }, () =>
+        {
+            if (_previousAges.Count == 0) return false;
+            var previousAge = _previousAges[^1];
+            _previousAges.RemoveAt(_previousAges.Count - 1);
+            Draft.AgeYearsText = previousAge.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            _editContext.NotifyFieldChanged(new FieldIdentifier(Draft, nameof(Draft.AgeYearsText)));
+            return true;
+        }, observation =>
+        {
+            var existing = Draft.GetObservations();
+            var matches = existing.Where(value => string.Equals(value, observation, StringComparison.OrdinalIgnoreCase)).ToArray();
+            if (matches.Length != 1) return false;
+            Draft.ObservationsText = string.Join(Environment.NewLine,
+                existing.Where(value => !string.Equals(value, matches[0], StringComparison.Ordinal)));
+            _editContext.NotifyFieldChanged(new FieldIdentifier(Draft, nameof(Draft.ObservationsText)));
+            return true;
+        }, (onsetDate, relativeDay, statement) =>
+        {
+            if (onsetDate is null)
+            {
+                if (relativeDay is null || Draft.CapturedAt is not { } capturedAt) return false;
+                var captureDate = DateOnly.FromDateTime(capturedAt.DateTime);
+                onsetDate = relativeDay == SwiftAid.UI.Ellai.Guidance.EllaiRelativeOnsetDay.Today ? captureDate : captureDate.AddDays(-1);
+            }
+
+            var existingNarrative = Draft.Narrative?.Trim();
+            var narrativeLines = string.IsNullOrEmpty(existingNarrative)
+                ? Array.Empty<string>()
+                : existingNarrative.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            var updatedNarrative = narrativeLines.Contains(statement, StringComparer.Ordinal)
+                ? existingNarrative
+                : string.Join(Environment.NewLine, narrativeLines.Append(statement));
+            if (updatedNarrative is not null && updatedNarrative.Length > MaximumNarrativeCharacters) return false;
+
+            Draft.OnsetPrecision = ReportedTimePrecision.DateOnly;
+            Draft.OnsetDate = onsetDate.Value.ToDateTime(TimeOnly.MinValue);
+            Draft.OnsetDateText = onsetDate.Value.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+            Draft.OnsetTime = null;
+            Draft.OnsetOffset = null;
+            Draft.OnsetZoneId = null;
+            Draft.OnsetDateInterpretedFromCaptureContext = relativeDay is not null;
+            Draft.Narrative = updatedNarrative;
+            _editContext.NotifyFieldChanged(new FieldIdentifier(Draft, nameof(Draft.OnsetPrecision)));
+            _editContext.NotifyFieldChanged(new FieldIdentifier(Draft, nameof(Draft.OnsetDateText)));
+            _editContext.NotifyFieldChanged(new FieldIdentifier(Draft, nameof(Draft.OnsetDateInterpretedFromCaptureContext)));
+            _editContext.NotifyFieldChanged(new FieldIdentifier(Draft, nameof(Draft.Narrative)));
+            return true;
+        });
+        if (!EllaiDraftContext.FlushPending(this))
+            _stepError = "Some details from this Ellai report conversation could not fit the form. Review the report and add those details manually.";
     }
 
     private void RegisterEllaiReportDraftContext()
@@ -875,6 +1077,25 @@
         _ => "Unknown"
     };
 
+    private string GenderSummary => Draft.Gender switch
+    {
+        ReportedGender.Female => "Female",
+        ReportedGender.Male => "Male",
+        ReportedGender.Other => "Other",
+        _ => "Unknown"
+    };
+
+    private void SetReportedAge(int age)
+    {
+        if (int.TryParse(Draft.AgeYearsText, System.Globalization.NumberStyles.None,
+                System.Globalization.CultureInfo.InvariantCulture, out var previousAge) && previousAge != age)
+        {
+            _previousAges.Add(previousAge);
+            if (_previousAges.Count > 10) _previousAges.RemoveAt(0);
+        }
+        Draft.AgeYearsText = age.ToString(System.Globalization.CultureInfo.InvariantCulture);
+    }
+
     private string ObservationSummary
     {
         get
@@ -892,10 +1113,28 @@
         _ => Draft.OccurrenceDate is { } date ? $"Approximately {date:d}" : "Approximately; date unknown"
     };
 
+    private string OnsetSummary => Draft.OnsetPrecision switch
+    {
+        ReportedTimePrecision.Unknown => "Unknown",
+        ReportedTimePrecision.Exact => $"{Draft.OnsetDate?.ToString("d") ?? "Unknown date"} {Draft.OnsetTime ?? "Unknown time"} {Draft.OnsetOffset ?? "Unknown offset"}",
+        ReportedTimePrecision.DateOnly => Draft.OnsetDate?.ToString("d") ?? "Date unknown",
+        _ => Draft.OnsetDate is { } date ? $"Approximately {date:d}" : "Approximately; date unknown"
+    };
+
+    private string OnsetProvenance => Draft.OnsetPrecision == ReportedTimePrecision.Unknown
+        ? "Not provided; remains unknown"
+        : Draft.OnsetDateInterpretedFromCaptureContext
+            ? "Interpreted from your words using the draft capture date and local time offset; review or correct before submitting."
+            : "From the onset details you entered";
+
     private string CountrySummary => string.IsNullOrWhiteSpace(Draft.CountryCode)
         ? "Unknown"
-        : Countries.FirstOrDefault(country => string.Equals(country.Code, Draft.CountryCode, StringComparison.OrdinalIgnoreCase))?.Name
+        : Countries.FirstOrDefault(country => string.Equals(country.Code, Draft.CountryCode.Trim(), StringComparison.OrdinalIgnoreCase))?.Name
             ?? (HasCountryCatalogue ? "Country choice unavailable — choose again" : "Previously selected; country list unavailable");
+
+    private int MaximumNarrativeCharacters => Math.Min(TextLimits is { } limits && limits.IsValid() ? limits.MaximumNarrativeCharacters : 6000, 6000);
+    private int MaximumObservations => Math.Min(TextLimits is { } limits && limits.IsValid() ? limits.MaximumObservations : 20, 20);
+    private int MaximumObservationCharacters => Math.Min(TextLimits is { } limits && limits.IsValid() ? limits.MaximumObservationCharacters : 300, 1000);
 
     private bool HasCountryCatalogue => CountryCatalogueIsCurrent &&
         Countries.Count > 0 && !string.IsNullOrWhiteSpace(CountryCatalogueVersion);
@@ -967,7 +1206,21 @@
                 IntakeSubjectScope.Herd or IntakeSubjectScope.Flock or IntakeSubjectScope.OtherGroup => previousScope,
             _ => null
         };
+        if (Draft.SubjectScope != IntakeSubjectScope.Human)
+        {
+            Draft.Gender = null;
+            _previousAges.Clear();
+        }
         NotifySubjectScopeChanged();
+        return Task.CompletedTask;
+    }
+
+    private Task ReportedGenderChangedAsync(ReportedGender? gender)
+    {
+        if (Draft.SubjectScope != IntakeSubjectScope.Human || gender is { } value && !Enum.IsDefined(value))
+            return Task.CompletedTask;
+        Draft.Gender = gender;
+        _editContext.NotifyFieldChanged(new FieldIdentifier(Draft, nameof(Draft.Gender)));
         return Task.CompletedTask;
     }
 
@@ -990,9 +1243,14 @@
         _editContext.NotifyFieldChanged(field);
     }
 
-    private bool CanSubmit => OnSubmit.HasDelegate && AttachmentSelectionCount == 0 && HasCountryCatalogue && HasPrivacyNotice && HasProcessingPolicy &&
+    private bool ReportTextIsValid => (Draft.Narrative?.Length ?? 0) <= MaximumNarrativeCharacters &&
+        Draft.HasValidObservations(Draft.GetObservations(), MaximumObservations, MaximumObservationCharacters) &&
+        (!string.IsNullOrWhiteSpace(Draft.Narrative) || Draft.GetObservations().Count > 0);
+    private bool ReportAgeIsValid => Draft.SubjectScope != IntakeSubjectScope.Human || Draft.HasValidAge();
+
+    private bool CanSubmit => OnSubmit.HasDelegate && AttachmentSelectionCount == 0 && HasCountryCatalogue && HasPrivacyNotice && HasProcessingPolicy && ReportTextIsValid &&
         CanConfirmCountry && Draft.CountryConfirmed &&
-        Draft.ProcessingConfirmed && Draft.ReportReviewConfirmed;
+        Draft.ProcessingConfirmed && Draft.ReportReviewConfirmed && ReportAgeIsValid;
 
     private bool IsCountrySupported(string? countryCode) =>
         !string.IsNullOrWhiteSpace(countryCode) &&
@@ -1021,7 +1279,12 @@
                 return "Unknown";
             }
 
-            var place = string.Join(", ", new[] { Draft.Locality, Draft.Area, Draft.Region }
+            var place = string.Join(", ", new[]
+            {
+                Draft.LocalityPresence == PresenceState.Known ? Draft.Locality : null,
+                Draft.AreaPresence == PresenceState.Known ? Draft.Area : null,
+                Draft.RegionPresence == PresenceState.Known ? Draft.Region : null
+            }
                 .Where(value => !string.IsNullOrWhiteSpace(value)));
             return string.IsNullOrWhiteSpace(place) ? "Unknown" : place;
         }
@@ -1213,17 +1476,11 @@
 
     private bool ValidateDetails()
     {
-        _validationField = null;
-        _validationMessage = null;
+        _saveValidationAttempted = false;
+        _detailsValidationAttempted = true;
         var hasNarrative = !string.IsNullOrWhiteSpace(Draft.Narrative);
         var observations = Draft.GetObservations();
         var isValid = true;
-
-        if (!hasNarrative && observations.Count == 0)
-        {
-            AddError(nameof(Draft.Narrative), "Describe what happened or add an observation.");
-            isValid = false;
-        }
 
         if (Draft.SubjectScope == IntakeSubjectScope.Human && !Draft.HasValidAge())
         {
@@ -1231,21 +1488,27 @@
             isValid = false;
         }
 
-        if ((Draft.Narrative?.Length ?? 0) > 6000)
+        if (!hasNarrative && observations.Count == 0)
         {
-            AddError(nameof(Draft.Narrative), "Keep the description under 6,000 characters.");
+            AddError(nameof(Draft.Narrative), "Describe what happened or add an observation.");
             isValid = false;
         }
 
-        if (observations.Count > 20 || observations.Any(value => value.Length > 1000))
+        if ((Draft.Narrative?.Length ?? 0) > MaximumNarrativeCharacters)
         {
-            AddError(nameof(Draft.ObservationsText), "Use no more than 20 observations, with each under 1,000 characters.");
+            AddError(nameof(Draft.Narrative), $"Keep the description within {MaximumNarrativeCharacters:N0} characters.");
+            isValid = false;
+        }
+
+        if (!Draft.HasValidObservations(observations, MaximumObservations, MaximumObservationCharacters))
+        {
+            AddError(nameof(Draft.ObservationsText), $"Use at most {MaximumObservations} observations, {MaximumObservationCharacters:N0} characters each and 20,000 characters in total.");
             isValid = false;
         }
 
         if (Draft.OccurrencePrecision != ReportedTimePrecision.Unknown && !Draft.OccurrenceDate.HasValue)
         {
-            AddError(nameof(Draft.OccurrenceDate), "Add the reported date or choose that the time is unknown.");
+            AddError(nameof(Draft.OccurrenceDateText), "Enter the reported date as YYYY-MM-DD or choose that the time is unknown.");
             isValid = false;
         }
 
@@ -1256,17 +1519,36 @@
                 missingTime ? "Enter the reported local time." : "Enter a valid time difference from UTC, such as +02:00.");
             isValid = false;
         }
+        if (Draft.OccurrencePrecision == ReportedTimePrecision.Exact && Draft.OccurrenceDate.HasValue &&
+            HasValidExactTime() && !Draft.HasValidExactOccurrence())
+        {
+            AddError(nameof(Draft.OccurrenceDateText), "Check that the date, time and UTC offset can be combined.");
+            isValid = false;
+        }
 
-        if (Draft.RegionPresence == PresenceState.Known && string.IsNullOrWhiteSpace(Draft.Region) ||
-             Draft.AreaPresence == PresenceState.Known && string.IsNullOrWhiteSpace(Draft.Area) ||
-             Draft.LocalityPresence == PresenceState.Known && string.IsNullOrWhiteSpace(Draft.Locality))
+        if (Draft.OnsetPrecision != ReportedTimePrecision.Unknown && !Draft.OnsetDate.HasValue)
+        {
+            AddError(nameof(Draft.OnsetDateText), "Enter the reported symptom or sign onset date, or choose that it is unknown.");
+            isValid = false;
+        }
+        if (Draft.OnsetPrecision == ReportedTimePrecision.Exact && !HasValidExactOnsetTime())
+        {
+            AddError(nameof(Draft.OnsetTime), "For an exact onset time, enter the local time and its reported offset from UTC.");
+            isValid = false;
+        }
+        if (Draft.OnsetPrecision == ReportedTimePrecision.Exact && Draft.OnsetDate.HasValue &&
+            HasValidExactOnsetTime() && !Draft.HasValidExactOnset())
+        {
+            AddError(nameof(Draft.OnsetDateText), "Check that the onset date, time and UTC offset can be combined.");
+            isValid = false;
+        }
+
+        if (!PublicReportDraft.IsValidPlaceName(Draft.RegionPresence, Draft.Region) ||
+            !PublicReportDraft.IsValidPlaceName(Draft.AreaPresence, Draft.Area) ||
+            !PublicReportDraft.IsValidPlaceName(Draft.LocalityPresence, Draft.Locality))
         {
             _showManualPlaces = true;
-            var missingPlace = Draft.RegionPresence == PresenceState.Known && string.IsNullOrWhiteSpace(Draft.Region)
-                ? nameof(Draft.Region) : Draft.AreaPresence == PresenceState.Known && string.IsNullOrWhiteSpace(Draft.Area)
-                    ? nameof(Draft.Area) : nameof(Draft.Locality);
-            var placeLabel = missingPlace == nameof(Draft.Region) ? "region" : missingPlace == nameof(Draft.Area) ? "area or district" : "locality";
-            AddError(missingPlace, $"Enter the {placeLabel}, or mark it unknown.");
+            AddError(string.Empty, "Enter each known place name using at most 200 characters, or leave it unknown.");
             isValid = false;
         }
 
@@ -1321,20 +1603,37 @@
         _validationGuidance?.Publish(_validationMessage);
     }
 
+    private Task OccurrenceDateChangedAsync(string? value)
+    {
+        Draft.OccurrenceDateText = value;
+        Draft.OccurrenceDate = PublicReportDraft.ParseOccurrenceDate(value);
+        _editContext.NotifyFieldChanged(new FieldIdentifier(Draft, nameof(Draft.OccurrenceDateText)));
+        return Task.CompletedTask;
+    }
+
+    private Task OnsetDateChangedAsync(string? value)
+    {
+        Draft.OnsetDateText = value;
+        Draft.OnsetDate = PublicReportDraft.ParseOccurrenceDate(value);
+        Draft.OnsetDateInterpretedFromCaptureContext = false;
+        _editContext.NotifyFieldChanged(new FieldIdentifier(Draft, nameof(Draft.OnsetDateText)));
+        _editContext.NotifyFieldChanged(new FieldIdentifier(Draft, nameof(Draft.OnsetDateInterpretedFromCaptureContext)));
+        return Task.CompletedTask;
+    }
+
     private bool HasValidExactTime()
     {
-        if (!TimeOnly.TryParse(Draft.OccurrenceTime, out _) ||
-            Draft.OccurrenceOffset is not { Length: 6 } offset ||
-            offset[0] is not ('+' or '-') || offset[3] != ':' ||
-            !int.TryParse(offset.AsSpan(1, 2), out var hours) ||
-            !int.TryParse(offset.AsSpan(4, 2), out var minutes) ||
-            hours > 14 || minutes > 59 || (hours == 14 && minutes != 0))
-        {
-            return false;
-        }
-
-        return true;
+        return TimeOnly.TryParse(Draft.OccurrenceTime, out _) && HasValidOccurrenceOffset();
     }
+
+    private bool HasValidOccurrenceOffset()
+    {
+        return PublicReportDraft.TryParseOffset(Draft.OccurrenceOffset, out _);
+    }
+
+    private bool HasValidExactOnsetTime() => TimeOnly.TryParse(Draft.OnsetTime, out _) && HasValidOnsetOffset();
+
+    private bool HasValidOnsetOffset() => PublicReportDraft.TryParseOffset(Draft.OnsetOffset, out _);
 
     private void ClearStepValidation()
     {
@@ -1349,7 +1648,7 @@
 
     private void HandleFieldChanged(object? sender, FieldChangedEventArgs args)
     {
-        var previousValidation = _validationField;
+        _dismissedServerValidationRevision = ServerValidationRevision;
         _messageStore.Clear(args.FieldIdentifier);
         _stepError = null;
         _observationChoiceMessage = null;
@@ -1364,36 +1663,15 @@
             _messageStore.Clear(new FieldIdentifier(Draft, nameof(PublicReportDraft.ReportReviewConfirmed)));
         }
 
-        _editContext.NotifyValidationStateChanged();
-        if (_followValidation && _step is 0 or 1)
+        if (_step == 1 && _detailsValidationAttempted)
         {
             _messageStore.Clear();
-            var isValid = _step == 0 ? ValidateSubject() : ValidateDetails();
-            if (isValid)
-            {
-                _followValidation = false;
-                _validationMessage = null;
-            }
-            else if (_validationField != previousValidation)
-            {
-                _focusValidationFieldAfterRender = true;
-            }
-            PublishValidation();
+            ValidateDetails();
         }
-    }
-
-    private bool ValidateSubject()
-    {
-        _validationField = null;
-        _validationMessage = null;
-        if (HasCompleteSubject) return true;
-
-        var message = _subjectCategory == ReportSubjectCategory.AnimalHealth
-            ? "Choose an animal type or group before continuing."
-            : "Choose whether this concern is about a person or an animal.";
-        AddError(nameof(PublicReportDraft.SubjectScope), message);
-        _stepError = _validationMessage ?? message;
-        return false;
+        else
+        {
+            _editContext.NotifyValidationStateChanged();
+        }
     }
 
     private bool IsObservationSelected(string observation) =>
@@ -1418,10 +1696,10 @@
                 : Environment.NewLine;
             var updatedText = string.Concat(currentText, separator, observation);
 
-            if (existingObservations.Count >= 20 || updatedText.Length > 20000)
+            if (existingObservations.Count >= MaximumObservations || updatedText.Length > 20000)
             {
-                _observationChoiceMessage = existingObservations.Count >= 20
-                    ? "You can add up to 20 separate observations. Remove one before adding another."
+                _observationChoiceMessage = existingObservations.Count >= MaximumObservations
+                    ? $"You can add up to {MaximumObservations} separate observations. Remove one before adding another."
                     : "There is not enough space for another observation. Shorten or remove one first.";
                 return Task.CompletedTask;
             }
@@ -1504,6 +1782,14 @@
             _step--;
             _stepError = null;
             _focusStepHeadingAfterRender = true;
+            if (_step == 1 && ServerValidationRevision > 0 &&
+                ServerValidationRevision != _dismissedServerValidationRevision)
+            {
+                // A server rejection may not identify its field. Re-run the trusted
+                // client checks so Ellai can guide the reporter through known issues
+                // in order instead of leaving the generic rejection on the review page.
+                ValidateDetails();
+            }
         }
     }
 
@@ -1515,6 +1801,7 @@
         }
 
         _saving = true;
+        _saveValidationAttempted = false;
         _savingDraftId = CurrentDraftId;
         _pendingDraftRefresh = null;
         _confirmedDraftSave = null;
@@ -1526,31 +1813,61 @@
         var savedStep = _step;
         try
         {
-            var submission = Draft.ToSubmission(
-                CountryCatalogueVersion,
-                ProcessingPolicyReference,
-                ProcessingPolicyVersion,
-                Countries,
-                CountryCatalogueIsCurrent);
-            _savingSnapshot = PublicReportDraft.FromSubmission(submission);
-            _activeSaveRequest = new PublicReportSaveRequest(CurrentDraftId, submission);
+            IntakeSubmission submission;
+            GuestDraftFormSnapshot? formSnapshot = null;
+            try
+            {
+                submission = Draft.ToSubmission(
+                    CountryCatalogueVersion,
+                    ProcessingPolicyReference,
+                    ProcessingPolicyVersion,
+                    Countries,
+                    CountryCatalogueIsCurrent,
+                    allowUnverifiedCountryForDraft: true);
+            }
+            catch (InvalidOperationException)
+            {
+                _saveValidationAttempted = true;
+                _showManualPlaces |= !PublicReportDraft.IsValidPlaceName(Draft.RegionPresence, Draft.Region) ||
+                    !PublicReportDraft.IsValidPlaceName(Draft.AreaPresence, Draft.Area) ||
+                    !PublicReportDraft.IsValidPlaceName(Draft.LocalityPresence, Draft.Locality);
+                if (_step != 1)
+                {
+                    _step = 1;
+                    _focusStepHeadingAfterRender = true;
+                }
+                if (!EditableDraftSnapshotsSupported)
+                {
+                    _saveState = DraftSaveState.Invalid;
+                    return;
+                }
+                formSnapshot = Draft.ToFormSnapshot();
+                // The protected snapshot is authoritative for editing. This empty,
+                // unconfirmed carrier cannot be queued or mistaken for the entered values.
+                var carrier = new PublicReportDraft { SubjectScope = Draft.SubjectScope };
+                submission = carrier.ToSubmission(null, null, null, [], false);
+            }
+            if (formSnapshot is null && EditableDraftSnapshotsSupported &&
+                !sourceSnapshot.IsLosslesslyRepresentedBy(submission))
+                formSnapshot = sourceSnapshot.ToFormSnapshot();
+            _savingSnapshot = formSnapshot is null ? PublicReportDraft.FromSubmission(submission) : sourceSnapshot.Copy();
+            _activeSaveRequest = new PublicReportSaveRequest(CurrentDraftId, submission, formSnapshot);
             await OnSaveDraft.InvokeAsync(_activeSaveRequest);
             var savedId = _activeSaveRequest.PersistedDraftId ?? _savingDraftId;
             var sameReport = ReferenceEquals(Draft, sourceDraft) && (CurrentDraftId == _savingDraftId || CurrentDraftId == savedId)
                 || IsSaveRefreshIdentity(savedId, CurrentDraftId) && DraftMatches(Draft, _savingSnapshot);
             var unchanged = ReferenceEquals(Draft, sourceDraft)
                 ? DraftMatches(Draft, sourceSnapshot) : DraftMatches(Draft, _savingSnapshot);
-            if (sameReport)
+            if (sameReport && _activeSaveRequest.PersistedDraftId is not null)
                 _pendingDraftRefresh = new PendingDraftRefresh(savedId, _savingSnapshot, sourceSnapshot, sourceDraft, savedStep);
-            if (sameReport && unchanged)
+            if (sameReport && unchanged && _activeSaveRequest.PersistedDraftId is not null)
             {
                 _saveState = DraftSaveState.Saved;
-                if (_activeSaveRequest.PersistedDraftId is not null)
-                    _confirmedDraftSave = _pendingDraftRefresh;
+                _confirmedDraftSave = _pendingDraftRefresh;
             }
             else
             {
-                _saveState = DraftSaveState.Unsaved;
+                _saveState = sameReport && unchanged ? DraftSaveState.Unconfirmed : DraftSaveState.Unsaved;
             }
         }
         catch
@@ -1574,13 +1891,22 @@
     private static bool DraftMatches(PublicReportDraft actual, PublicReportDraft expected) =>
         actual.SubjectScope == expected.SubjectScope &&
         actual.AgeYearsText == expected.AgeYearsText &&
+        actual.Gender == expected.Gender &&
         actual.Narrative == expected.Narrative &&
         actual.ObservationsText == expected.ObservationsText &&
         actual.OccurrencePrecision == expected.OccurrencePrecision &&
         actual.OccurrenceDate == expected.OccurrenceDate &&
+        actual.OccurrenceDateText == expected.OccurrenceDateText &&
         actual.OccurrenceTime == expected.OccurrenceTime &&
         actual.OccurrenceOffset == expected.OccurrenceOffset &&
         actual.TimeNote == expected.TimeNote &&
+        actual.OnsetPrecision == expected.OnsetPrecision &&
+        actual.OnsetDate == expected.OnsetDate &&
+        actual.OnsetDateText == expected.OnsetDateText &&
+        actual.OnsetTime == expected.OnsetTime &&
+        actual.OnsetOffset == expected.OnsetOffset &&
+        actual.OnsetZoneId == expected.OnsetZoneId &&
+        actual.OnsetDateInterpretedFromCaptureContext == expected.OnsetDateInterpretedFromCaptureContext &&
         actual.CapturedAt == expected.CapturedAt &&
         actual.LocationUnknown == expected.LocationUnknown &&
         actual.CountryCode == expected.CountryCode &&
@@ -1653,11 +1979,7 @@
 
     public void Dispose()
     {
-        if (Services.GetService(typeof(SwiftAid.UI.Ellai.Guidance.EllaiPublicReportDraftContext)) is
-            SwiftAid.UI.Ellai.Guidance.EllaiPublicReportDraftContext context)
-            context.Remove(this);
-        _validationMessage = null;
-        _validationGuidance?.Publish(null);
+        EllaiDraftContext?.Remove(this);
         if (_editContext is not null)
         {
             _editContext.OnFieldChanged -= HandleFieldChanged;
@@ -1669,6 +1991,8 @@
         Unsaved,
         Saving,
         Saved,
+        Unconfirmed,
+        Invalid,
         Failed
     }
 

@@ -102,9 +102,11 @@ public sealed record ReportContext
         string? capturedOffset,
         string? capturedZoneId,
         ReportedTimePrecision capturePrecision,
-        LocationContext location)
+        LocationContext location,
+        ReportedFact<ReportedTime>? onset = null)
     {
         Occurrence = ReportedTimeRules.Normalize(occurrence);
+        Onset = onset is null ? null : ReportedTimeRules.Normalize(onset);
         CapturedAtUtc = capturedAtUtc?.ToUniversalTime();
         CapturedOffset = capturedOffset;
         CapturedZoneId = capturedZoneId;
@@ -113,6 +115,8 @@ public sealed record ReportContext
     }
 
     public ReportedFact<ReportedTime> Occurrence { get; }
+    /// <summary>Separately reported symptom or event onset; null means this older report did not capture it.</summary>
+    public ReportedFact<ReportedTime>? Onset { get; }
     public DateTimeOffset? CapturedAtUtc { get; }
     public string? CapturedOffset { get; }
     public string? CapturedZoneId { get; }
@@ -123,8 +127,10 @@ public sealed record ReportContext
     {
         ArgumentNullException.ThrowIfNull(Occurrence);
         Occurrence.Validate();
+        Onset?.Validate();
         if (!Enum.IsDefined(CapturePrecision)) throw new ArgumentOutOfRangeException(nameof(CapturePrecision));
         if (Occurrence.Value.HasValue) ReportedTimeRules.Validate(Occurrence.Value.Value);
+        if (Onset?.Value.HasValue == true) ReportedTimeRules.Validate(Onset.Value.Value);
 
         ArgumentNullException.ThrowIfNull(Location);
         if (!double.IsFinite(Location.AccuracyMetres.GetValueOrDefault()) && Location.AccuracyMetres.HasValue)

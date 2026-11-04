@@ -19,7 +19,7 @@
     <BonboardingRoot PopoverClass="ellai-guided-popover" ChildContent="@(_generatedTour is null ? null : GuidancePopover)" />
     @if (_guidanceProposalId is not null && _generatedTour is null)
     {
-        <MudButton Variant="Variant.Text" Disabled="@_preparingGuidance" OnClick="StartProposedGuidanceAsync">
+        <MudButton Variant="Variant.Text" Disabled="@_preparingGuidance" OnClick="StartProposedGuidanceAsync" data-ellai-audio-unlock="true">
             @(_preparingGuidance ? "Preparing guidance…" : "Start guidance")
         </MudButton>
         @if (_guidanceNotice is not null)
@@ -39,6 +39,10 @@
                 <MudButton OnClick='@(() => ControlGeneratedTourAsync("pause"))'>Pause guidance</MudButton>
             }
             <MudButton OnClick='@(() => ControlGeneratedTourAsync("cancel"))'>Cancel guidance</MudButton>
+            @if (_guidanceReplanRequired)
+            {
+                <MudButton OnClick="ReplanGeneratedGuidanceAsync">Find another way</MudButton>
+            }
             @if (_guidanceNotice is not null)
             {
                 <MudText Typo="Typo.caption" role="status">@_guidanceNotice</MudText>
@@ -89,6 +93,10 @@
             <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small"
                            OnClick='@(() => ControlGeneratedTourAsync("cancel"))' aria-label="Cancel guidance" />
         </header>
+        @if (_validationGuidanceText is not null)
+        {
+            <p role="status" class="ellai-guided-conversation__validation">@_validationGuidanceText</p>
+        }
         @if (!string.IsNullOrWhiteSpace(context.ValidationMessage))
         {
             <p role="status" class="ellai-guided-conversation__validation">@context.ValidationMessage</p>
@@ -1943,12 +1951,18 @@
                 _pendingResponseAudioSequences.Clear();
             }
 
-            if (response.Sequence <= _lastReceivedResponseSequence)
+            // The poller may observe a guidance event while a failed request has
+            // temporarily cleared its identity. A retry returns that same retained
+            // event; allow it once only while it is still the current tour narration.
+            var recoveredGuidance = response.Progress is { State: "Guidance" } guidance &&
+                guidance.EventId == _guidanceNarrationEventId && _generatedTour is not null &&
+                response.Sequence == _lastReceivedResponseSequence && response.Sequence > _latestResponseSequence;
+            if (response.Sequence <= _lastReceivedResponseSequence && !recoveredGuidance)
             {
                 return;
             }
 
-            _lastReceivedResponseSequence = response.Sequence;
+            _lastReceivedResponseSequence = Math.Max(_lastReceivedResponseSequence, response.Sequence);
             if (_latestUserUtteranceId is not null && response.ClientUtteranceId is not null
                 && response.ClientUtteranceId != _latestUserUtteranceId) return;
             if (response.Progress is { } progress)

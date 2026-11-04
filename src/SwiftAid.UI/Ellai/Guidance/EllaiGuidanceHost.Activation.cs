@@ -15,11 +15,16 @@ public partial class EllaiGuidanceHost
     private string? _lastTabSelectionProposalId;
     private string? _lastCaseNavigationProposalId;
     private string? _lastCaseFilterProposalId;
-    private string? _lastFeatureNavigationProposalId;
     private string? _lastReportDraftEditProposalId;
+    private string? _lastFeatureNavigationProposalId;
     private readonly EllaiNavigationTrail _navigationTrail = new();
     private string? _guidanceNotice;
+    private bool _guidanceReplanRequired;
+    private Dictionary<string, string>? _guidanceAnchors;
+    private string? _validationTargetControlId;
+    private string? _validationInputId;
     private string? _validationGuidanceText;
+    private Func<string?, string?, CancellationToken, Task>? _narrateValidation;
     private bool _preparingGuidance;
     private string? _queuedGuidanceProposalId;
     private IBonboardingTourSession? _generatedTour;
@@ -27,7 +32,7 @@ public partial class EllaiGuidanceHost
     private bool _advancingValidatedInput;
     private EventHandler<BonboardingTourSessionChangedEventArgs>? _generatedTourChanged;
     private Func<string, Task<bool>>? _controlGeneratedTour;
-    private Func<string, Task>? _narrateValidation;
+    private Func<string, Task>? _narrateLegacyValidation;
 
     private void OnValidationGuidanceChanged(string? message)
     {
@@ -50,8 +55,8 @@ public partial class EllaiGuidanceHost
                 _pendingResponseAudioSequences.Clear();
                 _validationGuidanceText = message;
                 _latestResponseText = EllaiValidationPrompts.Resolve(EllaiValidationPrompts.CodeFor(message)) ?? message;
-                if (changed && _readResponsesAloud && _narrateValidation is not null)
-                    _ = _narrateValidation(message);
+                if (changed && _readResponsesAloud && _narrateLegacyValidation is not null)
+                    _ = _narrateLegacyValidation(message);
             }
             else
             {
@@ -143,27 +148,56 @@ public partial class EllaiGuidanceHost
         if (turn.Outcome != "Completed") return;
         newlyCompleted |= _pendingGuidanceTurn == turn.ClientUtteranceId;
         _pendingGuidanceTurn = null;
-        var reportEdits = turn.UiProposals.Where(item => item.Proposal.Kind == UiIntentKind.UpdatePublicReportDraft).Take(2).ToArray();
-        if (reportEdits.Length > 0)
+        var draftEdits = turn.UiProposals.Where(item => item.Proposal.Kind == UiIntentKind.UpdatePublicReportDraft).Take(2).ToArray();
+        if (draftEdits.Length > 0)
         {
-            if (reportEdits.Length == 1 && newlyCompleted && reportEdits[0].ProposalId != _lastReportDraftEditProposalId &&
-                reportEdits[0].Proposal is { FeatureId: "report", ResourceId: null, ControlId: "report.age-years" or "report.other-observations" or "report.locality" or "report.original-statement", Arguments.Count: 0 } &&
+            if (draftEdits.Length == 1 && newlyCompleted && draftEdits[0].ProposalId != _lastReportDraftEditProposalId &&
+                draftEdits[0].Proposal is { FeatureId: "report", ResourceId: null, ControlId: "report.age-years" or "report.gender" or "report.other-observations" or "report.locality" or "report.original-statement" or "report.onset-date", Arguments.Count: 0 } &&
                 turn.UserText is { } userText)
             {
-                _lastReportDraftEditProposalId = reportEdits[0].ProposalId;
+                _lastReportDraftEditProposalId = draftEdits[0].ProposalId;
                 var context = Services.GetService(typeof(EllaiPublicReportDraftContext)) as EllaiPublicReportDraftContext;
-                var controlId = reportEdits[0].Proposal.ControlId;
-                var applied = controlId switch
-                {
-                    "report.age-years" => context?.ApplyAgeCorrection(userText) == true,
-                    "report.other-observations" => context?.ApplyReportedObservation(userText) == true,
-                    "report.locality" => context?.ApplyReportedLocality(userText) == true,
-                    "report.original-statement" => context?.ApplyReportNarrativeStatement(userText) == true,
-                    _ => false
-                };
+                var controlId = draftEdits[0].Proposal.ControlId;
+                var applied = controlId == "report.age-years"
+                    ? context?.ApplyAgeCorrection(userText) == true
+                    : controlId == "report.gender"
+                        ? context?.ApplyReportedGender(userText) == true
+                            : controlId == "report.other-observations"
+                                ? EllaiPublicReportDraftContext.IsExplicitObservationRemoval(userText)
+                                    ? context?.RemoveReportedObservation(userText) == true
+                                    : context?.ApplyReportedObservation(userText) == true
+                            : controlId == "report.locality"
+                                ? context?.ApplyReportedLocality(userText) == true
+                                : controlId == "report.onset-date"
+                                    ? context?.ApplyReportedOnsetDate(userText) == true
+                                : context?.ApplyReportNarrativeStatement(userText) == true;
                 _guidanceNotice = applied
-                    ? "Updated the open report draft with your reported detail. Review it before saving or submitting."
-                    : "I could not capture that detail in the open report draft. Enter it in the report form to continue.";
+                    ? controlId == "report.age-years"
+                        ? "Updated the reported age in the open report draft. Review it before submitting."
+                        : controlId == "report.gender"
+                            ? "Updated the explicitly reported gender in the open report draft. Review it before submitting."
+                            : controlId == "report.other-observations"
+                                ? EllaiPublicReportDraftContext.IsExplicitObservationRemoval(userText)
+                                    ? "Removed the matching reported observation from the open draft. Review it before submitting."
+                                    : "Added your reported observation to the open report draft. Review it before submitting."
+                                : controlId == "report.locality"
+                                    ? "Added the reported locality to the open report draft. Review it before submitting."
+                                    : controlId == "report.onset-date"
+                                        ? "Added the reported symptom or sign onset detail to the open draft. Review or correct the date before submitting."
+                                    : "Added your reported statement to the open report draft. Review it before submitting."
+                    : controlId == "report.age-years"
+                        ? "I could not update the age. Open the report details and enter it there."
+                        : controlId == "report.gender"
+                            ? "I could not update gender from that statement. Enter the explicitly reported value in the report instead."
+                        : controlId == "report.other-observations"
+                            ? EllaiPublicReportDraftContext.IsExplicitObservationRemoval(userText)
+                                ? "I could not remove that observation. I remove only one exact matching observation line; review the report details manually."
+                                : "I could not add that statement as an observation. Enter it in the report details instead."
+                                : controlId == "report.locality"
+                                    ? "I could not add that locality. Enter it in the report details instead."
+                                    : controlId == "report.onset-date"
+                                        ? "I could not capture that onset detail. Enter its date in the onset field, or choose that it is unknown."
+                                    : "I could not add that statement to the report details.";
             }
             return;
         }
@@ -238,10 +272,12 @@ public partial class EllaiGuidanceHost
             reportDraft?.BeginReportCapture();
             if (turn.UserText is { } reportRequest)
             {
-                reportDraft?.ApplyAgeCorrection(reportRequest);
-                reportDraft?.ApplyReportedObservation(reportRequest);
-                reportDraft?.ApplyReportedLocality(reportRequest);
                 reportDraft?.ApplyReportNarrativeStatement(reportRequest);
+                if (reportDraft?.ApplyInitialReportDetails(reportRequest) != true)
+                {
+                    reportDraft?.ApplyAgeCorrection(reportRequest);
+                    reportDraft?.ApplyReportedGender(reportRequest);
+                }
             }
         }
         // Conversation restoration offers an explicit action; only the currently awaited turn auto-starts.
@@ -250,6 +286,8 @@ public partial class EllaiGuidanceHost
 
     private void TrackNavigation(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs args)
     {
+        Interlocked.Increment(ref _uiNavigationEpoch);
+        _latestGuidanceObservation = null;
         try { _navigationTrail.Record(Navigation.ToBaseRelativePath(args.Location)); }
         catch (ArgumentException) { _navigationTrail.Record(string.Empty); }
     }
@@ -271,7 +309,8 @@ public partial class EllaiGuidanceHost
                 as Microsoft.AspNetCore.Components.Authorization.AuthenticationStateProvider;
             var signedIn = auth is not null && (await auth.GetAuthenticationStateAsync()).User.Identity?.IsAuthenticated == true;
             if (!IsCurrent()) return;
-            if (!signedIn || route is null)
+            var publicHome = route == "/";
+            if ((!signedIn && !publicHome) || route is null)
             {
                 _guidanceNotice = back ? "No previous available page to return to." : "That page is not available with your current access.";
             }
@@ -286,26 +325,30 @@ public partial class EllaiGuidanceHost
             }
             else
             {
-                await ReportUiForFeatureAsync(EllaiNavigationManifest.FeatureId, _uiObservationLifetime.Token);
-                if (!IsCurrent()) return;
                 var destination = EllaiNavigationManifest.Destinations.Single(item => item.Route == route);
-                // A collapsed menu may be hidden; disabled, absent or ambiguous targets cannot navigate.
-                bool TargetAvailable() => _latestGuidanceObservation?.ControlStates?.Count(control => control.ControlId == destination.ControlId &&
-                    control.State is UiObservationState.Ready or UiObservationState.Hidden) == 1;
-                if (!TargetAvailable() && RevealNavigation.HasDelegate)
+                var available = publicHome && !signedIn;
+                if (!available)
                 {
-                    await RevealNavigation.InvokeAsync();
-                    for (var attempt = 0; attempt < 10 && IsCurrent() && !TargetAvailable(); attempt++)
+                    await ReportUiForFeatureAsync(EllaiNavigationManifest.FeatureId, _uiObservationLifetime.Token);
+                    if (!IsCurrent()) return;
+                    // A collapsed menu may be hidden; disabled, absent or ambiguous targets cannot navigate.
+                    bool TargetAvailable() => _latestGuidanceObservation?.ControlStates?.Count(control => control.ControlId == destination.ControlId &&
+                        control.State is UiObservationState.Ready or UiObservationState.Hidden) == 1;
+                    if (!TargetAvailable() && RevealNavigation.HasDelegate)
                     {
-                        await Task.Delay(100, _uiObservationLifetime.Token);
-                        await ReportUiForFeatureAsync(EllaiNavigationManifest.FeatureId, _uiObservationLifetime.Token);
+                        await RevealNavigation.InvokeAsync();
+                        for (var attempt = 0; attempt < 10 && IsCurrent() && !TargetAvailable(); attempt++)
+                        {
+                            await Task.Delay(100, _uiObservationLifetime.Token);
+                            await ReportUiForFeatureAsync(EllaiNavigationManifest.FeatureId, _uiObservationLifetime.Token);
+                        }
                     }
+                    if (!IsCurrent()) return;
+                    available = TargetAvailable();
                 }
-                if (!IsCurrent()) return;
-                var available = TargetAvailable();
                 var stillSignedIn = auth is not null && (await auth.GetAuthenticationStateAsync()).User.Identity?.IsAuthenticated == true;
                 if (!IsCurrent()) return;
-                if (available && stillSignedIn) Navigation.NavigateTo(route);
+                if (available && (publicHome || stillSignedIn)) Navigation.NavigateTo(route);
                 else _guidanceNotice = "That page is not available right now.";
             }
         }
@@ -472,6 +515,12 @@ public partial class EllaiGuidanceHost
         var tour = _generatedTour;
         _generatedTour = null;
         _generatedPlan = null;
+        _guidanceAnchors = null;
+        _validationTargetControlId = null;
+        _validationInputId = null;
+        _validationGuidanceText = null;
+        _unavailableObservedStepId = null;
+        _narrateValidation = null;
         _controlGeneratedTour = null;
         _narrateValidation = null;
         if (tour is null) return;
@@ -480,6 +529,24 @@ public partial class EllaiGuidanceHost
         try { await tour.CancelAsync(CancellationToken.None); }
         catch (OperationCanceledException) { }
         catch (Microsoft.JSInterop.JSDisconnectedException) { }
+    }
+
+    private async Task ReplanGeneratedGuidanceAsync()
+    {
+        if (!_guidanceReplanRequired || _advancingValidatedInput || _preparingGuidance ||
+            _generatedTour is null || _guidanceProposalId is null) return;
+        if (_lastDurableTurn is { Outcome: "Completed" } latestTurn)
+            _guidanceProposalTurn = latestTurn.ClientUtteranceId;
+        else if (_lastDurableTurn is not null)
+        {
+            _guidanceNotice = "Wait for Ellai to finish the current turn before finding another way.";
+            StateHasChanged();
+            return;
+        }
+        _guidanceReplanRequired = false;
+        CancelGuidanceCountdown();
+        await CancelGeneratedGuidanceAsync();
+        await StartProposedGuidanceAsync();
     }
 
     private async Task StartProposedGuidanceAsync()
@@ -494,6 +561,8 @@ public partial class EllaiGuidanceHost
         if (_sessionView is not { Status: "Active" } session ||
             _guidanceProposalId is not { } proposalId || _generatedTour is not null) return;
         _preparingGuidance = true;
+        _guidanceReplanRequired = false;
+        _unavailableObservedStepId = null;
         _guidanceNotice = null;
         if (_guidanceProposalIsAccepted) _guidanceProposalTurn = _lastDurableTurn?.ClientUtteranceId;
         var turnId = _guidanceProposalTurn;
@@ -642,7 +711,17 @@ public partial class EllaiGuidanceHost
                 if (!IsCurrent()) return false;
                 await ReportCurrentUiAsync(ct);
                 var admission = await ReviewClient.ReadGuidanceAdmissionAsync(session.SessionId, proposalId, ct);
-                if (admission?.Status != "Ready") return false;
+                if (admission?.Status != "Ready")
+                {
+                    if (admission?.Status is "NeedsNavigation" or "WaitingForControl")
+                    {
+                        _unavailableObservedStepId = null;
+                        _guidanceReplanRequired = true;
+                        _guidanceNotice = "The current control is unavailable. Find another way to continue.";
+                        await InvokeAsync(StateHasChanged);
+                    }
+                    return false;
+                }
                 var step = plan.Steps.SingleOrDefault(s => s.StepKey == stepId);
                 if (step?.ControlId is "report.submit" or "report.receipt" &&
                     Services.GetService(typeof(EllaiDisplayedReceiptContext)) is EllaiDisplayedReceiptContext { Current: { } receipt })
@@ -672,13 +751,35 @@ public partial class EllaiGuidanceHost
                     (step.Behavior != PlanStepBehavior.Explain && navigation is null && !validatedInput) ||
                     (navigation is null && !validatedInput && EllaiReportUiManifest.All.Any(control =>
                         control.ControlId == step.ControlId && control.ProofPolicyId != "proof-ui-observed")) ||
-                    (navigation is null && !validatedInput && observedContext != result.ContextStamp) ||
                     (navigation is not null && _latestGuidanceObservation?.CurrentNavigationId != navigation.NavigationId) ||
                     (!validatedInput && _latestGuidanceObservation?.ControlStates?.Any(state => state.ControlId == step.ControlId &&
                         state.State == UiObservationState.Ready) != true)) return false;
                 await progressGate.WaitAsync(ct);
                 try
                 {
+                    if (!IsCurrent() || _latestGuidanceObservation?.ContextStamp != observedContext) return false;
+                    if (navigation is null && !validatedInput && observedContext != result.ContextStamp)
+                    {
+                        // Rebind only the same durable plan and step. A changed or unavailable
+                        // target must be handled by normal replanning, never by advancing it here.
+                        var rebound = await ReviewClient.RevalidateGuidancePlanAsync(session.SessionId,
+                            proposalId, plan.PlanId, stepId, ct);
+                        if (!IsCurrent() || _latestGuidanceObservation?.ContextStamp != observedContext ||
+                            rebound?.Status != "Ready" || rebound.Plan?.PlanId != plan.PlanId ||
+                            rebound.Plan.Revision != plan.Revision || rebound.CurrentStepId != stepId ||
+                            rebound.ContextStamp != observedContext)
+                        {
+                            _unavailableObservedStepId = null;
+                            _guidanceReplanRequired = rebound?.Status == "ReplanRequired";
+                            _guidanceNotice = _guidanceReplanRequired
+                                ? "The page changed. Find another way to continue."
+                                : "Guidance could not be checked. Try again.";
+                            await InvokeAsync(StateHasChanged);
+                            return false;
+                        }
+                        progressVersion = rebound.ProgressVersion;
+                        result = rebound;
+                    }
                     var progress = await ReviewClient.CompleteGuidanceStepAsync(session.SessionId,
                         new(proposalId, plan.PlanId, progressVersion, stepId, observedContext!), ct);
                     if (!IsCurrent() || progress?.Status is not ("Ready" or "Completed") ||
@@ -699,8 +800,15 @@ public partial class EllaiGuidanceHost
                 _generatedTour = started;
                 BeginGuidanceSpeech();
                 _generatedPlan = plan;
+                _guidanceAnchors = anchors;
+                _narrateValidation = async (inputId, contextStamp, ct) =>
+                {
+                    await progressGate.WaitAsync(ct);
+                    try { await NarrateGuidanceStepAsync(started, progressVersion, inputId, contextStamp); }
+                    finally { progressGate.Release(); }
+                };
                 _controlGeneratedTour = PersistControl;
-                _narrateValidation = message => NarrateValidationAsync(started, progressVersion, message);
+                _narrateLegacyValidation = message => NarrateValidationAsync(started, progressVersion, message);
                 _generatedTourChanged = (_, _) => _ = InvokeAsync(async () =>
                 {
                     if (!IsCurrent() || !ReferenceEquals(started, _generatedTour)) return;
@@ -723,6 +831,11 @@ public partial class EllaiGuidanceHost
                             _generatedTourChanged = null;
                             _generatedTour = null;
                             _generatedPlan = null;
+                            _guidanceAnchors = null;
+                            _validationTargetControlId = null;
+                            _validationInputId = null;
+                            _validationGuidanceText = null;
+                            _narrateValidation = null;
                             _controlGeneratedTour = null;
                             _narrateValidation = null;
                             CancelValidationNarration();
