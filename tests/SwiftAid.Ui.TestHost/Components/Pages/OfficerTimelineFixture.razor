@@ -1,0 +1,35 @@
+@page "/officer-timeline-fixture"
+@using SwiftAid.Contracts.Cases
+@using SwiftAid.UI.Components.Cases
+@using SwiftAid.UI.Components.Theme
+
+<SwiftAidThemeProvider />
+<MudPopoverProvider />
+<MudDialogProvider />
+<main data-fixture-ready="@_ready.ToString().ToLowerInvariant()">
+    <h1>Officer history fixture</h1>
+    <CaseTimelineView Client="_client" CaseId="_caseId" />
+</main>
+
+@code {
+    private bool _ready;
+    private readonly Guid _caseId = Guid.NewGuid();
+    private readonly FixtureClient _client = new();
+    protected override void OnAfterRender(bool firstRender) { if (firstRender) { _ready = true; StateHasChanged(); } }
+    private sealed class FixtureClient : ICaseTimelineClient
+    {
+        public Task<CaseTimelineResult> GetAsync(Guid caseId, int? limit, CancellationToken cancellationToken = default, long? beforeAggregateVersion = null)
+        {
+            var now = DateTimeOffset.UtcNow;
+            var header = new CaseTimelineHeader(caseId, "org", "workspace", "SZ", "Active", "owner", 3, 1, now);
+            var entries = new[]
+            {
+                new CaseTimelineEntry(Guid.NewGuid(), "CaseFollowUpScheduled", "Follow-up scheduled", CaseTimelineEntryKind.Authoritative, 2, 1, Guid.NewGuid(), "private-actor", null, now, 1)
+                { OfficerEscalation = new(Guid.NewGuid(), Guid.NewGuid(), "private-officer", "Synthetic Officer", now.AddHours(1), now.AddDays(1), true, true) },
+                new CaseTimelineEntry(Guid.NewGuid(), "CaseFollowUpScheduled", "Follow-up scheduled", CaseTimelineEntryKind.Authoritative, 3, 1, Guid.NewGuid(), "private-actor", null, now.AddMinutes(1), 1)
+                { OfficerEscalation = new(Guid.NewGuid(), Guid.NewGuid(), "private-officer-2", null, now.AddHours(2), now.AddDays(2), false) }
+            };
+            return Task.FromResult(new CaseTimelineResult(CaseTimelineAccess.Found, new(header, entries)));
+        }
+    }
+}

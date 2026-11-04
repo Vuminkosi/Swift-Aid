@@ -45,9 +45,12 @@ It atomically appends a normal case follow-up event and receipt, a follow-up
 projection, outbox entry, and an immutable link to the approved escalation and
 acknowledgment deadline. The existing case owner is unchanged. A deferred check
 revalidates approval and designation expiry at commit. Execution does not notify
-anyone. There is no public or model execution endpoint, no officer acknowledgment
-linkage, reassignment flow, or scheduled supervisor escalation yet; the case
-timeline does not yet present the new escalation-to-follow-up link.
+anyone. The authorized case timeline shows the escalation-to-follow-up link to
+readers with both escalation and follow-up permissions, and distinguishes current
+work from historical assignments. Ellai's case-history tool uses the same
+permission-filtered projection and does not emit opaque officer identifiers.
+There is no public or model execution endpoint, no escalation acknowledgment
+linkage, reassignment flow, or scheduled supervisor escalation yet.
 Availability, workload and category-specific policy are not currently represented,
 and must not be inferred from this lookup. Controlled designation provisioning,
 operator authorization, data stewardship and production database grants remain

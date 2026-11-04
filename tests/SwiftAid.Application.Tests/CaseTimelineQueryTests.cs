@@ -10,6 +10,39 @@ namespace SwiftAid.Application.Tests;
 public sealed class CaseTimelineQueryTests
 {
     [Theory]
+    [InlineData(true, true)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(false, false)]
+    public async Task OfficerEscalationDetailsRequireBothManagementPermissions(bool escalation, bool followUp)
+    {
+        var header = new CaseTimelineHeader(Guid.NewGuid(), "org", "workspace", "SZ", "Active", "officer-1", 4, 1, DateTimeOffset.UtcNow);
+        var row = Row(4, "CaseFollowUpScheduled");
+        var store = new StubStore(header, null, [row])
+        {
+            OfficerAssignments = [new(row.EventId, Guid.NewGuid(), Guid.NewGuid(), "opaque-officer", "unsafe\nname", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddDays(1), true, false)]
+        };
+        var permitted = escalation && followUp;
+        var result = await new CaseTimelineQuery(store, new OfficerVisibilityPolicy(escalation, followUp), new StubUnitOfWork())
+            .GetAsync(CreateOfficer(), header.CaseId, 1, CancellationToken.None);
+        Assert.Equal(permitted, store.OfficerAssignmentsRead);
+        var assignment = Assert.Single(result.Timeline!.Entries).OfficerEscalation;
+        if (permitted) { Assert.NotNull(assignment); Assert.Null(assignment.OfficerDisplayLabel); }
+        else Assert.Null(assignment);
+    }
+
+    private sealed class OfficerVisibilityPolicy(bool escalation, bool followUp) : ICaseAccessPolicy
+    {
+        public ValueTask<AccessDecision> AuthorizeAsync(ActorContext actor, Guid caseId, CaseOperation operation, CancellationToken ct) =>
+            ValueTask.FromResult(new AccessDecision(operation == CaseOperation.ReadCase, AccessDecisionCode.Allowed, null));
+        public ValueTask<AccessDecision> AuthorizeAllAsync(ActorContext actor, Guid caseId, IReadOnlyCollection<CaseOperation> operations, CancellationToken ct)
+        {
+            var allowed = operations.Contains(CaseOperation.ManageEscalation) && operations.Contains(CaseOperation.ManageFollowUp) && escalation && followUp;
+            return ValueTask.FromResult(new AccessDecision(allowed, allowed ? AccessDecisionCode.Allowed : AccessDecisionCode.GrantMissing, null));
+        }
+    }
+
+    [Theory]
     [InlineData(false, "Active", false)]
     [InlineData(true, "Active", true)]
     [InlineData(true, "Resolved", false)]
@@ -277,6 +310,14 @@ public sealed class CaseTimelineQueryTests
         public bool HeaderRead { get; private set; }
         public bool CollaboratorsRead { get; private set; }
         public IReadOnlyList<CaseCollaboratorGrantView> Collaborators { get; set; } = [];
+        public bool OfficerAssignmentsRead { get; private set; }
+        public IReadOnlyList<CaseOfficerEscalationRow> OfficerAssignments { get; set; } = [];
+
+        public Task<IReadOnlyList<CaseOfficerEscalationRow>> GetOfficerEscalationsAsync(ICaseCommandLease lease, Guid caseId, IReadOnlyList<Guid> eventIds, CancellationToken ct)
+        {
+            OfficerAssignmentsRead = true;
+            return Task.FromResult<IReadOnlyList<CaseOfficerEscalationRow>>(OfficerAssignments.Where(item => eventIds.Contains(item.EventId)).ToArray());
+        }
 
         public Task<IReadOnlyList<CaseCollaboratorGrantView>> GetCollaboratorsAsync(Guid caseId, CancellationToken ct)
         {

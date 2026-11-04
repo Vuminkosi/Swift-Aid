@@ -39,7 +39,7 @@ public static class CaseTimelineEntryFilter
             }
             var matches = selected == AllEvents || selected == RelatedActivity && entry.Kind == CaseTimelineEntryKind.Derived ||
                 selected == StaffActions && entry.Kind == CaseTimelineEntryKind.Authoritative ||
-                selected == Escalations && entry.Kind == CaseTimelineEntryKind.Authoritative && (entry.EventType is "CaseEscalationRaised" or "CaseEscalationAcknowledged" or "CaseEscalationActionRecorded" or "CaseEscalationClosed") ||
+                selected == Escalations && entry.Kind == CaseTimelineEntryKind.Authoritative && (entry.OfficerEscalation is not null || entry.EventType is "CaseEscalationRaised" or "CaseEscalationAcknowledged" or "CaseEscalationActionRecorded" or "CaseEscalationClosed") ||
                 string.Equals(entry.EventType, selected, StringComparison.Ordinal);
             if (matches && InDate(entry.RecordedAtUtc))
                 results.Add(selected == StaffActions ? entry with { AgentActivities = [], AgentActivitiesTruncated = false } : entry);

@@ -3,6 +3,8 @@ using SwiftAid.Application.Cases;
 using SwiftAid.Contracts.Cases;
 using SwiftAid.Infrastructure.Persistence;
 using SwiftAid.Domain.Cases;
+using SwiftAid.Application.Cases.Commands;
+using SwiftAid.Infrastructure.Persistence.Transactions;
 
 namespace SwiftAid.Infrastructure.Persistence.Repositories.Cases;
 
@@ -148,6 +150,35 @@ public sealed class PostgresCaseTimelineStore(SwiftAidDbContext dbContext) : ICa
                     WHERE r.case_id = {caseId} AND r.source_event_id = ANY({ids})
                 ) sources
             ) activity WHERE position <= 21 ORDER BY "SourceEventId", "RecordedAtUtc" DESC, "ActivityId" DESC
+            """).ToArrayAsync(ct).ConfigureAwait(false);
+    }
+
+    public async Task<IReadOnlyList<CaseOfficerEscalationRow>> GetOfficerEscalationsAsync(ICaseCommandLease lease, Guid caseId,
+        IReadOnlyList<Guid> eventIds, CancellationToken ct)
+    {
+        if (lease is not PostgresCaseCommandLease current || !current.IsActive || current.Mode != CaseLeaseMode.Read ||
+            current.CaseId != caseId || !ReferenceEquals(current.DbContext, _dbContext) ||
+            !ReferenceEquals(current.Transaction, _dbContext.Database.CurrentTransaction))
+            throw new UnauthorizedAccessException("An active case read lease is required to read officer escalation history.");
+        if (eventIds.Count == 0) return [];
+        var ids = eventIds.ToArray();
+        return await _dbContext.Database.SqlQuery<CaseOfficerEscalationRow>($"""
+            SELECT a.follow_up_event_id AS "EventId", a.escalation_id AS "EscalationId", a.follow_up_id AS "FollowUpId",
+                a.officer_actor_id AS "OfficerActorId", profile.display_name AS "OfficerDisplayLabel",
+                a.acknowledgement_due_utc AS "AcknowledgementDueUtc",
+                CASE WHEN f.assignee_actor_id = a.officer_actor_id AND f.status IN ('Scheduled', 'Acknowledged')
+                    AND e.status <> 'Closed' AND c.workflow <> 'Resolved' THEN f.due_at_utc ELSE approval.follow_up_due_utc END AS "FollowUpDueUtc",
+                (f.assignee_actor_id = a.officer_actor_id AND f.status IN ('Scheduled', 'Acknowledged')
+                    AND e.status <> 'Closed' AND c.workflow <> 'Resolved') AS "IsCurrent",
+                CASE WHEN f.assignee_actor_id = a.officer_actor_id AND f.status IN ('Scheduled', 'Acknowledged')
+                    AND e.status <> 'Closed' AND c.workflow <> 'Resolved' THEN f.status = 'Acknowledged' ELSE NULL END AS "FollowUpAcknowledged"
+            FROM health_officer_escalation_assignments a
+            JOIN health_officer_escalation_approvals approval ON approval.approval_id = a.approval_id
+            JOIN managed_case_follow_ups f ON f.follow_up_id = a.follow_up_id AND f.case_id = a.case_id
+            JOIN managed_case_escalations e ON e.escalation_id = a.escalation_id AND e.case_id = a.case_id
+            JOIN managed_cases c ON c.case_id = a.case_id
+            LEFT JOIN swiftaid_identity.user_profiles profile ON profile.user_id = a.officer_actor_id
+            WHERE a.case_id = {caseId} AND a.follow_up_event_id = ANY({ids})
             """).ToArrayAsync(ct).ConfigureAwait(false);
     }
 

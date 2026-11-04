@@ -22,6 +22,9 @@ public sealed record CaseAgentActivityRow(Guid SourceEventId, Guid ActivityId, s
     bool? FollowUpIsCurrent = null, DateTimeOffset? FollowUpDueAtUtc = null,
     DateTimeOffset? FollowUpReviewedAtUtc = null);
 
+public sealed record CaseOfficerEscalationRow(Guid EventId, Guid EscalationId, Guid FollowUpId, string OfficerActorId,
+    string? OfficerDisplayLabel, DateTimeOffset AcknowledgementDueUtc, DateTimeOffset FollowUpDueUtc, bool IsCurrent, bool? FollowUpAcknowledged);
+
 /// <summary>Persistence port for the authorized timeline read. Cursor pages arrive newest-first.</summary>
 public interface ICaseTimelineStore
 {
@@ -43,6 +46,9 @@ public interface ICaseTimelineStore
 
     Task<IReadOnlyList<CaseAgentActivityRow>> GetAgentActivitiesAsync(Guid caseId, IReadOnlyList<Guid> eventIds,
         CancellationToken ct) => Task.FromResult<IReadOnlyList<CaseAgentActivityRow>>([]);
+
+    Task<IReadOnlyList<CaseOfficerEscalationRow>> GetOfficerEscalationsAsync(ICaseCommandLease lease, Guid caseId, IReadOnlyList<Guid> eventIds,
+        CancellationToken ct) => Task.FromResult<IReadOnlyList<CaseOfficerEscalationRow>>([]);
 }
 
 public interface ICaseTimelineQuery
@@ -152,11 +158,21 @@ public sealed class CaseTimelineQuery(
                 .ThenBy(row => row.RecordedAtUtc)
                 .ToArray();
             var activityRows = await _store.GetAgentActivitiesAsync(caseId, pageRows.Select(row => row.EventId).ToArray(), ct).ConfigureAwait(false);
+            var officerDecision = await _policy.AuthorizeAllAsync(actor, caseId,
+                [CaseOperation.ReadCase, CaseOperation.ManageEscalation, CaseOperation.ManageFollowUp], ct).ConfigureAwait(false);
+            var officerRows = officerDecision.IsAllowed
+                ? await _store.GetOfficerEscalationsAsync(lease, caseId, pageRows.Select(row => row.EventId).ToArray(), ct).ConfigureAwait(false)
+                : [];
             var entries = pageRows.Select(row =>
             {
                 var activities = activityRows.Where(activity => activity.SourceEventId == row.EventId).ToArray();
+                var officer = officerRows.SingleOrDefault(item => item.EventId == row.EventId);
                 return MapAuthoritative(row) with
                 {
+                    OfficerEscalation = officer is null ? null : new CaseOfficerEscalationAssignment(officer.EscalationId,
+                        officer.FollowUpId, officer.OfficerActorId,
+                        officer.OfficerDisplayLabel is { Length: > 0 and <= 120 } label && !label.Any(char.IsControl) ? label : null,
+                        officer.AcknowledgementDueUtc, officer.FollowUpDueUtc, officer.IsCurrent, officer.FollowUpAcknowledged),
                     AgentActivities = activities.Take(20).Select(activity => new CaseAgentActivity(activity.ActivityId,
                         activity.RoleId, CaseAgentActivityPresentation.ActivityLabel(activity.RoleId), activity.Version, activity.RecordedAtUtc)
                     {

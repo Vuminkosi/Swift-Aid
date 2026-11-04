@@ -6,6 +6,18 @@ namespace SwiftAid.Ui.Tests;
 public sealed class CaseTimelineEntryFilterTests
 {
     [Fact]
+    public void EscalationFilterIncludesOnlyAuthorizedLinkedFollowUp()
+    {
+        var entry = Entry("follow-up", DateTime.Now) with
+        {
+            EventType = "CaseFollowUpScheduled",
+            OfficerEscalation = new(Guid.NewGuid(), Guid.NewGuid(), "opaque", "Officer", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddDays(1), true, false)
+        };
+        Assert.Single(CaseTimelineEntryFilter.Apply([entry], CaseTimelineEntryFilter.Escalations, null, null));
+        Assert.Empty(CaseTimelineEntryFilter.Apply([entry with { OfficerEscalation = null }], CaseTimelineEntryFilter.Escalations, null, null));
+    }
+
+    [Fact]
     public void Apply_IncludesBothLocalDateBoundsAndKeepsChronologicalOrder()
     {
         var day = new DateTime(2026, 10, 31, 0, 0, 0, DateTimeKind.Local);

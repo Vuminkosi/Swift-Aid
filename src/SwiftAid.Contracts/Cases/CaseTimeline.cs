@@ -32,6 +32,9 @@ public sealed record CaseTimelineEntry(
     public IReadOnlyList<CaseAgentActivity> AgentActivities { get; init; } = [];
     public bool AgentActivitiesTruncated { get; init; }
 
+    /// <summary>Present only when the current reader has escalation and follow-up authority.</summary>
+    public CaseOfficerEscalationAssignment? OfficerEscalation { get; init; }
+
     /// <summary>
     /// Returns only a bounded display label supplied by an authorized projection.
     /// The opaque ActorId must never be used as a UI fallback.
@@ -42,6 +45,14 @@ public sealed record CaseTimelineEntry(
         !label.Any(char.IsControl)
             ? label
             : null;
+}
+
+public sealed record CaseOfficerEscalationAssignment(Guid EscalationId, Guid FollowUpId, string OfficerActorId,
+    string? OfficerDisplayLabel, DateTimeOffset AcknowledgementDueUtc, DateTimeOffset FollowUpDueUtc, bool IsCurrent, bool? FollowUpAcknowledged = null)
+{
+    [JsonIgnore]
+    public string? SafeOfficerDisplayLabel => OfficerDisplayLabel is { Length: > 0 and <= 120 } label && !label.Any(char.IsControl)
+        ? label : null;
 }
 
 public sealed record CaseAgentActivity(Guid ActivityId, string RoleId, string Label,

@@ -145,6 +145,39 @@ public sealed partial class CaseCommandProcessingPostgresTests
         Assert.True(await db.DomainOutbox.AnyAsync(item => item.EventId == recorded.FollowUpEventId));
         Assert.False(await db.NotificationItems.AnyAsync(item => item.AcceptedEventId == recorded.FollowUpEventId));
         Assert.Equal(1, await db.Database.SqlQuery<int>($"SELECT count(*)::int AS \"Value\" FROM health_officer_escalation_assignments WHERE approval_id = {approved.ApprovalId}").SingleAsync());
+        var timelineStore = new PostgresCaseTimelineStore(db);
+        await using (var readLease = await unit.BeginCaseAsync(fixture.CreateActor(), fixture.CaseId, [], CaseLeaseMode.Read, default))
+        {
+            await Assert.ThrowsAsync<UnauthorizedAccessException>(() => timelineStore.GetOfficerEscalationsAsync(readLease, Guid.NewGuid(), [recorded.FollowUpEventId!.Value], default));
+            await using var wrongDb = fixture.CreateDbContext();
+            await Assert.ThrowsAsync<UnauthorizedAccessException>(() => new PostgresCaseTimelineStore(wrongDb)
+                .GetOfficerEscalationsAsync(readLease, fixture.CaseId, [recorded.FollowUpEventId!.Value], default));
+        }
+        var timeline = new CaseTimelineQuery(timelineStore, policy, unit);
+        var visible = await timeline.GetAsync(fixture.CreateActor(), fixture.CaseId, 20, default);
+        var assigned = Assert.Single(visible.Timeline!.Entries, item => item.EventId == recorded.FollowUpEventId).OfficerEscalation;
+        Assert.NotNull(assigned);
+        Assert.Equal(fixture.NewOwnerActorId, assigned.OfficerActorId);
+        Assert.Equal(escalationId, assigned.EscalationId);
+        Assert.True(assigned.IsCurrent);
+        Assert.False(assigned.FollowUpAcknowledged);
+        var officer = ActorContext.FromValidatedPrincipal(Principal(fixture.NewOwnerActorId, fixture.AccessEpoch));
+        var acknowledged = await ProcessCommandAsync(fixture, officer,
+            new AcknowledgeFollowUpCommand(Guid.NewGuid(), 4, approved.FollowUpId, null, DateTimeOffset.UtcNow), keyRing.CreateOptions(), provider);
+        Assert.Equal(CaseCommandProcessingStatus.Accepted, acknowledged.Status);
+        var acknowledgedTimeline = await timeline.GetAsync(fixture.CreateActor(), fixture.CaseId, 20, default);
+        Assert.True(Assert.Single(acknowledgedTimeline.Timeline!.Entries, item => item.EventId == recorded.FollowUpEventId).OfficerEscalation!.FollowUpAcknowledged);
+        var transferred = await ProcessCommandAsync(fixture, fixture.CreateActor(),
+            new ChangeActionOwnerCommand(Guid.NewGuid(), 5, ActionOwnerKind.FollowUp, approved.FollowUpId,
+                fixture.ActorId, "synthetic transfer", null, DateTimeOffset.UtcNow), keyRing.CreateOptions(), provider);
+        Assert.Equal(CaseCommandProcessingStatus.Accepted, transferred.Status);
+        var historical = await timeline.GetAsync(fixture.CreateActor(), fixture.CaseId, 20, default);
+        Assert.False(Assert.Single(historical.Timeline!.Entries, item => item.EventId == recorded.FollowUpEventId).OfficerEscalation!.IsCurrent);
+        await db.AccessGrantOperations.Where(item => item.GrantGroupId == fixture.GrantGroupId && item.Operation == CaseOperation.ManageEscalation)
+            .ExecuteDeleteAsync();
+        var redacted = await timeline.GetAsync(fixture.CreateActor(), fixture.CaseId, 20, default);
+        Assert.Equal(SwiftAid.Contracts.Cases.CaseTimelineAccess.Found, redacted.Access);
+        Assert.Null(Assert.Single(redacted.Timeline!.Entries, item => item.EventId == recorded.FollowUpEventId).OfficerEscalation);
         await Assert.ThrowsAsync<Npgsql.PostgresException>(() => db.GetService<IMigrator>().MigrateAsync("20261104160000_HealthOfficerEscalationApprovals"));
     }
 }

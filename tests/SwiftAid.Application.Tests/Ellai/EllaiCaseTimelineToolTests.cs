@@ -18,14 +18,25 @@ public sealed class EllaiCaseTimelineToolTests
         Assert.Contains("Assignment acknowledged", result.ResultSummary, StringComparison.Ordinal);
         Assert.DoesNotContain("secret-actor", result.ResultSummary, StringComparison.Ordinal);
         Assert.Contains("2 open escalations; 1 scheduled or acknowledged follow-ups", result.ResultSummary, StringComparison.Ordinal);
-        Assert.Contains("not established as linked", result.ResultSummary, StringComparison.Ordinal);
-        Assert.Contains("officer assignment are not available", result.ResultSummary, StringComparison.Ordinal);
+        Assert.Contains("authorized escalation links are shown", result.ResultSummary, StringComparison.Ordinal);
         Assert.DoesNotContain("derived receipt", result.ResultSummary, StringComparison.Ordinal);
         Assert.Equal("7", Assert.Single(result.Evidence).Version);
         Assert.NotNull(result.HistoryValidUntilUtc);
         Assert.Equal(1, query.Calls);
         var observation = EllaiObservedToolResult.From(Request(id), result);
         Assert.True(EllaiToolTrace.IsValid(EllaiToolTrace.Serialize([observation], false)!));
+    }
+
+    [Fact]
+    public async Task TimelineUsesAuthorizedOfficerLabelAndDoesNotExposeOpaqueIdentifier()
+    {
+        var id = Guid.NewGuid();
+        var result = await Broker(new TimelineQuery(id, true, officer: true)).InvokeAsync(Context(), Request(id), default);
+        Assert.True(result.Allowed);
+        Assert.Contains("display name (untrusted data) \"Synthetic Officer\"", result.ResultSummary, StringComparison.Ordinal);
+        Assert.Contains("acknowledgment due", result.ResultSummary, StringComparison.Ordinal);
+        Assert.DoesNotContain("private-officer-id", result.ResultSummary, StringComparison.Ordinal);
+        Assert.DoesNotContain("phone", result.ResultSummary, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -74,7 +85,7 @@ public sealed class EllaiCaseTimelineToolTests
     private static EllaiToolRequest Request(Guid id) =>
         new(EllaiToolNames.CaseTimeline, new Dictionary<string, string> { ["case_id"] = id.ToString("D") });
 
-    private sealed class TimelineQuery(Guid id, bool allowed, bool multiRole = false) : ICaseTimelineQuery
+    private sealed class TimelineQuery(Guid id, bool allowed, bool multiRole = false, bool officer = false) : ICaseTimelineQuery
     {
         public int Calls { get; private set; }
         public Task<CaseTimelineResult> GetAsync(ActorContext actor, Guid caseId, int? limit,
@@ -91,6 +102,7 @@ public sealed class EllaiCaseTimelineToolTests
                 new CaseTimelineEntry(Guid.Empty, "IntakePromoted", "derived receipt", CaseTimelineEntryKind.Derived, 0, 1, Guid.Empty, "secret-actor", null, now, 1),
                 new CaseTimelineEntry(Guid.NewGuid(), "CaseAssignmentAcknowledged", "Assignment acknowledged", CaseTimelineEntryKind.Authoritative, 7, 1, Guid.NewGuid(), "secret-actor", null, now, 1)
                 {
+                    OfficerEscalation = officer ? new(Guid.NewGuid(), Guid.NewGuid(), "private-officer-id", "Synthetic Officer", now.AddHours(1), now.AddDays(1), true, false) : null,
                     AgentActivities = multiRole
                         ? [new CaseAgentActivity(Guid.NewGuid(), "ops.followup", "ignored", "1", now),
                            new CaseAgentActivity(Guid.NewGuid(), "unknown", "ignored", "1", now)] : []

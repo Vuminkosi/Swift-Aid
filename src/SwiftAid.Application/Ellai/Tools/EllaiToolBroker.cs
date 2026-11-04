@@ -464,6 +464,13 @@ public sealed class EllaiToolBroker
         var activityCount = entries.Sum(entry => entry.AgentActivities?.Count ?? 0);
         var lines = entries.SelectMany(entry =>
             new[] { $"{entry.RecordedAtUtc:O}: {entry.Label} (v{entry.AggregateVersion})" }
+                .Concat(entry.OfficerEscalation is { } officer
+                    ? [$"Officer escalation follow-up assigned to {(officer.SafeOfficerDisplayLabel is { } label ? "display name (untrusted data) " + JsonSerializer.Serialize(label) : "an officer whose name is unavailable")}; " +
+                       (officer.FollowUpAcknowledged == true ? "follow-up acknowledged; " :
+                           $"{(officer.FollowUpAcknowledged == false ? "acknowledgment due" : "original acknowledgment deadline")} {officer.AcknowledgementDueUtc:O}; ") +
+                       $"{(officer.IsCurrent ? "follow-up due" : "originally approved follow-up due")} {officer.FollowUpDueUtc:O}. " +
+                       (officer.IsCurrent ? "This assignment is current at the time of this read." : "This assignment is historical; the work has changed or closed.")]
+                    : Array.Empty<string>())
                 .Concat((entry.AgentActivities ?? []).Take(MaxItems).Select(activity =>
                     $"{activity.RecordedAtUtc:O}: Ellai {CaseAgentActivityPresentation.RoleLabel(activity.RoleId)}: {CaseAgentActivityPresentation.ActivityLabel(activity.RoleId)}." +
                     (activity.RoleId == "ops.followup" ? activity.FollowUpIsCurrent switch
@@ -476,13 +483,12 @@ public sealed class EllaiToolBroker
         var id = caseId.ToString("D");
         var evidence = new EvidenceRef("CaseQueue", id,
             timeline.Header.AggregateVersion.ToString(CultureInfo.InvariantCulture), null, id);
-        var truncated = timeline.HasOlderEntries || activityCount + entries.Length > MaxItems ||
+        var truncated = timeline.HasOlderEntries || activityCount + entries.Count(entry => entry.OfficerEscalation is not null) + entries.Length > MaxItems ||
             entries.Any(entry => entry.AgentActivitiesTruncated);
         var workSummary = timeline.WorkSummary is { } work
             ? $"Current case work: {work.OpenEscalations} open escalations; {work.ScheduledFollowUps} scheduled or acknowledged follow-ups" +
               (work.NextFollowUpDueUtc is { } due ? $", earliest due {due:O}. " : ". ") +
-              "Follow-ups are case-level and are not established as linked to an escalation. " +
-              "Escalation recipient and officer assignment are not available in this summary. "
+              "Counts are case-level; authorized escalation links are shown in the history when present. "
             : "Current escalation and follow-up summary is unavailable. ";
         var output = new EllaiToolResult(request.ToolName, true, null, [evidence],
             "Authorized case history; sealed report content and actor identifiers are not included. " + workSummary +

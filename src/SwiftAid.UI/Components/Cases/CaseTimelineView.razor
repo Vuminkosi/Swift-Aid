@@ -103,6 +103,22 @@
                                     </span>
                                     <span class="case-timeline__entry-actor">@ActorLabel(entry)</span>
                                 </button>
+                                @if (entry.OfficerEscalation is { } officer)
+                                {
+                                    <div class="case-timeline__officer-assignment">
+                                        <span>Officer escalation follow-up: @(officer.SafeOfficerDisplayLabel ?? "Name unavailable").</span>
+                                        <span>@(officer.IsCurrent ? "Current assignment." : "Historical assignment; the work has changed or closed.")</span>
+                                        @if (officer.FollowUpAcknowledged == true)
+                                        {
+                                            <span>Follow-up acknowledged.</span>
+                                        }
+                                        else
+                                        {
+                                            <span>@(officer.FollowUpAcknowledged == false ? "Acknowledgment due" : "Original acknowledgment deadline") <time datetime="@officer.AcknowledgementDueUtc.ToString("O")">@officer.AcknowledgementDueUtc.ToLocalTime().ToString("g")</time>.</span>
+                                        }
+                                        <span>@(officer.IsCurrent ? "Follow-up due" : "Originally approved follow-up due") <time datetime="@officer.FollowUpDueUtc.ToString("O")">@officer.FollowUpDueUtc.ToLocalTime().ToString("g")</time>.</span>
+                                    </div>
+                                }
                                 @if (entry.AgentActivities is { Count: > 0 })
                                 {
                                     <ul aria-label="Ellai activity for this event">
