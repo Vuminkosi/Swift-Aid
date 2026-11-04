@@ -179,7 +179,8 @@ public sealed partial class EllaiGuidanceProposalAdmission(
             ? EllaiPreplannedNavigation.Create(admitted.Objective!)
             : feature == EllaiReportUiManifest.FeatureId && !authority.Features.Contains(EllaiNavigationManifest.FeatureId) && !reportAlreadyReceived
                 ? EllaiPreplannedReport.Create(admitted.Objective!, admitted.Catalogue)
-                : null;
+                : feature == EllaiReportUiManifest.FeatureId ? null
+                    : EllaiPreplannedControl.Create(admitted.Objective!, admitted.Catalogue, observed);
         if (preplanned is not null)
         {
             var refreshed = await AdmitAsync(sessionId, proposalId, authority, ct).ConfigureAwait(false);
