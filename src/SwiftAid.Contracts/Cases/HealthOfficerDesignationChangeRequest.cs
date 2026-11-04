@@ -28,3 +28,13 @@ public sealed class HealthOfficerDesignationLookupRequest
 
 public sealed record HealthOfficerDesignationView(Guid DesignationId, long Version, string Status, DateTimeOffset ValidFromUtc, DateTimeOffset ExpiresAtUtc);
 public sealed record HealthOfficerDesignationLookupResponse(HealthOfficerDesignationView? Current);
+
+public enum HealthOfficerAdministrationStatus { Available, Recorded, Replayed, Denied, Invalid, Conflict, Unavailable, OutcomeUnknown }
+public sealed record HealthOfficerAdministrationLookupResult(HealthOfficerAdministrationStatus Status, HealthOfficerDesignationView? Current = null);
+public sealed record HealthOfficerAdministrationChangeResult(HealthOfficerAdministrationStatus Status, HealthOfficerDesignationChangeReceipt? Receipt = null);
+
+public interface IHealthOfficerAdministrationClient
+{
+    Task<HealthOfficerAdministrationLookupResult> LookupAsync(HealthOfficerDesignationLookupRequest request, CancellationToken cancellationToken = default);
+    Task<HealthOfficerAdministrationChangeResult> ChangeAsync(HealthOfficerDesignationChangeRequest request, CancellationToken cancellationToken = default);
+}

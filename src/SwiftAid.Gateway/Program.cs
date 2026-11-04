@@ -105,6 +105,7 @@ builder.Services.AddScoped<SwiftAid.Contracts.Intake.IIntakeCoordinationClient, 
 builder.Services.AddScoped<SwiftAid.Contracts.Cases.ICaseTimelineClient, SwiftAid.Gateway.Cases.CaseTimelineGatewayClient>();
 builder.Services.AddScoped<SwiftAid.Contracts.Cases.IFollowUpRecommendationReviewClient, SwiftAid.Gateway.Cases.FollowUpReviewGatewayClient>();
 builder.Services.AddScoped<SwiftAid.Contracts.Cases.IEligibleHealthOfficerClient, SwiftAid.Gateway.Cases.EligibleHealthOfficerGatewayClient>();
+builder.Services.AddScoped<SwiftAid.Contracts.Cases.IHealthOfficerAdministrationClient, SwiftAid.Gateway.Cases.HealthOfficerAdministrationGatewayClient>();
 builder.Services.AddScoped<SwiftAid.Contracts.Cases.ICaseCollaboratorCandidatesClient, SwiftAid.Gateway.Cases.CaseCollaboratorCandidatesGatewayClient>();
 builder.Services.AddScoped<SwiftAid.Contracts.Cases.ICaseQueueClient, SwiftAid.Gateway.Cases.CaseQueueGatewayClient>();
 builder.Services.AddScoped<SwiftAid.Contracts.Cases.IMonitoringQueueClient, SwiftAid.Gateway.Cases.MonitoringQueueGatewayClient>();
