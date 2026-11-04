@@ -1,4 +1,6 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.Extensions.Hosting;
 using SwiftAid.Application.Authorization;
 using SwiftAid.Application.Cases;
@@ -17,6 +19,97 @@ namespace SwiftAid.Integration.Tests;
 
 public sealed partial class CaseCommandProcessingPostgresTests
 {
+    [CaseAuthorityPostgresFact]
+    public async Task OfficerLookupRequiresDesignationSingleGrantAndEveryCaseRegion()
+    {
+        // Append-only designation rows are retained; run only in a disposable database.
+        var fixture = await CaseAuthorityPostgresFixture.CreateAsync();
+        var targetGrant = await AddEligibleTargetGrantAsync(fixture);
+        await AddOperationAsync(fixture, CaseOperation.ManageEscalation);
+        await using var db = fixture.CreateDbContext();
+        var unit = new PostgresCaseCommandUnitOfWork(db);
+        var policy = new CaseAccessPolicy(new PostgresCurrentAccessGrantStore(db, unit), new PostgresCaseAccessDescriptorStore(db, unit));
+        var store = new PostgresEligibleHealthOfficerStore(db);
+        var query = new EligibleHealthOfficerQuery(store, policy, unit, new HealthOfficerDirectoryOptions { Enabled = true });
+        var disabled = new EligibleHealthOfficerQuery(store, policy, unit, new HealthOfficerDirectoryOptions());
+        Assert.Null(await disabled.GetAsync(fixture.CreateActor(), fixture.CaseId, 20, default));
+        Assert.Empty((await query.GetAsync(fixture.CreateActor(), fixture.CaseId, 20, default))!.Items);
+        var designationId = Guid.NewGuid();
+        await db.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO health_officer_designations (designation_id, actor_id, organization_id, country_code, sector, status,
+                valid_from_utc, expires_at_utc, designated_by_actor_id, version, created_at_utc, updated_at_utc)
+            VALUES ({designationId}, {fixture.NewOwnerActorId}, {fixture.OrganizationId}, 'SZ', 'HumanHealth', 'Active',
+                clock_timestamp() - interval '1 day', clock_timestamp() + interval '1 day', {fixture.ActorId}, 1, clock_timestamp(), clock_timestamp())
+            """);
+        Assert.Empty((await query.GetAsync(fixture.CreateActor(), fixture.CaseId, 20, default))!.Items);
+        await db.AccessGrantGroups.Where(group => group.GrantGroupId == targetGrant)
+            .ExecuteUpdateAsync(update => update.SetProperty(group => group.CanAccessJurisdictionalCases, true));
+        var original = await db.AccessGrantGroups.SingleAsync(group => group.GrantGroupId == targetGrant);
+        var split = (AccessGrantGroupEntity)db.Entry(original).CurrentValues.ToObject();
+        split.GrantGroupId = targetGrant + "-split";
+        db.AccessGrantGroups.Add(split);
+        db.AccessGrantOperations.AddRange(
+            new AccessGrantOperationEntity { GrantGroupId = split.GrantGroupId, Operation = CaseOperation.ManageEscalation },
+            new AccessGrantOperationEntity { GrantGroupId = split.GrantGroupId, Operation = CaseOperation.ManageFollowUp });
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+        Assert.Empty((await query.GetAsync(fixture.CreateActor(), fixture.CaseId, 20, default))!.Items);
+        db.AccessGrantRegions.AddRange(
+            new AccessGrantRegionEntity { GrantGroupId = targetGrant, RegionId = fixture.CaseRegionId },
+            new AccessGrantRegionEntity { GrantGroupId = split.GrantGroupId, RegionId = fixture.CaseRegionId });
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+        Assert.Empty((await query.GetAsync(fixture.CreateActor(), fixture.CaseId, 20, default))!.Items);
+        db.AccessGrantOperations.AddRange(
+            new AccessGrantOperationEntity { GrantGroupId = targetGrant, Operation = CaseOperation.ManageEscalation },
+            new AccessGrantOperationEntity { GrantGroupId = targetGrant, Operation = CaseOperation.ManageFollowUp });
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+        var officer = Assert.Single((await query.GetAsync(fixture.CreateActor(), fixture.CaseId, 20, default))!.Items);
+        Assert.Equal(fixture.NewOwnerActorId, officer.ActorId);
+        Assert.Equal(designationId, officer.DesignationId);
+        Assert.Equal(1, officer.DesignationVersion);
+        Assert.Null(officer.DisplayLabel);
+        await db.Actors.Where(actor => actor.ActorId == fixture.NewOwnerActorId)
+            .ExecuteUpdateAsync(update => update.SetProperty(actor => actor.Status, PersistentActorStatus.Suspended));
+        Assert.Empty((await query.GetAsync(fixture.CreateActor(), fixture.CaseId, 20, default))!.Items);
+        await db.Actors.Where(actor => actor.ActorId == fixture.NewOwnerActorId)
+            .ExecuteUpdateAsync(update => update.SetProperty(actor => actor.Status, PersistentActorStatus.Active));
+        db.ManagedCaseRegions.Add(new ManagedCaseRegionEntity { CaseId = fixture.CaseId, RegionId = "extra-region" });
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+        Assert.Empty((await query.GetAsync(fixture.CreateActor(), fixture.CaseId, 20, default))!.Items);
+        db.AccessGrantRegions.Add(new AccessGrantRegionEntity { GrantGroupId = targetGrant, RegionId = "extra-region" });
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+        Assert.Single((await query.GetAsync(fixture.CreateActor(), fixture.CaseId, 20, default))!.Items);
+        await db.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO health_officer_designations (designation_id, actor_id, organization_id, country_code, sector, status,
+                valid_from_utc, expires_at_utc, designated_by_actor_id, version, created_at_utc, updated_at_utc)
+            VALUES ({Guid.NewGuid()}, {fixture.NewOwnerActorId}, {fixture.OrganizationId}, 'SZ', 'HumanHealth', 'Active',
+                clock_timestamp() - interval '2 days', clock_timestamp() - interval '1 day', {fixture.ActorId}, 2, clock_timestamp(), clock_timestamp())
+            """);
+        Assert.Empty((await query.GetAsync(fixture.CreateActor(), fixture.CaseId, 20, default))!.Items);
+        await db.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO health_officer_designations (designation_id, actor_id, organization_id, country_code, sector, status,
+                valid_from_utc, expires_at_utc, designated_by_actor_id, version, created_at_utc, updated_at_utc)
+            VALUES ({Guid.NewGuid()}, {fixture.NewOwnerActorId}, {fixture.OrganizationId}, 'SZ', 'HumanHealth', 'Active',
+                clock_timestamp() - interval '1 day', clock_timestamp() + interval '1 day', {fixture.ActorId}, 3, clock_timestamp(), clock_timestamp())
+            """);
+        Assert.Equal(3, Assert.Single((await query.GetAsync(fixture.CreateActor(), fixture.CaseId, 20, default))!.Items).DesignationVersion);
+        await db.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO health_officer_designations (designation_id, actor_id, organization_id, country_code, sector, status,
+                valid_from_utc, expires_at_utc, designated_by_actor_id, version, created_at_utc, updated_at_utc)
+            VALUES ({Guid.NewGuid()}, {fixture.NewOwnerActorId}, {fixture.OrganizationId}, 'SZ', 'HumanHealth', 'Revoked',
+                clock_timestamp() - interval '1 day', clock_timestamp() + interval '1 day', {fixture.ActorId}, 4, clock_timestamp(), clock_timestamp())
+            """);
+        Assert.Empty((await query.GetAsync(fixture.CreateActor(), fixture.CaseId, 20, default))!.Items);
+        Assert.Null(await query.GetAsync(CaseRegistrationBackendTests.CreateOfficer("unknown-" + Guid.NewGuid()), fixture.CaseId, 20, default));
+        await Assert.ThrowsAsync<Npgsql.PostgresException>(() => db.Database.ExecuteSqlInterpolatedAsync(
+            $"UPDATE health_officer_designations SET status = 'Revoked' WHERE designation_id = {designationId}"));
+        await Assert.ThrowsAsync<Npgsql.PostgresException>(() => db.GetService<IMigrator>().MigrateAsync("20261104130000_EllaiFollowUpReviews"));
+    }
+
     [CaseAuthorityPostgresFact]
     public async Task Follow_up_schedule_denies_recipient_with_read_only_grant()
     {
