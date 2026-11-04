@@ -11,6 +11,7 @@ public sealed record DueFollowUpReminder(
 
 public interface IFollowUpReminderScheduleStore
 {
+    /// <summary>Returns due schedules whose current recipient occurrence has not been materialized.</summary>
     Task<IReadOnlyList<DueFollowUpReminder>> GetDueAsync(
         DateTimeOffset nowUtc,
         int limit,

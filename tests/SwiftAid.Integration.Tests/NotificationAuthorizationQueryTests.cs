@@ -168,7 +168,7 @@ public sealed class NotificationAuthorizationQueryTests
         var (followUpId, _) = await fixture.AddDueFollowUpAsync().ConfigureAwait(false);
 
         Assert.Equal(1, await fixture.DispatchDueFollowUpsAsync().ConfigureAwait(false));
-        Assert.Equal(1, await fixture.DispatchDueFollowUpsAsync().ConfigureAwait(false));
+        Assert.Equal(0, await fixture.DispatchDueFollowUpsAsync().ConfigureAwait(false));
         Assert.Equal(1, await fixture.CountFollowUpNotificationsAsync(followUpId).ConfigureAwait(false));
         Assert.Equal(1, (await fixture.ReadPageAsync().ConfigureAwait(false)).TotalCount);
 
@@ -181,6 +181,42 @@ public sealed class NotificationAuthorizationQueryTests
 
         await fixture.CompleteFollowUpAsync(followUpId).ConfigureAwait(false);
         Assert.Equal(0, (await fixture.ReadPageAsync().ConfigureAwait(false)).TotalCount);
+    }
+
+    [CaseAuthorityPostgresFact]
+    public async Task MaterializedRemindersDoNotStarveLaterDueWork()
+    {
+        await using var fixture = await NotificationPostgresFixture.CreateAsync().ConfigureAwait(false);
+        var (firstId, eventId) = await fixture.AddDueFollowUpAsync().ConfigureAwait(false);
+        var secondId = await fixture.AddAnotherDueFollowUpAsync(eventId).ConfigureAwait(false);
+        await using var db = fixture.Authority.CreateDbContext();
+        var store = new PostgresFollowUpReminderScheduleStore(db);
+        var first = Assert.Single(await store.GetDueAsync(DateTimeOffset.UtcNow, 1, default));
+        Assert.Equal(firstId, first.FollowUpId);
+        var policyUnit = new PostgresCaseCommandUnitOfWork(db);
+        var policy = new CaseAccessPolicy(new PostgresCurrentAccessGrantStore(db, policyUnit),
+            new PostgresCaseAccessDescriptorStore(db, policyUnit));
+        var writer = new PostgresNotificationStore(db, new NotificationResourceAuthorizer(db, policy, policyUnit));
+        await writer.CreateWithDeliveryOutboxIfMissingAsync(first.ScheduleEventId,
+            $"case-follow-up:{first.FollowUpId:N}:{first.ScheduleVersion}", first.AssigneeActorId,
+            NotificationKind.CaseNeedsAttention, NotificationResourceKind.ManagedCase, first.CaseId,
+            NotificationAction.OpenCase, NotificationRecipientRequirement.CurrentFollowUpAssignee,
+            DateTimeOffset.UtcNow, default, first.FollowUpId, first.ScheduleVersion);
+        var next = Assert.Single(await store.GetDueAsync(DateTimeOffset.UtcNow, 1, default));
+        Assert.Equal(secondId, next.FollowUpId);
+        Assert.Equal(1, await fixture.DispatchDueFollowUpsAsync().ConfigureAwait(false));
+        Assert.Empty(await store.GetDueAsync(DateTimeOffset.UtcNow, 1, default));
+    }
+
+    [CaseAuthorityPostgresFact]
+    public async Task ReminderBacklogBeyondBatchLimitDrainsAcrossPolls()
+    {
+        await using var fixture = await NotificationPostgresFixture.CreateAsync().ConfigureAwait(false);
+        var (_, eventId) = await fixture.AddDueFollowUpAsync().ConfigureAwait(false);
+        await fixture.AddDueFollowUpsAsync(eventId, 100).ConfigureAwait(false);
+        Assert.Equal(100, await fixture.DispatchDueFollowUpsAsync().ConfigureAwait(false));
+        Assert.Equal(1, await fixture.DispatchDueFollowUpsAsync().ConfigureAwait(false));
+        Assert.Equal(0, await fixture.DispatchDueFollowUpsAsync().ConfigureAwait(false));
     }
 
     [CaseAuthorityPostgresFact]
@@ -398,6 +434,40 @@ internal sealed class NotificationPostgresFixture : IAsyncDisposable
         });
         await db.SaveChangesAsync().ConfigureAwait(false);
         return (followUpId, eventId);
+    }
+
+    public async Task<Guid> AddAnotherDueFollowUpAsync(Guid eventId)
+    {
+        var id = Guid.NewGuid();
+        _followUpIds.Add(id);
+        await using var db = Authority.CreateDbContext();
+        db.ManagedCaseFollowUps.Add(new ManagedCaseFollowUpEntity
+        {
+            FollowUpId = id, CaseId = Authority.CaseId, Purpose = "synthetic follow-up",
+            AssigneeActorId = Authority.ActorId, DueAtUtc = DateTimeOffset.UtcNow.AddSeconds(-1),
+            Status = FollowUpStatus.Scheduled, ScheduledVersion = 10001,
+            CurrentScheduleVersion = 10001, CurrentScheduleEventId = eventId
+        });
+        await db.SaveChangesAsync().ConfigureAwait(false);
+        return id;
+    }
+
+    public async Task AddDueFollowUpsAsync(Guid eventId, int count)
+    {
+        await using var db = Authority.CreateDbContext();
+        for (var index = 0; index < count; index++)
+        {
+            var id = Guid.NewGuid();
+            _followUpIds.Add(id);
+            db.ManagedCaseFollowUps.Add(new ManagedCaseFollowUpEntity
+            {
+                FollowUpId = id, CaseId = Authority.CaseId, Purpose = "synthetic follow-up",
+                AssigneeActorId = Authority.ActorId, DueAtUtc = DateTimeOffset.UtcNow.AddSeconds(-1),
+                Status = FollowUpStatus.Scheduled, ScheduledVersion = 10001,
+                CurrentScheduleVersion = 10001, CurrentScheduleEventId = eventId
+            });
+        }
+        await db.SaveChangesAsync().ConfigureAwait(false);
     }
 
     public async Task<int> DispatchDueFollowUpsAsync()
