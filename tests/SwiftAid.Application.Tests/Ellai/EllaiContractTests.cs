@@ -58,6 +58,15 @@ public sealed class EllaiContractTests
     }
 
     [Fact]
+    public void ValidNeedInputWithChoicesAndEmptySpeechPasses()
+    {
+        var decision = new EllaiDecision(2, DecisionKind.NeedInput, "Choose a window.", "",
+            [], [new EllaiQuestion("window", "Which window?", ["week", "month"])], [], null, [], null, null);
+
+        Assert.Empty(EllaiDecisionValidator.Validate(decision));
+    }
+
+    [Fact]
     public void ObservedClaimWithoutEvidenceIsRejected()
     {
         var claim = new GroundedClaim("c1", "created task", ClaimKind.Observed, Array.Empty<EvidenceRef>());

@@ -26,14 +26,19 @@ public static class EllaiDecisionValidator
             return errors;
         }
 
+        if (!Enum.IsDefined(decision.Kind))
+        {
+            errors.Add("Decision kind is unsupported.");
+        }
+
         if (string.IsNullOrWhiteSpace(decision.DisplayText) || decision.DisplayText.Length > MaxDisplayChars)
         {
             errors.Add("DisplayText must be 1..2000 characters.");
         }
 
-        if (CountWords(decision.SpokenText) > MaxSpokenWords)
+        if (decision.SpokenText is null || CountWords(decision.SpokenText) > MaxSpokenWords)
         {
-            errors.Add("SpokenText exceeds 120 words.");
+            errors.Add("SpokenText must be a string of at most 120 words.");
         }
 
         if (decision.UiIntents is null)
@@ -62,9 +67,11 @@ public static class EllaiDecisionValidator
                 errors.Add("At most 3 clarifying questions per decision.");
             }
 
-            if (decision.Questions.Any(question => question is null))
+            if (decision.Questions.Any(question => question is null || string.IsNullOrWhiteSpace(question.QuestionId) ||
+                string.IsNullOrWhiteSpace(question.Text) || question.Text.Length > 1000 || question.ChoiceIds is null ||
+                question.ChoiceIds.Count > 10 || question.ChoiceIds.Any(string.IsNullOrWhiteSpace)))
             {
-                errors.Add("Questions entries must be objects.");
+                errors.Add("Questions must have an identifier, bounded text and a valid choice array.");
             }
         }
 
@@ -80,6 +87,10 @@ public static class EllaiDecisionValidator
         if (decision.TopicRefs is null)
         {
             errors.Add("TopicRefs must be an array.");
+        }
+        else if (decision.TopicRefs.Any(string.IsNullOrWhiteSpace))
+        {
+            errors.Add("TopicRefs entries must be nonempty strings.");
         }
 
         if (decision.Kind == DecisionKind.NeedInput && decision.Questions is { Count: 0 })

@@ -339,6 +339,48 @@ public sealed class EllaiAgentFrameworkContractTests
         public void Dispose() { }
     }
 
+    [Theory]
+    [InlineData("kind")]
+    [InlineData("question")]
+    [InlineData("spoken")]
+    [InlineData("topic")]
+    public async Task MalformedDecisionFieldsAreRepairedBeforeCompletion(string defect)
+    {
+        using var model = new MalformedDecisionClient(defect);
+        var agent = new EllaiFrameworkAgent(model);
+        var context = new EllaiToolContext("session", "epoch", "public.product-help", null, 10, true,
+            AllowedTools: new HashSet<string>());
+        var result = await agent.RunAsync(context, "Synthetic policy", [new ChatMessage(ChatRole.User, "Help")], 256,
+            _ => Task.FromResult(true), (_, _, _) => throw new InvalidOperationException(),
+            new EllaiFrameworkUsage("session", new EllaiUsageLedger(), new InMemoryEllaiUsageStore()), default);
+        Assert.Equal("Done.", result?.DisplayText);
+        Assert.True(agent.LastRepairUsed);
+        Assert.Equal(2, model.Calls);
+    }
+
+    private sealed class MalformedDecisionClient(string defect) : IChatClient
+    {
+        public int Calls { get; private set; }
+        public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null,
+            CancellationToken cancellationToken = default)
+        {
+            var response = ++Calls == 1 ? defect switch
+            {
+                "kind" => ValidDecision.Replace("\"kind\":\"Answer\"", "\"kind\":99", StringComparison.Ordinal),
+                "question" => ValidDecision.Replace("\"kind\":\"Answer\"", "\"kind\":\"NeedInput\"", StringComparison.Ordinal)
+                    .Replace("\"questions\":[]", "\"questions\":[{\"questionId\":null,\"text\":null,\"choiceIds\":null}]", StringComparison.Ordinal),
+                "spoken" => ValidDecision.Replace("\"spokenText\":\"Done.\"", "\"spokenText\":null", StringComparison.Ordinal),
+                "topic" => ValidDecision.Replace("\"topicRefs\":[]", "\"topicRefs\":[null]", StringComparison.Ordinal),
+                _ => throw new InvalidOperationException()
+            } : ValidDecision;
+            return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant, response)));
+        }
+        public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+        public void Dispose() { }
+    }
+
     [Fact]
     public async Task FrameworkRepairsMalformedToolArgumentsBeforeBrokerInvocation()
     {
