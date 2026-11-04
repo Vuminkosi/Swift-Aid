@@ -23,14 +23,21 @@ public sealed class EllaiOwnedCaseCountPostgresTests
     [FrameworkPostgresFact]
     public Task WorkerCommitsAuthorizedCountToPostgresAndResponseFeed() => RunWorkerCountAsync(revoke: false);
 
-    private static async Task RunWorkerCountAsync(bool revoke)
+    [LiveCountFact]
+    public Task LiveMuseWorkerCommitsAuthorizedPostgresCount() => RunWorkerCountAsync(revoke: false, liveModel: true);
+
+    private static async Task RunWorkerCountAsync(bool revoke, bool liveModel = false)
     {
         await using var fixture = await CaseAuthorityPostgresFixture.CreateAsync(frameworkFixture: true);
         var sessionId = "count-worker-" + Guid.NewGuid().ToString("N");
         var actor = fixture.CreateActor();
         var consent = new EllaiConsentService();
         var barrier = new AggregatePublicationBarrier();
-        using var model = new CountClient();
+        var options = liveModel ? EllaiOptions.Bind(Environment.GetEnvironmentVariable) : new EllaiOptions
+        {
+            Enabled = true, ApiKey = "synthetic", ApiUrl = "https://fixture.invalid", ReasoningModel = "fixture"
+        };
+        using IChatClient model = liveModel ? EllaiMuseChatClientFactory.Create(options) : new CountClient();
         var services = new ServiceCollection();
         services.AddScoped(_ => fixture.CreateDbContext());
         services.AddScoped<PostgresEllaiSessionStore>();
@@ -50,10 +57,7 @@ public sealed class EllaiOwnedCaseCountPostgresTests
         services.AddScoped(sp => new EllaiToolBroker(new EllaiPolicyService(), consent,
             dashboard: sp.GetRequiredService<IDashboardAggregateQuery>()));
         services.AddScoped(_ => new EllaiPromptBuilder("Synthetic policy", "fixture"));
-        services.AddEllaiReasoningExecutor(new EllaiOptions
-        {
-            Enabled = true, ApiKey = "synthetic", ApiUrl = "https://fixture.invalid", ReasoningModel = "fixture"
-        }, "framework");
+        services.AddEllaiReasoningExecutor(options, "framework");
         services.AddKeyedSingleton<IChatClient>(EllaiReasoningRegistration.FrameworkClientKey, model);
         await using var provider = services.BuildServiceProvider();
         using var worker = new EllaiUtteranceWorker(provider, NullLogger<EllaiUtteranceWorker>.Instance);
@@ -65,7 +69,8 @@ public sealed class EllaiOwnedCaseCountPostgresTests
                     actor.ActorId, "scope", null, null, DateTimeOffset.UtcNow);
                 var store = new PostgresEllaiSessionStore(db);
                 await store.CreateAsync(session, default);
-                var work = new EllaiUtteranceWork(sessionId, "scope", "Count my cases", "cases", null,
+                var work = new EllaiUtteranceWork(sessionId, "scope", liveModel
+                    ? "How many of my readable managed cases were created in the last 30 days?" : "Count my cases", "cases", null,
                     EllaiMode.Ask, 1, "count-cycle", actor, true, "consent/0",
                     EllaiProcessingClassification.UserProvidedNonSensitive, EllaiProcessingClassification.UserProvidedNonSensitive,
                     new HashSet<string> { EllaiToolNames.OwnedCaseCount }, EllaiConsentPurposes.PublicProductHelp, "count-turn");
@@ -73,8 +78,14 @@ public sealed class EllaiOwnedCaseCountPostgresTests
                     work.ClientUtteranceId, default, EllaiUtteranceWorkEnvelope.Serialize(work, work.ClientUtteranceId)));
             }
             await worker.StartAsync(default);
-            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-            await barrier.Started.Task.WaitAsync(timeout.Token);
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(liveModel ? 180 : 30));
+            while (!barrier.Started.Task.IsCompleted)
+            {
+                await Task.Delay(100, timeout.Token);
+                await using var db = fixture.CreateDbContext();
+                var current = Assert.Single(await new PostgresEllaiSessionStore(db).ReadConversationAsync(sessionId, actor.ActorId, timeout.Token));
+                Assert.True(current.CompletedAtUtc is null, $"Worker completed before the count recheck: {current.Outcome}.");
+            }
             var responses = provider.GetRequiredService<EllaiSessionResponseStore>();
             var provisional = responses.ReadSince(sessionId, 0, take: 64).Responses;
             Assert.DoesNotContain(provisional, item => item.Text.Contains("managed case(s)", StringComparison.Ordinal));
