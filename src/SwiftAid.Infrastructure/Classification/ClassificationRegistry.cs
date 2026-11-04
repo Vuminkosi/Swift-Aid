@@ -30,6 +30,20 @@ public sealed class ClassificationRegistry(
         var noticeHash = ClassificationFingerprint.Hash(JsonSerializer.Serialize(notice, Json));
         var now = clock.GetUtcNow();
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        if (backfillJobId is { } admissionJobId)
+        {
+            // Share the job lock with snapshot reconciliation and control. The
+            // earlier endpoint check is outside this transaction and cannot fence
+            // a concurrent job transition on its own.
+            await LockAsync($"classification-backfill:{admissionJobId}", ct);
+            var admitted = await (from job in db.Set<ClassificationBackfillEntity>().AsNoTracking()
+                                  join item in db.Set<ClassificationBackfillItemEntity>().AsNoTracking() on job.Id equals item.JobId
+                                  where job.Id == admissionJobId && job.WorkerId == Options.WorkerId &&
+                                      job.ConfigurationHash == Options.Profile.Hash &&
+                                      Options.Organizations.Contains(job.OrganizationId) && item.SourceEventId == notice.MessageId
+                                  select job.Id).AnyAsync(ct);
+            if (!admitted) throw new UnauthorizedAccessException();
+        }
         await LockAsync($"classification-inbox:{notice.MessageId}:{Options.Profile.Hash}", ct);
         var sourceNotice = await db.CaseEvents.AsNoTracking().SingleOrDefaultAsync(e => e.EventId == notice.MessageId, ct);
         if (sourceNotice is null || sourceNotice.CaseId != notice.SourceId || sourceNotice.AggregateVersion != notice.SourceVersion ||
