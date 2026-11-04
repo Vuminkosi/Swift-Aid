@@ -14,7 +14,9 @@ public sealed class SessionSubscriptionPresentationTests
         Assert.True(SessionSubscriptionPresentation.IsConfirmedUpdate(result, sessionId, SubscriptionStatus.Active, 2));
         Assert.False(SessionSubscriptionPresentation.IsConfirmedUpdate(result, Guid.NewGuid(), SubscriptionStatus.Active, 2));
         Assert.False(SessionSubscriptionPresentation.IsConfirmedUpdate(result, sessionId, SubscriptionStatus.Unsubscribed, 2));
-        Assert.False(SessionSubscriptionPresentation.IsConfirmedUpdate(result, sessionId, SubscriptionStatus.Active, 4));
+        Assert.True(SessionSubscriptionPresentation.IsConfirmedUpdate(result, sessionId, SubscriptionStatus.Active, 10));
+        var unsubscribed = result with { Value = result.Value! with { Status = SubscriptionStatus.Unsubscribed } };
+        Assert.False(SessionSubscriptionPresentation.IsConfirmedUpdate(unsubscribed, sessionId, SubscriptionStatus.Unsubscribed, 4));
         Assert.False(SessionSubscriptionPresentation.IsConfirmedUpdate(result with { Value = result.Value! with { IsSynthetic = true } }, sessionId, SubscriptionStatus.Active, 2));
         Assert.False(SessionSubscriptionPresentation.IsConfirmedUpdate(result with { Metadata = metadata with { IsAvailable = false } }, sessionId, SubscriptionStatus.Active, 2));
     }

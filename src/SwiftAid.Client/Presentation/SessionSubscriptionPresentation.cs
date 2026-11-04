@@ -5,11 +5,14 @@ public sealed record SessionSubscriptionUpdateFeedback(bool IsError, string? Mes
 /// <summary>Normalizes authentication and subscription state for reminder presentation.</summary>
 public static class SessionSubscriptionPresentation
 {
+    // Subscribe carries a session version; unsubscribe carries a subscription version.
     public static bool IsConfirmedUpdate(UiCapabilityResult<SubscriptionView> result, Guid sessionId, SubscriptionStatus expectedStatus, long expectedVersion) =>
-        sessionId != Guid.Empty && expectedVersion >= 0 && result.Succeeded && result.Metadata.IsAvailable &&
+        sessionId != Guid.Empty && expectedVersion >= 0 && (expectedStatus is SubscriptionStatus.Active or SubscriptionStatus.Unsubscribed) &&
+        result.Succeeded && result.Metadata.IsAvailable &&
         result.Metadata.Provenance == UiCapabilityProvenance.LiveService &&
         result.Value is { IsSynthetic: false, Version: > 0 } value &&
-        value.SessionId == sessionId && value.Status == expectedStatus && value.Version >= expectedVersion;
+        value.SessionId == sessionId && value.Status == expectedStatus &&
+        (expectedStatus == SubscriptionStatus.Active || value.Version >= expectedVersion);
 
     public static SessionSubscriptionUpdateFeedback UpdateFeedback(bool confirmed, bool refreshAvailable, string? successMessage, string? refreshMessage)
     {
