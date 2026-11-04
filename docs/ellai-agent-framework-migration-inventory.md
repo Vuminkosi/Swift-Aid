@@ -4482,3 +4482,15 @@ application test project's `TestResults`. The post-commit application suite
 passed 1,268, failed 0 and skipped 19 with `--no-build --no-restore -m:1
 -nr:false`. Deployed behavior, non-streaming fault injection and independent security
 review remain unverified.
+
+### Main-worktree integration rerun ? 2026-11-04
+
+The default integration suite was rebuilt and run from the main worktree after
+the migration merge and the organization-owner fixture repairs. At the start
+of the run, `interactive-ellai` was at `088ca00e`; the shared worktree advanced
+to `744cc0f6` while the command was running, so this result is not proof for
+the later revision. With `OS=Windows_NT`, `dotnet test
+tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj --no-restore
+-m:1 -nr:false -p:WasmBuildNative=false --logger 'console;verbosity=quiet'`
+passed 855, failed 0 and skipped 399. The skipped cases, live deployments,
+physical devices and independent security acceptance remain NOT VERIFIED.
