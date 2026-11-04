@@ -97,7 +97,7 @@
         {
             <p role="status" class="ellai-guided-conversation__validation">@_validationGuidanceText</p>
         }
-        @if (!string.IsNullOrWhiteSpace(context.ValidationMessage))
+        @if (_validationGuidanceText is null && !string.IsNullOrWhiteSpace(context.ValidationMessage))
         {
             <p role="status" class="ellai-guided-conversation__validation">@context.ValidationMessage</p>
         }

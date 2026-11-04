@@ -53,7 +53,7 @@ public sealed partial class EllaiGuidanceProposalAdmission
                 admission.Observation.ValidationInputIds?.Select(EllaiReportValidationGuidance.Find)
                     .FirstOrDefault(item => item is not null)?.InputId != request.ValidationInputId ||
                 EllaiReportValidationGuidance.Find(request.ValidationInputId) is not { } issue ||
-                EllaiReportValidationGuidance.ControlFor(request.ValidationInputId) != step.ControlId) return null;
+                EllaiReportValidationGuidance.ControlFor(request.ValidationInputId) is null) return null;
             narration = issue.Message;
         }
         var turn = (await outbox.ReadConversationAsync(sessionId, authority.OwnerActorId, ct).ConfigureAwait(false))
@@ -68,7 +68,7 @@ public sealed partial class EllaiGuidanceProposalAdmission
             if (latest is null || latest.ContextStamp != request.ObservationContextStamp ||
                 latest.ValidationInputIds?.Select(EllaiReportValidationGuidance.Find)
                     .FirstOrDefault(item => item is not null)?.InputId != request.ValidationInputId ||
-                EllaiReportValidationGuidance.ControlFor(request.ValidationInputId) != step.ControlId) return null;
+                EllaiReportValidationGuidance.ControlFor(request.ValidationInputId) is null) return null;
         }
         return responses.PublishOrGetProgress(sessionId, turn.ClientUtteranceId, narration,
             new(validationEventId ?? request.EventId, "Guidance", "Guidance", true, session.InteractionEpoch,
