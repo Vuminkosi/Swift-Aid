@@ -1,5 +1,6 @@
 @using SwiftAid.Contracts.Ellai
 @using System.ComponentModel.DataAnnotations
+@using System.Globalization
 @using Microsoft.AspNetCore.Components.Forms
 @using SwiftAid.Contracts.Geography
 @using SwiftAid.Contracts.Intake
@@ -211,8 +212,8 @@
                 @if (Draft.OccurrencePrecision != ReportedTimePrecision.Unknown)
                 {
                     <div class="@ValidationClass(nameof(Draft.OccurrenceDate))" tabindex="-1" @ref="_dateValidationTarget">
-                    <MudTextField T="DateTime?" Label="Reported date" InputType="InputType.Date" Variant="Variant.Outlined"
-                                  @bind-Value="Draft.OccurrenceDate" For="@(() => Draft.OccurrenceDate)" />
+                    <MudTextField T="string" Label="Reported date" InputType="InputType.Date" Variant="Variant.Outlined"
+                                  Value="@ReportedDateInput" ValueChanged="ReportedDateChangedAsync" />
                     </div>
                 }
                 @if (Draft.OccurrencePrecision == ReportedTimePrecision.Exact)
@@ -456,6 +457,7 @@
     private ElementReference _localityValidationTarget;
     private string? _validationField;
     private string? _validationMessage;
+    private SwiftAid.UI.Ellai.Guidance.EllaiValidationGuidance? _validationGuidance;
     private bool _followValidation;
     private bool _focusValidationFieldAfterRender;
     private MudTextField<string>? _observationsField;
@@ -884,6 +886,16 @@
         !string.IsNullOrWhiteSpace(countryCode) &&
         Countries.Any(country => string.Equals(country.Code, countryCode.Trim(), StringComparison.OrdinalIgnoreCase));
 
+    private string? ReportedDateInput => Draft.OccurrenceDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+
+    private Task ReportedDateChangedAsync(string? value)
+    {
+        Draft.OccurrenceDate = DateTime.TryParseExact(value, "yyyy-MM-dd", CultureInfo.InvariantCulture,
+            DateTimeStyles.None, out var date) ? date : null;
+        _editContext.NotifyFieldChanged(new FieldIdentifier(Draft, nameof(Draft.OccurrenceDate)));
+        return Task.CompletedTask;
+    }
+
     private string LocationSummary
     {
         get
@@ -1135,6 +1147,21 @@
             isValid = false;
         }
 
+        foreach (var (field, label, presence, value) in new[]
+        {
+            (nameof(Draft.Region), "region", Draft.RegionPresence, Draft.Region),
+            (nameof(Draft.Area), "area or district", Draft.AreaPresence, Draft.Area),
+            (nameof(Draft.Locality), "locality", Draft.LocalityPresence, Draft.Locality)
+        })
+        {
+            if (presence == PresenceState.Known && value is { Length: > 200 })
+            {
+                _showManualPlaces = true;
+                AddError(field, $"Use no more than 200 characters for the {label}, or mark it unknown.");
+                isValid = false;
+            }
+        }
+
         if (!Draft.LocationUnknown &&
             string.IsNullOrWhiteSpace(Draft.CountryCode) &&
             Draft.RegionPresence != PresenceState.Known &&
@@ -1164,9 +1191,12 @@
         }
     }
 
-    private void PublishValidation() =>
-        (Services?.GetService(typeof(SwiftAid.UI.Ellai.Guidance.EllaiValidationGuidance)) as
-            SwiftAid.UI.Ellai.Guidance.EllaiValidationGuidance)?.Publish(_validationMessage);
+    private void PublishValidation()
+    {
+        _validationGuidance ??= Services?.GetService(typeof(SwiftAid.UI.Ellai.Guidance.EllaiValidationGuidance)) as
+            SwiftAid.UI.Ellai.Guidance.EllaiValidationGuidance;
+        _validationGuidance?.Publish(_validationMessage);
+    }
 
     private bool HasValidExactTime()
     {
@@ -1485,7 +1515,7 @@
     public void Dispose()
     {
         _validationMessage = null;
-        PublishValidation();
+        _validationGuidance?.Publish(null);
         if (_editContext is not null)
         {
             _editContext.OnFieldChanged -= HandleFieldChanged;

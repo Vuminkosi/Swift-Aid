@@ -56,6 +56,56 @@ public sealed partial class GuidedReportDraftPersistenceTests
         Assert.Equal(nameof(PublicReportDraft.Area), GetField<string>(component, "_validationField"));
         Assert.DoesNotContain("Synthetic region", GetField<string>(component, "_validationMessage"));
     }
+
+    [Fact]
+    public async Task ValidationGuidanceTargetsOverlongPlacesOneAtATimeBeforeReview()
+    {
+        var component = CreateStepper(CreateDraft(), _ => Task.CompletedTask);
+        var guidance = new EllaiValidationGuidance();
+        var messages = new List<string?>();
+        guidance.Changed += messages.Add;
+        using var services = new ServiceCollection().AddSingleton(guidance).BuildServiceProvider();
+        typeof(GuidedReportStepper).GetProperty("Services", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .SetValue(component, services);
+        component.Draft.RegionPresence = PresenceState.Known;
+        component.Draft.Region = new string('r', 201);
+        component.Draft.AreaPresence = PresenceState.Known;
+        component.Draft.Area = new string('a', 201);
+        await (Task)Invoke(component, "ContinueFromTypeAsync")!;
+        await (Task)Invoke(component, "ContinueToReviewAsync")!;
+        Assert.Equal(nameof(PublicReportDraft.Region), GetField<string>(component, "_validationField"));
+        Assert.Contains("region", messages.Last()!);
+
+        component.Draft.Region = new string('r', 200);
+        typeof(GuidedReportStepper).GetMethod("HandleFieldChanged", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .Invoke(component, [null, new Microsoft.AspNetCore.Components.Forms.FieldChangedEventArgs(
+                new Microsoft.AspNetCore.Components.Forms.FieldIdentifier(component.Draft, nameof(PublicReportDraft.Region)))]);
+        Assert.Equal(nameof(PublicReportDraft.Area), GetField<string>(component, "_validationField"));
+        Assert.Contains("area or district", messages.Last()!);
+        Assert.DoesNotContain(new string('a', 201), messages.Last()!);
+    }
+
+    [Fact]
+    public async Task ReportedDateInputUsesHtmlDateFormatAndRejectsInvalidDates()
+    {
+        var component = CreateStepper(CreateDraft(), _ => Task.CompletedTask);
+        var method = typeof(GuidedReportStepper).GetMethod("ReportedDateChangedAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        await (Task)method.Invoke(component, ["2026-11-01"])!;
+        Assert.Equal(new DateTime(2026, 11, 1), component.Draft.OccurrenceDate);
+        await (Task)method.Invoke(component, ["2026-02-30"])!;
+        Assert.Null(component.Draft.OccurrenceDate);
+    }
+
+    [Fact]
+    public void DisposingUnpublishedValidationDoesNotResolveDisposedServices()
+    {
+        var component = CreateStepper(CreateDraft(), _ => Task.CompletedTask);
+        var services = new ServiceCollection().BuildServiceProvider();
+        typeof(GuidedReportStepper).GetProperty("Services", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .SetValue(component, services);
+        services.Dispose();
+        component.Dispose();
+    }
     [Theory]
     [InlineData(nameof(PublicReportDraft.CountryConfirmed), true)]
     [InlineData(nameof(PublicReportDraft.ProcessingConfirmed), true)]
