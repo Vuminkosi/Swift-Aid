@@ -4638,3 +4638,9 @@ PASS: Gateway build (dotnet build src/SwiftAid.Gateway/SwiftAid.Gateway.csproj -
 The case-query instructions now distinguish an InvalidArguments rejection from a successful empty result. On a user correction, Ellai retries the same query with only the corrected argument, preserves prior filters and references, validates actual calendar dates, and maps Eswatini to the registered ISO code SZ. It reports outcomes only from the corrected tool result, supporting conversation scenario 2.2.
 
 PASS: Gateway build (dotnet build src/SwiftAid.Gateway/SwiftAid.Gateway.csproj --no-restore -m:1 -nr:false -p:WasmBuildNative=false --verbosity quiet, 0 warnings, 0 errors); git diff --check. Tests were not added or run, per user instruction. NOT VERIFIED: live model tool selection and the multi-turn corrected query against authorized case data.
+
+### Ellai missing-target replan turn fencing - 2026-11-04
+
+The Find another way action now binds replanning to the latest completed durable conversation turn. If a user turn is still queued or processing, it waits instead of starting a plan fenced against an older turn. The existing proposal and conversation are retained, allowing a changed UI observation to be replanned without highlighting an absent target.
+
+PASS: Gateway build (dotnet build src/SwiftAid.Gateway/SwiftAid.Gateway.csproj --no-restore -m:1 -nr:false -p:WasmBuildNative=false --verbosity quiet, 0 warnings, 0 errors); git diff --check. Tests were not added or run, per user instruction. NOT VERIFIED: live Bit.Bonboarding replan after a missing target, or cross-page recovery in a browser.

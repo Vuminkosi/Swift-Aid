@@ -487,6 +487,14 @@ public partial class EllaiGuidanceHost
     {
         if (!_guidanceReplanRequired || _advancingValidatedInput || _preparingGuidance ||
             _generatedTour is null || _guidanceProposalId is null) return;
+        if (_lastDurableTurn is { Outcome: "Completed" } latestTurn)
+            _guidanceProposalTurn = latestTurn.ClientUtteranceId;
+        else if (_lastDurableTurn is not null)
+        {
+            _guidanceNotice = "Wait for Ellai to finish the current turn before finding another way.";
+            StateHasChanged();
+            return;
+        }
         _guidanceReplanRequired = false;
         CancelGuidanceCountdown();
         await CancelGeneratedGuidanceAsync();
