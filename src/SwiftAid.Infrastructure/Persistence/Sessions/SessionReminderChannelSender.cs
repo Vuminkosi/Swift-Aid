@@ -93,9 +93,6 @@ public sealed class SessionReminderChannelSender(
         foreach (var device in devices)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (!await IsCurrentAsync(delivery, cancellationToken).ConfigureAwait(false))
-                return accepted ? SessionReminderSendStatus.OutcomeUnknown : SessionReminderSendStatus.NoRoute;
-
             IReadOnlyList<PushDeviceForDelivery> currentDevices;
             try
             {
@@ -114,6 +111,8 @@ public sealed class SessionReminderChannelSender(
 
             var currentDevice = currentDevices.SingleOrDefault(item => item.InstallationId == device.InstallationId);
             if (currentDevice is null) continue;
+            if (!await IsCurrentAsync(delivery, cancellationToken).ConfigureAwait(false))
+                return accepted ? SessionReminderSendStatus.OutcomeUnknown : SessionReminderSendStatus.NoRoute;
 
             PushNotificationResult result;
             try
