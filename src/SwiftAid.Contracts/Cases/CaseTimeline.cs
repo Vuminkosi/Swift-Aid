@@ -74,6 +74,7 @@ public static class CaseAgentActivityPresentation
         "ops.quality" => "Data Quality",
         "ops.enrichment" => "Case Enrichment",
         "ops.followup" => "Follow-up",
+        "ops.organization" => "Case Organization",
         _ => "Agent"
     };
 
@@ -82,6 +83,7 @@ public static class CaseAgentActivityPresentation
         ("ops.quality", _) => "Reported-data quality assessed",
         ("ops.enrichment", "ClassificationReused") => "Existing classification attached to the case",
         ("ops.enrichment", _) => "Classification processing completed",
+        ("ops.organization", _) => "Queue suggestion recorded for staff review",
         ("ops.followup", "Clarification:occurrence-not-known") => "Suggested question: If known, when did the reported event happen?",
         ("ops.followup", "Clarification:region-not-known") => "Suggested question: If known, which region was reported?",
         ("ops.followup", "Clarification:incomplete-coordinate-pair") => "Suggested question: If known, can the reported coordinates be confirmed as a pair?",

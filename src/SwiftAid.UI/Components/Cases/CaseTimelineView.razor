@@ -129,6 +129,10 @@
                                         @foreach (var activity in entry.AgentActivities)
                                         {
                                             <li>Ellai - @CaseAgentActivityPresentation.RoleLabel(activity.RoleId): @CaseAgentActivityPresentation.ActivityLabel(activity.RoleId, activity.RecommendationKind)
+                                                @if (activity.RoleId == "ops.organization" && activity.RecommendationKind?.StartsWith("Queue:", StringComparison.Ordinal) == true)
+                                                {
+                                                    <span>Suggested queue: @activity.RecommendationKind[6..]. @(activity.FollowUpIsCurrent == true ? "Review required; no assignment was made." : "Historical suggestion; the case has changed.")</span>
+                                                }
                                                 <time datetime="@activity.RecordedAtUtc.ToString("O")">@activity.RecordedAtUtc.ToLocalTime().ToString("g")</time>
                                                 @if (activity.FollowUpReviewedAtUtc is { } reviewedAt)
                                                 {
