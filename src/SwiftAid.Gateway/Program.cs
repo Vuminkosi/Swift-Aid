@@ -328,6 +328,7 @@ app.MapEligibleHealthOfficerEndpoints();
 app.MapHealthOfficerDesignationEndpoints();
 app.MapFollowUpReviewEndpoints();
 app.MapOrganizationDecisionEndpoints();
+app.MapCaseCorrelationEndpoints();
 app.MapCaseDetailEndpoints();
 app.MapCaseQueueEndpoints();
 app.MapMapAggregateEndpoints();

@@ -21,6 +21,7 @@ using SwiftAid.Application.Abstractions;
 using SwiftAid.Application.Attachments;
 using SwiftAid.Application.Authorization;
 using SwiftAid.Application.Cases;
+using SwiftAid.Application.Cases.Correlation;
 using SwiftAid.Application.Demo;
 using SwiftAid.Application.Cases.Commands;
 using SwiftAid.Application.Cases.Registration;
@@ -402,6 +403,8 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ICaseCommandPersistence, PostgresCaseCommandPersistence>();
         services.AddScoped<ICaseCommandProcessor, CaseCommandProcessor>();
         services.AddScoped<ICaseTimelineStore, PostgresCaseTimelineStore>();
+        services.AddScoped<ICaseCorrelationStore, PostgresCaseCorrelationStore>();
+        services.AddScoped<CaseCorrelationQuery>();
         services.AddScoped<ICaseTimelineQuery, CaseTimelineQuery>();
         services.AddScoped<IFollowUpRecommendationReviewService, PostgresFollowUpRecommendationReviewService>();
         services.AddScoped<IOrganizationSuggestionDecisionService, PostgresOrganizationSuggestionDecisionService>();
