@@ -2,6 +2,8 @@
 
 The quality and follow-up schedulers use `CadenceHours` (4 or 8), `PolicyVersion`, and a positive `ConfigurationRevision`. The default cadence is 4 hours and the default revision is 1. Configuration is scoped by the worker's explicitly configured workspace and organization lists.
 
+Quality schedules fingerprint the policy version, organization scope, and quality rules version. Enrichment schedules fingerprint the policy version, organization scope, worker identity, classification profile, and batch size. Deploy fingerprint-aware workers to every replica and allow old workers to drain before increasing each affected configuration revision; existing schedules created by older versions require a higher revision. Keep these settings identical across replicas and increase the relevant revision whenever they change.
+
 Apply the operational schedule configuration revision migration before deploying workers that use it. Deploy the revision-aware worker version to all replicas before increasing a configuration revision: older binaries do not enforce the revision when claiming work. Do not enable new settings until the old workers have drained.
 
 Apply both enrichment provenance migrations before deploying the updated Gateway: case timeline reads and classification claims use their tables even when enrichment scheduling is disabled. Jobs created before those migrations have no recorded enrichment provenance and do not acquire a retrospective timeline entry.

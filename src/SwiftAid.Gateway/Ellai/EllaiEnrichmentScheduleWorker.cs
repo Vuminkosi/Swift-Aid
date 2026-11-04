@@ -72,14 +72,23 @@ public sealed class EllaiEnrichmentScheduleWorker(IServiceScopeFactory scopes,
                 db.Organizations.Any(item => item.OrganizationId == link.OrganizationId && item.Status == PersistentResourceStatus.Active))
             .OrderBy(link => link.OrganizationId).Select(link => link.OrganizationId).ToArrayAsync(ct).ConfigureAwait(false);
         if (organizations.Length == 0) return;
+        var policyBytes = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(new
+        {
+            options.PolicyVersion,
+            Organizations = settings.Organizations.OrderBy(id => id, StringComparer.Ordinal).ToArray(),
+            settings.WorkerId,
+            ProfileHash = settings.Profile.Hash,
+            options.BatchSize
+        });
+        var effectivePolicy = "enrichment-sha256:" + Convert.ToHexString(SHA256.HashData(policyBytes));
         var schedule = new PostgresEllaiOperationalScheduleStore(db);
         var jitter = BinaryPrimitives.ReadUInt32BigEndian(SHA256.HashData(Encoding.UTF8.GetBytes("ops.enrichment:" + workspace))) % 300;
-        await schedule.ReconcileConfigurationAsync(workspace, "ops.enrichment", options.CadenceHours, options.PolicyVersion,
+        await schedule.ReconcileConfigurationAsync(workspace, "ops.enrichment", options.CadenceHours, effectivePolicy,
             options.ConfigurationRevision, DateTimeOffset.UtcNow.AddSeconds(jitter), ct).ConfigureAwait(false);
         var matches = await db.Database.SqlQuery<int>($"""
             SELECT count(*)::int AS "Value" FROM ellai_operational_schedules
             WHERE workspace_id = {workspace} AND role_id = 'ops.enrichment' AND cadence_hours = {options.CadenceHours}
-                AND policy_version = {options.PolicyVersion} AND configuration_revision = {options.ConfigurationRevision}
+                AND policy_version = {effectivePolicy} AND configuration_revision = {options.ConfigurationRevision}
             """).SingleAsync(ct).ConfigureAwait(false);
         if (matches != 1) { logger.LogWarning("Ellai enrichment schedule configuration mismatch."); return; }
         var lease = await schedule.TryClaimAsync(workspace, "ops.enrichment", TimeSpan.FromMinutes(5), ct,
@@ -91,6 +100,7 @@ public sealed class EllaiEnrichmentScheduleWorker(IServiceScopeFactory scopes,
         var jobsCreated = 0;
         try
         {
+            if (!string.Equals(lease.PolicyVersion, effectivePolicy, StringComparison.Ordinal)) return;
             var factory = services.GetRequiredService<IEllaiFrameworkAgentFactory>();
             var client = services.GetRequiredKeyedService<IChatClient>(EllaiReasoningRegistration.FrameworkClientKey);
             var agent = factory.Create(client, new ChatClientAgentOptions
