@@ -53,7 +53,12 @@
                 </li>
             }
         </ul>
-        <MudText Typo="Typo.caption">Only 100 candidates, ordered by newest report, are checked. A review decision does not merge or change either case.</MudText>
+        <MudText Typo="Typo.caption">Candidates are ordered by newest report. A review decision does not merge or change either case.</MudText>
+        @if (_result.NextCursor is not null)
+        {
+            <MudButton Variant="Variant.Text" Disabled="@_loadingMore" OnClick="LoadMoreAsync">@(_loadingMore ? "Loading…" : "Load more")</MudButton>
+            @if (_moreError) { <MudText Typo="Typo.body2" role="alert">Couldn't load more suggestions. Try again.</MudText> }
+        }
     }
 </section>
 
@@ -62,7 +67,9 @@
     private Guid _loadedCaseId;
     private long _generation;
     private bool _loading;
-    private CaseCorrelationReadResult? _result;
+    private CaseCorrelationPage? _result;
+    private bool _loadingMore;
+    private bool _moreError;
     private Guid? _reviewingId;
     private string _rationale = "";
     private bool _submitting;
@@ -136,15 +143,35 @@
         var generation = ++_generation;
         var caseId = CaseId;
         _loading = true;
+        _loadingMore = false;
+        _moreError = false;
         _result = null;
         try
         {
             var client = Services.GetService<ICaseCorrelationClient>();
-            var result = client is null || caseId == Guid.Empty ? null : await client.GetAsync(caseId);
+            var result = client is null || caseId == Guid.Empty ? null : await client.GetPageAsync(caseId, null);
             if (generation == _generation && caseId == CaseId) _result = result;
         }
         catch (Exception error) when (error is not OutOfMemoryException) { }
         finally { if (generation == _generation) _loading = false; }
+    }
+
+    private async Task LoadMoreAsync()
+    {
+        if (_loadingMore || _result?.NextCursor is not { } cursor || Services.GetService<ICaseCorrelationClient>() is not { } client) return;
+        var generation = _generation;
+        var caseId = CaseId;
+        _loadingMore = true;
+        _moreError = false;
+        try
+        {
+            var page = await client.GetPageAsync(caseId, cursor);
+            if (generation != _generation || caseId != CaseId) return;
+            if (page is null || !page.Allowed) { _moreError = true; return; }
+            _result = page with { Candidates = _result.Candidates.Concat(page.Candidates).ToArray() };
+        }
+        catch (Exception error) when (error is not OutOfMemoryException) { if (generation == _generation) _moreError = true; }
+        finally { if (generation == _generation) _loadingMore = false; }
     }
 
     private static string ReasonLabel(string reason) => reason switch

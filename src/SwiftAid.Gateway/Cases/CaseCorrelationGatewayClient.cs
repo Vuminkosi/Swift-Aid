@@ -8,6 +8,21 @@ namespace SwiftAid.Gateway.Cases;
 
 public sealed class CaseCorrelationGatewayClient(AuthenticationStateProvider authentication, IServiceProvider services) : ICaseCorrelationClient
 {
+    public async Task<CaseCorrelationPage?> GetPageAsync(Guid caseId, string? cursor, CancellationToken cancellationToken = default)
+    {
+        var principal = (await authentication.GetAuthenticationStateAsync().ConfigureAwait(false)).User;
+        if (principal.Identity?.IsAuthenticated != true) return new(false, [], null);
+        try
+        {
+            var actor = ActorContext.FromValidatedPrincipal(principal);
+            await using var scope = services.CreateAsyncScope();
+            var query = scope.ServiceProvider.GetService<CaseCorrelationQuery>();
+            return query is null ? null : await query.GetPageAsync(actor, caseId, cursor, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch (UnauthorizedAccessException) { return new(false, [], null); }
+        catch (Exception error) when (error is not OutOfMemoryException) { return null; }
+    }
     public async Task<OrganizationDecisionResult> DecideAsync(Guid caseId, Guid candidateId, OrganizationDecisionRequest request,
         CancellationToken cancellationToken = default)
     {

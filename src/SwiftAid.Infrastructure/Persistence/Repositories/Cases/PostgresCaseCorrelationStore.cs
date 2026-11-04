@@ -6,6 +6,31 @@ namespace SwiftAid.Infrastructure.Persistence.Repositories.Cases;
 /// <summary>Reads candidates under the source case lease; the caller separately leases and authorizes the other case.</summary>
 public sealed class PostgresCaseCorrelationStore(SwiftAidDbContext db) : ICaseCorrelationStore
 {
+    public async Task<IReadOnlyList<CorrelationScanRow>> GetAfterAsync(Guid caseId, CorrelationCursor? cursor, int limit, CancellationToken ct)
+    {
+        if (caseId == Guid.Empty || limit is < 1 or > 100) throw new ArgumentOutOfRangeException(nameof(limit));
+        var beforeTime = cursor?.SortTimeUtc;
+        var beforeId = cursor?.CandidateId;
+        return await db.Database.SqlQuery<CorrelationScanRow>($"""
+            SELECT p.candidate_id AS "CandidateId", p.first_case_id AS "FirstCaseId", p.second_case_id AS "SecondCaseId",
+                p.first_report_revision AS "FirstRevision", p.second_report_revision AS "SecondRevision",
+                p.recorded_at_utc AS "RecordedAtUtc", p.reason_codes AS "Reasons", d.decision AS "Decision",
+                sort_time.reported_at_utc AS "SortTimeUtc"
+            FROM ellai_correlation_candidates p LEFT JOIN ellai_correlation_decisions d ON d.candidate_id = p.candidate_id
+            JOIN managed_cases a ON a.case_id = p.first_case_id
+            JOIN managed_cases b ON b.case_id = p.second_case_id
+            CROSS JOIN LATERAL (SELECT COALESCE((SELECT r.received_at_utc FROM swiftaid_intake.intake_promotions i
+                JOIN swiftaid_intake.intake_reports r ON r.receipt_id = i.receipt_id WHERE i.case_id = a.case_id), a.created_at_utc) AS received_at_utc) atime
+            CROSS JOIN LATERAL (SELECT COALESCE((SELECT r.received_at_utc FROM swiftaid_intake.intake_promotions i
+                JOIN swiftaid_intake.intake_reports r ON r.receipt_id = i.receipt_id WHERE i.case_id = b.case_id), b.created_at_utc) AS received_at_utc) btime
+            CROSS JOIN LATERAL (SELECT CASE WHEN p.first_case_id = {caseId} THEN btime.received_at_utc ELSE atime.received_at_utc END AS reported_at_utc) sort_time
+            WHERE (p.first_case_id = {caseId} OR p.second_case_id = {caseId})
+                AND ({beforeTime}::timestamptz IS NULL OR sort_time.reported_at_utc < {beforeTime}::timestamptz
+                    OR (sort_time.reported_at_utc = {beforeTime}::timestamptz AND p.candidate_id < {beforeId}::uuid))
+            ORDER BY sort_time.reported_at_utc DESC, p.candidate_id DESC LIMIT {limit}
+            """).ToArrayAsync(ct).ConfigureAwait(false);
+    }
+
     public async Task<IReadOnlyList<StoredCorrelationCandidate>> GetCandidatesAsync(Guid caseId, int limit, CancellationToken ct)
     {
         if (caseId == Guid.Empty || limit is < 1 or > 100) throw new ArgumentOutOfRangeException(nameof(limit));
