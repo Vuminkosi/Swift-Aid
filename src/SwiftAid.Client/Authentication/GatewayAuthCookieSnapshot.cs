@@ -53,7 +53,8 @@ public sealed record GatewayAuthCookieSnapshot(
             cookie.Value.Any(char.IsControl) ||
             !cookie.HttpOnly ||
             !string.Equals(cookie.Path, "/", StringComparison.Ordinal) ||
-            !string.IsNullOrEmpty(cookie.Domain) ||
+            (!string.IsNullOrEmpty(cookie.Domain) &&
+             !string.Equals(cookie.Domain, gateway.IdnHost, StringComparison.OrdinalIgnoreCase)) ||
             cookie.Expires == DateTime.MinValue)
         {
             return null;

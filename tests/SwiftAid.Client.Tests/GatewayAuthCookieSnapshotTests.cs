@@ -9,6 +9,36 @@ public sealed class GatewayAuthCookieSnapshotTests
     private static readonly Uri DevelopmentGateway = new("http://10.0.2.2:8080/");
     private static readonly DateTimeOffset Now = new(2026, 10, 31, 12, 0, 0, TimeSpan.Zero);
 
+    [Theory]
+    [InlineData("http://localhost:8080/", GatewayAuthCookieSnapshot.DevelopmentCookieName, false)]
+    [InlineData("http://10.0.2.2:8080/", GatewayAuthCookieSnapshot.DevelopmentCookieName, false)]
+    [InlineData("https://gateway.swiftaid.example/", GatewayAuthCookieSnapshot.CookieName, true)]
+    public void CaptureAcceptsHostOnlyCookieFromCookieContainer(string address, string name, bool secure)
+    {
+        var gateway = new Uri(address);
+        var container = new CookieContainer();
+        container.SetCookies(gateway, $"{name}=synthetic; Path=/; HttpOnly; Expires=Wed, 01 Dec 2027 12:00:00 GMT{(secure ? "; Secure" : "")}");
+        var cookie = container.GetCookies(gateway)[name];
+
+        var snapshot = GatewayAuthCookieSnapshot.Capture(gateway, cookie, Now);
+
+        Assert.NotNull(snapshot);
+        Assert.Empty(snapshot.RestoreFor(gateway, Now)!.Domain);
+    }
+
+    [Fact]
+    public void CaptureRejectsParentDomainCookie()
+    {
+        var cookie = new Cookie(GatewayAuthCookieSnapshot.CookieName, "synthetic", "/", ".swiftaid.example")
+        {
+            Secure = true,
+            HttpOnly = true,
+            Expires = Now.AddDays(1).UtcDateTime
+        };
+
+        Assert.Null(GatewayAuthCookieSnapshot.Capture(Gateway, cookie, Now));
+    }
+
     [Fact]
     public void CaptureAcceptsOnlyPersistentSecureHostAuthCookie()
     {
