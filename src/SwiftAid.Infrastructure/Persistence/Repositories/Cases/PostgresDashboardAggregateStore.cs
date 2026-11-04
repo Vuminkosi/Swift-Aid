@@ -24,7 +24,8 @@ public sealed class PostgresDashboardAggregateStore(SwiftAidDbContext dbContext)
 
         var rows = await _dbContext.ManagedCases.AsNoTracking()
             .Where(item => item.AccountableOwnerActorId == ownerActorId && item.CreatedAtUtc >= sinceUtc)
-            .OrderBy(item => item.CaseId)
+            .OrderByDescending(item => item.CreatedAtUtc)
+            .ThenBy(item => item.CaseId)
             .Select(item => new
             {
                 item.CaseId,
