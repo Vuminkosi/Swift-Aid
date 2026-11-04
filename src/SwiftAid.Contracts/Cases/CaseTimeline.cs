@@ -69,7 +69,13 @@ public sealed record CaseTimeline(
     IReadOnlyList<CaseTimelineEntry> Entries,
     bool HasOlderEntries = false,
     long? OlderThanAggregateVersion = null,
-    CaseCollaborationView? Collaboration = null);
+    CaseCollaborationView? Collaboration = null)
+{
+    /// <summary>Authorized case-level monitoring summary; follow-ups are not necessarily escalation-related.</summary>
+    public CaseTimelineWorkSummary? WorkSummary { get; init; }
+}
+
+public sealed record CaseTimelineWorkSummary(int OpenEscalations, int ScheduledFollowUps, DateTimeOffset? NextFollowUpDueUtc);
 
 /// <summary>Management-only current share projection; reasons remain sealed in the journal.</summary>
 public sealed record CaseCollaborationView(bool CanGrant, IReadOnlyList<CaseCollaboratorGrantView> Grants);

@@ -36,6 +36,9 @@ public interface ICaseTimelineStore
 
     Task<IReadOnlyList<CaseCollaboratorGrantView>> GetCollaboratorsAsync(Guid caseId, CancellationToken ct);
 
+    Task<CaseTimelineWorkSummary?> GetWorkSummaryAsync(Guid caseId, CancellationToken ct) =>
+        Task.FromResult<CaseTimelineWorkSummary?>(null);
+
     Task<IReadOnlyList<CaseAgentActivityRow>> GetAgentActivitiesAsync(Guid caseId, IReadOnlyList<Guid> eventIds,
         CancellationToken ct) => Task.FromResult<IReadOnlyList<CaseAgentActivityRow>>([]);
 }
@@ -158,6 +161,7 @@ public sealed class CaseTimelineQuery(
                 };
             }).ToList();
 
+            var workSummary = await _store.GetWorkSummaryAsync(caseId, ct).ConfigureAwait(false);
             var receiptId = await _store.GetPromotingReceiptAsync(caseId, ct).ConfigureAwait(false);
             if (receiptId.HasValue && !hasOlderEntries)
             {
@@ -181,7 +185,7 @@ public sealed class CaseTimelineQuery(
                 : null;
             return new CaseTimelineResult(
                 CaseTimelineAccess.Found,
-                new CaseTimeline(header, entries, hasOlderEntries, olderCursor, collaboration));
+                new CaseTimeline(header, entries, hasOlderEntries, olderCursor, collaboration) { WorkSummary = workSummary });
         }
     }
 

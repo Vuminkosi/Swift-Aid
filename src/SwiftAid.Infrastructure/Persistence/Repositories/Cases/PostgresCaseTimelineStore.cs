@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using SwiftAid.Application.Cases;
 using SwiftAid.Contracts.Cases;
 using SwiftAid.Infrastructure.Persistence;
+using SwiftAid.Domain.Cases;
 
 namespace SwiftAid.Infrastructure.Persistence.Repositories.Cases;
 
@@ -28,6 +29,17 @@ public sealed class PostgresCaseTimelineStore(SwiftAidDbContext dbContext) : ICa
         return rows.Select(row => new CaseCollaboratorGrantView(row.GrantId!.Value, row.ActorId, row.DisplayName,
             row.AllowedOperations ?? throw new InvalidDataException("A collaborator grant has no operation scope."),
             row.ExpiresAtUtc ?? throw new InvalidDataException("A collaborator grant has no expiry."), !row.IsActive)).ToArray();
+    }
+
+    public async Task<CaseTimelineWorkSummary?> GetWorkSummaryAsync(Guid caseId, CancellationToken ct)
+    {
+        var escalations = await _dbContext.ManagedCaseEscalations.AsNoTracking()
+            .CountAsync(item => item.CaseId == caseId && item.Status != EscalationStatus.Closed, ct).ConfigureAwait(false);
+        var followUps = _dbContext.ManagedCaseFollowUps.AsNoTracking().Where(item => item.CaseId == caseId &&
+            (item.Status == FollowUpStatus.Scheduled || item.Status == FollowUpStatus.Acknowledged));
+        var count = await followUps.CountAsync(ct).ConfigureAwait(false);
+        var due = await followUps.MinAsync(item => (DateTimeOffset?)item.DueAtUtc, ct).ConfigureAwait(false);
+        return new CaseTimelineWorkSummary(escalations, count, due);
     }
 
     public async Task<CaseTimelineHeader?> GetHeaderAsync(Guid caseId, CancellationToken ct)

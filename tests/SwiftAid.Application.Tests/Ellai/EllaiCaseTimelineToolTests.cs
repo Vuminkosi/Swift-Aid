@@ -17,6 +17,9 @@ public sealed class EllaiCaseTimelineToolTests
         Assert.True(result.Allowed);
         Assert.Contains("Assignment acknowledged", result.ResultSummary, StringComparison.Ordinal);
         Assert.DoesNotContain("secret-actor", result.ResultSummary, StringComparison.Ordinal);
+        Assert.Contains("2 open escalations; 1 scheduled or acknowledged follow-ups", result.ResultSummary, StringComparison.Ordinal);
+        Assert.Contains("not established as linked", result.ResultSummary, StringComparison.Ordinal);
+        Assert.Contains("officer assignment are not available", result.ResultSummary, StringComparison.Ordinal);
         Assert.DoesNotContain("derived receipt", result.ResultSummary, StringComparison.Ordinal);
         Assert.Equal("7", Assert.Single(result.Evidence).Version);
         Assert.NotNull(result.HistoryValidUntilUtc);
@@ -77,7 +80,7 @@ public sealed class EllaiCaseTimelineToolTests
                 new CaseTimelineEntry(Guid.Empty, "IntakePromoted", "derived receipt", CaseTimelineEntryKind.Derived, 0, 1, Guid.Empty, "secret-actor", null, now, 1),
                 new CaseTimelineEntry(Guid.NewGuid(), "CaseAssignmentAcknowledged", "Assignment acknowledged", CaseTimelineEntryKind.Authoritative, 7, 1, Guid.NewGuid(), "secret-actor", null, now, 1)
             };
-            return Task.FromResult(new CaseTimelineResult(CaseTimelineAccess.Found, new CaseTimeline(header, entries)));
+            return Task.FromResult(new CaseTimelineResult(CaseTimelineAccess.Found, new CaseTimeline(header, entries) { WorkSummary = new CaseTimelineWorkSummary(2, 1, now.AddDays(1)) }));
         }
     }
 }

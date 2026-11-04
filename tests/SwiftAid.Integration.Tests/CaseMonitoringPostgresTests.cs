@@ -37,6 +37,50 @@ public sealed class CaseMonitoringPostgresTests
     private static readonly DateTimeOffset SecondDueAtUtc = new(2026, 11, 2, 8, 0, 0, TimeSpan.Zero);
 
     [IntakePostgresFact]
+    public async Task TimelineWorkSummaryReflectsAuthorizedEscalationAndFollowUpState()
+    {
+        await using var db = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
+        var grantGroupId = await SeedMonitoringScopeAsync(db,
+            [CaseOperation.ReadCase, CaseOperation.ManageFollowUp, CaseOperation.ManageEscalation]);
+        using var keyRing = SyntheticMonitoringKeyRing.Create();
+        using var provider = ProtectedPayloadDataProtectionProviderFactory.Create(
+            keyRing.CreateOptions(), new TestHostEnvironment(Environments.Production));
+        var caseId = await SeedMonitoredCaseAsync(db, keyRing.CreateOptions(), provider);
+        await using var cleanup = new CaseMonitoringCleanup(caseId, grantGroupId);
+        var actor = CreateOfficer("officer-1");
+        var scheduled = await ProcessCommandAsync(db, actor, caseId,
+            new ScheduleFollowUpCommand(Guid.NewGuid(), 2, Guid.NewGuid(), "synthetic", "officer-1",
+                FirstDueAtUtc, "staff scheduled", null, DateTimeOffset.UtcNow), keyRing.CreateOptions(), provider);
+        Assert.Equal(CaseCommandProcessingStatus.Accepted, scheduled.Status);
+        var escalationId = Guid.NewGuid();
+        var raised = await ProcessCommandAsync(db, actor, caseId,
+            new RaiseEscalationCommand(Guid.NewGuid(), 3, escalationId, "synthetic", [], "duty-officer", null, DateTimeOffset.UtcNow),
+            keyRing.CreateOptions(), provider);
+        Assert.Equal(CaseCommandProcessingStatus.Accepted, raised.Status);
+        var unit = new PostgresCaseCommandUnitOfWork(db);
+        var policy = new CaseAccessPolicy(new PostgresCurrentAccessGrantStore(db, unit), new PostgresCaseAccessDescriptorStore(db, unit));
+        var query = new CaseTimelineQuery(new PostgresCaseTimelineStore(db), policy, unit);
+        var timeline = await query.GetAsync(actor, caseId, 1, default);
+        Assert.Equal(new CaseTimelineWorkSummary(1, 1, FirstDueAtUtc), timeline.Timeline!.WorkSummary);
+        var closed = await ProcessCommandAsync(db, actor, caseId,
+            new AcknowledgeEscalationCommand(Guid.NewGuid(), 4, escalationId, null, "acknowledged", null, DateTimeOffset.UtcNow),
+            keyRing.CreateOptions(), provider);
+        Assert.Equal(CaseCommandProcessingStatus.Accepted, closed.Status);
+        closed = await ProcessCommandAsync(db, actor, caseId,
+            new RecordEscalationActionCommand(Guid.NewGuid(), 5, escalationId, "action", "recorded", null, DateTimeOffset.UtcNow),
+            keyRing.CreateOptions(), provider);
+        Assert.Equal(CaseCommandProcessingStatus.Accepted, closed.Status);
+        closed = await ProcessCommandAsync(db, actor, caseId,
+            new CloseEscalationCommand(Guid.NewGuid(), 6, escalationId, "closed", "resolved", null, DateTimeOffset.UtcNow),
+            keyRing.CreateOptions(), provider);
+        Assert.Equal(CaseCommandProcessingStatus.Accepted, closed.Status);
+        timeline = await query.GetAsync(actor, caseId, 1, default);
+        Assert.Equal(new CaseTimelineWorkSummary(0, 1, FirstDueAtUtc), timeline.Timeline!.WorkSummary);
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            query.GetAsync(CreateOfficer("unauthorized-" + Guid.NewGuid()), caseId, 1, default));
+    }
+
+    [IntakePostgresFact]
     public async Task AssignedWorkerAcknowledgement_PersistsAndRemainsDueInAuthorizedQueue()
     {
         await using var db = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();

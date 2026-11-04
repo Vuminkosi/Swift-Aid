@@ -471,8 +471,14 @@ public sealed class EllaiToolBroker
             timeline.Header.AggregateVersion.ToString(CultureInfo.InvariantCulture), null, id);
         var truncated = timeline.HasOlderEntries || activityCount + entries.Length > MaxItems ||
             entries.Any(entry => entry.AgentActivitiesTruncated);
+        var workSummary = timeline.WorkSummary is { } work
+            ? $"Current case work: {work.OpenEscalations} open escalations; {work.ScheduledFollowUps} scheduled or acknowledged follow-ups" +
+              (work.NextFollowUpDueUtc is { } due ? $", earliest due {due:O}. " : ". ") +
+              "Follow-ups are case-level and are not established as linked to an escalation. " +
+              "Escalation recipient and officer assignment are not available in this summary. "
+            : "Current escalation and follow-up summary is unavailable. ";
         var output = new EllaiToolResult(request.ToolName, true, null, [evidence],
-            "Authorized case history; sealed report content and actor identifiers are not included. " +
+            "Authorized case history; sealed report content and actor identifiers are not included. " + workSummary +
             (truncated ? "Some history or activity is omitted.\n" : "\n") +
             (entries.Length == 0 ? "No authoritative entries were returned." : string.Join("\n", lines.Take(MaxItems))),
             entries.Length, truncated, EllaiToolReasonCodes.Ok)
