@@ -107,9 +107,10 @@ public sealed record EllaiObservedToolResult(
                 ? result.CaseTimelineReplayScope : null,
             request.ToolName == EllaiToolNames.UiObserve && result.Allowed && !result.Truncated
                 ? result.UiObservationReplayScope : null,
-            request.ToolName == EllaiToolNames.ClassificationEvidence && result.ToolName == request.ToolName &&
+            (request.ToolName is EllaiToolNames.ClassificationEvidence or EllaiToolNames.ClassificationSnapshot) && result.ToolName == request.ToolName &&
                 result.Allowed && result.DenialReason is null && result.ReasonCode == EllaiToolReasonCodes.Ok &&
-                !result.Truncated && result.Evidence.Count == 0 && result.ItemCount == 1 &&
+                !result.Truncated && (request.ToolName == EllaiToolNames.ClassificationEvidence && result.Evidence.Count == 0 && result.ItemCount == 1 ||
+                    request.ToolName == EllaiToolNames.ClassificationSnapshot && result.ItemCount is > 0 and <= 10 && result.Evidence.Count == result.ItemCount) &&
                 request.Arguments.Count == 1 && request.Arguments.TryGetValue("case_id", out var rawCaseId) &&
                 Guid.TryParse(rawCaseId, out var caseId) && caseId != Guid.Empty
                     ? new EllaiClassificationReplayScope(caseId, ResultFingerprint(result)) : null,

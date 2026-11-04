@@ -50,6 +50,7 @@ public static class EllaiToolNames
     public const string Imports = "ellai_imports";
     public const string ImportStatus = "ellai_import_status";
     public const string ClassificationEvidence = "ellai_classification_evidence";
+    public const string ClassificationSnapshot = "ellai_classification_snapshot";
     public const string OwnedCaseCount = "ellai_owned_case_count";
     public const string CaseTimeline = "ellai_case_timeline";
     public const string PublicSessions = "ellai_public_sessions";
@@ -58,7 +59,7 @@ public static class EllaiToolNames
     {
         State, Evidence, Topic, Capabilities, Receipts, ProductFacts, Now,
         DocsSearch, DocsGet, UiCatalogue, UiObserve, IngestionSchema, ValidateObservations, Locations,
-        ImportDestinations, Imports, ImportStatus, ClassificationEvidence, OwnedCaseCount, CaseTimeline, PublicSessions
+        ImportDestinations, Imports, ImportStatus, ClassificationEvidence, ClassificationSnapshot, OwnedCaseCount, CaseTimeline, PublicSessions
     };
 }
 
@@ -213,6 +214,7 @@ public sealed class EllaiToolBroker
         $"{EllaiToolNames.UiObserve}(controls, view=current, context?, feature?) — live mounted-control facts.",
         $"{EllaiToolNames.IngestionSchema}() — canonical case CSV fields, capture requirements and authority boundaries; no submission.",
         $"{EllaiToolNames.ValidateObservations}(observations_json) — validate a bounded JSON array of original reported strings; no inference or submission.",
+        $"{EllaiToolNames.ClassificationSnapshot}(case_id) - read authorized persisted classification records for one case; never a diagnosis.",
         $"{EllaiToolNames.PublicSessions}(status?) - list published public sessions, optionally filtered by Scheduled, Completed, or Cancelled; no registration or scheduling.",
         $"{EllaiToolNames.Locations}(q, country?, limit?) — search the public geographic registry; present matches for user selection, never guess a location.",
         $"{EllaiToolNames.ImportDestinations}() — current authorized organization/workspace/country destinations for Workspace imports; staff only.",
@@ -436,6 +438,8 @@ public sealed class EllaiToolBroker
             return Bound(await ReadImportsAsync(context, request, ct).ConfigureAwait(false));
         if (canonical == EllaiToolNames.ClassificationEvidence)
             return Bound(await ReadClassificationAsync(context, request, ct).ConfigureAwait(false));
+        if (canonical == EllaiToolNames.ClassificationSnapshot)
+            return Bound(await ReadClassificationSnapshotAsync(context, request, ct).ConfigureAwait(false));
         if (canonical == EllaiToolNames.PublicSessions)
             return Bound(await ReadPublicSessionsAsync(request, ct).ConfigureAwait(false));
         if (canonical == EllaiToolNames.Evidence)
@@ -650,6 +654,35 @@ public sealed class EllaiToolBroker
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch (Exception error) when (error is not OutOfMemoryException)
         { return Deny(request.ToolName, "Public sessions are unavailable.", EllaiToolReasonCodes.Unavailable); }
+    }
+
+    private async Task<EllaiToolResult> ReadClassificationSnapshotAsync(EllaiToolContext context, EllaiToolRequest request, CancellationToken ct)
+    {
+        if (context.Actor is null || _classification is null)
+            return Deny(request.ToolName, "Classification information is unavailable.", EllaiToolReasonCodes.Unavailable);
+        if (!request.Arguments.TryGetValue("case_id", out var rawCaseId) ||
+            !Guid.TryParseExact(rawCaseId, "D", out var caseId) || caseId == Guid.Empty)
+            return Deny(request.ToolName, "A valid case ID is required.", EllaiToolReasonCodes.InvalidArguments);
+        try
+        {
+            var records = await _classification.GetAsync(context.Actor, caseId, ct).ConfigureAwait(false);
+            if (records is null)
+                return Deny(request.ToolName, "The case was not found or is not accessible.", EllaiToolReasonCodes.DeniedByPolicy);
+            if (records.Count is 0 or > 10)
+                return Deny(request.ToolName, "A bounded classification record is unavailable for this case.", EllaiToolReasonCodes.Unavailable);
+            var evidence = records.Select(record => new EvidenceRef("CaseClassification", caseId.ToString("D"),
+                record.ReportRevision.ToString(CultureInfo.InvariantCulture), "classification", record.ResultId.ToString("D"))).ToArray();
+            var lines = records.Select(record => $"case {caseId:D} classification {record.ResultId:D}: " +
+                JsonSerializer.Serialize(new { record.State, record.CurrentConfiguration, record.ReportRevision,
+                    record.ModelId, record.ModelRevision, record.TaxonomyVersion, record.AbstentionReason,
+                    selectedLabels = record.Labels.Where(label => label.Selected).Select(label => label.Id).ToArray() }) +
+                "; uncalibrated reported-text patterns, not a diagnosis or confirmed incident; other records may exist.");
+            return new EllaiToolResult(request.ToolName, true, null, evidence, string.Join("\n", lines), records.Count, false,
+                EllaiToolReasonCodes.Ok);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        catch (Exception error) when (error is not OutOfMemoryException)
+        { return Deny(request.ToolName, "Classification information is unavailable.", EllaiToolReasonCodes.Unavailable); }
     }
 
     private async Task<EllaiToolResult> ReadClassificationAsync(EllaiToolContext context, EllaiToolRequest request, CancellationToken ct)

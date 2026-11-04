@@ -329,23 +329,26 @@ public static class EllaiAuthorizedConversationContext
                     }
                     continue;
                 }
-                if (observation.ToolName == EllaiToolNames.ClassificationEvidence)
+                if (observation.ToolName is EllaiToolNames.ClassificationEvidence or EllaiToolNames.ClassificationSnapshot)
                 {
                     var scope = observation.ClassificationReplayScope;
                     if (scope is null || !scope.IsValid() || observation.ReasonCode != EllaiToolReasonCodes.Ok ||
-                        observation.Evidence.Count != 0 || toolContext is null || invokeTool is null ||
+                        (observation.ToolName == EllaiToolNames.ClassificationEvidence && observation.Evidence.Count != 0 ||
+                         observation.ToolName == EllaiToolNames.ClassificationSnapshot && (observation.Evidence.Count is < 1 or > 10 ||
+                             observation.Evidence.Any(reference => reference.SourceKind != "CaseClassification" || reference.ResourceId != scope.CaseId.ToString("D")))) ||
+                        toolContext is null || invokeTool is null ||
                         toolContext.SessionId != turn.SessionId || toolContext.Actor is null ||
                         toolContext.Actor.ActorId != actor.ActorId || toolContext.Actor.AccessEpoch != actor.AccessEpoch)
                         return decisions[turn.ClientUtteranceId] = false;
                     try
                     {
-                        var request = new EllaiToolRequest(EllaiToolNames.ClassificationEvidence,
+                        var request = new EllaiToolRequest(observation.ToolName,
                             new Dictionary<string, string> { ["case_id"] = scope.CaseId.ToString("D") });
                         var current = await invokeTool(toolContext, request, ct).ConfigureAwait(false);
                         ct.ThrowIfCancellationRequested();
-                        if (current.ToolName != EllaiToolNames.ClassificationEvidence || !current.Allowed ||
+                        if (current.ToolName != observation.ToolName || !current.Allowed ||
                             current.DenialReason is not null || current.ReasonCode != EllaiToolReasonCodes.Ok ||
-                            current.Truncated || current.Evidence.Count != 0 || current.ItemCount != 1 ||
+                            current.Truncated || !current.Evidence.SequenceEqual(observation.Evidence) ||
                             EllaiObservedToolResult.ResultFingerprint(current) != scope.ResultDigest)
                             return decisions[turn.ClientUtteranceId] = false;
                     }
