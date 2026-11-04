@@ -4435,3 +4435,34 @@ tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj --no-restore
 test project's `TestResults`. The task-owned database and relay were removed;
 the existing language service was not restarted. Provider settings and the
 relay key were supplied only to the test process.
+
+### Cancellation of stalled provider streams — 2026-11-04
+
+Synthetic streaming and non-streaming providers that ignored cancellation both
+held the framework turn open before their responses were released. Streaming
+provider iteration now runs behind a bounded process-wide pool of eight slots.
+Cancellation stops the caller without awaiting a stuck iterator; the iterator
+retains its slot and owns its disposal until it exits. An acknowledged channel
+preserves update ordering and backpressure, and late updates never reach the
+framework. When usage is unavailable at cancellation, existing estimated-usage
+accounting applies; usage reported only after the caller returns is not recorded
+as actual usage by this path. Eight permanently stuck streams can exhaust the
+pool, and cancellation does not prove the remote provider stopped or billing
+ceased. Non-streaming calls remain cooperative: an attempted isolation changed
+reported-usage accounting when cancellation raced a completed response, so it
+was not retained.
+
+PASS: the focused application framework, usage and isolation filters passed
+166/166 with `dotnet test tests/SwiftAid.Application.Tests/SwiftAid.Application.Tests.csproj
+--no-restore -m:1 -nr:false`. Tests cover held stream cancellation, no late
+output, recorded usage, bounded-slot retention, later slot reuse and sanitized
+disposal failure. The Gateway worker/lease/retry filter passed 14/14 with
+`dotnet test tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj
+--no-restore -m:1 -nr:false -p:WasmBuildNative=false` and `OS=Windows_NT`;
+the four lease cases passed again after commit `27dd7b98`. Three live Muse probes
+covering cancellation, grounded streaming and brokered streaming passed 3/3
+before the commit, using `ELLAI_LIVE=1`; their TRX is retained under the
+application test project's `TestResults`. The post-commit application suite
+passed 1,268, failed 0 and skipped 19 with `--no-build --no-restore -m:1
+-nr:false`. Deployed behavior, non-streaming hard cancellation and independent
+security review remain unverified.
