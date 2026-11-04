@@ -37,8 +37,13 @@ public sealed class ClassificationBackfillStore(SwiftAidDbContext db, IOptions<C
         // One SQL snapshot sees only committed source facts. No paging through a moving live dataset.
         job.Eligible = await db.Database.ExecuteSqlInterpolatedAsync($"""
             INSERT INTO swiftaid_classification.backfill_items ("JobId", "SourceEventId", "Ordinal", "State")
-            SELECT {job.Id}, e.event_id, row_number() OVER (ORDER BY c.created_at_utc DESC, c.case_id, e.report_revision DESC, e.event_id), 'Pending'
+            SELECT {job.Id}, e.event_id, row_number() OVER (ORDER BY report_time.received_at_utc DESC, c.case_id, e.report_revision DESC, e.event_id), 'Pending'
             FROM case_events e JOIN managed_cases c ON c.case_id = e.case_id
+            CROSS JOIN LATERAL (SELECT COALESCE((
+                SELECT report.received_at_utc FROM swiftaid_intake.intake_promotions promotion
+                JOIN swiftaid_intake.intake_reports report ON report.receipt_id = promotion.receipt_id
+                WHERE promotion.case_id = c.case_id
+            ), c.created_at_utc) AS received_at_utc) report_time
             WHERE c.workspace_id = {job.WorkspaceId} AND c.organization_id = {job.OrganizationId}
               AND e.event_type IN ('CaseReported', 'CaseReportCorrected')
             """, ct);
