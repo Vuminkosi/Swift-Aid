@@ -527,13 +527,12 @@ public sealed class EllaiFrameworkAgent
             var outputLimitReached = false;
             try
             {
-                await using var stream = CreateStreamSafe(boundedMessages, options, cancellationToken);
-                while (await MoveNextSafeAsync(stream, cancellationToken).ConfigureAwait(false))
+                await foreach (var update in EllaiProviderCallIsolation.Instance.StreamAsync(
+                    token => CreateStreamSafe(boundedMessages, options, token), cancellationToken).ConfigureAwait(false))
                 {
                     // A provider may return an update after ignoring cancellation.
                     // Never pass that late update to framework tool invocation.
                     cancellationToken.ThrowIfCancellationRequested();
-                    var update = stream.Current;
                     outputLimitReached |= IsOutputLimit(update.FinishReason);
                     foreach (var reported in update.Contents.OfType<UsageContent>().Select(content => content.Details))
                     {
@@ -572,18 +571,6 @@ public sealed class EllaiFrameworkAgent
                 throw new EllaiFrameworkFailureException(EllaiToolReasonCodes.UnregisteredTool);
         }
 
-        private static async ValueTask<bool> MoveNextSafeAsync(IAsyncEnumerator<ChatResponseUpdate> stream, CancellationToken ct)
-        {
-            try { return await stream.MoveNextAsync().ConfigureAwait(false); }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
-            catch (Exception error) when (ct.IsCancellationRequested && error is not OutOfMemoryException)
-            {
-                throw new OperationCanceledException(ct);
-            }
-            catch (System.ClientModel.ClientResultException error) { throw ProviderFailure(error); }
-            catch (Exception error) when (error is not OutOfMemoryException) { throw new EllaiFrameworkFailureException("ProviderUnavailable"); }
-        }
-
         private IAsyncEnumerator<ChatResponseUpdate> CreateStreamSafe(IReadOnlyList<ChatMessage> messages,
             ChatOptions? options, CancellationToken ct)
         {
@@ -601,7 +588,17 @@ public sealed class EllaiFrameworkAgent
             : IAsyncEnumerator<ChatResponseUpdate>
         {
             public ChatResponseUpdate Current => inner.Current;
-            public ValueTask<bool> MoveNextAsync() => inner.MoveNextAsync();
+            public async ValueTask<bool> MoveNextAsync()
+            {
+                try { return await inner.MoveNextAsync().ConfigureAwait(false); }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+                catch (Exception error) when (ct.IsCancellationRequested && error is not OutOfMemoryException)
+                {
+                    throw new OperationCanceledException(ct);
+                }
+                catch (System.ClientModel.ClientResultException error) { throw ProviderFailure(error); }
+                catch (Exception error) when (error is not OutOfMemoryException) { throw new EllaiFrameworkFailureException("ProviderUnavailable"); }
+            }
 
             public async ValueTask DisposeAsync()
             {

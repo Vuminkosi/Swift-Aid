@@ -281,10 +281,11 @@ public sealed class EllaiUtteranceWorkerOutcomeTests
     }
 
     [Theory]
-    [InlineData(false, false)]
-    [InlineData(true, false)]
-    [InlineData(true, true)]
-    public async Task FrameworkWorkerRenewsLeaseOrCancelsIfRenewalFails(bool rejectRenewal, bool noncooperative)
+    [InlineData(false, false, false)]
+    [InlineData(true, false, false)]
+    [InlineData(true, true, false)]
+    [InlineData(true, false, true)]
+    public async Task FrameworkWorkerRenewsLeaseOrCancelsIfRenewalFails(bool rejectRenewal, bool noncooperative, bool heldProvider)
     {
         var store = new InMemoryEllaiSessionStore();
         var outbox = new CompletionObservedOutbox(store) { RejectRenewal = rejectRenewal };
@@ -300,7 +301,7 @@ public sealed class EllaiUtteranceWorkerOutcomeTests
         await store.TryAcceptUtteranceAsync(session with { SessionVersion = 2, CyclesUsed = 1 }, 1, work.ClientUtteranceId,
             default, EllaiUtteranceWorkEnvelope.Serialize(work, work.ClientUtteranceId));
         var consent = new EllaiConsentService();
-        using var model = new HeldFrameworkStream("Synthetic answer.");
+        using var model = new HeldFrameworkStream("Synthetic answer.", ignoreCancellation: heldProvider);
         var framework = new EllaiFrameworkExecutor(model, new EllaiPromptBuilder("Synthetic policy", "fixture"),
             new EllaiToolBroker(new EllaiPolicyService(), consent), new EllaiUsageLedger(), new InMemoryEllaiUsageStore());
         var uncooperative = new CancellationIgnoringExecutor();
@@ -334,6 +335,7 @@ public sealed class EllaiUtteranceWorkerOutcomeTests
                 turn = Assert.Single(await store.ReadConversationAsync(session.SessionId, actor.ActorId, timeout.Token));
             } while (turn.Outcome == "Processing");
             Assert.Equal("RetryableFailure", turn.Outcome);
+            if (heldProvider) Assert.False(model.Release.Task.IsCompleted);
             Assert.DoesNotContain(responses.ReadSince(session.SessionId, 0).Responses,
                 item => item.Progress is null && !string.IsNullOrWhiteSpace(item.Text));
         }
@@ -627,7 +629,7 @@ public sealed class EllaiUtteranceWorkerOutcomeTests
         finally { model.Release.TrySetResult(); await worker.StopAsync(CancellationToken.None); }
     }
 
-    private sealed class HeldFrameworkStream(string answer, bool segmented = false) : IChatClient
+    private sealed class HeldFrameworkStream(string answer, bool segmented = false, bool ignoreCancellation = false) : IChatClient
     {
         public TaskCompletionSource FirstPart { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -641,14 +643,14 @@ public sealed class EllaiUtteranceWorkerOutcomeTests
             {
                 yield return new ChatResponseUpdate(ChatRole.Assistant, "{\"stream_segments\":[{\"text\":\"Synthetic answer.\",\"claims\":[]}]");
                 FirstPart.TrySetResult();
-                await Release.Task.WaitAsync(cancellationToken);
+                if (ignoreCancellation) await Release.Task; else await Release.Task.WaitAsync(cancellationToken);
                 yield return new ChatResponseUpdate(ChatRole.Assistant, "," + response.TrimStart()[1..]);
                 yield break;
             }
             var split = response.IndexOf(answer, StringComparison.Ordinal) + answer.Length;
             yield return new ChatResponseUpdate(ChatRole.Assistant, response[..split]);
             FirstPart.TrySetResult();
-            await Release.Task.WaitAsync(cancellationToken);
+            if (ignoreCancellation) await Release.Task; else await Release.Task.WaitAsync(cancellationToken);
             yield return new ChatResponseUpdate(ChatRole.Assistant, response[split..]);
         }
         public object? GetService(Type serviceType, object? serviceKey = null) => null;

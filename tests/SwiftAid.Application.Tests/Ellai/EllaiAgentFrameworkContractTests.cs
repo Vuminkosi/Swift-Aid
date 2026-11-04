@@ -155,6 +155,39 @@ public sealed class EllaiAgentFrameworkContractTests
         Assert.DoesNotContain("synthetic-disposal-secret", error.ToString(), StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task ProviderDisposalFailureAfterFinalUpdatePreventsCompletion()
+    {
+        using var client = new FinalThenFailingDisposalClient();
+        var context = new EllaiToolContext("session", "epoch", "cases", null, 4, true,
+            AllowedTools: new HashSet<string>());
+        var error = await Assert.ThrowsAsync<EllaiFrameworkFailureException>(() => new EllaiFrameworkAgent(client).RunAsync(
+            context, "policy", [new ChatMessage(ChatRole.User, "hello")], 100, _ => Task.FromResult(true),
+            (_, _, _) => throw new InvalidOperationException(),
+            new EllaiFrameworkUsage("session", new EllaiUsageLedger(), new InMemoryEllaiUsageStore()), default,
+            (_, _) => ValueTask.CompletedTask));
+        Assert.Equal("ProviderUnavailable", error.Code);
+        Assert.DoesNotContain("synthetic-disposal-secret", error.ToString(), StringComparison.Ordinal);
+    }
+
+    private sealed class FinalThenFailingDisposalClient : IChatClient
+    {
+        public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null, CancellationToken cancellationToken = default) => new Stream();
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+        public void Dispose() { }
+        private sealed class Stream : IAsyncEnumerable<ChatResponseUpdate>, IAsyncEnumerator<ChatResponseUpdate>
+        {
+            private bool _sent;
+            public ChatResponseUpdate Current => new(ChatRole.Assistant, ValidDecision);
+            public IAsyncEnumerator<ChatResponseUpdate> GetAsyncEnumerator(CancellationToken cancellationToken = default) => this;
+            public ValueTask<bool> MoveNextAsync() { var next = !_sent; _sent = true; return ValueTask.FromResult(next); }
+            public ValueTask DisposeAsync() => ValueTask.FromException(new InvalidOperationException("synthetic-disposal-secret"));
+        }
+    }
+
     private sealed class FailingStreamDisposalClient(CancellationTokenSource? cancellation = null) : IChatClient
     {
         public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null,
@@ -253,6 +286,67 @@ public sealed class EllaiAgentFrameworkContractTests
             if (emitUnknownTool)
                 yield return new ChatResponseUpdate(ChatRole.Assistant,
                     [new FunctionCallContent("late", "unknown-tool", new Dictionary<string, object?>())]);
+        }
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+        public void Dispose() { }
+    }
+
+    [Fact]
+    public async Task StreamingCancellationReturnsBeforeNoncooperativeProviderAndDiscardsLateOutput()
+    {
+        using var cancellation = new CancellationTokenSource();
+        using var client = new HeldProviderClient();
+        var context = new EllaiToolContext("session", "epoch", "cases", null, 4, true,
+            AllowedTools: new HashSet<string>());
+        var fragments = new List<string>();
+        var toolCalls = 0;
+        var usage = new InMemoryEllaiUsageStore();
+        var run = new EllaiFrameworkAgent(client).RunAsync(context, "policy", [new ChatMessage(ChatRole.User, "hello")], 100,
+            _ => Task.FromResult(true), (_, _, _) => { toolCalls++; throw new InvalidOperationException(); },
+            new EllaiFrameworkUsage("session", new EllaiUsageLedger(), usage), cancellation.Token,
+            (text, _) => { fragments.Add(text); return ValueTask.CompletedTask; });
+        try
+        {
+            await client.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            cancellation.Cancel();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run.WaitAsync(TimeSpan.FromSeconds(2)));
+            Assert.False(client.Release.Task.IsCompleted);
+            Assert.Empty(fragments);
+            Assert.Equal(0, toolCalls);
+            Assert.Equal(1, (await usage.TotalsAsync("session", default)).Calls);
+        }
+        finally
+        {
+            client.Release.TrySetResult();
+            await client.Finished.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+        Assert.Empty(fragments);
+        Assert.Equal(0, toolCalls);
+    }
+
+    private sealed class HeldProviderClient : IChatClient
+    {
+        public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Finished { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public async Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null,
+            CancellationToken cancellationToken = default)
+        {
+            Started.TrySetResult();
+            await Release.Task;
+            Finished.TrySetResult();
+            return new ChatResponse(new ChatMessage(ChatRole.Assistant, ValidDecision));
+        }
+        public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            Started.TrySetResult();
+            try
+            {
+                await Release.Task;
+                yield return new ChatResponseUpdate(ChatRole.Assistant, ValidDecision);
+            }
+            finally { Finished.TrySetResult(); }
         }
         public object? GetService(Type serviceType, object? serviceKey = null) => null;
         public void Dispose() { }
