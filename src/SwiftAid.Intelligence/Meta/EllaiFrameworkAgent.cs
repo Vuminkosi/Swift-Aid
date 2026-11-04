@@ -37,7 +37,7 @@ public sealed class EllaiFrameworkAgent
         bool enableKnowledgeSpecialist = false, bool enableCaseSpecialist = false, bool enableAnalyticsSpecialist = false,
         bool allowEmptyCaseQueue = false, bool enableUiSpecialist = false, bool enableGeospatialSpecialist = false,
         bool enableWorkflowSpecialist = false, bool enableCommunitySessionsSpecialist = false, bool enableSurveillanceSpecialist = false,
-        bool enableReportingSpecialist = false)
+        bool enableReportingSpecialist = false, bool enableSpatialSpecialist = false)
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentException.ThrowIfNullOrWhiteSpace(instructions);
@@ -262,6 +262,35 @@ public sealed class EllaiFrameworkAgent
             }
             tools.Add(AIFunctionFactory.Create(DelegateAnalytics, name: "ellai_delegate_analytics",
                 description: "Delegate one authorized owned-case count with an explicit 1 to 365 day window."));
+        }
+        if (enableSpatialSpecialist && context.Actor is not null && context.AllowedTools?.Contains(EllaiToolNames.OwnedRegionCounts) == true)
+        {
+            var delegationCount = 0;
+            async Task<string> DelegateSpatial(string task, CancellationToken token)
+            {
+                token.ThrowIfCancellationRequested();
+                if (Interlocked.Increment(ref delegationCount) != 1) return "Spatial delegation limit reached.";
+                using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
+                deadline.CancelAfter(TimeSpan.FromSeconds(SwiftAid.Application.Ellai.Specialists.EllaiSpecialistRegistry.TryGet(
+                    SwiftAid.Application.Ellai.Specialists.EllaiSpecialistRegistry.Spatial, out var profile) ? profile.TimeoutSeconds : 1));
+                try
+                {
+                    var result = await new EllaiSpatialSpecialist().RunAsync(task, true, context, usage, Current,
+                        InvokeGuardedTool, revalidateTool ?? invoke, deadline.Token).ConfigureAwait(false);
+                    if (result.Outcome != EllaiSpecialistOutcome.Completed || result.Decision is null)
+                    { Interlocked.Exchange(ref invalidDelegation, 1); return "Spatial analysis could not verify an answer."; }
+                    var json = System.Text.Json.JsonSerializer.Serialize(result.Decision);
+                    if (json.Length <= 12000) return json;
+                    Interlocked.Exchange(ref invalidDelegation, 1);
+                    return "Spatial result exceeded its limit.";
+                }
+                catch (OperationCanceledException) when (!token.IsCancellationRequested && deadline.IsCancellationRequested)
+                { Interlocked.Exchange(ref invalidDelegation, 1); return "Spatial analysis timed out."; }
+                catch (EllaiFrameworkFailureException)
+                { Interlocked.Exchange(ref invalidDelegation, 1); return "Spatial analysis could not complete the request."; }
+            }
+            tools.Add(AIFunctionFactory.Create(DelegateSpatial, name: "ellai_delegate_spatial",
+                description: "Delegate a bounded count of the current officer's readable cases by region over the last 30 days; not a hotspot or incidence estimate."));
         }
         if (enableUiSpecialist && context.AllowedTools is { } uiTools &&
             (uiTools.Contains(EllaiToolNames.UiCatalogue) || uiTools.Contains(EllaiToolNames.UiObserve)))

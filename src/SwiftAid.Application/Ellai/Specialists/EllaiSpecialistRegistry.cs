@@ -18,6 +18,7 @@ public static class EllaiSpecialistRegistry
     public const string Surveillance = "core.surveillance";
     public const string Reporting = "core.reporting";
     public const string CommunitySessions = "community.sessions";
+    public const string Spatial = "ops.spatial";
 
     private static readonly FrozenDictionary<string, EllaiSpecialistProfile> Profiles =
         new[]
@@ -39,7 +40,9 @@ public static class EllaiSpecialistRegistry
             new EllaiSpecialistProfile(Surveillance, 1, "Ellai:Specialists:Surveillance:Enabled",
                 new[] { EllaiToolNames.ClassificationSnapshot, EllaiToolNames.SurveillanceSignals }.ToFrozenSet(StringComparer.Ordinal)),
             new EllaiSpecialistProfile(CommunitySessions, 1, "Ellai:Specialists:CommunitySessions:Enabled",
-                new[] { EllaiToolNames.PublicSessions }.ToFrozenSet(StringComparer.Ordinal))
+                new[] { EllaiToolNames.PublicSessions }.ToFrozenSet(StringComparer.Ordinal)),
+            new EllaiSpecialistProfile(Spatial, 1, "Ellai:Specialists:Spatial:Enabled",
+                new[] { EllaiToolNames.OwnedRegionCounts }.ToFrozenSet(StringComparer.Ordinal))
         }.ToFrozenDictionary(profile => profile.AgentId, StringComparer.Ordinal);
 
     public static bool TryGet(string agentId, out EllaiSpecialistProfile profile)
