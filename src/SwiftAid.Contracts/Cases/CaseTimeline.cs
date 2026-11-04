@@ -45,7 +45,13 @@ public sealed record CaseTimelineEntry(
 }
 
 public sealed record CaseAgentActivity(Guid ActivityId, string RoleId, string Label,
-    string Version, DateTimeOffset RecordedAtUtc);
+    string Version, DateTimeOffset RecordedAtUtc)
+{
+    /// <summary>Present only for an authorized follow-up recommendation.</summary>
+    public Guid? FollowUpId { get; init; }
+    public bool? FollowUpIsCurrent { get; init; }
+    public DateTimeOffset? FollowUpDueAtUtc { get; init; }
+}
 
 /// <summary>Closed, non-model-authored activity labels shared by timeline clients and Ellai.</summary>
 public static class CaseAgentActivityPresentation

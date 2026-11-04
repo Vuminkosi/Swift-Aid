@@ -89,11 +89,15 @@ recorded; a unique follow-up/schedule-version key prevents repeated records.
 The workspace and organization are rechecked under the fenced transaction, and
 case and follow-up rows are locked while selecting and committing. The activity
 is visible on its source event in the existing authorized timeline, and Ellai's
-history replay digest changes when the activity appears. A later reschedule or
-completion does not erase that historical recommendation. It is not a current
+history replay digest changes when the activity appears. The timeline marks a
+recommendation historical after its schedule or status changes; a current item
+can open its existing follow-up in the case work list. If the item is unavailable,
+the user is prompted to refresh. Existing work actions still require their normal
+authorization and confirmation. A later reschedule or completion does not erase
+that historical recommendation. It is not a current
 approval, a notification, an officer assignment, a clinical priority, or a new
 due date. The new migration refuses rollback when recommendations exist.
 
-A human review workflow and durable operational metrics remain outstanding.
+A dedicated recommendation disposition workflow and durable operational metrics remain outstanding.
 Production grants, migration deployment, rendered UI and deployed worker operation
 are not verified. No user or officer messages are sent by this work unit.

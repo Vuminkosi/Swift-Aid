@@ -141,12 +141,16 @@
         <MudTabPanel Text="History" data-ellai-control="case-detail.history" data-bonboarding-anchor="ellai-case-detail-history" Icon="@Icons.Material.Outlined.History">
             @if (TimelineClient is not null && CaseId != Guid.Empty)
             {
-                <CaseTimelineView @ref="_timelineView" Client="TimelineClient" CaseId="CaseId" />
+                <CaseTimelineView @ref="_timelineView" Client="TimelineClient" CaseId="CaseId" OnReviewFollowUp="OpenRecommendedFollowUpAsync" />
             }
             else { <CaseDetailUnavailable Title="History unavailable" Description="Case history is not available here." /> }
         </MudTabPanel>
         <MudTabPanel Text="Follow-ups" data-ellai-control="case-detail.follow-ups" data-bonboarding-anchor="ellai-case-detail-follow-ups" Icon="@Icons.Material.Outlined.EventNote">
-            <OperationsWorkManagementSurface Title="Follow-ups" Description="Schedule visits, manage deadlines, and record completion outcomes." State="WorkState" Items="FollowUpItems" IsBusy="WorkIsBusy" StatusMessage="@WorkStatusMessage" StatusIsError="WorkStatusIsError" OnAction="HandleWorkActionAsync" OnRetry="OnWorkRetry" />
+            @if (_followUpReviewMessage is not null)
+            {
+                <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" role="status">@_followUpReviewMessage</MudAlert>
+            }
+            <OperationsWorkManagementSurface RequestedSelection="_followUpSelection" Title="Follow-ups" Description="Schedule visits, manage deadlines, and record completion outcomes." State="WorkState" Items="FollowUpItems" IsBusy="WorkIsBusy" StatusMessage="@WorkStatusMessage" StatusIsError="WorkStatusIsError" OnAction="HandleWorkActionAsync" OnRetry="OnWorkRetry" />
         </MudTabPanel>
         <MudTabPanel Text="Assistance" data-ellai-control="case-detail.assistance" data-bonboarding-anchor="ellai-case-detail-assistance" Icon="@Icons.Material.Outlined.VolunteerActivism">
             <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" role="status" aria-label="Referral directory status">
@@ -329,6 +333,8 @@
     [Parameter] public EventCallback OnWorkRetry { get; set; }
 
     private MudTabs? _tabs;
+    private OperationsWorkManagementSurface.WorkSelectionRequest? _followUpSelection;
+    private string? _followUpReviewMessage;
     private int _activePanelIndex;
     private MudButton? _correctionTrigger;
     private MudTextField<string>? _correctionNarrativeField;
@@ -365,7 +371,7 @@
 
     protected override void OnParametersSet()
     {
-        if (CaseId != _boundCaseId) { _boundCaseId = CaseId; _caseVersion = 0; _savingCorrection = false; CloseDiscussionForm(); CloseObservationForm(); CloseCorrectionForm(); CancelAssistanceRequest(); }
+        if (CaseId != _boundCaseId) { _followUpSelection = null; _followUpReviewMessage = null; _boundCaseId = CaseId; _caseVersion = 0; _savingCorrection = false; CloseDiscussionForm(); CloseObservationForm(); CloseCorrectionForm(); CancelAssistanceRequest(); }
         if (_assistanceRequestId is { } assistanceId && WorkItems.Any(item => item.WorkKey == $"ast:{assistanceId:D}"))
         {
             CancelAssistanceRequest();
@@ -512,6 +518,22 @@
             try { if (_correctionTrigger is not null) await _correctionTrigger.FocusAsync(); }
             catch (InvalidOperationException) { }
         }
+    }
+
+    private async Task OpenRecommendedFollowUpAsync(Guid followUpId)
+    {
+        var key = $"fu:{followUpId:D}";
+        if (WorkState != OperationsSurfaceState.Populated || !FollowUpItems.Any(item => item.CaseId == CaseId && item.WorkKey == key))
+        {
+            _followUpSelection = null;
+            _followUpReviewMessage = "This follow-up is not in the current work list. Refresh the list to check its status.";
+        }
+        else
+        {
+            _followUpReviewMessage = null;
+            _followUpSelection = new(Guid.NewGuid(), CaseId, key);
+        }
+        await SelectTab(2);
     }
 
     private async Task HandleWorkActionAsync(OperationsWorkManagementSurface.OperationsWorkActionRequest request)

@@ -348,6 +348,8 @@
     [Parameter] public ICaseCollaboratorCandidatesClient? CandidatesClient { get; set; }
     [Parameter] public EventCallback<WorkFilter> OnFilterChanged { get; set; }
     [Parameter] public EventCallback OnRetry { get; set; }
+    [Parameter] public WorkSelectionRequest? RequestedSelection { get; set; }
+    private Guid? _lastSelectionRequestId;
 
     private string? _selectedWorkKey;
     private long? _selectedVersion;
@@ -441,6 +443,13 @@
 
     protected override void OnParametersSet()
     {
+        if (RequestedSelection is { } request && request.RequestId != _lastSelectionRequestId)
+        {
+            _lastSelectionRequestId = request.RequestId;
+            var requested = Items.FirstOrDefault(item => item.CaseId == request.CaseId &&
+                string.Equals(item.WorkKey, request.WorkKey, StringComparison.Ordinal));
+            if (requested is not null) SelectWork(requested);
+        }
         if (Items.Count == 0)
         {
             _selectedWorkKey = null;
@@ -1141,6 +1150,7 @@
         FollowUpOutcome? FollowUpOutcome = null,
         EscalationReason? EscalationReason = null,
         EscalationActionKind? EscalationAction = null);
+    public sealed record WorkSelectionRequest(Guid RequestId, Guid CaseId, string WorkKey);
     public sealed record OperationsWorkItem(
         Guid CaseId,
         string WorkKey,

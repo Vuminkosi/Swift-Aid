@@ -19,6 +19,35 @@ namespace SwiftAid.Ui.Tests;
 public sealed class CaseDetailWorkActionRefreshTests
 {
     [Fact]
+    public async Task RecommendedFollowUpSelectsOnlyTheMatchingCurrentCaseWork()
+    {
+        var caseId = Guid.NewGuid();
+        var followUpId = Guid.NewGuid();
+        var key = $"fu:{followUpId:D}";
+        var item = new OperationsWorkManagementSurface.OperationsWorkItem(
+            caseId, key, 2, "Follow-up", OperationsWorkManagementSurface.OperationsWorkKind.FollowUp,
+            OperationsWorkManagementSurface.OperationsWorkStatus.Open, OperationsWorkManagementSurface.OperationsAssignmentStatus.AssignedToYou,
+            "Synthetic follow-up", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, [], []);
+        var detail = new OperationsCaseDetailSurface();
+        SetParameter(detail, nameof(OperationsCaseDetailSurface.CaseId), caseId);
+        SetParameter(detail, nameof(OperationsCaseDetailSurface.WorkState), OperationsSurfaceState.Populated);
+        SetParameter(detail, nameof(OperationsCaseDetailSurface.WorkItems), new[] { item });
+        await (Task)typeof(OperationsCaseDetailSurface).GetMethod("OpenRecommendedFollowUpAsync", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(detail, [followUpId])!;
+        var selection = Assert.IsType<OperationsWorkManagementSurface.WorkSelectionRequest>(GetPrivateField(detail, "_followUpSelection"));
+        Assert.Equal(key, selection.WorkKey);
+        var work = new OperationsWorkManagementSurface();
+        SetParameter(work, nameof(OperationsWorkManagementSurface.Items), new[] { item });
+        SetParameter(work, nameof(OperationsWorkManagementSurface.RequestedSelection), selection);
+        typeof(OperationsWorkManagementSurface).GetMethod("OnParametersSet", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(work, null);
+        Assert.Equal($"{caseId:N}|{key}", GetPrivateField(work, "_selectedWorkKey"));
+        await (Task)typeof(OperationsCaseDetailSurface).GetMethod("OpenRecommendedFollowUpAsync", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(detail, [Guid.NewGuid()])!;
+        Assert.Null(GetPrivateField(detail, "_followUpSelection"));
+        Assert.Contains("not in the current work list", Assert.IsType<string>(GetPrivateField(detail, "_followUpReviewMessage")), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task FollowUpSchedule_UsesAuthorizedCandidateAndSubmitsItsActorReference()
     {
         var caseId = Guid.NewGuid();

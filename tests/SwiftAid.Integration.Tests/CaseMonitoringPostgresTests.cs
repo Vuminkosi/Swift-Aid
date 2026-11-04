@@ -215,9 +215,13 @@ public sealed class CaseMonitoringPostgresTests
         var activity = Assert.Single(timeline.Timeline!.Entries.SelectMany(entry => entry.AgentActivities));
         Assert.Equal("ops.followup", activity.RoleId);
         Assert.Equal("Overdue follow-up review recommended", activity.Label);
+        Assert.Equal(followUpId, activity.FollowUpId);
+        Assert.True(activity.FollowUpIsCurrent);
+        Assert.Equal(FirstDueAtUtc, activity.FollowUpDueAtUtc);
         var after = await broker.InvokeAsync(context, request, default);
         Assert.True(after.Allowed);
         Assert.Contains("Overdue follow-up review recommended", after.ResultSummary, StringComparison.Ordinal);
+        Assert.Contains("recommendation is current", after.ResultSummary, StringComparison.Ordinal);
         Assert.NotEqual(before.CaseTimelineReplayScope, after.CaseTimelineReplayScope);
         var inaccessible = await broker.InvokeAsync(context with { Actor = CreateOfficer("unknown-" + Guid.NewGuid()) }, request, default);
         Assert.False(inaccessible.Allowed);
@@ -230,7 +234,11 @@ public sealed class CaseMonitoringPostgresTests
         Assert.Equal(CaseCommandProcessingStatus.Accepted, rescheduled.Status);
         Assert.Equal(EllaiFencedWorkOutcome.NoChange, await work.RunOneAsync(lease, run, Guid.NewGuid(), default));
         timeline = await new CaseTimelineQuery(new PostgresCaseTimelineStore(db), policy, unit).GetAsync(actor, caseId, 20, default);
-        Assert.Single(timeline.Timeline!.Entries.SelectMany(entry => entry.AgentActivities));
+        var historical = Assert.Single(timeline.Timeline!.Entries.SelectMany(entry => entry.AgentActivities));
+        Assert.False(historical.FollowUpIsCurrent);
+        var afterReschedule = await broker.InvokeAsync(context, request, default);
+        Assert.Contains("recommendation is historical", afterReschedule.ResultSummary, StringComparison.Ordinal);
+        Assert.NotEqual(after.CaseTimelineReplayScope, afterReschedule.CaseTimelineReplayScope);
         await Assert.ThrowsAsync<Npgsql.PostgresException>(() => db.Database.ExecuteSqlInterpolatedAsync(
             $"UPDATE ellai_follow_up_recommendations SET policy_version = 'changed' WHERE follow_up_id = {followUpId}"));
         await Assert.ThrowsAsync<Npgsql.PostgresException>(() => db.GetService<IMigrator>().MigrateAsync("20261104110000_EllaiQualityActivity"));

@@ -98,6 +98,18 @@
                                         {
                                             <li>Ellai - @CaseAgentActivityPresentation.RoleLabel(activity.RoleId): @CaseAgentActivityPresentation.ActivityLabel(activity.RoleId)
                                                 <time datetime="@activity.RecordedAtUtc.ToString("O")">@activity.RecordedAtUtc.ToLocalTime().ToString("g")</time>
+                                                @if (activity.RoleId == "ops.followup" && activity.FollowUpIsCurrent == false)
+                                                {
+                                                    <span>Historical recommendation; the follow-up has changed.</span>
+                                                }
+                                                else if (activity.RoleId == "ops.followup" && activity.FollowUpIsCurrent is null)
+                                                {
+                                                    <span>Current follow-up status is unavailable.</span>
+                                                }
+                                                else if (activity.RoleId == "ops.followup" && activity.FollowUpIsCurrent == true && activity.FollowUpId is { } followUpId && OnReviewFollowUp.HasDelegate)
+                                                {
+                                                    <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="@(() => OnReviewFollowUp.InvokeAsync(followUpId))" aria-label="Review the recommended follow-up">Review follow-up</MudButton>
+                                                }
                                             </li>
                                         }
                                     </ul>
@@ -204,6 +216,8 @@
     };
 
     [Parameter, EditorRequired] public ICaseTimelineClient Client { get; set; } = null!;
+
+    [Parameter] public EventCallback<Guid> OnReviewFollowUp { get; set; }
 
     [Parameter, EditorRequired] public Guid CaseId { get; set; }
 

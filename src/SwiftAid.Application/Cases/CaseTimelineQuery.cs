@@ -18,7 +18,8 @@ public sealed record CaseTimelineRow(
     int SchemaVersion);
 
 public sealed record CaseAgentActivityRow(Guid SourceEventId, Guid ActivityId, string RoleId,
-    string Version, DateTimeOffset RecordedAtUtc);
+    string Version, DateTimeOffset RecordedAtUtc, Guid? FollowUpId = null,
+    bool? FollowUpIsCurrent = null, DateTimeOffset? FollowUpDueAtUtc = null);
 
 /// <summary>Persistence port for the authorized timeline read. Cursor pages arrive newest-first.</summary>
 public interface ICaseTimelineStore
@@ -156,7 +157,12 @@ public sealed class CaseTimelineQuery(
                 return MapAuthoritative(row) with
                 {
                     AgentActivities = activities.Take(20).Select(activity => new CaseAgentActivity(activity.ActivityId,
-                        activity.RoleId, CaseAgentActivityPresentation.ActivityLabel(activity.RoleId), activity.Version, activity.RecordedAtUtc)).ToArray(),
+                        activity.RoleId, CaseAgentActivityPresentation.ActivityLabel(activity.RoleId), activity.Version, activity.RecordedAtUtc)
+                    {
+                        FollowUpId = activity.FollowUpId,
+                        FollowUpIsCurrent = activity.FollowUpIsCurrent,
+                        FollowUpDueAtUtc = activity.FollowUpDueAtUtc
+                    }).ToArray(),
                     AgentActivitiesTruncated = activities.Length > 20
                 };
             }).ToList();
