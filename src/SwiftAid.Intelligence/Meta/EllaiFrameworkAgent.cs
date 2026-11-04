@@ -396,7 +396,7 @@ public sealed class EllaiFrameworkAgent
                 { Interlocked.Exchange(ref invalidDelegation, 1); return "Geographic specialist could not complete the request."; }
             }
             tools.Add(AIFunctionFactory.Create(DelegateGeospatial, name: "ellai_delegate_geospatial",
-                description: "Find registry-backed place candidates; does not perform case mapping or spatial analysis."));
+                description: "Find registry-backed place candidates or read other admitted SwiftAid information; does not perform case mapping or spatial analysis."));
         }
         if (enableWorkflowSpecialist && context.AllowedTools?.Contains(EllaiToolNames.Receipts) == true)
         {
@@ -496,7 +496,7 @@ public sealed class EllaiFrameworkAgent
                 { Interlocked.Exchange(ref invalidDelegation, 1); return "Surveillance specialist could not complete the request."; }
             }
             tools.Add(AIFunctionFactory.Create(DelegateSurveillance, name: "ellai_delegate_surveillance",
-                description: "Read authorized persisted classification and review signals for one case, without making a diagnosis."));
+                description: "Read authorized persisted classification, review signals or other admitted SwiftAid information, without making a diagnosis."));
         }
         if (enableReportingSpecialist && context.AllowedTools is { } reportingTools &&
             (reportingTools.Contains(EllaiToolNames.UiCatalogue) || reportingTools.Contains(EllaiToolNames.UiObserve)))

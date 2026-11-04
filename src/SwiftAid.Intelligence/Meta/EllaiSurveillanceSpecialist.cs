@@ -40,7 +40,7 @@ public sealed class EllaiSurveillanceSpecialist(IChatClient client, IEllaiFramew
         try
         {
             decision = await agent.RunAsync(context, trustedPolicy +
-                "\nYou are the surveillance specialist. Read only persisted classification and review-signal records. " +
+                "\nYou are the surveillance specialist. Read persisted classification and review-signal records, and use any other admitted read tool when relevant to the user's SwiftAid question. " +
                 "Never infer a diagnosis, outbreak, personal risk, urgency or confirmed incident. " +
                 "Return only a grounded Answer in the required final_decision JSON schema. " +
                 "Each claim must exactly match one returned record line and cite its matching evidence. " +
@@ -51,11 +51,9 @@ public sealed class EllaiSurveillanceSpecialist(IChatClient client, IEllaiFramew
         finally { onModelCalls?.Invoke(agent.LastModelCallCount); }
         if (decision is null || decision.Kind != DecisionKind.Answer || decision.Claims.Count == 0 ||
             decision.UiIntents.Count != 0 || decision.PlanProposal is not null ||
-            decision.Claims.Any(claim => claim.Kind != ClaimKind.Observed || claim.Evidence.Count == 0 ||
-                claim.Evidence.Any(reference => reference.SourceKind is not ("CaseClassification" or "SurveillanceSignal"))))
+            decision.Claims.Any(claim => claim.Kind != ClaimKind.Observed || claim.Evidence.Count == 0))
             return new(EllaiSpecialistOutcome.Unverified, null);
 
-        var grounded = new HashSet<(EvidenceRef Reference, string Line)>();
         foreach (var (request, original) in observations)
         {
             if (!await isCurrent(ct).ConfigureAwait(false)) return new(EllaiSpecialistOutcome.Stale, null);
@@ -65,16 +63,12 @@ public sealed class EllaiSurveillanceSpecialist(IChatClient client, IEllaiFramew
             catch (Exception error) when (error is not OutOfMemoryException) { return new(EllaiSpecialistOutcome.Stale, null); }
             if (!fresh.Allowed || fresh.Truncated != original.Truncated || fresh.ToolName != original.ToolName ||
                 fresh.ItemCount != original.ItemCount || fresh.ResultSummary != original.ResultSummary ||
-                !fresh.Evidence.SequenceEqual(original.Evidence) || !await isCurrent(ct).ConfigureAwait(false))
+                !fresh.Evidence.SequenceEqual(original.Evidence) || fresh.CaseTimelineReplayScope != original.CaseTimelineReplayScope ||
+                fresh.UiCatalogueReplayScope != original.UiCatalogueReplayScope || fresh.UiObservationReplayScope != original.UiObservationReplayScope ||
+                !await isCurrent(ct).ConfigureAwait(false))
                 return new(EllaiSpecialistOutcome.Stale, null);
-            foreach (var reference in original.Evidence)
-                foreach (var line in original.ResultSummary.Split('\n'))
-                    if (line.StartsWith($"case {reference.ResourceId} {(reference.SourceKind == "CaseClassification" ? "classification" : "signal")} {reference.EvidenceId}: ", StringComparison.Ordinal))
-                        grounded.Add((reference, line));
         }
-        if (decision.Claims.Any(claim => claim.Evidence.Any(reference => !grounded.Contains((reference, claim.Text)))) ||
-            decision.DisplayText != string.Join("\n", decision.Claims.Select(claim => claim.Text)) ||
-            decision.SpokenText != decision.DisplayText)
+        if (!EllaiSpecialistGrounding.IsGrounded(decision, observations))
             return new(EllaiSpecialistOutcome.Unverified, null);
         return new(EllaiSpecialistOutcome.Completed, decision);
     }

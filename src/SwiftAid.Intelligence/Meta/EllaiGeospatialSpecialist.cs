@@ -41,12 +41,12 @@ public sealed class EllaiGeospatialSpecialist(IChatClient client, IEllaiFramewor
         try
         {
             decision = await agent.RunAsync(context, trustedPolicy +
-                "\nYou are the geographic registry specialist. Use only registry-backed place matches. " +
+                "\nYou are the geographic registry specialist. Use registry-backed place matches for location questions and any other admitted read tool when relevant to the user's SwiftAid question. " +
                 "Never invent coordinates, boundaries, case locations, spatial analysis or population figures. " +
                 "Place matches are candidates; ask the user to choose when ambiguous. " +
                 "Return only a grounded Answer in the required final_decision JSON schema. " +
-                "Each claim text must be exactly one returned place name and cite its matching registry evidence. " +
-                "Set displayText and spokenText to the claim texts joined by a comma and one space, with no other prose. " +
+                "For place matches each claim must be exactly a returned place name; for other reads each claim must exactly match a returned source line. Cite the matching evidence. " +
+                "For place-only answers join claim texts by a comma and one space; otherwise join them by a newline. Set displayText and spokenText to that text, with no other prose. " +
                 "When a search has multiple matches, include a clarifying question asking the user to select a place.",
                 [new ChatMessage(ChatRole.User, task)], 2048, isCurrent, Read, usage, ct,
                 maxModelCalls: profile.MaxModelCalls).ConfigureAwait(false);
@@ -54,8 +54,7 @@ public sealed class EllaiGeospatialSpecialist(IChatClient client, IEllaiFramewor
         finally { onModelCalls?.Invoke(agent.LastModelCallCount); }
         if (decision is null || decision.Kind != DecisionKind.Answer || decision.Claims.Count == 0 ||
             decision.UiIntents.Count != 0 || decision.PlanProposal is not null ||
-            decision.Claims.Any(claim => claim.Kind != ClaimKind.Observed || claim.Evidence.Count == 0 ||
-                claim.Evidence.Any(reference => reference.SourceKind != "GeographicRegistry")))
+            decision.Claims.Any(claim => claim.Kind != ClaimKind.Observed || claim.Evidence.Count == 0))
             return new(EllaiSpecialistOutcome.Unverified, null);
         foreach (var (request, original) in observations)
         {
@@ -66,7 +65,8 @@ public sealed class EllaiGeospatialSpecialist(IChatClient client, IEllaiFramewor
             catch (Exception error) when (error is not OutOfMemoryException) { return new(EllaiSpecialistOutcome.Stale, null); }
             if (!fresh.Allowed || original.Truncated || fresh.Truncated || fresh.ToolName != original.ToolName ||
                 fresh.ItemCount != original.ItemCount || fresh.ResultSummary != original.ResultSummary ||
-                !fresh.Evidence.SequenceEqual(original.Evidence) ||
+                !fresh.Evidence.SequenceEqual(original.Evidence) || fresh.CaseTimelineReplayScope != original.CaseTimelineReplayScope ||
+                fresh.UiCatalogueReplayScope != original.UiCatalogueReplayScope || fresh.UiObservationReplayScope != original.UiObservationReplayScope ||
                 !await isCurrent(ct).ConfigureAwait(false)) return new(EllaiSpecialistOutcome.Stale, null);
         }
         // References alone do not prove that generated prose describes the referenced
@@ -74,7 +74,7 @@ public sealed class EllaiGeospatialSpecialist(IChatClient client, IEllaiFramewor
         var grounded = new HashSet<(EvidenceRef Reference, string Name)>();
         try
         {
-            foreach (var (_, result) in observations)
+            foreach (var (request, result) in observations.Where(item => item.Request.ToolName == EllaiToolNames.Locations))
             {
                 using var json = JsonDocument.Parse(result.ResultSummary);
                 foreach (var item in json.RootElement.GetProperty("matches").EnumerateArray())
@@ -90,10 +90,15 @@ public sealed class EllaiGeospatialSpecialist(IChatClient client, IEllaiFramewor
         }
         catch (Exception error) when (error is JsonException or InvalidOperationException or KeyNotFoundException)
         { return new(EllaiSpecialistOutcome.Unverified, null); }
+        foreach (var (request, result) in observations.Where(item => item.Request.ToolName != EllaiToolNames.Locations))
+            foreach (var reference in result.Evidence)
+                foreach (var line in EllaiFrameworkAgent.EvidenceLines(request.ToolName, result, reference))
+                    grounded.Add((reference, line));
+        var placeOnly = decision.Claims.All(claim => claim.Evidence.All(reference => reference.SourceKind == "GeographicRegistry"));
         if (decision.Claims.Any(claim => claim.Evidence.Any(reference => !grounded.Contains((reference, claim.Text)))) ||
-            decision.DisplayText != string.Join(", ", decision.Claims.Select(claim => claim.Text)) ||
+            decision.DisplayText != string.Join(placeOnly ? ", " : "\n", decision.Claims.Select(claim => claim.Text)) ||
             decision.SpokenText != decision.DisplayText ||
-            observations.Any(item => item.Result.ItemCount > 1) && decision.Questions.Count == 0)
+            observations.Any(item => item.Request.ToolName == EllaiToolNames.Locations && item.Result.ItemCount > 1) && decision.Questions.Count == 0)
             return new(EllaiSpecialistOutcome.Unverified, null);
         return new(EllaiSpecialistOutcome.Completed, decision);
     }
