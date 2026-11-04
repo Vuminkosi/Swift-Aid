@@ -198,6 +198,17 @@ commit. The opt-in command filtered `LiveMuseAndNllbWorker` in the integration
 project with `ELLAI_LIVE=1`, the dedicated PostgreSQL fixture, the configured
 provider and the local language relay. This is local integration evidence,
 not a translation-quality, production deployment or broad reliability test.
+At `c0d95687`, the complete local application suite passed 1,225 with 19
+skipped and the default integration suite passed 809 with 347 skipped. Commands
+were `dotnet test tests/SwiftAid.Application.Tests/SwiftAid.Application.Tests.csproj
+--no-build --no-restore -m:1 -nr:false` and `dotnet test
+tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj --no-restore
+-m:1 -nr:false -p:WasmBuildNative=false` with `OS=Windows_NT` for integration.
+The preceding application run failed three recall cases because their expected
+index-read count still assumed the old two-fence behavior; the final publication
+fence now causes a third read. After correcting that test expectation, the four
+recall variants passed and the complete application rerun passed. Skips and
+earlier intermittent integration failures remain part of the acceptance limit.
 
 ## Provider observations and open checks
 
