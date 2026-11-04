@@ -103,6 +103,7 @@ builder.Services.AddScoped<SwiftAid.Application.Authorization.IScopeService,
     SwiftAid.Gateway.Ellai.GatewaySessionScopeService>();
 builder.Services.AddScoped<SwiftAid.Infrastructure.Authorization.PostgresSessionScopeService>();
 builder.Services.AddScoped<SwiftAid.Infrastructure.Demo.DemoAccessProvisioner>();
+builder.Services.AddHostedService<DemoAccountStartupSeeder>();
 if (builder.Configuration.GetValue<bool>("DemoAccess:Enabled") && !builder.Environment.IsDevelopment())
 {
     throw new InvalidOperationException("Demo access requires the Development environment.");
@@ -410,6 +411,8 @@ public static class GatewayAuthenticationRegistration
             return;
         }
 
+        services.AddSingleton<Microsoft.AspNetCore.DataProtection.IDataProtectionProvider>(provider =>
+            provider.GetRequiredService<ProtectedPayloadDataProtectionProvider>());
         ConfigureCookieProvider(services, IdentityConstants.ApplicationScheme);
         ConfigureCookieProvider(services, IdentityConstants.ExternalScheme);
         ConfigureCookieProvider(services, EllaiGuestEndpoints.AuthenticationScheme);
