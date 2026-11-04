@@ -396,9 +396,16 @@ public sealed class PostgresCommunitySessionStore(SwiftAidDbContext dbContext) :
             ChannelType = session.ChannelType.ToString(),
             session.ChannelLink,
             session.ReminderLeadHours,
+            session.CreatedByActorId,
+            session.CreatedAtUtc,
+            session.ReviewedByActorId,
+            session.ReviewedAtUtc,
+            session.SelfReviewAcknowledged,
             session.ScheduledAtUtc,
             session.PublishedVersion,
             session.CancellationReason,
+            session.CancelledAtUtc,
+            session.CompletedAtUtc,
         });
 
     private sealed record MaterialJson(string MaterialId, string SourceVersion);

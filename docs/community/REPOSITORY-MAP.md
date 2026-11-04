@@ -12,6 +12,8 @@ Baseline: `community-sessions` at `20e6d09f0c3436cf288123b15cdfee05dd41ce57`. Re
 | Participants and attendance | No contracts found in the inspected session contracts, application service or session endpoints. | Deferred: do not show participant counts or roster until authorized authoritative contracts exist. | Not applicable yet. |
 | Session logistical follow-ups and feedback | No contracts found in the inspected session contracts, application service or session endpoints. | Deferred: distinguish logistical work from private case follow-ups; no fabricated feedback. | Not applicable yet. |
 
+New session revision snapshots retain creator and reviewer identifiers, review time, explicit self-review acknowledgement, and cancellation/completion times. Earlier snapshots lack these fields and must be treated as unknown rather than backfilled or inferred. The staff history read and its session-scoped authorization remain unimplemented.
+
 ## Initial slice and verification (historical)
 
 The first change exposed existing debounced search and filters on compact screens. Subsequent commits added server-side discovery and calendar behavior; see the current snapshot above and the later entries below.

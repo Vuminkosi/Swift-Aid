@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using System.Net;
+using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
@@ -399,6 +400,17 @@ public sealed class SessionSchedulingTests
             var selfView = await service.GetStaffAsync(selfId, "officer-1", CancellationToken.None);
             Assert.NotNull(selfView);
             Assert.True(selfView.SelfReviewAcknowledged);
+            await service.ExecuteAsync(UpdateDraft(selfId, 2, "Edited after self review"), "officer-1", CancellationToken.None);
+            var historicalReview = await db.Set<CommunitySessionRevisionEntity>().AsNoTracking()
+                .SingleAsync(row => row.SessionId == selfId && row.Version == 2);
+            using var snapshot = JsonDocument.Parse(historicalReview.SnapshotJson);
+            Assert.Equal("officer-1", snapshot.RootElement.GetProperty("CreatedByActorId").GetString());
+            Assert.Equal("officer-1", snapshot.RootElement.GetProperty("ReviewedByActorId").GetString());
+            Assert.True(snapshot.RootElement.GetProperty("SelfReviewAcknowledged").GetBoolean());
+            Assert.NotEqual(JsonValueKind.Null, snapshot.RootElement.GetProperty("ReviewedAtUtc").ValueKind);
+            var current = await service.GetStaffAsync(selfId, "officer-1", CancellationToken.None);
+            Assert.Null(current!.ReviewedByActorId);
+            Assert.False(current.SelfReviewAcknowledged);
 
             await service.ExecuteAsync(CreateDraft(otherId, "officer-1"), "officer-1", CancellationToken.None);
             var otherReviewed = await service.ExecuteAsync(
@@ -406,6 +418,11 @@ public sealed class SessionSchedulingTests
                 "officer-2",
                 CancellationToken.None);
             Assert.Equal(2, otherReviewed.Version);
+            var otherRevision = await db.Set<CommunitySessionRevisionEntity>().AsNoTracking()
+                .SingleAsync(row => row.SessionId == otherId && row.Version == 2);
+            using var otherSnapshot = JsonDocument.Parse(otherRevision.SnapshotJson);
+            Assert.Equal("officer-2", otherSnapshot.RootElement.GetProperty("ReviewedByActorId").GetString());
+            Assert.False(otherSnapshot.RootElement.GetProperty("SelfReviewAcknowledged").GetBoolean());
         }
         finally
         {
