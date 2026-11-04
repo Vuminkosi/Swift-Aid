@@ -111,6 +111,23 @@ public sealed class GeographicRegistryTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task ReadOnlySearchDoesNotSeedAndMatchesNormalSearchAfterInitialization()
+    {
+        var registry = Assert.IsType<GeographicRegistryService>(_provider.GetRequiredService<IGeographicRegistry>());
+
+        Assert.Null(await registry.SearchIfInitializedAsync("mbabane", "SZ", 5, default));
+        Assert.Empty(await _dbContext.GeographicLocations.ToListAsync());
+        var initialized = await registry.SearchAsync("mbabane", "SZ", 5, default);
+        var readOnly = await registry.SearchIfInitializedAsync("mbabane", "SZ", 5, default);
+
+        Assert.NotNull(readOnly);
+        Assert.Equal(initialized.RegistryVersion, readOnly.RegistryVersion);
+        Assert.Equal(initialized.TotalCount, readOnly.TotalCount);
+        Assert.Equal(initialized.Results.Select(item => item.Id), readOnly.Results.Select(item => item.Id));
+        Assert.Equal(264, await _dbContext.GeographicLocations.CountAsync());
+    }
+
+    [Fact]
     public async Task Search_respects_country_scope_and_result_cap()
     {
         var registry = _provider.GetRequiredService<IGeographicRegistry>();
