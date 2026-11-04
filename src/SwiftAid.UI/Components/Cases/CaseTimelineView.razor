@@ -136,7 +136,9 @@
                                                 }
                                                 @if (activity.RoleId == "ops.followup" && activity.FollowUpIsCurrent == false)
                                                 {
-                                                    <span>Historical recommendation; the follow-up has changed.</span>
+                                                    <span>@(activity.RecommendationKind?.StartsWith("Clarification:", StringComparison.Ordinal) == true
+                                                        ? "Historical suggestion; the report has changed or the case is resolved."
+                                                        : "Historical recommendation; the follow-up has changed.")</span>
                                                 }
                                                 else if (activity.RoleId == "ops.followup" && activity.FollowUpIsCurrent is null)
                                                 {
@@ -146,7 +148,7 @@
                                                 {
                                                     <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="@(() => OnReviewFollowUp.InvokeAsync(followUpId))" aria-label="Review the recommended follow-up">Review follow-up</MudButton>
                                                 }
-                                                @if (activity.RoleId == "ops.followup" && activity.FollowUpIsCurrent == true && activity.FollowUpReviewedAtUtc is null && ReviewClient is not null)
+                                                @if (activity.RoleId == "ops.followup" && activity.FollowUpId is not null && activity.FollowUpIsCurrent == true && activity.FollowUpReviewedAtUtc is null && ReviewClient is not null)
                                                 {
                                                     <MudButton Variant="Variant.Text" Color="Color.Primary" Disabled="@(_reviewingId is not null)" OnClick="@(() => RecordReviewAsync(activity.ActivityId))" aria-label="Mark this recommendation as reviewed">Mark reviewed</MudButton>
                                                 }

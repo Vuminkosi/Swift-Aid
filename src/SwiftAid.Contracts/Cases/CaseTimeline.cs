@@ -82,6 +82,10 @@ public static class CaseAgentActivityPresentation
         ("ops.quality", _) => "Reported-data quality assessed",
         ("ops.enrichment", "ClassificationReused") => "Existing classification attached to the case",
         ("ops.enrichment", _) => "Classification processing completed",
+        ("ops.followup", "Clarification:occurrence-not-known") => "Suggested question: If known, when did the reported event happen?",
+        ("ops.followup", "Clarification:region-not-known") => "Suggested question: If known, which region was reported?",
+        ("ops.followup", "Clarification:incomplete-coordinate-pair") => "Suggested question: If known, can the reported coordinates be confirmed as a pair?",
+        ("ops.followup", "Clarification:text-evidence-unavailable") => "Suggested question: If available, can the original description or observation be provided?",
         ("ops.followup", "OfficerAcknowledgementDue") => "Overdue officer acknowledgment review recommended",
         ("ops.followup", _) => "Overdue follow-up review recommended",
         _ => "Activity recorded"

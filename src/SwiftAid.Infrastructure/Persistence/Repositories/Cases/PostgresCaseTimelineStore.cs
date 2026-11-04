@@ -164,6 +164,14 @@ public sealed class PostgresCaseTimelineStore(SwiftAidDbContext dbContext) : ICa
                           AND r."PredictionsJson" ->> 'leaseId' = claim.lease_id::text
                       )
                     UNION ALL
+                    SELECT p.source_event_id, p.activity_id, 'ops.followup', p.policy_version, p.recorded_at_utc,
+                        NULL::uuid, (c.report_revision = source.report_revision AND c.workflow <> 'Resolved'),
+                        NULL::timestamptz, NULL::timestamptz, 'Clarification:' || p.finding_code
+                    FROM ellai_clarification_proposals p
+                    JOIN managed_cases c ON c.case_id = p.case_id
+                    JOIN case_events source ON source.event_id = p.source_event_id AND source.case_id = p.case_id
+                    WHERE {includeFollowUp} AND p.case_id = {caseId} AND p.source_event_id = ANY({ids})
+                    UNION ALL
                     SELECT r.source_event_id, r.activity_id, 'ops.followup', r.policy_version, r.recorded_at_utc,
                         r.follow_up_id, CASE WHEN r.recommendation_kind = 'OfficerAcknowledgementDue' THEN
                             (f.assignee_actor_id = a.officer_actor_id AND f.status = 'Scheduled'
