@@ -407,6 +407,8 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IEligibleHealthOfficerStore, PostgresEligibleHealthOfficerStore>();
         services.AddScoped<IHealthOfficerDesignationAdministration>(provider => new PostgresHealthOfficerDesignationAdministration(
             provider.GetRequiredService<SwiftAidDbContext>(), provider.GetRequiredService<IOptions<HealthOfficerDirectoryOptions>>().Value));
+        services.AddScoped<IHealthOfficerDesignationQuery>(provider => new PostgresHealthOfficerDesignationQuery(
+            provider.GetRequiredService<SwiftAidDbContext>(), provider.GetRequiredService<IOptions<HealthOfficerDirectoryOptions>>().Value));
         services.AddScoped<IEligibleHealthOfficerQuery>(provider => new EligibleHealthOfficerQuery(
             provider.GetRequiredService<IEligibleHealthOfficerStore>(), provider.GetRequiredService<ICaseAccessPolicy>(),
             provider.GetRequiredService<ICaseCommandUnitOfWork>(), provider.GetRequiredService<IOptions<HealthOfficerDirectoryOptions>>().Value));

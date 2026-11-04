@@ -42,3 +42,11 @@ workflow yet. Production database
 roles must be separated so the application cannot grant itself administrator
 authority, and an approved bootstrap and revocation process must be established
 before either gate is enabled. A designation is not a professional licence check.
+
+The separately gated administration lookup accepts one explicit organization,
+country, sector and actor reference in the request body. It uses the same current
+administrator authorization and lock order as changes, and returns the latest
+designation version even when suspended, revoked or expired. An authorized lookup
+with no designation returns an empty current record; it does not establish that
+the target exists or is eligible for assignment. Results are not cached. A later
+change still checks the expected version and current administrator authority.

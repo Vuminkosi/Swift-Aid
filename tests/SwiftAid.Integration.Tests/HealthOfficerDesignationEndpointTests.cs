@@ -33,7 +33,9 @@ public sealed class HealthOfficerDesignationEndpointTests
           .AddScheme<AuthenticationSchemeOptions, TestAuthenticationHandler>(OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme, _ => { });
         builder.Services.AddAuthorization();
         var service = new DesignationService();
+        var query = new DesignationQuery();
         builder.Services.AddSingleton<IHealthOfficerDesignationAdministration>(service);
+        builder.Services.AddSingleton<IHealthOfficerDesignationQuery>(query);
         await using var app = builder.Build();
         app.UseAuthentication();
         app.UseAuthorization();
@@ -49,6 +51,24 @@ public sealed class HealthOfficerDesignationEndpointTests
         };
         var json = JsonSerializer.Serialize(requestBody, new JsonSerializerOptions(JsonSerializerDefaults.Web));
         using (var anonymous = await client.PostAsJsonAsync(path, requestBody)) Assert.Equal(HttpStatusCode.Unauthorized, anonymous.StatusCode);
+        const string lookupPath = "/api/v1/health-officer-designations/lookup";
+        var lookupBody = new HealthOfficerDesignationLookupRequest { TargetActorId = "target", OrganizationId = "org", CountryCode = "SZ", Sector = "HumanHealth" };
+        using (var anonymous = await client.PostAsJsonAsync(lookupPath, lookupBody)) Assert.Equal(HttpStatusCode.Unauthorized, anonymous.StatusCode);
+        using (var cookieLookup = new HttpRequestMessage(HttpMethod.Post, lookupPath) { Content = JsonContent.Create(lookupBody) })
+        {
+            TestAuthenticationHandler.AddCookieAuthentication(cookieLookup);
+            using var response = await client.SendAsync(cookieLookup);
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        }
+        using (var lookup = new HttpRequestMessage(HttpMethod.Post, lookupPath) { Content = JsonContent.Create(lookupBody) })
+        {
+            lookup.Headers.Authorization = new AuthenticationHeaderValue("Bearer", TestAuthenticationHandler.BearerToken);
+            using var response = await client.SendAsync(lookup);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            Assert.True(response.Headers.CacheControl!.NoStore);
+            Assert.Null((await response.Content.ReadFromJsonAsync<HealthOfficerDesignationLookupResponse>())!.Current);
+        }
+        Assert.Equal(1, query.Calls);
         using (var cookie = new HttpRequestMessage(HttpMethod.Post, path) { Content = JsonContent.Create(requestBody) })
         {
             TestAuthenticationHandler.AddCookieAuthentication(cookie);
@@ -113,6 +133,16 @@ public sealed class HealthOfficerDesignationEndpointTests
         {
             Calls++; Actor = actor; Change = change;
             return Task.FromResult(new HealthOfficerDesignationChangeResult(Status, Id, 1));
+        }
+    }
+
+    private sealed class DesignationQuery : IHealthOfficerDesignationQuery
+    {
+        public int Calls { get; private set; }
+        public Task<HealthOfficerDesignationReadResult> GetAsync(ActorContext actor, HealthOfficerDesignationScope scope, CancellationToken ct)
+        {
+            Calls++;
+            return Task.FromResult(new HealthOfficerDesignationReadResult(HealthOfficerDesignationReadStatus.Available));
         }
     }
 

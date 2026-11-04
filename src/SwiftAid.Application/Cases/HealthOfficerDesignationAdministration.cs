@@ -14,3 +14,13 @@ public interface IHealthOfficerDesignationAdministration
 {
     Task<HealthOfficerDesignationChangeResult> ChangeAsync(ActorContext actor, HealthOfficerDesignationChange change, CancellationToken ct);
 }
+
+public sealed record HealthOfficerDesignationScope(string TargetActorId, string OrganizationId, string CountryCode, string Sector);
+public sealed record HealthOfficerDesignationCurrent(Guid DesignationId, long Version, string Status, DateTimeOffset ValidFromUtc, DateTimeOffset ExpiresAtUtc);
+public enum HealthOfficerDesignationReadStatus { Available, Denied, Invalid, Unavailable }
+public sealed record HealthOfficerDesignationReadResult(HealthOfficerDesignationReadStatus Status, HealthOfficerDesignationCurrent? Current = null);
+
+public interface IHealthOfficerDesignationQuery
+{
+    Task<HealthOfficerDesignationReadResult> GetAsync(ActorContext actor, HealthOfficerDesignationScope scope, CancellationToken ct);
+}

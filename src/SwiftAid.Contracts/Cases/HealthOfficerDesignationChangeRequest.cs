@@ -17,3 +17,14 @@ public sealed class HealthOfficerDesignationChangeRequest
 }
 
 public sealed record HealthOfficerDesignationChangeReceipt(Guid DesignationId, long Version, bool Replayed);
+
+public sealed class HealthOfficerDesignationLookupRequest
+{
+    [JsonRequired] public string TargetActorId { get; init; } = "";
+    [JsonRequired] public string OrganizationId { get; init; } = "";
+    [JsonRequired] public string CountryCode { get; init; } = "";
+    [JsonRequired] public string Sector { get; init; } = "";
+}
+
+public sealed record HealthOfficerDesignationView(Guid DesignationId, long Version, string Status, DateTimeOffset ValidFromUtc, DateTimeOffset ExpiresAtUtc);
+public sealed record HealthOfficerDesignationLookupResponse(HealthOfficerDesignationView? Current);

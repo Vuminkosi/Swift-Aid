@@ -25,6 +25,9 @@ public static class HealthOfficerDesignationEndpoints
         endpoints.MapPost("/api/v1/health-officer-designations/changes", ChangeAsync)
             .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = schemes })
             .WithMetadata(new RequestSizeLimitAttribute(2048));
+        endpoints.MapPost("/api/v1/health-officer-designations/lookup", LookupAsync)
+            .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = schemes })
+            .WithMetadata(new RequestSizeLimitAttribute(2048));
     }
 
     private static async Task<IResult> ChangeAsync(HttpContext context, IAntiforgery antiforgery, CancellationToken ct)
@@ -40,29 +43,9 @@ public static class HealthOfficerDesignationEndpoints
             try { await antiforgery.ValidateRequestAsync(context).ConfigureAwait(false); }
             catch (AntiforgeryValidationException) { return Results.Problem(statusCode: 400, title: "Request verification failed."); }
         }
-        if (!context.Request.HasJsonContentType()) return Invalid();
-        const int maxBytes = 2048;
-        if (context.Request.ContentLength > maxBytes) return TooLarge();
-        var buffer = new byte[maxBytes + 1];
-        var length = 0;
-        while (length < buffer.Length)
-        {
-            var count = await context.Request.Body.ReadAsync(buffer.AsMemory(length), ct).ConfigureAwait(false);
-            if (count == 0) break;
-            length += count;
-        }
-        if (length > maxBytes) return TooLarge();
-        HealthOfficerDesignationChangeRequest? request;
-        try
-        {
-            using var document = JsonDocument.Parse(buffer.AsMemory(0, length));
-            if (document.RootElement.ValueKind != JsonValueKind.Object) return Invalid();
-            var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var property in document.RootElement.EnumerateObject())
-                if (!names.Add(property.Name)) return Invalid();
-            request = document.RootElement.Deserialize<HealthOfficerDesignationChangeRequest>(JsonOptions);
-        }
-        catch (JsonException) { return Invalid(); }
+        var parsed = await ReadBodyAsync<HealthOfficerDesignationChangeRequest>(context, ct).ConfigureAwait(false);
+        if (parsed.TooLarge) return TooLarge();
+        var request = parsed.Value;
         if (request is null) return Invalid();
         try
         {
@@ -82,6 +65,65 @@ public static class HealthOfficerDesignationEndpoints
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch (Exception error) when (error is not OutOfMemoryException)
         { return Results.Problem(statusCode: 503, title: "Designation administration is unavailable."); }
+    }
+
+    private static async Task<IResult> LookupAsync(HttpContext context, IAntiforgery antiforgery, CancellationToken ct)
+    {
+        context.Response.Headers.CacheControl = "no-store";
+        ActorContext actor;
+        try { actor = ActorContext.FromValidatedPrincipal(context.User); }
+        catch (UnauthorizedAccessException) { return Results.Problem(statusCode: 401, title: "Authentication is required."); }
+        var query = context.RequestServices.GetService<IHealthOfficerDesignationQuery>();
+        if (query is null) return Results.Problem(statusCode: 503, title: "Designation administration is unavailable.");
+        if (await CaseCommandEndpoints.RequiresAntiforgeryAsync(context).ConfigureAwait(false))
+        {
+            try { await antiforgery.ValidateRequestAsync(context).ConfigureAwait(false); }
+            catch (AntiforgeryValidationException) { return Results.Problem(statusCode: 400, title: "Request verification failed."); }
+        }
+        var parsed = await ReadBodyAsync<HealthOfficerDesignationLookupRequest>(context, ct).ConfigureAwait(false);
+        if (parsed.TooLarge) return TooLarge();
+        if (parsed.Value is not { } request) return Invalid();
+        try
+        {
+            var result = await query.GetAsync(actor, new(request.TargetActorId, request.OrganizationId, request.CountryCode, request.Sector), ct).ConfigureAwait(false);
+            if (result.Status == HealthOfficerDesignationReadStatus.Denied)
+                return Results.Problem(statusCode: 404, title: "The designation scope was not found.");
+            if (result.Status == HealthOfficerDesignationReadStatus.Invalid) return Invalid();
+            if (result.Status != HealthOfficerDesignationReadStatus.Available)
+                return Results.Problem(statusCode: 503, title: "Designation administration is unavailable.");
+            var current = result.Current;
+            return Results.Json(new HealthOfficerDesignationLookupResponse(current is null ? null :
+                new(current.DesignationId, current.Version, current.Status, current.ValidFromUtc, current.ExpiresAtUtc)));
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        catch (Exception error) when (error is not OutOfMemoryException)
+        { return Results.Problem(statusCode: 503, title: "Designation administration is unavailable."); }
+    }
+
+    private static async Task<(T? Value, bool TooLarge)> ReadBodyAsync<T>(HttpContext context, CancellationToken ct) where T : class
+    {
+        if (!context.Request.HasJsonContentType()) return (null, false);
+        const int maxBytes = 2048;
+        if (context.Request.ContentLength > maxBytes) return (null, true);
+        var buffer = new byte[maxBytes + 1];
+        var length = 0;
+        while (length < buffer.Length)
+        {
+            var count = await context.Request.Body.ReadAsync(buffer.AsMemory(length), ct).ConfigureAwait(false);
+            if (count == 0) break;
+            length += count;
+        }
+        if (length > maxBytes) return (null, true);
+        try
+        {
+            using var document = JsonDocument.Parse(buffer.AsMemory(0, length));
+            if (document.RootElement.ValueKind != JsonValueKind.Object) return (null, false);
+            var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var property in document.RootElement.EnumerateObject())
+                if (!names.Add(property.Name)) return (null, false);
+            return (document.RootElement.Deserialize<T>(JsonOptions), false);
+        }
+        catch (JsonException) { return (null, false); }
     }
 
     private static IResult Invalid() => Results.Problem(statusCode: 400, title: "The designation request is invalid.");

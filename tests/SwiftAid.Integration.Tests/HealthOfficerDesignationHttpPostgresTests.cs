@@ -40,6 +40,8 @@ public sealed partial class CaseCommandProcessingPostgresTests
         builder.Services.AddScoped(_ => fixture.CreateDbContext());
         builder.Services.AddScoped<IHealthOfficerDesignationAdministration>(services =>
             new PostgresHealthOfficerDesignationAdministration(services.GetRequiredService<SwiftAidDbContext>(), settings));
+        builder.Services.AddScoped<IHealthOfficerDesignationQuery>(services =>
+            new PostgresHealthOfficerDesignationQuery(services.GetRequiredService<SwiftAidDbContext>(), settings));
         await using var app = builder.Build();
         app.UseAuthentication();
         app.UseAuthorization();
@@ -58,7 +60,18 @@ public sealed partial class CaseCommandProcessingPostgresTests
             message.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
             return await client.SendAsync(message);
         }
+        async Task<HttpResponseMessage> Lookup(string token, string sector = "HumanHealth")
+        {
+            using var message = new HttpRequestMessage(HttpMethod.Post, "/api/v1/health-officer-designations/lookup")
+            {
+                Content = JsonContent.Create(new HealthOfficerDesignationLookupRequest
+                { TargetActorId = fixture.NewOwnerActorId, OrganizationId = fixture.OrganizationId, CountryCode = "SZ", Sector = sector })
+            };
+            message.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            return await client.SendAsync(message);
+        }
         using (var denied = await Send("current", request)) Assert.Equal(HttpStatusCode.NotFound, denied.StatusCode);
+        using (var denied = await Lookup("current")) Assert.Equal(HttpStatusCode.NotFound, denied.StatusCode);
         await using (var db = fixture.CreateDbContext())
         {
             await db.Database.ExecuteSqlInterpolatedAsync($"""
@@ -69,6 +82,14 @@ public sealed partial class CaseCommandProcessingPostgresTests
                 """);
         }
         using (var stale = await Send("stale", request)) Assert.Equal(HttpStatusCode.NotFound, stale.StatusCode);
+        using (var stale = await Lookup("stale")) Assert.Equal(HttpStatusCode.NotFound, stale.StatusCode);
+        using (var wrongSector = await Lookup("current", "AnimalHealth")) Assert.Equal(HttpStatusCode.NotFound, wrongSector.StatusCode);
+        using (var empty = await Lookup("current"))
+        {
+            Assert.Equal(HttpStatusCode.OK, empty.StatusCode);
+            Assert.True(empty.Headers.CacheControl!.NoStore);
+            Assert.Null((await empty.Content.ReadFromJsonAsync<HealthOfficerDesignationLookupResponse>())!.Current);
+        }
         Guid designationId;
         using (var created = await Send("current", request))
         {
@@ -85,6 +106,36 @@ public sealed partial class CaseCommandProcessingPostgresTests
             Assert.True(receipt.Replayed);
             Assert.Equal(designationId, receipt.DesignationId);
         }
+        using (var current = await Lookup("current"))
+        {
+            var designation = (await current.Content.ReadFromJsonAsync<HealthOfficerDesignationLookupResponse>())!.Current;
+            Assert.Equal(designationId, designation!.DesignationId);
+            Assert.Equal(1, designation.Version);
+            Assert.Equal("Active", designation.Status);
+        }
+        var revoke = new HealthOfficerDesignationChangeRequest
+        {
+            CommandId = Guid.NewGuid(), TargetActorId = request.TargetActorId, OrganizationId = request.OrganizationId,
+            CountryCode = request.CountryCode, Sector = request.Sector, Status = "Revoked",
+            ValidFromUtc = request.ValidFromUtc, ExpiresAtUtc = request.ExpiresAtUtc, ExpectedVersion = 1
+        };
+        using (var revoked = await Send("current", revoke)) Assert.Equal(HttpStatusCode.OK, revoked.StatusCode);
+        using (var current = await Lookup("current"))
+        {
+            var designation = (await current.Content.ReadFromJsonAsync<HealthOfficerDesignationLookupResponse>())!.Current;
+            Assert.Equal(2, designation!.Version);
+            Assert.Equal("Revoked", designation.Status);
+        }
+        await using (var db = fixture.CreateDbContext())
+        {
+            await db.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO health_officer_designation_administrators (administrator_event_id, actor_id, organization_id, country_code,
+                    sector, status, valid_from_utc, expires_at_utc, granted_by_actor_id, version, recorded_at_utc)
+                VALUES ({Guid.NewGuid()}, {fixture.ActorId}, {fixture.OrganizationId}, 'SZ', 'HumanHealth', 'Revoked',
+                    clock_timestamp() - interval '1 day', clock_timestamp() + interval '1 day', {fixture.OwnerActorId}, 2, clock_timestamp())
+                """);
+        }
+        using (var denied = await Lookup("current")) Assert.Equal(HttpStatusCode.NotFound, denied.StatusCode);
         settings.AdministrationEnabled = false;
         using (var disabled = await Send("current", request)) Assert.Equal(HttpStatusCode.ServiceUnavailable, disabled.StatusCode);
         await using var verification = fixture.CreateDbContext();

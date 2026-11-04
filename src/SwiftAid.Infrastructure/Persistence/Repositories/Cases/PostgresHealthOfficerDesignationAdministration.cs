@@ -13,9 +13,9 @@ public sealed class PostgresHealthOfficerDesignationAdministration(SwiftAidDbCon
         ArgumentNullException.ThrowIfNull(actor);
         ArgumentNullException.ThrowIfNull(change);
         if (!options.Enabled || !options.AdministrationEnabled) return new(HealthOfficerDesignationChangeStatus.Unavailable);
-        if (change.CommandId == Guid.Empty || !Identifier(change.TargetActorId) || !Identifier(change.OrganizationId) ||
-            change.TargetActorId == actor.ActorId || change.CountryCode is not { Length: 2 } ||
-            change.CountryCode.Any(c => c is < 'A' or > 'Z') || change.Sector is not ("HumanHealth" or "AnimalHealth") ||
+        if (change.CommandId == Guid.Empty || !PostgresOfficerDesignationAuthority.Identifier(change.TargetActorId) ||
+            !PostgresOfficerDesignationAuthority.ValidScope(change.OrganizationId, change.CountryCode, change.Sector) ||
+            change.TargetActorId == actor.ActorId ||
             change.Status is not ("Active" or "Suspended" or "Revoked") || change.ExpectedVersion < 0 ||
             change.ExpectedVersion == long.MaxValue || change.ExpiresAtUtc <= change.ValidFromUtc)
             return new(HealthOfficerDesignationChangeStatus.Invalid);
@@ -28,34 +28,8 @@ public sealed class PostgresHealthOfficerDesignationAdministration(SwiftAidDbCon
         // Stable lock ordering: command identity, administrator scope, shared authority rows, target scope.
         var commandLock = "officer-command:" + change.CommandId.ToString("D");
         await db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({commandLock}, 0))", ct).ConfigureAwait(false);
-        await db.Database.ExecuteSqlInterpolatedAsync($"""
-            SELECT pg_advisory_xact_lock(hashtextextended('officer-admin:' ||
-                jsonb_build_array({actor.ActorId}, {change.OrganizationId}, {change.CountryCode}, {change.Sector})::text, 0))
-            """, ct).ConfigureAwait(false);
-        await db.Database.ExecuteSqlInterpolatedAsync($"SELECT actor_id FROM actors WHERE actor_id IN ({actor.ActorId}, {change.TargetActorId}) ORDER BY actor_id FOR SHARE", ct).ConfigureAwait(false);
-        await db.Database.ExecuteSqlInterpolatedAsync($"SELECT actor_id FROM actor_access_states WHERE actor_id = {actor.ActorId} FOR SHARE", ct).ConfigureAwait(false);
-        await db.Database.ExecuteSqlInterpolatedAsync($"SELECT organization_id FROM organizations WHERE organization_id = {change.OrganizationId} FOR SHARE", ct).ConfigureAwait(false);
-        await db.Database.ExecuteSqlInterpolatedAsync($"""
-            SELECT membership_id FROM organization_memberships WHERE organization_id = {change.OrganizationId}
-                AND actor_id IN ({actor.ActorId}, {change.TargetActorId}) ORDER BY membership_id FOR SHARE
-            """, ct).ConfigureAwait(false);
-
-        var authorized = await db.Database.SqlQuery<bool>($"""
-            SELECT EXISTS (
-                SELECT 1 FROM actors a JOIN actor_access_states state ON state.actor_id = a.actor_id
-                JOIN organization_memberships m ON m.actor_id = a.actor_id AND m.organization_id = {change.OrganizationId}
-                JOIN organizations o ON o.organization_id = m.organization_id
-                JOIN health_officer_designation_administrators adm ON adm.actor_id = a.actor_id AND adm.organization_id = o.organization_id
-                WHERE a.actor_id = {actor.ActorId} AND a.status = 'Active' AND (a.expires_at_utc IS NULL OR a.expires_at_utc > clock_timestamp())
-                    AND state.access_epoch = {actor.AccessEpoch} AND o.status = 'Active' AND m.status = 'Active'
-                    AND m.valid_from_utc <= clock_timestamp() AND (m.expires_at_utc IS NULL OR m.expires_at_utc > clock_timestamp())
-                    AND adm.country_code = {change.CountryCode} AND adm.sector = {change.Sector} AND adm.status = 'Active'
-                    AND adm.valid_from_utc <= clock_timestamp() AND adm.expires_at_utc > clock_timestamp()
-                    AND NOT EXISTS (SELECT 1 FROM health_officer_designation_administrators newer
-                        WHERE newer.actor_id = adm.actor_id AND newer.organization_id = adm.organization_id
-                        AND newer.country_code = adm.country_code AND newer.sector = adm.sector AND newer.version > adm.version)
-            ) AS "Value"
-            """).SingleAsync(ct).ConfigureAwait(false);
+        var authorized = await PostgresOfficerDesignationAuthority.AcquireAsync(db, actor, change.TargetActorId,
+            change.OrganizationId, change.CountryCode, change.Sector, ct).ConfigureAwait(false);
         if (!authorized) return new(HealthOfficerDesignationChangeStatus.Denied);
 
         var receipts = await db.Database.SqlQuery<Receipt>($"""
@@ -108,7 +82,6 @@ public sealed class PostgresHealthOfficerDesignationAdministration(SwiftAidDbCon
         return new(HealthOfficerDesignationChangeStatus.Recorded, designationId, version + 1);
     }
 
-    private static bool Identifier(string value) => !string.IsNullOrWhiteSpace(value) && value.Length <= 256 && value == value.Trim() && !value.Any(char.IsControl);
     private static DateTimeOffset Microseconds(DateTimeOffset value)
     {
         var utc = value.ToUniversalTime();
