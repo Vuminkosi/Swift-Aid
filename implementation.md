@@ -4564,3 +4564,9 @@ Case grouping now supports both recorded region and locality dimensions. `ellai_
 PASS: `dotnet build src/SwiftAid.Gateway/SwiftAid.Gateway.csproj --no-restore -m:1 -nr:false -p:WasmBuildNative=false --verbosity quiet` (zero warnings, zero errors). PASS: `git diff --check`. No tests added or run, per user instruction. NOT VERIFIED: live case data, provider selection, PostgreSQL query behavior, browser/session replay, or deployment. No migration.
 
 Location aggregation emits the supporting case IDs within each group and scans at most 80 candidates in 40-row pages to stay within the existing 32 KiB tool-result bound. Remaining candidates make the result incomplete.
+
+### Ellai review-stage validation guidance targeting (2026-11-04)
+
+Review-stage age and text-limit errors now tell the user to select Return to details before promising a field highlight. The current review target is the navigation control; after the detail form is active, existing guidance advances to the first invalid input and updates the spotlight one issue at a time.
+
+PASS: `dotnet build src/SwiftAid.Gateway/SwiftAid.Gateway.csproj --no-restore -m:1 -nr:false -p:WasmBuildNative=false --verbosity quiet` (zero warnings, zero errors). PASS: `git diff --check`. No tests added or run, per user instruction. NOT VERIFIED: live browser or device rendering of the review-to-detail focus transition.
