@@ -20,6 +20,11 @@ public static class EllaiSpecialistRegistry
     public const string CommunitySessions = "community.sessions";
     public const string Spatial = "ops.spatial";
     public const string HealthResearch = "community.health-research";
+    public const string Enrichment = "ops.enrichment";
+    public const string Organization = "ops.organization";
+    public const string FollowUp = "ops.followup";
+    public const string Quality = "ops.quality";
+    public const string Correlation = "ops.correlation";
 
     private static readonly FrozenDictionary<string, EllaiSpecialistProfile> Profiles =
         new[]
@@ -45,7 +50,17 @@ public static class EllaiSpecialistRegistry
             new EllaiSpecialistProfile(Spatial, 1, "Ellai:Specialists:Spatial:Enabled",
                 new[] { EllaiToolNames.OwnedRegionCounts }.ToFrozenSet(StringComparer.Ordinal)),
             new EllaiSpecialistProfile(HealthResearch, 1, "Ellai:Specialists:HealthResearch:Enabled",
-                new[] { EllaiToolNames.ApprovedHealthSources }.ToFrozenSet(StringComparer.Ordinal))
+                new[] { EllaiToolNames.ApprovedHealthSources }.ToFrozenSet(StringComparer.Ordinal)),
+            new EllaiSpecialistProfile(Enrichment, 1, "Ellai:Specialists:OperationalReads:Enabled",
+                new[] { EllaiToolNames.CaseTimeline, EllaiToolNames.ClassificationSnapshot }.ToFrozenSet(StringComparer.Ordinal)),
+            new EllaiSpecialistProfile(Organization, 1, "Ellai:Specialists:OperationalReads:Enabled",
+                new[] { EllaiToolNames.CaseTimeline, EllaiToolNames.State }.ToFrozenSet(StringComparer.Ordinal)),
+            new EllaiSpecialistProfile(FollowUp, 1, "Ellai:Specialists:OperationalReads:Enabled",
+                new[] { EllaiToolNames.CaseTimeline, EllaiToolNames.Receipts }.ToFrozenSet(StringComparer.Ordinal)),
+            new EllaiSpecialistProfile(Quality, 1, "Ellai:Specialists:OperationalReads:Enabled",
+                new[] { EllaiToolNames.CaseTimeline, EllaiToolNames.ClassificationEvidence }.ToFrozenSet(StringComparer.Ordinal)),
+            new EllaiSpecialistProfile(Correlation, 1, "Ellai:Specialists:OperationalReads:Enabled",
+                new[] { EllaiToolNames.CaseTimeline }.ToFrozenSet(StringComparer.Ordinal))
         }.ToFrozenDictionary(profile => profile.AgentId, StringComparer.Ordinal);
 
     public static bool TryGet(string agentId, out EllaiSpecialistProfile profile)

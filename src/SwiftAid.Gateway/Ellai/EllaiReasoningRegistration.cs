@@ -64,7 +64,8 @@ public static class EllaiReasoningRegistration
             enableSurveillanceSpecialist: sp.GetService<IConfiguration>()?.GetValue<bool>("Ellai:Specialists:Surveillance:Enabled") == true,
             enableReportingSpecialist: sp.GetService<IConfiguration>()?.GetValue<bool>("Ellai:Specialists:Reporting:Enabled") == true,
             enableSpatialSpecialist: sp.GetService<IConfiguration>()?.GetValue<bool>("Ellai:Specialists:Spatial:Enabled") == true,
-            enableHealthResearchSpecialist: sp.GetService<IConfiguration>()?.GetValue<bool>("Ellai:Specialists:HealthResearch:Enabled") == true));
+            enableHealthResearchSpecialist: sp.GetService<IConfiguration>()?.GetValue<bool>("Ellai:Specialists:HealthResearch:Enabled") == true,
+            enableOperationalReadSpecialists: sp.GetService<IConfiguration>()?.GetValue<bool>("Ellai:Specialists:OperationalReads:Enabled") == true));
         return services;
     }
 }

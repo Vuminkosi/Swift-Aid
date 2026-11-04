@@ -37,7 +37,8 @@ public sealed class EllaiFrameworkAgent
         bool enableKnowledgeSpecialist = false, bool enableCaseSpecialist = false, bool enableAnalyticsSpecialist = false,
         bool allowEmptyCaseQueue = false, bool enableUiSpecialist = false, bool enableGeospatialSpecialist = false,
         bool enableWorkflowSpecialist = false, bool enableCommunitySessionsSpecialist = false, bool enableSurveillanceSpecialist = false,
-        bool enableReportingSpecialist = false, bool enableSpatialSpecialist = false, bool enableHealthResearchSpecialist = false)
+        bool enableReportingSpecialist = false, bool enableSpatialSpecialist = false, bool enableHealthResearchSpecialist = false,
+        bool enableOperationalReadSpecialists = false)
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentException.ThrowIfNullOrWhiteSpace(instructions);
@@ -292,6 +293,27 @@ public sealed class EllaiFrameworkAgent
             { Interlocked.Exchange(ref invalidDelegation, 1); return "Specialist timed out."; }
             catch (EllaiFrameworkFailureException)
             { Interlocked.Exchange(ref invalidDelegation, 1); return "Specialist could not complete the request."; }
+        }
+        if (enableOperationalReadSpecialists && context.Actor is not null &&
+            context.AllowedTools?.Contains(EllaiToolNames.CaseTimeline) == true)
+        {
+            var operationalRoles = new[]
+            {
+                (SwiftAid.Application.Ellai.Specialists.EllaiSpecialistRegistry.Enrichment, "ellai_delegate_enrichment_read", "enrichment"),
+                (SwiftAid.Application.Ellai.Specialists.EllaiSpecialistRegistry.Organization, "ellai_delegate_organization_read", "organization"),
+                (SwiftAid.Application.Ellai.Specialists.EllaiSpecialistRegistry.FollowUp, "ellai_delegate_followup_read", "follow-up"),
+                (SwiftAid.Application.Ellai.Specialists.EllaiSpecialistRegistry.Quality, "ellai_delegate_quality_read", "data quality"),
+                (SwiftAid.Application.Ellai.Specialists.EllaiSpecialistRegistry.Correlation, "ellai_delegate_correlation_read", "correlation")
+            };
+            foreach (var (agentId, functionName, roleName) in operationalRoles)
+            {
+                var delegationCount = 0;
+                Task<string> DelegateOperationalRead(string task, CancellationToken token) => Interlocked.Increment(ref delegationCount) == 1
+                    ? DelegateMvpRead(agentId, task, token)
+                    : Task.FromResult("Operational specialist read delegation limit reached.");
+                tools.Add(AIFunctionFactory.Create(DelegateOperationalRead, name: functionName,
+                    description: $"Ask the {roleName} specialist a SwiftAid question using the session's admitted reads. This does not run a background job or execute an action."));
+            }
         }
         if (enableHealthResearchSpecialist && context.Actor is not null && context.AllowedTools?.Contains(EllaiToolNames.ApprovedHealthSources) == true)
         {

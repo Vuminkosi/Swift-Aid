@@ -4,7 +4,7 @@ This inventory describes the source implementation, not a claim that every role 
 
 ## Interactive specialists
 
-The following 11 profiles are enabled in the checked-in Gateway defaults. Runtime configuration, provider readiness, authorization and service deployment still determine actual availability.
+The following 11 interactive roles are enabled in the checked-in Gateway defaults. The five operational roles below also have MVP interactive read profiles behind `Ellai:Specialists:OperationalReads:Enabled`. Runtime configuration, provider readiness, authorization and service deployment still determine actual availability.
 
 | Identity | Role | Admitted model-visible tools | Implemented scope and material gaps |
 |---|---|---|---|
@@ -22,7 +22,7 @@ The following 11 profiles are enabled in the checked-in Gateway defaults. Runtim
 
 ## Operational roles
 
-These are bounded background workflows, not model-visible tool grants. Their schedulers are disabled by default and require explicit workspace, organization and policy configuration. Their checked-in code does not prove a live worker is running. See `docs/ellai-operational-schedule-configuration.md` for configuration and rollout requirements.
+These are bounded background workflows. Their MVP interactive read delegates inherit the current workspace session's admitted reads; those delegates do not run jobs or execute actions. Their schedulers are disabled by default and require explicit workspace, organization and policy configuration. Their checked-in code does not prove a live worker is running. See `docs/ellai-operational-schedule-configuration.md` for configuration and rollout requirements.
 
 | Identity | Role | Existing implementation boundary | Material gaps |
 |---|---|---|---|
@@ -46,4 +46,4 @@ The user directed that these three roles remain unimplemented while the others a
 
 The logical supervisor delegates within the existing Ellai session. Interactive specialists inherit the parent's admitted registered tools and cannot exceed the caller's permissions; individual specialist implementations may still have narrower output or workflow handling. Each interactive profile has a server-owned call budget and timeout; tool-specific result bounds, replay checks and authorization remain enforced in the broker and application services. Operational roles use fenced schedules, bounded work and domain authorization. This matrix does not claim that every conceptual semantic tool in the design is implemented: missing tools and complete output contracts remain work against the specification.
 
-`EllaiSpecialistIdentities` supplies descriptive IDs, names, current boundaries and implementation kinds for all 19 roles; it does not enable roles or grant tools. `EllaiSpecialistRegistry` supplies the 11 interactive profile flags, primary tool lists and limits. A required-permission manifest, handoff policy, per-tool audit/timeout/side-effect catalog, and operational role registry are still missing. Verify each boundary against the current source and actual environment before treating it as operational.
+`EllaiSpecialistIdentities` supplies descriptive IDs, names, current boundaries and implementation kinds for all 19 roles; it does not enable roles or grant tools. `EllaiSpecialistRegistry` supplies 16 interactive profile flags, primary tool lists and limits. A required-permission manifest, handoff policy, per-tool audit/timeout/side-effect catalog, and complete operational role registry are still missing. Verify each boundary against the current source and actual environment before treating it as operational.
