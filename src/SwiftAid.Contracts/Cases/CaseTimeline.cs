@@ -120,6 +120,10 @@ public sealed record CaseTimeline(
 {
     /// <summary>Authorized case-level monitoring summary; follow-ups are not necessarily escalation-related.</summary>
     public CaseTimelineWorkSummary? WorkSummary { get; init; }
+
+    /// <summary>Current officer assignments, available only with escalation and follow-up authority.</summary>
+    public IReadOnlyList<CaseOfficerEscalationAssignment> CurrentOfficerEscalations { get; init; } = [];
+    public bool CurrentOfficerEscalationsTruncated { get; init; }
 }
 
 public sealed record CaseTimelineWorkSummary(int OpenEscalations, int ScheduledFollowUps, DateTimeOffset? NextFollowUpDueUtc);

@@ -256,6 +256,26 @@ public sealed class PostgresCaseTimelineStore(SwiftAidDbContext dbContext) : ICa
             """).ToArrayAsync(ct).ConfigureAwait(false);
     }
 
+    public async Task<IReadOnlyList<CaseOfficerEscalationRow>> GetCurrentOfficerEscalationsAsync(ICaseCommandLease lease, Guid caseId,
+        CancellationToken ct)
+    {
+        if (lease is not PostgresCaseCommandLease current || !current.IsActive || current.Mode != CaseLeaseMode.Read ||
+            current.CaseId != caseId || !ReferenceEquals(current.DbContext, _dbContext) ||
+            !ReferenceEquals(current.Transaction, _dbContext.Database.CurrentTransaction))
+            throw new UnauthorizedAccessException("An active case read lease is required to read officer escalation history.");
+        var ids = await _dbContext.Database.SqlQuery<Guid>($"""
+            SELECT a.follow_up_event_id AS "Value" FROM health_officer_escalation_assignments a
+            JOIN managed_case_follow_ups f ON f.follow_up_id = a.follow_up_id AND f.case_id = a.case_id
+            JOIN managed_case_escalations e ON e.escalation_id = a.escalation_id AND e.case_id = a.case_id
+            JOIN managed_cases c ON c.case_id = a.case_id
+            WHERE a.case_id = {caseId} AND f.assignee_actor_id = a.officer_actor_id
+                AND f.status IN ('Scheduled', 'Acknowledged') AND e.status <> 'Closed' AND c.workflow <> 'Resolved'
+            ORDER BY a.aggregate_version DESC, a.assignment_id DESC LIMIT 11
+            """).ToArrayAsync(ct).ConfigureAwait(false);
+        var rows = await GetOfficerEscalationsAsync(lease, caseId, ids, ct).ConfigureAwait(false);
+        return rows.OrderBy(row => Array.IndexOf(ids, row.EventId)).ToArray();
+    }
+
     public Task<Guid?> GetPromotingReceiptAsync(Guid caseId, CancellationToken ct) =>
         _dbContext.IntakePromotions.AsNoTracking()
             .Where(item => item.CaseId == caseId)

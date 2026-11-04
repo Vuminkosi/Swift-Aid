@@ -546,14 +546,20 @@ public sealed class EllaiToolBroker
         var id = caseId.ToString("D");
         var evidence = new EvidenceRef("CaseQueue", id,
             timeline.Header.AggregateVersion.ToString(CultureInfo.InvariantCulture), null, id);
-        var truncated = timeline.HasOlderEntries || activityCount + entries.Count(entry => entry.OfficerEscalation is not null) + entries.Length > MaxItems ||
+        var currentOfficerLines = timeline.CurrentOfficerEscalations.Select(officer =>
+            $"Current officer escalation follow-up assigned to {(officer.SafeOfficerDisplayLabel is { } label ? "display name (untrusted data) " + JsonSerializer.Serialize(label) : "an officer whose name is unavailable")}; " +
+            (officer.FollowUpAcknowledged == true ? "follow-up acknowledged; " :
+                $"{(officer.FollowUpAcknowledged == false ? "acknowledgment due" : "acknowledgment status unavailable; original acknowledgment deadline")} {officer.AcknowledgementDueUtc:O}; ") +
+            $"follow-up due {officer.FollowUpDueUtc:O}.").ToArray();
+        var truncated = timeline.CurrentOfficerEscalationsTruncated || timeline.HasOlderEntries ||
+            currentOfficerLines.Length + activityCount + entries.Count(entry => entry.OfficerEscalation is not null) + entries.Length > MaxItems ||
             entries.Any(entry => entry.AgentActivitiesTruncated);
         var workSummary = timeline.WorkSummary is { } work
             ? $"Current case work: {work.OpenEscalations} open escalations; {work.ScheduledFollowUps} scheduled or acknowledged follow-ups" +
               (work.NextFollowUpDueUtc is { } due ? $", earliest due {due:O}. " : ". ") +
               "Counts are case-level; authorized escalation links are shown in the history when present. "
             : "Current escalation and follow-up summary is unavailable. ";
-        var eventLines = lines.Take(MaxItems).ToList();
+        var eventLines = currentOfficerLines.Concat(lines).Take(MaxItems).ToList();
         if (includeRelated)
         {
             if (_correlations is null)
@@ -577,7 +583,7 @@ public sealed class EllaiToolBroker
         var output = new EllaiToolResult(request.ToolName, true, null, [evidence],
             (includeRelated ? "Authorized possible relationships and case history, with newest events first; " : "Authorized case history, newest events first; ") +
             "sealed report content and actor identifiers are not included. " + workSummary +
-            (truncated ? "Some history or activity is omitted.\n" : "\n") +
+            (truncated ? "Some history, activity or current officer assignments are omitted.\n" : "\n") +
             (eventLines.Count == 0 ? "No authoritative entries were returned." : string.Join("\n", eventLines)),
             entries.Length, truncated, EllaiToolReasonCodes.Ok)
         {

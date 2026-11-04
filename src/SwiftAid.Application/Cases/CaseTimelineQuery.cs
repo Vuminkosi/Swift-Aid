@@ -49,6 +49,9 @@ public interface ICaseTimelineStore
 
     Task<IReadOnlyList<CaseOfficerEscalationRow>> GetOfficerEscalationsAsync(ICaseCommandLease lease, Guid caseId, IReadOnlyList<Guid> eventIds,
         CancellationToken ct) => Task.FromResult<IReadOnlyList<CaseOfficerEscalationRow>>([]);
+
+    Task<IReadOnlyList<CaseOfficerEscalationRow>> GetCurrentOfficerEscalationsAsync(ICaseCommandLease lease, Guid caseId,
+        CancellationToken ct) => Task.FromResult<IReadOnlyList<CaseOfficerEscalationRow>>([]);
 }
 
 public interface ICaseTimelineQuery
@@ -199,6 +202,13 @@ public sealed class CaseTimelineQuery(
             var workSummary = officerDecision.IsAllowed
                 ? await _store.GetWorkSummaryAsync(caseId, ct).ConfigureAwait(false)
                 : null;
+            var currentOfficerRows = officerDecision.IsAllowed
+                ? await _store.GetCurrentOfficerEscalationsAsync(lease, caseId, ct).ConfigureAwait(false)
+                : [];
+            var currentOfficerEscalations = currentOfficerRows.Take(10).Select(officer =>
+                new CaseOfficerEscalationAssignment(officer.EscalationId, officer.FollowUpId, officer.OfficerActorId,
+                    officer.OfficerDisplayLabel is { Length: > 0 and <= 120 } label && !label.Any(char.IsControl) ? label : null,
+                    officer.AcknowledgementDueUtc, officer.FollowUpDueUtc, officer.IsCurrent, officer.FollowUpAcknowledged)).ToArray();
             var receiptId = await _store.GetPromotingReceiptAsync(caseId, ct).ConfigureAwait(false);
             if (receiptId.HasValue && !hasOlderEntries)
             {
@@ -222,7 +232,12 @@ public sealed class CaseTimelineQuery(
                 : null;
             return new CaseTimelineResult(
                 CaseTimelineAccess.Found,
-                new CaseTimeline(header, entries, hasOlderEntries, olderCursor, collaboration) { WorkSummary = workSummary });
+                new CaseTimeline(header, entries, hasOlderEntries, olderCursor, collaboration)
+                {
+                    WorkSummary = workSummary,
+                    CurrentOfficerEscalations = currentOfficerEscalations,
+                    CurrentOfficerEscalationsTruncated = currentOfficerRows.Count > 10
+                });
         }
     }
 
