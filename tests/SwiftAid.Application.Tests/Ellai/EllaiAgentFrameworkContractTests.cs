@@ -2165,6 +2165,60 @@ public sealed class EllaiAgentFrameworkContractTests
         Assert.Equal(!correctReference, agent.LastRepairUsed);
     }
 
+    [Theory]
+    [InlineData("ui", true)]
+    [InlineData("question", true)]
+    [InlineData("plan", true)]
+    [InlineData("ui", false)]
+    [InlineData("question", false)]
+    [InlineData("plan", false)]
+    public async Task ProvisionalSegmentsCannotCompleteWithAdditionalDecisionPayload(string payload, bool provisional)
+    {
+        var final = payload switch
+        {
+            "ui" => GroundedDecision.Replace("\"uiIntents\":[]",
+                "\"uiIntents\":[{\"kind\":\"StartGuidance\",\"featureId\":\"ellai.guidance\",\"resourceId\":null,\"controlId\":null,\"arguments\":{\"feature\":\"report\",\"objective\":\"Open the report form\"}}]", StringComparison.Ordinal),
+            "question" => GroundedDecision.Replace("\"questions\":[]",
+                "\"questions\":[{\"questionId\":\"window\",\"text\":\"Which window?\",\"choiceIds\":[]}]", StringComparison.Ordinal),
+            "plan" => GroundedDecision.Replace("\"planProposal\":null",
+                "\"planProposal\":{\"objective\":\"Review\",\"actions\":[{\"proposalLabel\":\"Review\",\"kind\":\"CreateAdministrativeReviewTask\",\"obligation\":{\"sourceKind\":\"CaseQueue\",\"resourceId\":\"case\",\"version\":\"1\",\"fieldPath\":null,\"evidenceId\":\"case\"},\"recipientCandidateId\":null,\"humanSuppliedDueAtUtc\":null,\"evidence\":[{\"sourceKind\":\"CaseQueue\",\"resourceId\":\"case\",\"version\":\"1\",\"fieldPath\":null,\"evidenceId\":\"case\"}],\"factualRationale\":\"Done.\"}]}", StringComparison.Ordinal),
+            _ => throw new ArgumentOutOfRangeException(nameof(payload))
+        };
+        using var client = new PrivateSegmentStreamingClient(omitSegment: !provisional,
+            segmentPrefix: GroundedStreamPrefix, finalDecision: final);
+        var context = new EllaiToolContext("session", "epoch", "cases", null, 4, true,
+            AllowedTools: new HashSet<string> { EllaiToolNames.State });
+        var published = new List<string>();
+        var agent = new EllaiFrameworkAgent(client);
+        var run = agent.RunAsync(context, "Test instructions", [new ChatMessage(ChatRole.User, "test")], 100,
+            _ => Task.FromResult(true), (_, request, _) => Task.FromResult(new EllaiToolResult(request.ToolName,
+                true, null, [StreamEvidence], "Done.", 1, false)),
+            new EllaiFrameworkUsage("session", new EllaiUsageLedger(), new InMemoryEllaiUsageStore()), default,
+            onVerifiedStreamSegment: (text, _) => { published.Add(text); return ValueTask.CompletedTask; },
+            revalidateStreamObservations: _ => Task.FromResult(true));
+        if (provisional)
+        {
+            try
+            {
+                await client.SegmentSent.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                Assert.Equal(new[] { "Done." }, published);
+            }
+            finally { client.Release.TrySetResult(); }
+        }
+
+        var decision = await run;
+        if (provisional)
+        {
+            Assert.Null(decision);
+            Assert.Equal("InvalidDecision", agent.LastFailureCode);
+        }
+        else
+        {
+            Assert.NotNull(decision);
+            Assert.Empty(published);
+        }
+    }
+
     private sealed class PrivateSegmentStreamingClient(bool omitSegment = false, string? segmentPrefix = null, string? finalDecision = null,
         string toolName = EllaiToolNames.State, bool repairWithSafeDecision = false) : IChatClient
     {

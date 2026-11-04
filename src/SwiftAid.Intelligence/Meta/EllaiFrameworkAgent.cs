@@ -327,6 +327,7 @@ public sealed class EllaiFrameworkAgent
         }
         if (streamedSegments.Count != 0 &&
             (decision.Kind != DecisionKind.Answer ||
+             decision.UiIntents.Count != 0 || decision.Questions.Count != 0 || decision.PlanProposal is not null ||
              !string.Equals(string.Join(" ", streamedSegments), decision.DisplayText.Trim(), StringComparison.Ordinal) ||
              !string.Equals(string.Join(" ", streamedSegments), decision.SpokenText?.Trim(), StringComparison.Ordinal)))
         {
