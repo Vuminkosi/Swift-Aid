@@ -158,6 +158,10 @@ public sealed class EllaiFollowUpWork(SwiftAidDbContext db, IOptions<EllaiFollow
                     WHERE c.case_id = {clarification.CaseId} AND c.workspace_id = {lease.WorkspaceId}
                         AND c.organization_id = {clarification.OrganizationId} AND c.workflow <> 'Resolved'
                         AND e.case_id = c.case_id AND e.report_revision = c.report_revision
+                        AND COALESCE((SELECT report.received_at_utc FROM swiftaid_intake.intake_promotions promotion
+                            JOIN swiftaid_intake.intake_reports report ON report.receipt_id = promotion.receipt_id
+                            WHERE promotion.case_id = c.case_id), c.created_at_utc)
+                            BETWEEN clock_timestamp() - interval '30 days' AND clock_timestamp()
                     FOR SHARE OF c
                     """).ToArrayAsync(token).ConfigureAwait(false);
                 if (current.Length != 1) { retry = true; return false; }
@@ -189,6 +193,10 @@ public sealed class EllaiFollowUpWork(SwiftAidDbContext db, IOptions<EllaiFollow
                         AND c.workspace_id = {lease.WorkspaceId} AND c.organization_id = {acknowledgement.OrganizationId}
                         AND a.aggregate_version = {acknowledgement.ScheduleVersion} AND a.follow_up_event_id = {acknowledgement.EventId}
                         AND a.acknowledgement_due_utc = {acknowledgement.DueAtUtc} AND a.acknowledgement_due_utc < clock_timestamp()
+                        AND COALESCE((SELECT report.received_at_utc FROM swiftaid_intake.intake_promotions promotion
+                            JOIN swiftaid_intake.intake_reports report ON report.receipt_id = promotion.receipt_id
+                            WHERE promotion.case_id = c.case_id), c.created_at_utc)
+                            BETWEEN clock_timestamp() - interval '30 days' AND clock_timestamp()
                         AND c.workflow <> 'Resolved' AND e.status <> 'Closed' AND f.status = 'Scheduled'
                         AND f.acknowledged_version IS DISTINCT FROM 0
                         AND (f.current_schedule_version = a.aggregate_version OR f.acknowledged_version = 1)
@@ -219,6 +227,10 @@ public sealed class EllaiFollowUpWork(SwiftAidDbContext db, IOptions<EllaiFollow
                     AND c.workspace_id = {lease.WorkspaceId} AND c.organization_id = {item.OrganizationId}
                     AND f.current_schedule_version = {item.ScheduleVersion} AND f.current_schedule_event_id = {item.EventId}
                     AND f.due_at_utc = {item.DueAtUtc} AND f.due_at_utc < clock_timestamp()
+                    AND COALESCE((SELECT report.received_at_utc FROM swiftaid_intake.intake_promotions promotion
+                        JOIN swiftaid_intake.intake_reports report ON report.receipt_id = promotion.receipt_id
+                        WHERE promotion.case_id = c.case_id), c.created_at_utc)
+                        BETWEEN clock_timestamp() - interval '30 days' AND clock_timestamp()
                     AND c.workflow <> 'Resolved' AND f.status IN ('Scheduled', 'Acknowledged')
                 FOR SHARE OF c, f
                 """).ToArrayAsync(token).ConfigureAwait(false);
