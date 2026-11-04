@@ -28,6 +28,9 @@ public sealed class MobileDraftSnapshotTests
         await InvokeAsync(reopened, "OpenDraftAsync", id);
         var restored = Get<PublicReportDraft>(reopened, "_reportDraft");
         Assert.Equal("SYNTHETIC-MOBILE-DRAFT", restored.Narrative);
+        Assert.Equal("2026-1", restored.OccurrenceDateText);
+        Assert.Null(restored.OccurrenceDate);
+        Assert.Equal("08:", restored.OccurrenceTime);
         Assert.Equal("+02:", restored.OccurrenceOffset);
         restored.Narrative = "A later unsaved edit";
 
@@ -35,6 +38,7 @@ public sealed class MobileDraftSnapshotTests
 
         Assert.Equal("SYNTHETIC-MOBILE-DRAFT", Get<PublicReportDraft>(reopened, "_reportDraft").Narrative);
         Assert.Equal("+02:", Get<PublicReportDraft>(reopened, "_reportDraft").OccurrenceOffset);
+        Assert.Equal("2026-1", Get<PublicReportDraft>(reopened, "_reportDraft").OccurrenceDateText);
     }
 
     [Fact]
@@ -132,6 +136,8 @@ public sealed class MobileDraftSnapshotTests
         SubjectScope = IntakeSubjectScope.Human,
         Narrative = "SYNTHETIC-MOBILE-DRAFT",
         OccurrencePrecision = ReportedTimePrecision.Exact,
+        OccurrenceDateText = "2026-1",
+        OccurrenceTime = "08:",
         OccurrenceOffset = "+02:"
     };
 

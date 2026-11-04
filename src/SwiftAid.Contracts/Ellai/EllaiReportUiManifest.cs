@@ -74,8 +74,8 @@ public static class EllaiReportUiManifest
         "report.time-location" =>
         [
             new("report.time-precision", "When did this happen?", "selection", true, "Details page", "Unknown, approximate date, date only or exact time; preserve uncertainty."),
-            new("report.occurrence-date", "Reported date", "date", true, "Time precision is not Unknown", "Provide the reported date."),
-            new("report.occurrence-time", "Reported time", "time", true, "Time precision is Exact", "A valid time and UTC offset are required together."),
+            new("report.occurrence-date", "Reported date", "date", true, "Time precision is not Unknown", "Enter the reported date as YYYY-MM-DD."),
+            new("report.occurrence-time", "Reported time", "time", true, "Time precision is Exact", "Enter a 24-hour time and a valid UTC offset."),
             new("report.utc-offset", "Time difference from UTC", "text", true, "Time precision is Exact", "Provide a valid UTC offset, such as +02:00, matching the reported time."),
             new("report.occurrence-country", "Country where the event happened", "selection", true, "Details page", "Select a country from the current application catalogue."),
             new("report.place-search", "Search for the place", "place-selection", false, "The place registry is available", "Select a reported place; do not infer device location."),

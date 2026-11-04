@@ -75,7 +75,11 @@ const { chromium } = require(process.env.SWIFTAID_PLAYWRIGHT_PACKAGE || 'playwri
                 spot.x + spot.width >= target.x + target.width && spot.y + spot.height >= target.y + target.height;
         };
         await page.getByRole('button', { name: 'Refresh validation target' }).click();
-        await page.waitForFunction(() => document.querySelector('[data-bonboarding-anchor="ellai-report-original-statement"]') !== null);
+        await page.waitForFunction(() => {
+            const target = document.querySelector('[data-bonboarding-anchor="ellai-report-original-statement"]')?.getBoundingClientRect();
+            const spot = document.querySelector('.bit-bonboarding-spotlight')?.getBoundingClientRect();
+            return target && spot && spot.left <= target.left && spot.top <= target.top && spot.right >= target.right && spot.bottom >= target.bottom;
+        });
         assert(await containsTarget('ellai-report-original-statement'), 'First validation highlight must cover the missing narrative');
         await page.getByLabel('Describe what happened').fill('Synthetic observation');
         await page.getByLabel('Describe what happened').press('Tab');

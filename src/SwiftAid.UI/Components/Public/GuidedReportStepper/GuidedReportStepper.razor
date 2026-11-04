@@ -215,15 +215,20 @@
                 @if (Draft.OccurrencePrecision != ReportedTimePrecision.Unknown)
                 {
                     <div data-bonboarding-anchor="ellai-report-occurrence-date">
-                    <MudTextField T="DateTime?" Label="Reported date" InputType="InputType.Date" Format="yyyy-MM-dd" Variant="Variant.Outlined"
-                                  @bind-Value="Draft.OccurrenceDate" For="@(() => Draft.OccurrenceDate)" />
+                    <MudTextField T="string" Label="Reported date" InputType="InputType.Text" Placeholder="YYYY-MM-DD"
+                                  HelperText="Enter the date as year-month-day, for example 2026-10-01."
+                                  Variant="Variant.Outlined" Immediate="true"
+                                  Value="@(Draft.OccurrenceDateText ?? Draft.OccurrenceDate?.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture))"
+                                  ValueChanged="OccurrenceDateChangedAsync" For="@(() => Draft.OccurrenceDateText)" />
                     </div>
                 }
                 @if (Draft.OccurrencePrecision == ReportedTimePrecision.Exact)
                 {
                     <div class="guided-report__grid">
                         <div data-bonboarding-anchor="ellai-report-occurrence-time">
-                        <MudTextField T="string" Label="Reported time" InputType="InputType.Time" Variant="Variant.Outlined"
+                        <MudTextField T="string" Label="Reported time" InputType="InputType.Text" Placeholder="HH:MM"
+                                      HelperText="Enter a 24-hour time, for example 08:30."
+                                      Variant="Variant.Outlined" Immediate="true"
                                       @bind-Value="Draft.OccurrenceTime" For="@(() => Draft.OccurrenceTime)" />
                         </div>
                         <div data-bonboarding-anchor="ellai-report-utc-offset">
@@ -1119,7 +1124,7 @@
 
         if (Draft.OccurrencePrecision != ReportedTimePrecision.Unknown && !Draft.OccurrenceDate.HasValue)
         {
-            AddError(nameof(Draft.OccurrenceDate), "Add the reported date or choose that the time is unknown.");
+            AddError(nameof(Draft.OccurrenceDateText), "Enter the reported date as YYYY-MM-DD or choose that the time is unknown.");
             isValid = false;
         }
 
@@ -1131,7 +1136,7 @@
         if (Draft.OccurrencePrecision == ReportedTimePrecision.Exact && Draft.OccurrenceDate.HasValue &&
             HasValidExactTime() && !Draft.HasValidExactOccurrence())
         {
-            AddError(nameof(Draft.OccurrenceDate), "Check that the date, time and UTC offset can be combined.");
+            AddError(nameof(Draft.OccurrenceDateText), "Check that the date, time and UTC offset can be combined.");
             isValid = false;
         }
 
@@ -1165,6 +1170,14 @@
 
     private void AddError(string fieldName, string message) =>
         _messageStore.Add(new FieldIdentifier(Draft, fieldName), message);
+
+    private Task OccurrenceDateChangedAsync(string? value)
+    {
+        Draft.OccurrenceDateText = value;
+        Draft.OccurrenceDate = PublicReportDraft.ParseOccurrenceDate(value);
+        _editContext.NotifyFieldChanged(new FieldIdentifier(Draft, nameof(Draft.OccurrenceDateText)));
+        return Task.CompletedTask;
+    }
 
     private bool HasValidExactTime()
     {
@@ -1422,6 +1435,7 @@
         actual.ObservationsText == expected.ObservationsText &&
         actual.OccurrencePrecision == expected.OccurrencePrecision &&
         actual.OccurrenceDate == expected.OccurrenceDate &&
+        actual.OccurrenceDateText == expected.OccurrenceDateText &&
         actual.OccurrenceTime == expected.OccurrenceTime &&
         actual.OccurrenceOffset == expected.OccurrenceOffset &&
         actual.TimeNote == expected.TimeNote &&

@@ -29,8 +29,12 @@ public sealed class PublicReportDraft : IValidatableObject
 
     public GuestDraftFormSnapshot ToFormSnapshot()
     {
+        var source = Copy();
+        source.OccurrenceDateText ??= source.OccurrenceDate?.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+        if (ParseOccurrenceDate(source.OccurrenceDateText)?.Date != source.OccurrenceDate?.Date)
+            throw new InvalidOperationException("The editable date is inconsistent.");
         var snapshot = new GuestDraftFormSnapshot(GuestDraftFormSnapshot.CurrentSchemaVersion,
-            System.Text.Json.JsonSerializer.Serialize(this));
+            System.Text.Json.JsonSerializer.Serialize(source));
         if (!snapshot.IsValid()) throw new InvalidOperationException("The editable draft is too large or invalid.");
         return snapshot;
     }
@@ -49,6 +53,7 @@ public sealed class PublicReportDraft : IValidatableObject
                 nameof(RegionId), nameof(AreaPresence), nameof(Area), nameof(AreaId), nameof(LocalityPresence), nameof(Locality),
                 nameof(LocalityId), nameof(ReportReviewConfirmed), nameof(ProcessingConfirmed)
             };
+            if (snapshot.SchemaVersion >= 2) expected.Add(nameof(OccurrenceDateText));
             var names = document.RootElement.EnumerateObject().Select(property => property.Name).ToArray();
             if (names.Length != expected.Count || names.Distinct(StringComparer.Ordinal).Count() != names.Length ||
                 names.Any(name => !expected.Contains(name)))
@@ -57,6 +62,10 @@ public sealed class PublicReportDraft : IValidatableObject
                 ?? throw new InvalidOperationException("The editable draft is empty.");
             if (draft.SubjectScope is null || !Enum.IsDefined(draft.SubjectScope.Value))
                 throw new InvalidOperationException("The editable draft subject is invalid.");
+            if (snapshot.SchemaVersion == 1)
+                draft.OccurrenceDateText = draft.OccurrenceDate?.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+            else if (ParseOccurrenceDate(draft.OccurrenceDateText)?.Date != draft.OccurrenceDate?.Date)
+                throw new InvalidOperationException("The editable date is inconsistent.");
             // The local snapshot may outlive the catalogue or policy shown when
             // these acknowledgements were made. Require review against current metadata.
             draft.CountryConfirmed = false;
@@ -81,6 +90,7 @@ public sealed class PublicReportDraft : IValidatableObject
 
     public ReportedTimePrecision OccurrencePrecision { get; set; } = ReportedTimePrecision.Unknown;
     public DateTime? OccurrenceDate { get; set; }
+    public string? OccurrenceDateText { get; set; }
     public string? OccurrenceTime { get; set; }
     public string? OccurrenceOffset { get; set; }
     public string? TimeNote { get; set; }
@@ -127,7 +137,7 @@ public sealed class PublicReportDraft : IValidatableObject
 
         if (OccurrencePrecision != ReportedTimePrecision.Unknown && !OccurrenceDate.HasValue)
         {
-            yield return new ValidationResult("Add the reported date or choose that the time is unknown.", [nameof(OccurrenceDate)]);
+            yield return new ValidationResult("Add the reported date or choose that the time is unknown.", [nameof(OccurrenceDateText)]);
         }
 
         if (OccurrencePrecision == ReportedTimePrecision.Exact && !TryGetExactOccurrence(out _))
@@ -160,6 +170,7 @@ public sealed class PublicReportDraft : IValidatableObject
             ObservationsText = string.Join(Environment.NewLine, submission.Observations),
             OccurrencePrecision = occurrence.Precision,
             OccurrenceDate = localOccurrence.Date,
+            OccurrenceDateText = localOccurrence.Date?.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture),
             OccurrenceTime = localOccurrence.Time,
             OccurrenceOffset = localOccurrence.Offset,
             TimeNote = occurrence.ZoneId,
@@ -321,6 +332,10 @@ public sealed class PublicReportDraft : IValidatableObject
         .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
         .Where(value => !string.IsNullOrWhiteSpace(value))
         .ToArray();
+
+    public static DateTime? ParseOccurrenceDate(string? text) =>
+        DateTime.TryParseExact(text, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture,
+            System.Globalization.DateTimeStyles.None, out var date) ? date : null;
 
     internal bool HasValidExactOccurrence() => TryGetExactOccurrence(out _);
 

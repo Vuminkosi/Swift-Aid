@@ -109,6 +109,60 @@ public sealed partial class GuidedReportDraftPersistenceTests
     }
 
     [Fact]
+    public void LegacySnapshotRestoresItsDateAndMigratesToCurrentVersion()
+    {
+        var draft = CreateDraft();
+        draft.OccurrencePrecision = ReportedTimePrecision.DateOnly;
+        draft.OccurrenceDate = new DateTime(2026, 10, 1);
+        var current = draft.ToFormSnapshot();
+        var legacyJson = System.Text.Json.Nodes.JsonNode.Parse(current.Json)!.AsObject();
+        Assert.True(legacyJson.Remove(nameof(PublicReportDraft.OccurrenceDateText)));
+
+        var restored = PublicReportDraft.FromFormSnapshot(new GuestDraftFormSnapshot(1, legacyJson.ToJsonString()));
+
+        Assert.Equal(new DateTime(2026, 10, 1), restored.OccurrenceDate);
+        Assert.Equal("2026-10-01", restored.OccurrenceDateText);
+        Assert.Equal(GuestDraftFormSnapshot.CurrentSchemaVersion, restored.ToFormSnapshot().SchemaVersion);
+    }
+
+    [Fact]
+    public void InconsistentRawAndParsedDatesFailClosedWithoutDiscardingTheSnapshot()
+    {
+        var draft = CreateDraft();
+        draft.OccurrenceDate = new DateTime(2026, 10, 1);
+        draft.OccurrenceDateText = "2026-10-01";
+        var snapshot = draft.ToFormSnapshot();
+        var json = System.Text.Json.Nodes.JsonNode.Parse(snapshot.Json)!.AsObject();
+        json[nameof(PublicReportDraft.OccurrenceDateText)] = "2026-1";
+        var inconsistent = new GuestDraftFormSnapshot(2, json.ToJsonString());
+
+        Assert.Throws<InvalidOperationException>(() => PublicReportDraft.FromFormSnapshot(inconsistent));
+        Assert.Contains("2026-1", inconsistent.Json);
+        draft.OccurrenceDateText = "2026-1";
+        Assert.Throws<InvalidOperationException>(() => draft.ToFormSnapshot());
+        Assert.Equal(new DateTime(2026, 10, 1), draft.OccurrenceDate);
+    }
+
+    [Fact]
+    public async Task PartialDateAndTimeSurviveSnapshotAndNeverBecomeAValidDate()
+    {
+        var component = CreateStepper(CreateDraft(), _ => Task.CompletedTask);
+        component.Draft.OccurrencePrecision = ReportedTimePrecision.Exact;
+        component.Draft.OccurrenceDate = new DateTime(2026, 10, 1);
+        var method = typeof(GuidedReportStepper).GetMethod("OccurrenceDateChangedAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        await (Task)method.Invoke(component, ["2026-1"])!;
+        component.Draft.OccurrenceTime = "08:";
+
+        Assert.Null(component.Draft.OccurrenceDate);
+        var restored = PublicReportDraft.FromFormSnapshot(component.Draft.ToFormSnapshot());
+        Assert.Equal("2026-1", restored.OccurrenceDateText);
+        Assert.Equal("08:", restored.OccurrenceTime);
+        Assert.Null(restored.OccurrenceDate);
+        Assert.Null(PublicReportDraft.ParseOccurrenceDate("2026-02-30"));
+        Assert.Equal(new DateTime(2026, 10, 1), PublicReportDraft.ParseOccurrenceDate("2026-10-01"));
+    }
+
+    [Fact]
     public async Task ValidDraftSaveRetainsOriginalWhitespaceAndHiddenInput()
     {
         var draft = CreateDraft("  Synthetic original entry  ");
