@@ -17,7 +17,8 @@ public sealed record CaseQueueCandidate(
     string? Sector = null,
     string? Classification = null,
     string? WorkspaceId = null,
-    DateTimeOffset? CreatedAtUtc = null);
+    DateTimeOffset? CreatedAtUtc = null,
+    DateTimeOffset? ReportedAtUtc = null);
 
 /// <summary>Keyset position used to resume after a previously authorized row; it is not an access grant.</summary>
 public sealed record CaseQueueContinuation(DateTimeOffset SortTimestampUtc, Guid CaseId);
@@ -197,7 +198,7 @@ public sealed class CaseQueueQuery(
 
     private static DateTimeOffset GetSortTimestamp(CaseQueueCandidate candidate, CaseQueueFilter? filter) =>
         filter?.NewestReportedFirst == true
-            ? candidate.CreatedAtUtc ?? candidate.LastRecordedAtUtc
+            ? candidate.ReportedAtUtc ?? candidate.CreatedAtUtc ?? candidate.LastRecordedAtUtc
             : candidate.LastRecordedAtUtc;
 
     private static CaseQueueContinuation? DecodeCursor(string? value)

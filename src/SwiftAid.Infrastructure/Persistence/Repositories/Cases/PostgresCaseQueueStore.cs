@@ -57,6 +57,10 @@ public sealed class PostgresCaseQueueStore(SwiftAidDbContext dbContext) : ICaseQ
                 item.Classification,
                 item.WorkspaceId,
                 item.CreatedAtUtc,
+                ReportedAtUtc = (from promotion in _dbContext.IntakePromotions
+                                 join report in _dbContext.IntakeReports on promotion.ReceiptId equals report.ReceiptId
+                                 where promotion.CaseId == item.CaseId
+                                 select (DateTimeOffset?)report.ReceivedAtUtc).FirstOrDefault() ?? item.CreatedAtUtc,
                 item.CountryCode,
                 item.AccountableOwnerActorId,
                 item.AggregateVersion,
@@ -67,15 +71,15 @@ public sealed class PostgresCaseQueueStore(SwiftAidDbContext dbContext) : ICaseQ
             });
         if (after is not null)
         {
-            query = query.Where(item => (newestReportedFirst ? item.CreatedAtUtc : item.LastRecordedAtUtc ?? item.UpdatedAtUtc)
+            query = query.Where(item => (newestReportedFirst ? item.ReportedAtUtc : item.LastRecordedAtUtc ?? item.UpdatedAtUtc)
                     < after.SortTimestampUtc ||
-                (newestReportedFirst ? item.CreatedAtUtc : item.LastRecordedAtUtc ?? item.UpdatedAtUtc)
+                (newestReportedFirst ? item.ReportedAtUtc : item.LastRecordedAtUtc ?? item.UpdatedAtUtc)
                     == after.SortTimestampUtc &&
                 item.CaseId.CompareTo(after.CaseId) > 0);
         }
 
         var rows = await query
-            .OrderByDescending(item => newestReportedFirst ? item.CreatedAtUtc : item.LastRecordedAtUtc ?? item.UpdatedAtUtc)
+            .OrderByDescending(item => newestReportedFirst ? item.ReportedAtUtc : item.LastRecordedAtUtc ?? item.UpdatedAtUtc)
             .ThenBy(item => item.CaseId)
             .Take(take)
             .ToArrayAsync(ct).ConfigureAwait(false);
@@ -90,7 +94,7 @@ public sealed class PostgresCaseQueueStore(SwiftAidDbContext dbContext) : ICaseQ
                 item.UpdatedAtUtc,
                 item.LastRecordedAtUtc ?? item.UpdatedAtUtc,
                 item.Sector.ToString(),
-                item.Classification.ToString(), item.WorkspaceId, item.CreatedAtUtc))
+                item.Classification.ToString(), item.WorkspaceId, item.CreatedAtUtc, item.ReportedAtUtc))
             .ToArray();
     }
 }
