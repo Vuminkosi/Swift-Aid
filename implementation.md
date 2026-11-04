@@ -4632,3 +4632,9 @@ PASS: Gateway build (dotnet build src/SwiftAid.Gateway/SwiftAid.Gateway.csproj -
 During the active report conversation, explicit requests to save the draft or submit it officially now direct Ellai to the existing report guidance plan. Save completion is claimed only from the report-save persistence signal. Submission remains a human-operated review and confirmation flow, and success is claimed only after the matching server receipt is displayed. The guidance reuses the same report draft and conversation.
 
 PASS: Gateway build (dotnet build src/SwiftAid.Gateway/SwiftAid.Gateway.csproj --no-restore -m:1 -nr:false -p:WasmBuildNative=false --verbosity quiet, 0 warnings, 0 errors); git diff --check. Tests were not added or run, per user instruction. NOT VERIFIED: live model tool selection, real browser save/submit, receipt confirmation, or full scenario 2.4.
+
+### Ellai invalid tool-argument recovery - 2026-11-04
+
+The case-query instructions now distinguish an InvalidArguments rejection from a successful empty result. On a user correction, Ellai retries the same query with only the corrected argument, preserves prior filters and references, validates actual calendar dates, and maps Eswatini to the registered ISO code SZ. It reports outcomes only from the corrected tool result, supporting conversation scenario 2.2.
+
+PASS: Gateway build (dotnet build src/SwiftAid.Gateway/SwiftAid.Gateway.csproj --no-restore -m:1 -nr:false -p:WasmBuildNative=false --verbosity quiet, 0 warnings, 0 errors); git diff --check. Tests were not added or run, per user instruction. NOT VERIFIED: live model tool selection and the multi-turn corrected query against authorized case data.
