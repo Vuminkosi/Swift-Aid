@@ -32,13 +32,15 @@ public sealed class WebGuestIntakeServiceTests
         var authority = new PostgresIntakeSessionAuthority(db, limits, Options.Create(new IntakeSessionOptions()));
         var sessions = new IntakeSessionEndpointService(authority, new PostgresIntakeReceiptReader(db), TimeProvider.System);
         var submissions = new PostgresIntakeSubmissionStore(db, limits, new EphemeralDataProtectionProvider());
+        var countries = new FixtureCountries();
         var intake = new IntakeService(submissions, new PostgresIntakeDecisionStore(db), new UnusedPromotion(),
             new PostgresIntakeAttachmentAuthority(db), new CoverageRouter(new NoCoverage()),
-            new IntakeSubmissionValidator(new FixtureCountries(), new FixturePolicy()), limits, TimeProvider.System);
+            new IntakeSubmissionValidator(countries, new FixturePolicy()), limits, TimeProvider.System);
         var web = new WebGuestIntakeService(sessions, intake);
+        var client = new WebPublicIntakeSubmissionClient(web);
         var page = new Report();
         typeof(Report).GetProperty("IntakeSubmissionClient", BindingFlags.NonPublic | BindingFlags.Instance)!
-            .SetValue(page, new WebPublicIntakeSubmissionClient(web));
+            .SetValue(page, client);
         var draft = new PublicReportDraft
         {
             SubjectScope = IntakeSubjectScope.Human, Narrative = "Synthetic observation", CountryCode = "ZA",
@@ -47,6 +49,18 @@ public sealed class WebGuestIntakeServiceTests
         var command = draft.ToSubmission("fixture-catalogue", "https://fixture.invalid/policy", "v1",
             [new PublicCountryOption("ZA", "Synthetic country")], true);
         Assert.Equal(Guid.Empty, command.ClientSubmissionId);
+        var invalidId = Guid.NewGuid();
+        var invalid = await client.SubmitAsync(command with { ClientSubmissionId = invalidId,
+            Confirmations = command.Confirmations with { ReportReviewConfirmed = false } });
+        Assert.Equal(UiCapabilityResultCode.InvalidRequest, invalid.Code);
+        Assert.Null(invalid.Value);
+        Assert.Equal(0, await db.Set<IntakeReportEntity>().CountAsync(item => item.ClientSubmissionId == invalidId));
+        var unavailableId = Guid.NewGuid();
+        countries.Unavailable = true;
+        var unavailable = await client.SubmitAsync(command with { ClientSubmissionId = unavailableId });
+        Assert.Equal(UiCapabilityResultCode.Unavailable, unavailable.Code);
+        Assert.Equal(0, await db.Set<IntakeReportEntity>().CountAsync(item => item.ClientSubmissionId == unavailableId));
+        countries.Unavailable = false;
         var send = typeof(Report).GetMethod("SendReportAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
 
         await (Task)send.Invoke(page, [command])!;
@@ -70,7 +84,9 @@ public sealed class WebGuestIntakeServiceTests
 
     private sealed class FixtureCountries : IIntakeCountryCatalogue
     {
+        public bool Unavailable { get; set; }
         public Task<bool> IsKnownCountryAsync(string countryCode, string catalogueVersion, CancellationToken ct) =>
+            Unavailable ? Task.FromException<bool>(new IOException("Synthetic catalogue outage")) :
             Task.FromResult(countryCode == "ZA" && catalogueVersion == "fixture-catalogue");
     }
 
