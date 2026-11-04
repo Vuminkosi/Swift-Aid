@@ -16,7 +16,7 @@ internal static class EllaiSharedGuidanceTemplates
     {
         var material = JsonSerializer.Serialize(new
         {
-            schema = 2,
+            schema = 3,
             objective = objective.Trim(),
             audience = authority.Features.Contains(EllaiNavigationManifest.FeatureId) ? "authorized" : "guest",
             features = authority.Features.Order(StringComparer.Ordinal).ToArray(),
@@ -26,7 +26,7 @@ internal static class EllaiSharedGuidanceTemplates
                 .OrderBy(o => o.ControlId, StringComparer.Ordinal).ToArray(),
             reportAlreadyReceived
         });
-        return "ellai:ui-template:v2:" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(material)));
+        return "ellai:ui-template:v3:" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(material)));
     }
 
     public static async Task<EllaiGuidancePlanDraft?> ReadAsync(ICacheStore? cache, string key, string objective,
@@ -76,6 +76,20 @@ internal static class EllaiSharedGuidanceTemplates
         if (draft.Status != GuidancePlanStatus.Ready || draft.Mode != GuidanceMode.Navigation ||
             draft.Steps is null || draft.Steps.Count is < 1 or > EllaiGuidancePlanDraft.MaxStepsPerChunk) return null;
         var descriptors = catalogue.Descriptors.ToDictionary(d => d.ControlId, StringComparer.Ordinal);
+        var suggestionIds = new Dictionary<string, string>(StringComparer.Ordinal);
+        var suggestions = new Dictionary<string, GuidanceStepSuggestion>(StringComparer.Ordinal);
+        foreach (var pair in (draft.Suggestions ?? new Dictionary<string, GuidanceStepSuggestion>()).OrderBy(pair => pair.Key, StringComparer.Ordinal))
+        {
+            if (suggestions.Count == 12) break;
+            if (pair.Value is not { } suggestion || !descriptors.TryGetValue(suggestion.ControlId, out var target) ||
+                target.RiskClass == UiRiskClass.R5 || target.ObjectiveId != suggestion.ObjectiveId ||
+                string.IsNullOrWhiteSpace(target.Semantics?.Purpose)) continue;
+            var label = target.Semantics.Purpose.Trim();
+            if (label.Length > 80) label = label[..80].TrimEnd();
+            var id = $"suggestion-{suggestions.Count + 1}";
+            suggestionIds[pair.Key] = id;
+            suggestions[id] = new GuidanceStepSuggestion(label, target.ControlId, target.ObjectiveId!);
+        }
         var ids = new Dictionary<string, string>(StringComparer.Ordinal);
         for (var i = 0; i < draft.Steps.Count; i++)
             if (draft.Steps[i] is not { } step || string.IsNullOrWhiteSpace(step.StepKey) ||
@@ -90,10 +104,12 @@ internal static class EllaiSharedGuidanceTemplates
             steps.Add(step with
             {
                 StepKey = ids[step.StepKey], NextStepKey = step.NextStepKey is null ? null : ids[step.NextStepKey],
-                Explanation = descriptor.Semantics.Purpose, SuggestionIds = []
+                Explanation = descriptor.Semantics.Purpose,
+                SuggestionIds = (step.SuggestionIds ?? []).Where(suggestionIds.ContainsKey)
+                    .Select(id => suggestionIds[id]).Distinct(StringComparer.Ordinal).Take(3).ToArray()
             });
         }
-        return new(EllaiGuidancePlanDraft.CurrentSchemaVersion, GuidancePlanStatus.Ready, objective,
-            GuidanceMode.Navigation, steps, [], null);
+        return new EllaiGuidancePlanDraft(EllaiGuidancePlanDraft.CurrentSchemaVersion, GuidancePlanStatus.Ready, objective,
+            GuidanceMode.Navigation, steps, [], null) { Suggestions = suggestions };
     }
 }
