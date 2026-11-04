@@ -53,8 +53,9 @@ public sealed class PostgresCaseCorrelationStore(SwiftAidDbContext db) : ICaseCo
 
     public Task<bool> AreCurrentAsync(StoredCorrelationCandidate candidate, CancellationToken ct) =>
         db.Database.SqlQuery<bool>($"""
-            SELECT EXISTS (
-                SELECT 1 FROM ellai_correlation_candidates p
+            SELECT TRUE AS "Value" FROM ellai_correlation_candidates p
+                JOIN ellai_operational_schedules schedule ON schedule.workspace_id = p.workspace_id
+                    AND schedule.role_id = 'ops.correlation' AND schedule.policy_version = p.policy_version
                 JOIN managed_cases a ON a.case_id = p.first_case_id AND a.report_revision = p.first_report_revision
                 JOIN managed_cases b ON b.case_id = p.second_case_id AND b.report_revision = p.second_report_revision
                 JOIN workspaces w ON w.workspace_id = p.workspace_id AND w.status = 'Active'
@@ -75,6 +76,6 @@ public sealed class PostgresCaseCorrelationStore(SwiftAidDbContext db) : ICaseCo
                     AND COALESCE((SELECT r.received_at_utc FROM swiftaid_intake.intake_promotions i
                         JOIN swiftaid_intake.intake_reports r ON r.receipt_id = i.receipt_id WHERE i.case_id = b.case_id), b.created_at_utc)
                         BETWEEN clock_timestamp() - interval '30 days' AND clock_timestamp()
-            ) AS "Value"
-            """).SingleAsync(ct);
+                LIMIT 1 FOR SHARE OF schedule
+            """).SingleOrDefaultAsync(ct);
 }
