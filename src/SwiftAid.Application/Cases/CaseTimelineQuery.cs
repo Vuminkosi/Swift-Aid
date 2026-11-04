@@ -189,7 +189,11 @@ public sealed class CaseTimelineQuery(
                 };
             }).ToList();
 
-            var workSummary = await _store.GetWorkSummaryAsync(caseId, ct).ConfigureAwait(false);
+            // The combined summary includes escalation counts and follow-up deadlines.
+            // Do not expose either through a case-read-only timeline grant.
+            var workSummary = officerDecision.IsAllowed
+                ? await _store.GetWorkSummaryAsync(caseId, ct).ConfigureAwait(false)
+                : null;
             var receiptId = await _store.GetPromotingReceiptAsync(caseId, ct).ConfigureAwait(false);
             if (receiptId.HasValue && !hasOlderEntries)
             {
