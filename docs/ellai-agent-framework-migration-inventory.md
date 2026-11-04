@@ -150,6 +150,15 @@ existing membership and revoked-access cases passed 3/3 against disposable
 PostGIS; the new test also passed 1/1 after commit. The first attempt used an
 incorrect one-case fixture expectation and failed; the fixture contains two
 cases. These checks do not establish deployed Gateway behavior.
+Two additional tests use the actual Gateway outbox worker, framework executor,
+broker and disposable PostgreSQL with a scripted model. The authorized control
+commits the count and its aggregate evidence trace and publishes it to the
+response feed. The revocation case pauses the third aggregate query, expires
+the grant and verifies that no count is delivered or committed. Both passed
+2/2 before and after commit. An initial test incorrectly expected a provisional
+count in the feed; the worker buffers these chunks until durable completion.
+This evidence is local and does not verify deployed Gateway or live-model
+behavior for this worker scenario.
 
 ## Provider observations and open checks
 
