@@ -4193,3 +4193,16 @@ including the ordinary guidance-proposal persistence control. After commit
 `bed64800`, the six new cases passed again with `--no-build --no-restore`.
 Live-provider, deployed Gateway and independent security review remain unverified
 for this boundary.
+
+### Live capability follow-up rerun — 2026-11-04
+
+At `188b6e35`, the exact synthetic live-provider test that previously hit
+`ProviderOutputLimit` passed 1/1 with the configured Muse route. The command
+was `dotnet test tests/SwiftAid.Application.Tests/SwiftAid.Application.Tests.csproj
+--no-build --no-restore -m:1 -nr:false --filter
+FullyQualifiedName~LiveFrameworkPreservesAuthorizedCapabilityObservationForFollowup
+--logger 'trx;LogFileName=ellai-live-followup-current-20261104.trx' --logger
+'console;verbosity=normal'`, with `ELLAI_LIVE=1` and existing provider settings
+supplied only to the test process. The TRX is retained under the application
+test project's `TestResults` directory. This single pass does not explain or
+resolve the earlier intermittent output-limit failure or verify deployment.
