@@ -805,7 +805,7 @@
         if (!ReportVoiceAutofill.CanApply(suggestion, transcript, Draft, IsModified)) return false;
         return suggestion.Field switch
         {
-            "age" when int.TryParse(suggestion.Value, out var age) => SetReportedAge(age),
+            "age" when ReportVoiceAutofill.TryGetAge(suggestion.Value, out var age) => SetReportedAge(age),
             "locality" => SetReportedLocality(suggestion.Value),
             "observation" => AddReportedObservation(suggestion.Evidence),
             _ => false

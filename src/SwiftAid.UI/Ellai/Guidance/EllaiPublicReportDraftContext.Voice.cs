@@ -230,7 +230,8 @@ public sealed partial class EllaiPublicReportDraftContext
             if (_owner is null || !_voiceSuggestions.Contains(suggestion)) return false;
             applied = suggestion.Field switch
             {
-                "age" when int.TryParse(suggestion.Value, out var age) && age >= 0 => _setAge?.Invoke(age) == true,
+                "age" when SwiftAid.UI.Components.Public.ReportVoiceAutofill.TryGetAge(suggestion.Value, out var age) =>
+                    _setAge?.Invoke(age) == true,
                 "locality" => _setLocality?.Invoke(suggestion.Value) == true,
                 "observation" => _addObservation?.Invoke(suggestion.Evidence) == true,
                 _ => false

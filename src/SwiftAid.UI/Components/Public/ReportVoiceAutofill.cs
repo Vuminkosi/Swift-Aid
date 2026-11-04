@@ -27,11 +27,11 @@ public static class ReportVoiceAutofill
         if (suggestion.Field == "age" && draft.SubjectScope == IntakeSubjectScope.Human &&
             string.IsNullOrWhiteSpace(draft.AgeYearsText) && !isModified(nameof(draft.AgeYearsText)))
         {
-            const string pattern = @"^(?:the\s+patient|she|he)\s+is\s+(?<age>\d{1,3})\s+years?\s+old$";
+            const string pattern = @"^(?:the\s+patient|she|he)\s+(?:is\s+){1,2}(?<age>\d{1,3})\s+years?\s+old$";
             var match = Regex.Match(statement, pattern, options);
             return statements.Count(item => Regex.IsMatch(item, pattern, options)) == 1 && match.Success &&
-                string.Equals(match.Groups["age"].Value, suggestion.Value, StringComparison.Ordinal) &&
-                int.TryParse(suggestion.Value, out _);
+                TryGetAge(suggestion.Value, out var age) &&
+                int.TryParse(match.Groups["age"].Value, out var statedAge) && age == statedAge;
         }
         if (suggestion.Field == "locality" && string.IsNullOrWhiteSpace(draft.Locality) &&
             draft.LocalityPresence != PresenceState.Known && !isModified(nameof(draft.Locality)))
@@ -44,13 +44,21 @@ public static class ReportVoiceAutofill
         if (suggestion.Field == "country" && string.IsNullOrWhiteSpace(draft.CountryCode) &&
             !isModified(nameof(draft.CountryCode)))
         {
-            const string pattern = @"^(?:this|it|the\s+incident)\s+happened\s+in\s+(?<country>[\p{L}\p{N}][\p{L}\p{N} '\-]{0,199})$";
+            const string pattern = @"^(?:this|it|the\s+incident)\s+(?:happened\s+){1,2}in\s+(?<country>[\p{L}\p{N}][\p{L}\p{N} '\-]{0,199})$";
             var match = Regex.Match(statement, pattern, options);
             return statements.Count(item => Regex.IsMatch(item, pattern, options)) == 1 && match.Success &&
                 string.Equals(match.Groups["country"].Value.Trim(), suggestion.Value.Trim(), StringComparison.OrdinalIgnoreCase);
         }
         return suggestion.Field == "observation" && draft.GetObservations().Count == 0 &&
             !isModified(nameof(draft.ObservationsText));
+    }
+
+    public static bool TryGetAge(string value, out int age)
+    {
+        var match = Regex.Match(value.Trim(), @"^(?<age>\d{1,3})(?:\s+years?\s+old)?$",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        age = 0;
+        return match.Success && int.TryParse(match.Groups["age"].Value, out age);
     }
 
     public static bool TryGetCountryCode(ReportVoiceSuggestion suggestion, string transcript,

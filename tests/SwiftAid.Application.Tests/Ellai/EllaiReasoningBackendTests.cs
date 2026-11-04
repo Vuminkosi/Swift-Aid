@@ -133,6 +133,33 @@ public sealed class EllaiReasoningBackendTests
     }
 
     [Fact]
+    public async Task ReportVoiceUsesStructuredSchemaWithoutChangingNormalEllaiRequests()
+    {
+        const string response = """{"choices":[{"message":{"content":"{\"fields\":[]}"},"finish_reason":"stop"}]}""";
+        var options = Bind(new Dictionary<string, string?>
+        {
+            ["Ellai__Enabled"] = "true", ["Ellai__ApiKey"] = "test-key",
+            ["Ellai__ApiUrl"] = "https://api.meta.ai/v1", ["Ellai__ReasoningModel"] = "fixture"
+        });
+        var handler = new StubHandler(response);
+        using var http = new HttpClient(handler);
+        var adapter = new EllaiReasoningAdapter(http, options);
+        await adapter.CompleteReportVoiceAsync([new("user", "synthetic")], 4096, default);
+        using (var payload = JsonDocument.Parse(handler.RequestBody!))
+        {
+            Assert.Equal(4096, payload.RootElement.GetProperty("max_tokens").GetInt32());
+            var format = payload.RootElement.GetProperty("response_format");
+            Assert.Equal("json_schema", format.GetProperty("type").GetString());
+            Assert.True(format.GetProperty("json_schema").GetProperty("strict").GetBoolean());
+            Assert.True(format.GetProperty("json_schema").GetProperty("schema").GetProperty("properties").TryGetProperty("fields", out _));
+        }
+        await adapter.CompleteAsync([new("user", "ordinary Ellai")], 64, default);
+        using var normal = JsonDocument.Parse(handler.RequestBody!);
+        Assert.False(normal.RootElement.TryGetProperty("response_format", out _));
+        Assert.Equal(64, normal.RootElement.GetProperty("max_tokens").GetInt32());
+    }
+
+    [Fact]
     public async Task MetaProviderSerializesCorrelatedToolCallsAndResults()
     {
         const string response = """{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}]}""";

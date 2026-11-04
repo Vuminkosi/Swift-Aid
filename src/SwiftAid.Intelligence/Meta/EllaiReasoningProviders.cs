@@ -19,6 +19,10 @@ public interface IEllaiReasoningProvider
     Task<EllaiReasoningResult> CompleteAsync(
         IReadOnlyList<EllaiChatMessage> messages, int maxTokens, CancellationToken ct);
 
+    Task<EllaiReasoningResult> CompleteReportVoiceAsync(
+        IReadOnlyList<EllaiChatMessage> messages, int maxTokens, CancellationToken ct) =>
+        CompleteAsync(messages, maxTokens, ct);
+
     async Task<EllaiReasoningResult> CompleteStreamingAsync(
         IReadOnlyList<EllaiChatMessage> messages,
         int maxTokens,
@@ -47,6 +51,10 @@ public sealed class MetaEllaiReasoningProvider(
     public Task<EllaiReasoningResult> CompleteAsync(
         IReadOnlyList<EllaiChatMessage> messages, int maxTokens, CancellationToken ct) =>
         inner.CompleteAsync(messages, maxTokens, ct);
+
+    public Task<EllaiReasoningResult> CompleteReportVoiceAsync(
+        IReadOnlyList<EllaiChatMessage> messages, int maxTokens, CancellationToken ct) =>
+        inner.CompleteReportVoiceAsync(messages, maxTokens, ct);
 
     public Task<EllaiReasoningResult> CompleteStreamingAsync(
         IReadOnlyList<EllaiChatMessage> messages,

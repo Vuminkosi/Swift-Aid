@@ -20,6 +20,7 @@ public sealed class ReportVoiceAutofillTests
 
     [Theory]
     [InlineData("age", "35", "The patient is 35 years old", "The patient is 35 years old. She lives in Mbabane.", true)]
+    [InlineData("age", "35 years old", "The patient is is 35 years old", "The patient is is 35 years old. She lives in Mbabane.", true)]
     [InlineData("locality", "Mbabane", "She lives in Mbabane", "The patient is 35 years old. She lives in Mbabane.", true)]
     [InlineData("observation", "fever", "No fever", "No fever. She lives in Mbabane.", true)]
     [InlineData("age", "35", "The patient is 35 years old", "The patient is 35 years old. The patient is 36 years old.", false)]
@@ -43,6 +44,8 @@ public sealed class ReportVoiceAutofillTests
         const string transcript = "This happened in Eswatini. The patient is 35 years old.";
         Assert.True(ReportVoiceAutofill.TryGetCountryCode(suggestion, transcript, draft, _ => false, countries, out var code));
         Assert.Equal("SZ", code);
+        var duplicated = new ReportVoiceSuggestion("country", "Eswatini", "This happened happened in Eswatini");
+        Assert.True(ReportVoiceAutofill.TryGetCountryCode(duplicated, "This happened happened in Eswatini.", draft, _ => false, countries, out _));
         Assert.False(ReportVoiceAutofill.TryGetCountryCode(suggestion, transcript, draft, _ => true, countries, out _));
         Assert.False(ReportVoiceAutofill.TryGetCountryCode(suggestion, transcript, draft, _ => false, [], out _));
         Assert.False(ReportVoiceAutofill.TryGetCountryCode(suggestion,

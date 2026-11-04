@@ -19,6 +19,18 @@ public sealed class EllaiProviderTurnClient(EllaiReasoningRouter router) : IElla
             result.Text, result.Usage.PromptTokens, result.Usage.CompletionTokens) { FinishReason = result.FinishReason };
     }
 
+    public async Task<EllaiTurnCompletion> CompleteReportVoiceAsync(
+        IReadOnlyList<EllaiChatMessage> messages, int maxTokens, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(messages);
+        using var timing = EllaiPipelineMetrics.Measure("provider_request");
+        var result = await _router.Resolve().CompleteReportVoiceAsync(messages, maxTokens, ct).ConfigureAwait(false);
+        return new EllaiTurnCompletion(result.Text, result.Usage.PromptTokens, result.Usage.CompletionTokens)
+        {
+            FinishReason = result.FinishReason
+        };
+    }
+
     public async Task<EllaiTurnCompletion> CompleteStreamingAsync(
         IReadOnlyList<EllaiChatMessage> messages,
         int maxTokens,

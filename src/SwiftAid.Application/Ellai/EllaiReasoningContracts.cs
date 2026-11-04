@@ -21,6 +21,11 @@ public interface IEllaiTurnCompletionClient
     Task<EllaiTurnCompletion> CompleteAsync(
         IReadOnlyList<EllaiChatMessage> messages, int maxTokens, CancellationToken ct);
 
+    /// <summary>Report extraction may use a provider-specific structured response contract.</summary>
+    Task<EllaiTurnCompletion> CompleteReportVoiceAsync(
+        IReadOnlyList<EllaiChatMessage> messages, int maxTokens, CancellationToken ct) =>
+        CompleteAsync(messages, maxTokens, ct);
+
     async Task<EllaiTurnCompletion> CompleteStreamingAsync(
         IReadOnlyList<EllaiChatMessage> messages, int maxTokens,
         Func<string, CancellationToken, ValueTask> onText, CancellationToken ct)

@@ -20,9 +20,23 @@ public sealed record EllaiReasoningResult(string Text, string Model, string Fini
 public sealed class EllaiReasoningAdapter(HttpClient http, EllaiOptions options)
 {
     private const int MaximumStreamLineLength = 64 * 1024;
+    private static readonly JsonElement ReportVoiceSchema = JsonSerializer.Deserialize<JsonElement>("""
+        {"type":"object","properties":{"fields":{"type":"array","items":{"type":"object",
+        "properties":{"field":{"type":"string"},"value":{"type":"string"},"evidence":{"type":"string"}},
+        "required":["field","value","evidence"],"additionalProperties":false}}},
+        "required":["fields"],"additionalProperties":false}
+        """);
 
-    public async Task<EllaiReasoningResult> CompleteAsync(
-        IReadOnlyList<EllaiChatMessage> messages, int maxTokens, CancellationToken ct)
+    public Task<EllaiReasoningResult> CompleteAsync(
+        IReadOnlyList<EllaiChatMessage> messages, int maxTokens, CancellationToken ct) =>
+        CompleteCoreAsync(messages, maxTokens, reportVoice: false, ct);
+
+    public Task<EllaiReasoningResult> CompleteReportVoiceAsync(
+        IReadOnlyList<EllaiChatMessage> messages, int maxTokens, CancellationToken ct) =>
+        CompleteCoreAsync(messages, maxTokens, reportVoice: true, ct);
+
+    private async Task<EllaiReasoningResult> CompleteCoreAsync(
+        IReadOnlyList<EllaiChatMessage> messages, int maxTokens, bool reportVoice, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(messages);
         if (!options.HasReasoningRoute)
@@ -35,18 +49,26 @@ public sealed class EllaiReasoningAdapter(HttpClient http, EllaiOptions options)
             throw new ArgumentException("A non-empty message list and 1..16384 max tokens are required.");
         }
 
-        var payload = new
-        {
-            model = options.ReasoningModel,
-            messages = messages.Select(MetaCompatibleChatMessage.ToPayload).ToList(),
-            max_tokens = maxTokens
-        };
+        var wireMessages = messages.Select(MetaCompatibleChatMessage.ToPayload).ToList();
+        var payload = reportVoice
+            ? JsonSerializer.Serialize(new
+            {
+                model = options.ReasoningModel,
+                messages = wireMessages,
+                max_tokens = maxTokens,
+                response_format = new
+                {
+                    type = "json_schema",
+                    json_schema = new { name = "report_voice", strict = true, schema = ReportVoiceSchema }
+                }
+            })
+            : JsonSerializer.Serialize(new { model = options.ReasoningModel, messages = wireMessages, max_tokens = maxTokens });
 
         using var request = new HttpRequestMessage(
             HttpMethod.Post, options.ApiUrl.TrimEnd('/') + "/chat/completions");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", options.ApiKey);
         request.Content = new StringContent(
-            JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
+            payload, Encoding.UTF8, "application/json");
 
         int status;
         string body;
