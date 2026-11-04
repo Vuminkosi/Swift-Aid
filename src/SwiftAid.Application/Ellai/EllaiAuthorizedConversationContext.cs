@@ -206,10 +206,8 @@ public static class EllaiAuthorizedConversationContext
                         return decisions[turn.ClientUtteranceId] = false;
                     try
                     {
-                        var current = query.Country is null && query.Workflow is null && query.Sort is null
-                            ? await queue.GetMineAsync(actor, query.Limit, ct).ConfigureAwait(false)
-                            : await queue.GetMineAsync(actor, query.Limit,
-                                new CaseQueueFilter(query.Country, query.Workflow, query.Sort == "latest-reported"), ct).ConfigureAwait(false);
+                        var current = await queue.GetMineAsync(actor, query.Limit,
+                            new CaseQueueFilter(query.Country, query.Workflow, query.Sort != "latest-updated"), ct).ConfigureAwait(false);
                         ct.ThrowIfCancellationRequested();
                         var items = current.Items.Take(query.Limit).ToArray();
                         if (current.Access != CaseQueueAccess.Allowed || current.NextCursor is not null ||

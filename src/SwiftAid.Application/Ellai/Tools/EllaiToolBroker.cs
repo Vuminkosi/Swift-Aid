@@ -202,7 +202,7 @@ public sealed class EllaiToolBroker
     /// consent applies only to explicitly consent-scoped processing lanes.</summary>
     private static readonly string[] ToolDescriptions =
     {
-        $"{EllaiToolNames.State}(projection=[feature|queue], limit=1..20, country?, workflow?, sort?) — permitted feature or owned-case queue. country is an uppercase two-letter code (Zimbabwe=ZW, Eswatini=SZ); workflow is Reported, UnderReview, Active, AwaitingFollowUp or Resolved; sort=latest-reported or latest-updated. Reported is a recorded workflow, not proof that no human reviewed a case. Classification review status is not supplied; clarify ambiguous unreviewed requests.",
+        $"{EllaiToolNames.State}(projection=[feature|queue], limit=1..20, country?, workflow?, sort?) — permitted feature or owned-case queue. country is an uppercase two-letter code (Zimbabwe=ZW, Eswatini=SZ); workflow is Reported, UnderReview, Active, AwaitingFollowUp or Resolved; sort defaults to latest-reported and can be latest-updated. Reported is a recorded workflow, not proof that no human reviewed a case. Classification review status is not supplied; clarify ambiguous unreviewed requests.",
         $"{EllaiToolNames.Evidence}(ref=case-results, field=[country|workflow]?) — re-read retained case queue references under current access.",
         $"{EllaiToolNames.Topic}(ref) — session topic candidates with checkpoints. Use ref=case-results to recall the last retained case list with fresh authorization; never invent a remembered result set.",
         $"{EllaiToolNames.Capabilities}(feature?) — capability readiness, no credentials.",
@@ -898,10 +898,8 @@ public sealed class EllaiToolBroker
         CaseQueueResult result;
         try
         {
-            result = country is null && workflow is null && sort is null
-                ? await queue.GetMineAsync(context.Actor, limit, ct).ConfigureAwait(false)
-                : await queue.GetMineAsync(context.Actor, limit,
-                    new CaseQueueFilter(country, workflow, sort == "latest-reported"), ct).ConfigureAwait(false);
+            result = await queue.GetMineAsync(context.Actor, limit,
+                new CaseQueueFilter(country, workflow, sort != "latest-updated"), ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
