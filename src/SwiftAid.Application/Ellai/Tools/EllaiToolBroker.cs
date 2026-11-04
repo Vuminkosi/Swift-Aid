@@ -483,8 +483,10 @@ public sealed class EllaiToolBroker
             timeline.Header.CaseId != caseId || timeline.Header.AggregateVersion < 1)
             return Deny(request.ToolName, "The case was not found or is not accessible.", EllaiToolReasonCodes.DeniedByPolicy);
 
+        // Timeline pages are chronological for the UI. A bounded assistant projection
+        // must spend its line budget on the newest journal events first.
         var entries = timeline.Entries.Where(entry => entry.Kind == CaseTimelineEntryKind.Authoritative)
-            .Take(MaxItems).ToArray();
+            .OrderByDescending(entry => entry.AggregateVersion).Take(MaxItems).ToArray();
         var activityCount = entries.Sum(entry => entry.AgentActivities?.Count ?? 0);
         var lines = entries.SelectMany(entry =>
             new[] { $"{entry.RecordedAtUtc:O}: {entry.Label} (v{entry.AggregateVersion})" }
@@ -515,7 +517,7 @@ public sealed class EllaiToolBroker
               "Counts are case-level; authorized escalation links are shown in the history when present. "
             : "Current escalation and follow-up summary is unavailable. ";
         var output = new EllaiToolResult(request.ToolName, true, null, [evidence],
-            "Authorized case history; sealed report content and actor identifiers are not included. " + workSummary +
+            "Authorized case history, newest events first; sealed report content and actor identifiers are not included. " + workSummary +
             (truncated ? "Some history or activity is omitted.\n" : "\n") +
             (entries.Length == 0 ? "No authoritative entries were returned." : string.Join("\n", lines.Take(MaxItems))),
             entries.Length, truncated, EllaiToolReasonCodes.Ok)
