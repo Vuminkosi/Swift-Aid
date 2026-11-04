@@ -1,15 +1,20 @@
 using Microsoft.EntityFrameworkCore;
 using SwiftAid.Application.Cases;
+using SwiftAid.Application.Cases.Commands;
+using SwiftAid.Infrastructure.Persistence.Transactions;
 
 namespace SwiftAid.Infrastructure.Persistence.Repositories.Cases;
 
 /// <summary>Reads designated officers with one complete current case-scoped grant.
 /// This lookup does not grant access, validate professional licensure, or assign an officer.</summary>
-public sealed class PostgresEligibleHealthOfficerStore(SwiftAidDbContext db) : IEligibleHealthOfficerStore
+public sealed class PostgresEligibleHealthOfficerStore(SwiftAidDbContext db, ICaseCommandLeaseAccessor leases) : IEligibleHealthOfficerStore
 {
     public async Task<EligibleHealthOfficerPage> GetAsync(Guid caseId, int limit, CancellationToken ct)
     {
         if (caseId == Guid.Empty || limit is < 1 or > 20) throw new ArgumentException("A case and bounded limit are required.");
+        var lease = PostgresLeaseGuard.RequireCurrent(db, leases, caseId);
+        if (lease.Mode != CaseLeaseMode.Read)
+            throw new InvalidOperationException("An active case read lease is required to look up officers.");
         var take = limit + 1;
         var rows = await db.Database.SqlQuery<OfficerRow>($"""
             SELECT DISTINCT ON (officer.actor_id) officer.designation_id AS "DesignationId",

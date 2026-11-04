@@ -29,7 +29,19 @@ public sealed partial class CaseCommandProcessingPostgresTests
         await using var db = fixture.CreateDbContext();
         var unit = new PostgresCaseCommandUnitOfWork(db);
         var policy = new CaseAccessPolicy(new PostgresCurrentAccessGrantStore(db, unit), new PostgresCaseAccessDescriptorStore(db, unit));
-        var store = new PostgresEligibleHealthOfficerStore(db);
+        var store = new PostgresEligibleHealthOfficerStore(db, unit);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => store.GetAsync(fixture.CaseId, 20, default));
+        await using (var lease = await unit.BeginCaseAsync(fixture.CreateActor(), fixture.CaseId, [], CaseLeaseMode.Read, default))
+        {
+            await Assert.ThrowsAsync<InvalidOperationException>(() => store.GetAsync(Guid.NewGuid(), 20, default));
+            await using var otherDb = fixture.CreateDbContext();
+            var wrongContextStore = new PostgresEligibleHealthOfficerStore(otherDb, unit);
+            await Assert.ThrowsAsync<InvalidOperationException>(() => wrongContextStore.GetAsync(fixture.CaseId, 20, default));
+        }
+        await using (var lease = await unit.BeginCaseAsync(fixture.CreateActor(), fixture.CaseId, [], CaseLeaseMode.Write, default))
+        {
+            await Assert.ThrowsAsync<InvalidOperationException>(() => store.GetAsync(fixture.CaseId, 20, default));
+        }
         var query = new EligibleHealthOfficerQuery(store, policy, unit, new HealthOfficerDirectoryOptions { Enabled = true });
         var disabled = new EligibleHealthOfficerQuery(store, policy, unit, new HealthOfficerDirectoryOptions());
         Assert.Null(await disabled.GetAsync(fixture.CreateActor(), fixture.CaseId, 20, default));
@@ -105,6 +117,7 @@ public sealed partial class CaseCommandProcessingPostgresTests
             """);
         Assert.Empty((await query.GetAsync(fixture.CreateActor(), fixture.CaseId, 20, default))!.Items);
         Assert.Null(await query.GetAsync(CaseRegistrationBackendTests.CreateOfficer("unknown-" + Guid.NewGuid()), fixture.CaseId, 20, default));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => store.GetAsync(fixture.CaseId, 20, default));
         await Assert.ThrowsAsync<Npgsql.PostgresException>(() => db.Database.ExecuteSqlInterpolatedAsync(
             $"UPDATE health_officer_designations SET status = 'Revoked' WHERE designation_id = {designationId}"));
         await Assert.ThrowsAsync<Npgsql.PostgresException>(() => db.GetService<IMigrator>().MigrateAsync("20261104130000_EllaiFollowUpReviews"));
