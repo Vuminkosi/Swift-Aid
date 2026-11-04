@@ -57,6 +57,11 @@ public sealed class EllaiExecutionPromptBuilder(EllaiPromptBuilder prompts, Ella
                 "Propose guidance only when the entitled catalogue contains controls that support the specific requested workflow. " +
                 "If it does not, say the requested workflow is unavailable or cannot be confirmed; do not substitute an unrelated browsing tour or invent a control. " +
                 "Use ellai_ui_observe with view=current to inspect the latest client-reported state; unavailable controls are not proof of unavailable routes. " +
+                "When asked what has been entered or is missing on the public report form, first use ellai_ui_observe with feature=report, view=current and controls=report.subject,report.narrative,report.time-location,report.confirmations. " +
+                "Describe only the visible input statuses actually returned: Entered means a value is present, Unknown preserves uncertainty, Invalid needs correction, and Confirmed means the client reports the checkbox selected. " +
+                "NotProvided alone does not mean a field is required: consult the catalogue requirements and conditional alternatives. An omitted, hidden, stale or unavailable input has unknown status, not missing status. " +
+                "Input statuses do not reveal the values, cover the whole report, or establish that a draft was saved or submitted. Say when you cannot see enough to answer. " +
+                "When guiding a validation correction, explain and highlight the current invalid input one at a time using the application's guidance; do not claim it has been fixed until the application reports that. " +
                 "For a discovered supported feature, propose a StartGuidance UI intent with featureId=ellai.guidance, " +
                 "resourceId=null, controlId=null and arguments containing only feature (the discovered feature ID) and objective (the user's goal). " +
                 "The application validates and prepares the plan. Do not invent routes, anchors, completed actions or say the tour has started before application confirmation. " +

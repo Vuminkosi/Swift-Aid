@@ -236,8 +236,9 @@ public sealed class EllaiUiToolTests
         var result = await broker.InvokeAsync(context, new(EllaiToolNames.UiObserve,
             Args(("controls", "report.narrative,report.time-location"), ("view", "view-9"))), default);
 
-        Assert.Contains("input report.original-statement: Entered", result.ResultSummary);
+        Assert.Contains("input report.original-statement (Describe what happened): Entered", result.ResultSummary);
         Assert.Contains("does not prove a draft was saved or submitted", result.ResultSummary);
+        Assert.Contains("omitted inputs have unknown status", result.ResultSummary);
         Assert.DoesNotContain("report.forged", result.ResultSummary);
         Assert.DoesNotContain("input report.occurrence-date", result.ResultSummary);
         var stale = await broker.InvokeAsync(context, new(EllaiToolNames.UiObserve,

@@ -195,7 +195,7 @@ public sealed class EllaiToolBroker
         $"{EllaiToolNames.DocsSearch}(q, limit?) — approved technical reference search.",
         $"{EllaiToolNames.DocsGet}(section) — one approved section excerpt.",
         $"{EllaiToolNames.UiCatalogue}(feature?, goal?, limit?) — entitled control descriptors.",
-        $"{EllaiToolNames.UiObserve}(controls, view=current, context?, feature?) — live mounted-control facts.",
+        $"{EllaiToolNames.UiObserve}(controls, view=current, context?, feature?) — current client-reported control and visible input presence; no field values or proof of saving.",
         $"{EllaiToolNames.IngestionSchema}() — canonical case CSV fields, capture requirements and authority boundaries; no submission.",
         $"{EllaiToolNames.ValidateObservations}(observations_json) — validate a bounded JSON array of original reported strings; no inference or submission.",
         $"{EllaiToolNames.Locations}(q, country?, limit?) — search the public geographic registry; present matches for user selection, never guess a location.",
@@ -1096,7 +1096,11 @@ public sealed class EllaiToolBroker
         var inputLines = stale ? [] : (report.InputStates ?? [])
             .Where(input => requested.Contains(input.ControlId) && byId[input.ControlId].State == UiObservationState.Ready &&
                 eligible[input.ControlId].Semantics?.Inputs.Any(descriptor => descriptor.InputId == input.InputId) == true)
-            .Select(input => $"input {input.InputId}: {input.Presence}").ToList();
+            .Select(input =>
+            {
+                var descriptor = eligible[input.ControlId].Semantics!.Inputs.First(item => item.InputId == input.InputId);
+                return $"input {input.InputId} ({descriptor.Label}): {input.Presence}";
+            }).ToList();
         var lines = ordered.Select(o =>
             $"control {o.ControlId} · {o.State} · view {o.ViewInstanceId} · {o.Platform}" +
             $"; client form validation accepted {!stale && eligible[o.ControlId].ProofPolicyId == "proof-ui-validated" && report.CompletedControlIds?.Contains(o.ControlId) == true}");
@@ -1110,7 +1114,8 @@ public sealed class EllaiToolBroker
                 : $" Requested view '{view.Trim()}' differs from the latest report.");
         return new EllaiToolResult(request.ToolName, true, null, evidence,
             header + "\n" + string.Join("\n", lines) +
-            (inputLines.Count == 0 ? string.Empty : "\nInput state is client-reported and does not prove a draft was saved or submitted.\n" + string.Join("\n", inputLines)),
+            (inputLines.Count == 0 ? string.Empty : "\nInput state is client-reported and does not prove a draft was saved or submitted. " +
+                "Only reported visible inputs on requested controls are included; omitted inputs have unknown status.\n" + string.Join("\n", inputLines)),
             ordered.Count, false, EllaiToolReasonCodes.Ok);
     }
 
