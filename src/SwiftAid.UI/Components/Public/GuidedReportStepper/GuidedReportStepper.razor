@@ -329,7 +329,7 @@
                     <div><dt>Original statement</dt><dd>@UnknownIfEmpty(Draft.Narrative)</dd><dd class="guided-report__provenance">Review entered words and any machine transcript for accuracy.</dd></div>
                     <div><dt>Separate observations</dt><dd>@ObservationSummary</dd><dd class="guided-report__provenance">Review any suggested observations against the transcript.</dd></div>
                     <div><dt>Reported time</dt><dd>@TimeSummary</dd><dd class="guided-report__provenance">@(Draft.OccurrencePrecision == ReportedTimePrecision.Unknown ? "Not provided; remains unknown" : "From the time you entered")</dd></div>
-                    <div><dt>Country</dt><dd>@CountrySummary</dd><dd class="guided-report__provenance">@(string.IsNullOrWhiteSpace(Draft.CountryCode) ? "Not provided; remains unknown" : "You selected this")</dd></div>
+                    <div><dt>Country</dt><dd>@CountrySummary</dd><dd class="guided-report__provenance">@(string.IsNullOrWhiteSpace(Draft.CountryCode) ? "Not provided; remains unknown" : "Review the selected country")</dd></div>
                     <div><dt>Location</dt><dd>@LocationSummary</dd><dd class="guided-report__provenance">@LocationProvenance</dd></div>
                     <div><dt>Animal type or group</dt><dd>Unknown</dd><dd class="guided-report__provenance">Not asked here; remains unknown.</dd></div>
                     <div><dt>Affected, deceased, and at-risk counts</dt><dd>Unknown</dd><dd class="guided-report__provenance">Not entered; remains unknown.</dd></div>
@@ -791,8 +791,18 @@
 
     private bool AutoFillVoiceSuggestion(SwiftAid.Contracts.Intake.ReportVoiceSuggestion suggestion, string transcript)
     {
-        if (!ReportVoiceAutofill.CanApply(suggestion, transcript, Draft,
-                field => _editContext?.IsModified(new FieldIdentifier(Draft, field)) == true)) return false;
+        bool IsModified(string field) => _editContext?.IsModified(new FieldIdentifier(Draft, field)) == true;
+        if (suggestion.Field == "country")
+        {
+            if (!HasCountryCatalogue || !ReportVoiceAutofill.TryGetCountryCode(
+                    suggestion, transcript, Draft, IsModified, Countries, out var countryCode)) return false;
+            Draft.CountryCode = countryCode;
+            Draft.CountryConfirmed = false;
+            Draft.LocationUnknown = false;
+            NotifyEllaiDraftEdit(nameof(Draft.CountryCode));
+            return true;
+        }
+        if (!ReportVoiceAutofill.CanApply(suggestion, transcript, Draft, IsModified)) return false;
         return suggestion.Field switch
         {
             "age" when int.TryParse(suggestion.Value, out var age) => SetReportedAge(age),

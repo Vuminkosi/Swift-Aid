@@ -35,6 +35,23 @@ public sealed class ReportVoiceAutofillTests
     }
 
     [Fact]
+    public void ExplicitCountryMustMatchCurrentCatalogueAndUntouchedField()
+    {
+        var draft = new PublicReportDraft { SubjectScope = IntakeSubjectScope.Human };
+        var countries = new[] { new PublicCountryOption("SZ", "Eswatini"), new PublicCountryOption("ZA", "South Africa") };
+        var suggestion = new ReportVoiceSuggestion("country", "Eswatini", "This happened in Eswatini");
+        const string transcript = "This happened in Eswatini. The patient is 35 years old.";
+        Assert.True(ReportVoiceAutofill.TryGetCountryCode(suggestion, transcript, draft, _ => false, countries, out var code));
+        Assert.Equal("SZ", code);
+        Assert.False(ReportVoiceAutofill.TryGetCountryCode(suggestion, transcript, draft, _ => true, countries, out _));
+        Assert.False(ReportVoiceAutofill.TryGetCountryCode(suggestion, transcript, draft, _ => false, [], out _));
+        Assert.False(ReportVoiceAutofill.TryGetCountryCode(suggestion,
+            "This happened in Eswatini. Actually, it happened in South Africa.", draft, _ => false, countries, out _));
+        draft.CountryCode = "ZA";
+        Assert.False(ReportVoiceAutofill.TryGetCountryCode(suggestion, transcript, draft, _ => false, countries, out _));
+    }
+
+    [Fact]
     public void ExistingAndUserEditedFieldsAreNeverOverwritten()
     {
         var draft = new PublicReportDraft { SubjectScope = IntakeSubjectScope.Human, AgeYearsText = "40" };

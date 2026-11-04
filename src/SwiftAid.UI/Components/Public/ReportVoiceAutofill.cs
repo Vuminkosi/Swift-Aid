@@ -41,8 +41,28 @@ public static class ReportVoiceAutofill
             return statements.Count(item => Regex.IsMatch(item, pattern, options)) == 1 && match.Success &&
                 string.Equals(match.Groups["place"].Value.Trim(), suggestion.Value.Trim(), StringComparison.Ordinal);
         }
+        if (suggestion.Field == "country" && string.IsNullOrWhiteSpace(draft.CountryCode) &&
+            !isModified(nameof(draft.CountryCode)))
+        {
+            const string pattern = @"^(?:this|it|the\s+incident)\s+happened\s+in\s+(?<country>[\p{L}\p{N}][\p{L}\p{N} '\-]{0,199})$";
+            var match = Regex.Match(statement, pattern, options);
+            return statements.Count(item => Regex.IsMatch(item, pattern, options)) == 1 && match.Success &&
+                string.Equals(match.Groups["country"].Value.Trim(), suggestion.Value.Trim(), StringComparison.OrdinalIgnoreCase);
+        }
         return suggestion.Field == "observation" && draft.GetObservations().Count == 0 &&
             !isModified(nameof(draft.ObservationsText));
+    }
+
+    public static bool TryGetCountryCode(ReportVoiceSuggestion suggestion, string transcript,
+        PublicReportDraft draft, Func<string, bool> isModified, IReadOnlyList<PublicCountryOption> countries,
+        out string? countryCode)
+    {
+        countryCode = null;
+        if (suggestion.Field != "country" || !CanApply(suggestion, transcript, draft, isModified)) return false;
+        var matches = countries.Where(country => string.Equals(country.Name, suggestion.Value.Trim(), StringComparison.OrdinalIgnoreCase)).ToArray();
+        if (matches.Length != 1) return false;
+        countryCode = matches[0].Code;
+        return true;
     }
 
     private static string NormalizeStatement(string value) => value.Trim().TrimEnd('.', '!', '?').TrimEnd();
