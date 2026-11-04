@@ -781,6 +781,8 @@ The application uses Microsoft AI/MCP tooling with verified Meta models. These a
 | SA-AI-14 | Gate | Enable Meta ASR only after the participant account, specific Meta model endpoint, media format, language behavior and credit eligibility are verified. No fixed price or universal language claim is made by this spec. Non-Meta transcription endpoints are prohibited. |
 | SA-AI-15 | P0 | Measure field accuracy, missingness, unsupported claims, citation validity, latency and usage on fixed examples; report failures and sample sizes. |
 
+For a retained case-result set, Ellai may filter current, actor-authorized rows by the recorded `Classified` or `Unclassified` status. The response identifies matching case IDs and versions only; it does not expose classifier labels or scores, infer a classification, or establish a diagnosis. Unknown status is omitted from either filtered result. Detailed classification evidence remains a separate permission- and processing-gated capability.
+
 ### 15.3 Human review experience
 
 The review card presents reported evidence, proposed factual fields or administrative action IDs, unknowns and input versions. The user can correct, accept selected facts, dismiss or regenerate. Fact acceptance uses normal case-correction commands. A plan approval is separate: it names the approved action set, permitted recipients, source versions and expiry.

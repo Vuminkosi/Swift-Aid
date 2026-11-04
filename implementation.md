@@ -4503,3 +4503,9 @@ PASS: 20 focused GuidedReportDraftPersistenceTests and EllaiReportAnchorTests; c
 Live signed-in Chromium reproduced Send report remaining disabled when the three confirmations were checked in display order. HandleFieldChanged cleared report review on country/processing acknowledgement. These acknowledgements now preserve review; edits to narrative or country still invalidate it. Report.razor now passes actual catalogue/privacy string values rather than literal field names. No policy or server validation bypass.
 
 Regression before fix: 2 failed, 3 passed. After fix: 25 focused UI tests passed (GuidedReportDraftPersistenceTests and EllaiReportAnchorTests). Evidence: .codex/ellai-confirmation-before.log and .codex/ellai-confirmation-after.log. Live retest pending deployment.
+
+### Ellai retained case classification-status filtering (2026-11-04)
+
+`ellai_evidence` can filter the latest or original retained case-result set by the persisted `Classified` or `Unclassified` status. It re-reads those bounded case IDs through the current actor-scoped queue, which reauthorizes each row. The response includes matching case IDs and aggregate versions, not classifier labels or scores. Unknown values are excluded from either result and called out; no classification is inferred and this filter is not a diagnosis. The separate detailed classification-evidence tool remains unavailable under the current reasoning route.
+
+PASS: `dotnet build src/SwiftAid.Application/SwiftAid.Application.csproj --no-restore -m:1 -nr:false` (0 warnings, 0 errors). No tests were added or run. NOT VERIFIED: conversation scenario 1.2 with a live authorized case set, provider tool selection, browser/session restoration, or deployment. No schema change.

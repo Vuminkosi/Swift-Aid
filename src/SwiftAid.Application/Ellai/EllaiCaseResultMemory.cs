@@ -71,16 +71,12 @@ public sealed class EllaiCaseResultMemory(EllaiTopicService topics, ICaseQueueQu
         bool original = false)
     {
         ct.ThrowIfCancellationRequested();
-        if (field is not null && field is not ("country" or "workflow" or "classification"))
+        if (field is not null && field is not ("country" or "workflow"))
             return new(EllaiToolNames.Topic, false, "Unsupported case-result field selector.", [], "", 0, false,
                 EllaiToolReasonCodes.InvalidArguments);
-        if (classificationFilter is not null && (classificationFilter is not ("Classified" or "Unclassified") ||
-            field is not (null or "classification")))
+        if (classificationFilter is not null && (classificationFilter is not ("Classified" or "Unclassified") || field is not null))
             return new(EllaiToolNames.Topic, false, "Unsupported case-result classification filter.", [], "", 0, false,
                 EllaiToolReasonCodes.InvalidArguments);
-        if (field == "classification" || classificationFilter is not null)
-            return new(EllaiToolNames.Topic, false, "Case classification is unavailable for this reasoning route.", [], "", 0, false,
-                EllaiToolReasonCodes.Unavailable);
         if (context.Actor is null) return Unavailable();
         EllaiTopicEntry? indexedTopic = null;
         if (index is not null)
@@ -136,7 +132,7 @@ public sealed class EllaiCaseResultMemory(EllaiTopicService topics, ICaseQueueQu
         var incomplete = snapshot.SearchIncomplete != false || snapshot.UnknownLocations != false;
         if (snapshot.Cases.Count == 0)
             return new EllaiToolResult(EllaiToolNames.Topic, true, null, [],
-                completeness + (classificationFilter is null ? "" : $"Filtered by recorded clinical classification: {classificationFilter}. ") +
+                completeness + (classificationFilter is null ? "" : $"Filtered by recorded case classification status: {classificationFilter}. ") +
                 (original ? "The original retained case result set was empty." : "The last retained case result set was empty."), 0, incomplete)
                 { HistoryValidUntilUtc = snapshot.ExpiresAtUtc };
 
@@ -162,10 +158,11 @@ public sealed class EllaiCaseResultMemory(EllaiTopicService topics, ICaseQueueQu
         var scopedEvidence = evidenceField is null
             ? evidence
             : evidence.Select(item => item with { FieldPath = evidenceField }).ToArray();
+        var filteredStatus = classificationFilter == "Unclassified" ? "unclassified" : "classified";
         var text = completeness + (original ? "Original retained case results" : "Previously retrieved cases") +
             ", checked against current access; this is not a new search. " +
             "Unavailable records are omitted. " +
-            (classificationFilter is null ? "" : $"Filtered by recorded clinical classification: {classificationFilter}. ") +
+            (classificationFilter is null ? "" : $"Filtered by recorded case classification status: {classificationFilter}. ") +
             (unknownClassification ? "Cases with unknown classification are excluded. " : "") +
             "\n" + string.Join("\n", rows.Select(pair =>
             {
@@ -173,7 +170,7 @@ public sealed class EllaiCaseResultMemory(EllaiTopicService topics, ICaseQueueQu
                 {
                     "country" => $"country {pair.row.CountryCode}",
                     "workflow" => $"workflow {pair.row.Workflow}",
-                    "classification" => $"recorded clinical classification {RecordedClassification(pair.row.Classification)}",
+                    "classification" => $"recorded case classification status {filteredStatus}",
                     _ => $"country {pair.row.CountryCode}; workflow {pair.row.Workflow}"
                 };
                 return $"case {pair.row.CaseId:D}; {selectedValue}; v{pair.row.AggregateVersion}" +

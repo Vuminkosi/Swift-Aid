@@ -78,7 +78,7 @@ public static class EllaiAuthorizedConversationContext
                     return decisions[decisionKey] = false;
                 if (observation.RetainedCaseReplay is { } retainedCase)
                 {
-                    if (!retainedCase.IsValid() || !observation.Truncated ||
+                    if (!retainedCase.IsValid() || observation.Truncated && retainedCase.ClassificationFilter is null ||
                         observation.CaseSnapshotExpiresAtUtc is not { } expiry || expiry <= DateTimeOffset.UtcNow ||
                         toolContext is null || invokeTool is null || toolContext.SessionId != turn.SessionId ||
                         toolContext.Actor is null || toolContext.Actor.ActorId != actor.ActorId ||
@@ -88,10 +88,12 @@ public static class EllaiAuthorizedConversationContext
                     {
                         var arguments = new Dictionary<string, string> { ["ref"] = retainedCase.Reference };
                         if (retainedCase.Field is not null) arguments["field"] = retainedCase.Field;
+                        if (retainedCase.ClassificationFilter is not null)
+                            arguments["classification_filter"] = retainedCase.ClassificationFilter;
                         var current = await invokeTool(toolContext with { RevalidationOnly = true },
                             new EllaiToolRequest(observation.ToolName, arguments), ct).ConfigureAwait(false);
                         ct.ThrowIfCancellationRequested();
-                        if (current.ToolName != observation.ToolName || !current.Allowed || !current.Truncated ||
+                        if (current.ToolName != observation.ToolName || !current.Allowed || current.Truncated != observation.Truncated ||
                             current.DenialReason is not null || current.ReasonCode != EllaiToolReasonCodes.Ok ||
                             current.HistoryValidUntilUtc != expiry || current.ItemCount != observation.Evidence.Count ||
                             !current.Evidence.SequenceEqual(observation.Evidence) ||
@@ -329,7 +331,7 @@ public static class EllaiAuthorizedConversationContext
                     continue;
                 }
                 if (observation.Evidence.Count == 0 &&
-                    (observation.ToolName != EllaiToolNames.Evidence || observation.RetainedClassificationFilter is null))
+                    (observation.ToolName != EllaiToolNames.Evidence || observation.RetainedCaseReplay?.ClassificationFilter is null))
                     return decisions[decisionKey] = false;
                 if (observation.ToolName == EllaiToolNames.ImportStatus)
                 {
@@ -403,10 +405,6 @@ public static class EllaiAuthorizedConversationContext
                     return decisions[decisionKey] = false;
                 if (observation.CaseSnapshotExpiresAtUtc is not { } expires || expires <= DateTimeOffset.UtcNow)
                     return decisions[decisionKey] = false;
-                if (observation.RetainedClassificationFilter is not null)
-                {
-                    return decisions[decisionKey] = false;
-                }
                 foreach (var reference in observation.Evidence)
                 {
                     if (reference.SourceKind != "CaseQueue" || reference.FieldPath == "classification" ||
