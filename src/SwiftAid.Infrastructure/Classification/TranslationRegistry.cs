@@ -59,10 +59,17 @@ public sealed class TranslationRegistry(SwiftAidDbContext db, IDataProtectionPro
         var now = clock.GetUtcNow();
         await using var tx = await db.Database.BeginTransactionAsync(ct);
         var row = await db.Set<TranslationArtifactEntity>().FromSqlInterpolated($"""
-            SELECT * FROM swiftaid_translation.artifacts WHERE "OrganizationId" = ANY({organizations})
-            AND "State" IN ('Pending','RetryScheduled','Leased') AND "AvailableAtUtc" <= {now}
-            AND ("LeaseUntilUtc" IS NULL OR "LeaseUntilUtc" <= {now})
-            ORDER BY "AvailableAtUtc", "CreatedAtUtc" LIMIT 1 FOR UPDATE SKIP LOCKED
+            SELECT artifact.* FROM swiftaid_translation.artifacts artifact WHERE artifact."OrganizationId" = ANY({organizations})
+            AND artifact."State" IN ('Pending','RetryScheduled','Leased') AND artifact."AvailableAtUtc" <= {now}
+            AND (artifact."LeaseUntilUtc" IS NULL OR artifact."LeaseUntilUtc" <= {now})
+            ORDER BY COALESCE((
+                SELECT MAX(c.created_at_utc) FROM swiftaid_translation.associations association
+                JOIN managed_cases c ON c.case_id = association."CaseId"
+                    AND c.workspace_id = artifact."WorkspaceId" AND c.organization_id = artifact."OrganizationId"
+                    AND c.report_revision = association."ReportRevision"
+                WHERE association."ArtifactId" = artifact."Id"
+            ), artifact."CreatedAtUtc") DESC, artifact."AvailableAtUtc", artifact."Id"
+            LIMIT 1 FOR UPDATE OF artifact SKIP LOCKED
             """).SingleOrDefaultAsync(ct);
         if (row is null) return null;
         if (row.Attempts >= 5)
