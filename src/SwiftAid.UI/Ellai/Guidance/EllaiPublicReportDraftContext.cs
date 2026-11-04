@@ -11,6 +11,7 @@ public sealed class EllaiPublicReportDraftContext
     private object? _owner;
     private Func<int, bool>? _setAge;
     private Func<string, bool>? _addObservation;
+    private Func<string, bool>? _removeObservation;
     private Func<string, bool>? _setLocality;
     private Func<string, bool>? _appendNarrative;
     private Func<ReportedGender, bool>? _setGender;
@@ -19,7 +20,7 @@ public sealed class EllaiPublicReportDraftContext
     private DateTimeOffset _captureExpiresAt;
     private bool _captureActive;
 
-    private enum PendingEditKind { Age, AgeRevert, Gender, Observation, Locality, Narrative }
+    private enum PendingEditKind { Age, AgeRevert, Gender, Observation, RemoveObservation, Locality, Narrative }
     private sealed record PendingEdit(PendingEditKind Kind, int? Age = null, ReportedGender? Gender = null, string? Text = null);
 
     public void BeginReportCapture()
@@ -34,13 +35,15 @@ public sealed class EllaiPublicReportDraftContext
 
     public void Register(object owner, Func<int, bool> setAge, Func<string, bool> addObservation,
         Func<string, bool>? setLocality = null, Func<string, bool>? appendNarrative = null,
-        Func<ReportedGender, bool>? setGender = null, Func<bool>? revertAge = null)
+        Func<ReportedGender, bool>? setGender = null, Func<bool>? revertAge = null,
+        Func<string, bool>? removeObservation = null)
     {
         lock (_gate)
         {
             _owner = owner;
             _setAge = setAge;
             _addObservation = addObservation;
+            _removeObservation = removeObservation ?? (_ => false);
             _setLocality = setLocality ?? (_ => false);
             _appendNarrative = appendNarrative ?? (_ => false);
             _setGender = setGender ?? (_ => false);
@@ -79,6 +82,7 @@ public sealed class EllaiPublicReportDraftContext
                 _owner = null;
                 _setAge = null;
                 _addObservation = null;
+                _removeObservation = null;
                 _setLocality = null;
                 _appendNarrative = null;
                 _setGender = null;
@@ -140,6 +144,25 @@ public sealed class EllaiPublicReportDraftContext
         return Apply(new(PendingEditKind.Observation, Text: utterance.Trim()));
     }
 
+    public static bool IsExplicitObservationRemoval(string? utterance) =>
+        TryGetObservationRemoval(utterance, out _);
+
+    public bool RemoveReportedObservation(string? utterance) =>
+        TryGetObservationRemoval(utterance, out var observation) &&
+        Apply(new(PendingEditKind.RemoveObservation, Text: observation));
+
+    private static bool TryGetObservationRemoval(string? utterance, out string observation)
+    {
+        observation = string.Empty;
+        if (utterance is null || utterance.Length > 300 || utterance.Contains('\r') || utterance.Contains('\n')) return false;
+        var match = Regex.Match(utterance,
+            @"^\s*(?:remove|delete)\s+(?:the\s+)?(?<observation>[\p{L}\p{N}][\p{L}\p{N} '\-]{0,199}?)(?:\.\s+It was recorded incorrectly\.?)?[.!?]?\s*$",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        if (!match.Success) return false;
+        observation = match.Groups["observation"].Value.Trim();
+        return observation.Length is > 0 and <= 200;
+    }
+
     public bool ApplyReportedLocality(string? utterance)
     {
         if (utterance is null || utterance.Length > 240 || utterance.Contains('\r') || utterance.Contains('\n')) return false;
@@ -173,6 +196,7 @@ public sealed class EllaiPublicReportDraftContext
                 PendingEditKind.AgeRevert when _revertAge is { } revertAge => revertAge,
                 PendingEditKind.Gender when _setGender is { } setGender => () => setGender(edit.Gender!.Value),
                 PendingEditKind.Observation when _addObservation is { } addObservation => () => addObservation(edit.Text!),
+                PendingEditKind.RemoveObservation when _removeObservation is { } removeObservation => () => removeObservation(edit.Text!),
                 PendingEditKind.Locality when _setLocality is { } setLocality => () => setLocality(edit.Text!),
                 PendingEditKind.Narrative when _appendNarrative is { } appendNarrative => () => appendNarrative(edit.Text!),
                 _ => null

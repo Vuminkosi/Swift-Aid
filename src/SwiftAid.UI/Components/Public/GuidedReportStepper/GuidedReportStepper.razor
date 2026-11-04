@@ -837,6 +837,15 @@
             Draft.AgeYearsText = previousAge.ToString(System.Globalization.CultureInfo.InvariantCulture);
             _editContext.NotifyFieldChanged(new FieldIdentifier(Draft, nameof(Draft.AgeYearsText)));
             return true;
+        }, observation =>
+        {
+            var existing = Draft.GetObservations();
+            var matches = existing.Where(value => string.Equals(value, observation, StringComparison.OrdinalIgnoreCase)).ToArray();
+            if (matches.Length != 1) return false;
+            Draft.ObservationsText = string.Join(Environment.NewLine,
+                existing.Where(value => !string.Equals(value, matches[0], StringComparison.Ordinal)));
+            _editContext.NotifyFieldChanged(new FieldIdentifier(Draft, nameof(Draft.ObservationsText)));
+            return true;
         });
         if (!EllaiDraftContext.FlushPending(this))
             _stepError = "Some details from this Ellai report conversation could not fit the form. Review the report and add those details manually.";

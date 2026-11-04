@@ -121,8 +121,10 @@ public partial class EllaiGuidanceHost
                     ? context?.ApplyAgeCorrection(userText) == true
                     : controlId == "report.gender"
                         ? context?.ApplyReportedGender(userText) == true
-                        : controlId == "report.other-observations"
-                            ? context?.ApplyReportedObservation(userText) == true
+                            : controlId == "report.other-observations"
+                                ? EllaiPublicReportDraftContext.IsExplicitObservationRemoval(userText)
+                                    ? context?.RemoveReportedObservation(userText) == true
+                                    : context?.ApplyReportedObservation(userText) == true
                             : controlId == "report.locality"
                                 ? context?.ApplyReportedLocality(userText) == true
                                 : context?.ApplyReportNarrativeStatement(userText) == true;
@@ -132,7 +134,9 @@ public partial class EllaiGuidanceHost
                         : controlId == "report.gender"
                             ? "Updated the explicitly reported gender in the open report draft. Review it before submitting."
                             : controlId == "report.other-observations"
-                                ? "Added your reported observation to the open report draft. Review it before submitting."
+                                ? EllaiPublicReportDraftContext.IsExplicitObservationRemoval(userText)
+                                    ? "Removed the matching reported observation from the open draft. Review it before submitting."
+                                    : "Added your reported observation to the open report draft. Review it before submitting."
                                 : controlId == "report.locality"
                                     ? "Added the reported locality to the open report draft. Review it before submitting."
                                     : "Added your reported statement to the open report draft. Review it before submitting."
@@ -140,8 +144,10 @@ public partial class EllaiGuidanceHost
                         ? "I could not update the age. Open the report details and enter it there."
                         : controlId == "report.gender"
                             ? "I could not update gender from that statement. Enter the explicitly reported value in the report instead."
-                            : controlId == "report.other-observations"
-                                ? "I could not add that statement as an observation. Enter it in the report details instead."
+                        : controlId == "report.other-observations"
+                            ? EllaiPublicReportDraftContext.IsExplicitObservationRemoval(userText)
+                                ? "I could not remove that observation. I remove only one exact matching observation line; review the report details manually."
+                                : "I could not add that statement as an observation. Enter it in the report details instead."
                                 : controlId == "report.locality"
                                     ? "I could not add that locality. Enter it in the report details instead."
                                     : "I could not add that statement to the report details.";
