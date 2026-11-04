@@ -11,6 +11,7 @@ public sealed class IngestionOutboxWorker(
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         if (!options.Value.Enabled || !options.Value.IngestionDispatchEnabled) return;
+        var retryAfter = new Dictionary<string, DateTimeOffset>(StringComparer.Ordinal);
         while (!stoppingToken.IsCancellationRequested)
         {
             try
@@ -18,25 +19,25 @@ public sealed class IngestionOutboxWorker(
                 var dispatched = false;
                 foreach (var kind in new[] { "intake", "case" })
                 {
-                    await using var scope = scopes.CreateAsyncScope();
-                    dispatched |= await scope.ServiceProvider.GetRequiredService<IngestionDispatchService>()
-                        .DispatchOneAsync(kind, stoppingToken);
+                    dispatched |= await DispatchLaneAsync(kind, services =>
+                        services.GetRequiredService<IngestionDispatchService>().DispatchOneAsync(kind, stoppingToken));
                 }
 
-                await using (var scope = scopes.CreateAsyncScope())
+                dispatched |= await DispatchLaneAsync("classification", async services =>
                 {
-                    if (scope.ServiceProvider.GetRequiredService<IOptions<SwiftAid.Infrastructure.Classification.ClassificationOptions>>().Value.Enabled)
-                        dispatched |= await scope.ServiceProvider.GetRequiredService<SwiftAid.Infrastructure.Classification.ClassificationOutboxDispatcher>()
-                            .DispatchOneAsync(stoppingToken);
-                }
-
-                await using (var scope = scopes.CreateAsyncScope())
-                    dispatched |= await scope.ServiceProvider.GetRequiredService<SwiftAid.Infrastructure.Surveillance.SurveillanceOutboxDispatcher>()
+                    if (!services.GetRequiredService<IOptions<SwiftAid.Infrastructure.Classification.ClassificationOptions>>().Value.Enabled)
+                        return false;
+                    return await services.GetRequiredService<SwiftAid.Infrastructure.Classification.ClassificationOutboxDispatcher>()
                         .DispatchOneAsync(stoppingToken);
+                });
 
-                await using (var scope = scopes.CreateAsyncScope())
-                    dispatched |= await scope.ServiceProvider.GetRequiredService<SwiftAid.Infrastructure.Classification.TranslationOutboxDispatcher>()
-                        .DispatchOneAsync(stoppingToken);
+                dispatched |= await DispatchLaneAsync("surveillance", services =>
+                    services.GetRequiredService<SwiftAid.Infrastructure.Surveillance.SurveillanceOutboxDispatcher>()
+                        .DispatchOneAsync(stoppingToken));
+
+                dispatched |= await DispatchLaneAsync("translation", services =>
+                    services.GetRequiredService<SwiftAid.Infrastructure.Classification.TranslationOutboxDispatcher>()
+                        .DispatchOneAsync(stoppingToken));
 
                 if (!dispatched) await Task.Delay(TimeSpan.FromSeconds(1), stoppingToken);
             }
@@ -48,6 +49,25 @@ public sealed class IngestionOutboxWorker(
             {
                 logger.LogWarning("Ingestion dispatch unavailable. Failure type: {FailureType}", exception.GetType().Name);
                 await Task.Delay(TimeSpan.FromSeconds(2), stoppingToken);
+            }
+        }
+
+        async Task<bool> DispatchLaneAsync(string lane, Func<IServiceProvider, Task<bool>> dispatch)
+        {
+            if (retryAfter.TryGetValue(lane, out var retryAt) && retryAt > DateTimeOffset.UtcNow) return false;
+            try
+            {
+                await using var scope = scopes.CreateAsyncScope();
+                var result = await dispatch(scope.ServiceProvider).ConfigureAwait(false);
+                retryAfter.Remove(lane);
+                return result;
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { throw; }
+            catch (Exception exception) when (exception is not OutOfMemoryException)
+            {
+                retryAfter[lane] = DateTimeOffset.UtcNow.AddSeconds(2);
+                logger.LogWarning("Ingestion lane {Lane} unavailable. Failure type: {FailureType}", lane, exception.GetType().Name);
+                return false;
             }
         }
     }
