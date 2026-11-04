@@ -382,7 +382,8 @@
             capability.CanCancel,
             capability.CanComplete,
             message,
-            capability.CanViewHistory);
+            capability.CanViewHistory,
+            capability.OwnerOrganizationIds);
 
     private bool CanRenderEditor(SessionManagementPresentation presentation)
     {
@@ -621,7 +622,7 @@
             create.Title, create.Summary, create.AudienceDescription, create.TopicTags,
             create.CountryCode, create.RegionId, create.Sector, create.Presenter, create.Language,
             create.StartUtc, create.TimeZoneId, create.DurationMinutes, create.Capacity,
-            create.Materials.Select(m => new SessionMaterialInput(m.MaterialId, m.SourceVersion)).ToArray(),
+            create.Materials.Select(m => new SessionMaterialInput(m.MaterialId, m.SourceVersion, m.RightsEvidence)).ToArray(),
             create.Visibility, create.ChannelType, create.ChannelLink, create.ReminderLeadHours), create.Reason);
         _deferredCreateActor = actorId;
         _deferredCreateSessionId = create.SessionId;

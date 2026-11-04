@@ -27,7 +27,7 @@ public enum SessionVisibility
 }
 
 /// <summary>Opaque reference to a human-authored source card and the exact version bound at review time.</summary>
-public sealed record SessionMaterialRef(string MaterialId, string SourceVersion);
+public sealed record SessionMaterialRef(string MaterialId, string SourceVersion, string? RightsEvidence = null);
 
 /// <summary>One computed reminder occurrence. Dispatch itself belongs to the durable reminder lane.</summary>
 public sealed record SessionReminderOccurrence(DateTimeOffset RemindAtUtc, int LeadHours);
@@ -40,6 +40,7 @@ public sealed record SessionReminderOccurrence(DateTimeOffset RemindAtUtc, int L
 public sealed class CommunitySession
 {
     public Guid SessionId { get; }
+    public string OrganizationId { get; }
     public long Version { get; private set; }
     public string Title { get; private set; }
     public string Summary { get; private set; }
@@ -81,6 +82,7 @@ public sealed class CommunitySession
 
     private CommunitySession(
         Guid sessionId,
+        string organizationId,
         string title,
         string summary,
         string audienceDescription,
@@ -103,6 +105,7 @@ public sealed class CommunitySession
         DateTimeOffset createdAtUtc)
     {
         SessionId = sessionId;
+        OrganizationId = organizationId;
         Version = 1;
         Title = title;
         Summary = summary;
@@ -129,6 +132,7 @@ public sealed class CommunitySession
 
     public static CommunitySession Create(
         Guid sessionId,
+        string organizationId,
         string title,
         string summary,
         string audienceDescription,
@@ -151,6 +155,7 @@ public sealed class CommunitySession
         DateTimeOffset createdAtUtc)
     {
         if (sessionId == Guid.Empty) throw new ArgumentException("A session identifier is required.", nameof(sessionId));
+        RequireText(organizationId, nameof(organizationId));
         RequireText(title, nameof(title));
         RequireText(summary, nameof(summary));
         RequireText(audienceDescription, nameof(audienceDescription));
@@ -169,7 +174,7 @@ public sealed class CommunitySession
         var checkedLeads = CheckReminderLeads(reminderLeadHours);
         var checkedLink = CheckChannelLink(channelType, channelLink);
         return new CommunitySession(
-            sessionId, title, summary, audienceDescription, checkedTags, countryCode, regionId,
+            sessionId, organizationId, title, summary, audienceDescription, checkedTags, countryCode, regionId,
             sector, presenter, language, startUtc.ToUniversalTime(), timeZoneId, durationMinutes,
             capacity, checkedMaterials, visibility, channelType, checkedLink, checkedLeads,
             createdByActorId, createdAtUtc);
@@ -344,9 +349,18 @@ public sealed class CommunitySession
             ArgumentNullException.ThrowIfNull(material);
             RequireText(material.MaterialId, "material.MaterialId");
             RequireText(material.SourceVersion, "material.SourceVersion");
+            if (material.MaterialId.Length > 256 || material.SourceVersion.Length > 256)
+                throw new ArgumentException("Material identifiers and source versions must not exceed 256 characters.", nameof(materials));
+            if (material.RightsEvidence is { Length: > 4000 })
+                throw new ArgumentException("Material rights evidence must not exceed 4000 characters.", nameof(materials));
         }
 
-        return Array.AsReadOnly(materials.ToArray());
+        return Array.AsReadOnly(materials.Select(material => material with
+        {
+            MaterialId = material.MaterialId.Trim(),
+            SourceVersion = material.SourceVersion.Trim(),
+            RightsEvidence = string.IsNullOrWhiteSpace(material.RightsEvidence) ? null : material.RightsEvidence.Trim()
+        }).ToArray());
     }
 
     private static IReadOnlyList<string> CheckTags(IReadOnlyList<string>? tags)

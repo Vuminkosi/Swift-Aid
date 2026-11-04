@@ -18,8 +18,8 @@ public sealed record SessionStaffOutcome(
 
 /// <summary>
 /// Server-side session client for Blazor Server. Public reads remain available;
-/// staff reads and mutations fail closed until a trusted scoped-staff capability
-/// contract is available. Authentication or role claims alone do not grant it.
+/// staff reads and mutations are authorized against persisted organization ownership.
+/// Authentication or role claims alone do not grant access.
 /// </summary>
 public sealed class SessionGatewayClient(
     AuthenticationStateProvider authenticationStateProvider,
@@ -98,11 +98,6 @@ public sealed class SessionGatewayClient(
         Guid sessionId,
         CancellationToken cancellationToken = default)
     {
-        if (!await HasTrustedScopedStaffCapabilityAsync(cancellationToken).ConfigureAwait(false))
-        {
-            return null;
-        }
-
         var actor = await GetActorAsync().ConfigureAwait(false);
         var service = _serviceProvider.GetService<ICommunitySessionService>();
         if (actor is null || service is null)
@@ -133,17 +128,11 @@ public sealed class SessionGatewayClient(
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(command);
-        if (!await HasTrustedScopedStaffCapabilityAsync(cancellationToken).ConfigureAwait(false))
-        {
-            return new SessionStaffOutcome(
-                false, null, "The community session was not found.", false);
-        }
-
         var actor = await GetActorAsync().ConfigureAwait(false);
         if (actor is null)
         {
             return new SessionStaffOutcome(
-                false, null, "Sign in with a staff account to change community sessions.", false);
+                false, null, "Sign in with an active organization owner account to change community sessions.", false);
         }
 
         var service = _serviceProvider.GetService<ICommunitySessionService>();
@@ -228,11 +217,4 @@ public sealed class SessionGatewayClient(
         }
     }
 
-    private static Task<bool> HasTrustedScopedStaffCapabilityAsync(CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        // No trusted officer/current-scope capability contract is currently
-        // wired. Do not infer staff authority from authentication or role claims.
-        return Task.FromResult(false);
-    }
 }

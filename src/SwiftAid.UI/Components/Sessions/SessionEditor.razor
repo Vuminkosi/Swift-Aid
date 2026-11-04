@@ -57,6 +57,23 @@
     <fieldset class="session-editor__fields" disabled="@(!CanEditFields || Busy)">
         <legend>Session details</legend>
     <MudGrid Class="mt-2">
+        @if (IsNew)
+        {
+            <MudItem xs="12">
+                <MudSelect T="string" Label="Organization" @bind-Value="_organizationId" Required="true" Clearable="true"
+                           HelperText="Choose an organization you own. Owners can review materials and publish its sessions."
+                           Error='@HasError("OrganizationId")' ErrorText='@FieldError("OrganizationId")'>
+                    @foreach (var organizationId in OwnerOrganizationIds)
+                    {
+                        <MudSelectItem Value="@organizationId">@organizationId</MudSelectItem>
+                    }
+                </MudSelect>
+                @if (OwnerOrganizationIds.Count == 0)
+                {
+                    <MudText Typo="Typo.caption" Color="Color.Warning">No active organization ownership is available for this account.</MudText>
+                }
+            </MudItem>
+        }
         <MudItem xs="12" md="6">
             <MudTextField T="string" Label="Title" @bind-Value="_title" Disabled="@IsScheduled" Required="true"
                          Error='@HasError("Title")' ErrorText='@FieldError("Title")' />
@@ -166,6 +183,8 @@
                 <div class="session-editor__material-row" @key="row.Key">
                     <MudTextField T="string" Label="Material" @bind-Value="row.MaterialId" Disabled="@IsScheduled" />
                     <MudTextField T="string" Label="Source version" @bind-Value="row.SourceVersion" Disabled="@IsScheduled" />
+                    <MudTextField T="string" Label="Source and reuse-rights evidence" @bind-Value="row.RightsEvidence" Disabled="@IsScheduled"
+                                  HelperText="Required before an organization owner can approve this material." />
                     <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error"
                                    OnClick="() => RemoveMaterial(row)" aria-label="@removeMaterialLabel" Disabled="@(!CanEditFields || Busy || IsScheduled)" />
                 </div>
@@ -213,7 +232,7 @@
                         <MudText Typo="Typo.caption" Color="Color.Error">@FieldError("SelfReview")</MudText>
                     }
                 }
-                <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="SubmitReviewAsync" Disabled="@(Busy || HasUnsavedChanges)" StartIcon="@Icons.Material.Filled.RateReview">Record review</MudButton>
+                <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="SubmitReviewAsync" Disabled="@(Busy || HasUnsavedChanges)" StartIcon="@Icons.Material.Filled.RateReview">Approve materials and record review</MudButton>
             }
             @if (CanSchedule)
             {
@@ -282,6 +301,8 @@
     [Parameter] public EventCallback<string> OnComplete { get; set; }
 
     private string _title = string.Empty;
+    private string? _organizationId;
+    private IReadOnlyList<string> OwnerOrganizationIds => ManagementCapabilities?.OwnerOrganizationIds ?? [];
     private string _summary = string.Empty;
     private string _audience = string.Empty;
     private string _country = string.Empty;
@@ -353,6 +374,7 @@
             _draftRestored = true;
             var input = draft.Input;
             _title = input.Title;
+            _organizationId = input.OrganizationId;
             _summary = input.Summary;
             _audience = input.AudienceDescription;
             _country = input.CountryCode;
@@ -373,7 +395,7 @@
             _reminderLeadsText = string.Join(", ", input.ReminderLeadHours);
             _materials.Clear();
             foreach (var material in input.Materials)
-                _materials.Add(new MaterialRow { MaterialId = material.MaterialId, SourceVersion = material.SourceVersion });
+                _materials.Add(new MaterialRow { MaterialId = material.MaterialId, SourceVersion = material.SourceVersion, RightsEvidence = material.RightsEvidence ?? string.Empty });
             _reason = draft.Reason;
         }
     }
@@ -410,6 +432,7 @@
     private void Prefill(CommunitySessionView view)
     {
         _title = view.Title;
+        _organizationId = view.OrganizationId;
         _summary = view.Summary;
         _audience = view.AudienceDescription;
         _country = view.CountryCode;
@@ -431,7 +454,7 @@
         _materials.Clear();
         foreach (var material in view.Materials)
         {
-            _materials.Add(new MaterialRow { MaterialId = material.MaterialId, SourceVersion = material.SourceVersion });
+            _materials.Add(new MaterialRow { MaterialId = material.MaterialId, SourceVersion = material.SourceVersion, RightsEvidence = material.RightsEvidence ?? string.Empty });
         }
 
         _errors.Clear();
@@ -446,12 +469,13 @@
             _title, _summary, _audience, _country, _region, _sector, _presenter, _language,
             _topicTagsText, _timeZone, _startLocal?.ToString("O", System.Globalization.CultureInfo.InvariantCulture),
             _ambiguousOffsetMinutes?.ToString(System.Globalization.CultureInfo.InvariantCulture), _durationText,
-            _capacityText, _visibility, _channelType, _channelLink, _reminderLeadsText
+            _organizationId, _capacityText, _visibility, _channelType, _channelLink, _reminderLeadsText
         };
         foreach (var material in _materials)
         {
             fields.Add(material.MaterialId);
             fields.Add(material.SourceVersion);
+            fields.Add(material.RightsEvidence);
         }
         return fields.ToArray();
     }
@@ -572,11 +596,11 @@
         _timeZone.Trim(),
         int.Parse(_durationText.Trim(), System.Globalization.CultureInfo.InvariantCulture),
         ParseCapacity(),
-        _materials.Select(m => new SessionMaterialInput(m.MaterialId.Trim(), m.SourceVersion.Trim())).ToArray(),
+        _materials.Select(m => new SessionMaterialInput(m.MaterialId.Trim(), m.SourceVersion.Trim(), m.RightsEvidence.Trim())).ToArray(),
         Enum.Parse<SessionVisibility>(_visibility, ignoreCase: true),
         Enum.Parse<SessionChannelType>(_channelType, ignoreCase: true),
         string.IsNullOrWhiteSpace(_channelLink) ? null : _channelLink.Trim(),
-        ParseReminderLeads());
+        ParseReminderLeads()) { OrganizationId = _organizationId?.Trim() ?? string.Empty };
 
     private UpdateSessionInput BuildUpdateInput()
     {
@@ -587,7 +611,7 @@
 
             return new UpdateSessionInput(published.Title, published.Summary, published.AudienceDescription,
                 published.TopicTags, published.Presenter, published.Language, ToStartUtc(), published.DurationMinutes,
-                published.Capacity, published.Materials.Select(item => new SessionMaterialInput(item.MaterialId, item.SourceVersion)).ToArray(),
+                published.Capacity, published.Materials.Select(item => new SessionMaterialInput(item.MaterialId, item.SourceVersion, item.RightsEvidence)).ToArray(),
                 published.Visibility, published.ChannelType, published.ChannelLink, ParseReminderLeads());
         }
 
@@ -613,6 +637,8 @@
     {
         _errors.Clear();
 
+        if (IsNew && !OwnerOrganizationIds.Contains(_organizationId ?? string.Empty, StringComparer.Ordinal))
+            _errors["OrganizationId"] = "Choose an active organization you own.";
         Require(_title, "Title", "A title is required.");
         Require(_summary, "Summary", "A public summary is required.");
         Require(_audience, "Audience", "Describe who should attend.");
@@ -697,9 +723,9 @@
         {
             _errors["Materials"] = "At least one source-linked material is required.";
         }
-        else if (_materials.Any(m => string.IsNullOrWhiteSpace(m.MaterialId) || string.IsNullOrWhiteSpace(m.SourceVersion)))
+        else if (_materials.Any(m => string.IsNullOrWhiteSpace(m.MaterialId) || string.IsNullOrWhiteSpace(m.SourceVersion) || (IsDraft && string.IsNullOrWhiteSpace(m.RightsEvidence))))
         {
-            _errors["Materials"] = "Each material needs an identifier and a source version.";
+            _errors["Materials"] = "Each material needs an identifier, source version, and source/reuse-rights evidence.";
         }
 
         if (string.Equals(_channelType, "None", StringComparison.Ordinal))
@@ -848,5 +874,6 @@
         public Guid Key { get; } = Guid.NewGuid();
         public string MaterialId { get; set; } = string.Empty;
         public string SourceVersion { get; set; } = string.Empty;
+        public string RightsEvidence { get; set; } = string.Empty;
     }
 }

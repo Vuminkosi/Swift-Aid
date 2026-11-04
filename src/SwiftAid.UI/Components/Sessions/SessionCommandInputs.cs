@@ -3,7 +3,7 @@ using SwiftAid.Contracts.Sessions;
 namespace SwiftAid.UI.Components.Sessions;
 
 /// <summary>Officer-supplied material reference for the session editor.</summary>
-public sealed record SessionMaterialInput(string MaterialId, string SourceVersion);
+public sealed record SessionMaterialInput(string MaterialId, string SourceVersion, string? RightsEvidence = null);
 
 /// <summary>Officer-supplied fields for creating a session draft.</summary>
 public sealed record CreateSessionInput(
@@ -26,10 +26,12 @@ public sealed record CreateSessionInput(
     string? ChannelLink,
     IReadOnlyList<int> ReminderLeadHours)
 {
+    public string OrganizationId { get; init; } = string.Empty;
     /// <summary>Builds the creation command; the gateway page supplies the fresh identifier.</summary>
     public CreateSessionDraftCommand ToCommand(Guid sessionId, string reason, DateTimeOffset recordedAtUtc) =>
         new(
             sessionId,
+            OrganizationId,
             Title,
             Summary,
             AudienceDescription,
@@ -43,7 +45,7 @@ public sealed record CreateSessionInput(
             TimeZoneId,
             DurationMinutes,
             Capacity,
-            Materials.Select(m => new SessionMaterialRef(m.MaterialId, m.SourceVersion)).ToArray(),
+            Materials.Select(m => new SessionMaterialRef(m.MaterialId, m.SourceVersion, m.RightsEvidence)).ToArray(),
             Visibility,
             ChannelType,
             ChannelLink,
@@ -83,7 +85,7 @@ public sealed record UpdateSessionInput(
             StartUtc,
             DurationMinutes,
             Capacity,
-            Materials.Select(m => new SessionMaterialRef(m.MaterialId, m.SourceVersion)).ToArray(),
+            Materials.Select(m => new SessionMaterialRef(m.MaterialId, m.SourceVersion, m.RightsEvidence)).ToArray(),
             Visibility,
             ChannelType,
             ChannelLink,
@@ -124,10 +126,10 @@ public static class SessionEditorPrefill
             view.TimeZoneId,
             view.DurationMinutes,
             view.Capacity,
-            view.Materials.Select(m => new SessionMaterialInput(m.MaterialId, m.SourceVersion)).ToArray(),
+            view.Materials.Select(m => new SessionMaterialInput(m.MaterialId, m.SourceVersion, m.RightsEvidence)).ToArray(),
             view.Visibility,
             view.ChannelType,
             view.ChannelLink,
-            view.ReminderLeadHours);
+            view.ReminderLeadHours) { OrganizationId = view.OrganizationId };
     }
 }

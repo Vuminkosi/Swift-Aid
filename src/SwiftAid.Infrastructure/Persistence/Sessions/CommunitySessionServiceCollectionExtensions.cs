@@ -15,8 +15,11 @@ public static class CommunitySessionServiceCollectionExtensions
     {
         ArgumentNullException.ThrowIfNull(services);
         services.AddScoped<ICommunitySessionStore, PostgresCommunitySessionStore>();
+        services.AddScoped<ISessionMaterialEligibility, PostgresSessionMaterialEligibility>();
+        services.AddScoped<ISessionMaterialApprovalManager, PostgresSessionMaterialApprovalManager>();
         services.AddScoped<ICommunitySessionService, CommunitySessionService>();
         services.AddScoped<ICommunitySessionHistoryReader, CommunitySessionHistoryReader>();
+        services.AddScoped<ICommunitySessionHistoryAuthorizer, PostgresCommunitySessionHistoryAuthorizer>();
         services.AddScoped<IEventSubscriptionStore, PostgresEventSubscriptionStore>();
         services.AddSingleton(TimeProvider.System);
         services.AddScoped<IEventSubscriptionService, EventSubscriptionService>();

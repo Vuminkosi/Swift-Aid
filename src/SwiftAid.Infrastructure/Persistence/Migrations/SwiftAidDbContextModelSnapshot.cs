@@ -4028,6 +4028,10 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         .HasColumnType("jsonb")
                         .HasColumnName("materials");
 
+                    b.Property<string>("OrganizationId")
+                        .HasColumnType("text")
+                        .HasColumnName("organization_id");
+
                     b.Property<string>("Presenter")
                         .IsRequired()
                         .HasColumnType("text")
@@ -4109,6 +4113,9 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
 
                     b.HasKey("SessionId")
                         .HasName("pk_community_sessions");
+
+                    b.HasIndex("OrganizationId", "StartUtc")
+                        .HasDatabaseName("ix_community_sessions_organization_schedule");
 
                     b.HasIndex("Visibility", "Status", "StartUtc")
                         .HasDatabaseName("ix_community_sessions_public_listing");
@@ -4226,6 +4233,62 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                             t.HasCheckConstraint("ck_community_session_subscriptions_status", "status IN ('Active', 'Unsubscribed')");
 
                             t.HasCheckConstraint("ck_community_session_subscriptions_values", "length(btrim(account_id)) > 0 AND length(btrim(channel)) > 0 AND length(btrim(consent_reference)) > 0 AND version > 0");
+                        });
+                });
+
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Sessions.SessionMaterialApprovalEntity", b =>
+                {
+                    b.Property<string>("OrganizationId")
+                        .HasColumnType("text")
+                        .HasColumnName("organization_id");
+
+                    b.Property<string>("MaterialId")
+                        .HasColumnType("text")
+                        .HasColumnName("material_id");
+
+                    b.Property<string>("SourceVersion")
+                        .HasColumnType("text")
+                        .HasColumnName("source_version");
+
+                    b.Property<DateTimeOffset>("ApprovedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("approved_at_utc");
+
+                    b.Property<string>("ApprovedByActorId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("approved_by_actor_id");
+
+                    b.Property<DateTimeOffset?>("RevokedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("revoked_at_utc");
+
+                    b.Property<string>("RevokedByActorId")
+                        .HasColumnType("text")
+                        .HasColumnName("revoked_by_actor_id");
+
+                    b.Property<string>("RightsEvidence")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("rights_evidence");
+
+                    b.Property<long>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("bigint")
+                        .HasColumnName("version");
+
+                    b.HasKey("OrganizationId", "MaterialId", "SourceVersion")
+                        .HasName("pk_session_material_approvals");
+
+                    b.HasIndex("ApprovedByActorId");
+
+                    b.HasIndex("RevokedByActorId");
+
+                    b.ToTable("session_material_approvals", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_session_material_approval_ids", "length(btrim(organization_id)) > 0 AND length(btrim(material_id)) > 0 AND length(btrim(source_version)) > 0 AND length(btrim(rights_evidence)) > 0 AND length(btrim(approved_by_actor_id)) > 0");
+
+                            t.HasCheckConstraint("ck_session_material_approval_revocation", "(revoked_at_utc IS NULL AND revoked_by_actor_id IS NULL) OR (revoked_at_utc IS NOT NULL AND length(btrim(revoked_by_actor_id)) > 0)");
                         });
                 });
 
@@ -5566,6 +5629,15 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         .HasConstraintName("fk_organization_owners_revoked_by_actor");
                 });
 
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Sessions.CommunitySessionEntity", b =>
+                {
+                    b.HasOne("SwiftAid.Infrastructure.Persistence.OrganizationEntity", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_community_sessions_organization");
+                });
+
             modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Sessions.CommunitySessionRevisionEntity", b =>
                 {
                     b.HasOne("SwiftAid.Infrastructure.Persistence.Sessions.CommunitySessionEntity", null)
@@ -5584,6 +5656,29 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_community_session_subscriptions_session");
+                });
+
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Sessions.SessionMaterialApprovalEntity", b =>
+                {
+                    b.HasOne("SwiftAid.Infrastructure.Persistence.ActorEntity", null)
+                        .WithMany()
+                        .HasForeignKey("ApprovedByActorId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_session_material_approvals_approver");
+
+                    b.HasOne("SwiftAid.Infrastructure.Persistence.OrganizationEntity", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_session_material_approvals_organization");
+
+                    b.HasOne("SwiftAid.Infrastructure.Persistence.ActorEntity", null)
+                        .WithMany()
+                        .HasForeignKey("RevokedByActorId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_session_material_approvals_revoked_by_actor");
                 });
 
             modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Sessions.SessionReminderDeliveryEntity", b =>

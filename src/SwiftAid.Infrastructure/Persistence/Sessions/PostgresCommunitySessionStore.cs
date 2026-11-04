@@ -28,6 +28,10 @@ public sealed class PostgresCommunitySessionStore(SwiftAidDbContext dbContext) :
         return entity is null ? null : Rehydrate(entity);
     }
 
+    public Task<string?> GetOrganizationIdAsync(Guid sessionId, CancellationToken ct) =>
+        Entities().AsNoTracking().Where(item => item.SessionId == sessionId)
+            .Select(item => item.OrganizationId).SingleOrDefaultAsync(ct);
+
     public async Task InsertAsync(
         CommunitySession session,
         string actorId,
@@ -52,7 +56,8 @@ public sealed class PostgresCommunitySessionStore(SwiftAidDbContext dbContext) :
         IReadOnlyList<SessionReminderOccurrence>? occurrences,
         SessionRevisionAction action,
         DateTimeOffset? previousStartUtc,
-        CancellationToken ct)
+        CancellationToken ct,
+        IReadOnlyList<SwiftAid.Contracts.Sessions.SessionMaterialApproval>? materialApprovals = null)
     {
         ArgumentNullException.ThrowIfNull(session);
         await using var transaction = await _dbContext.Database.BeginTransactionAsync(ct).ConfigureAwait(false);
@@ -70,6 +75,33 @@ public sealed class PostgresCommunitySessionStore(SwiftAidDbContext dbContext) :
         }
 
         OverwriteEntity(session, entity);
+        if (materialApprovals is not null)
+        {
+            foreach (var approval in materialApprovals)
+            {
+                var current = await _dbContext.SessionMaterialApprovals.SingleOrDefaultAsync(item =>
+                    item.OrganizationId == approval.OrganizationId && item.MaterialId == approval.MaterialId &&
+                    item.SourceVersion == approval.SourceVersion, ct).ConfigureAwait(false);
+                if (current is null)
+                {
+                    _dbContext.SessionMaterialApprovals.Add(new SessionMaterialApprovalEntity
+                    {
+                        OrganizationId = approval.OrganizationId, MaterialId = approval.MaterialId,
+                        SourceVersion = approval.SourceVersion, RightsEvidence = approval.RightsEvidence,
+                        ApprovedByActorId = approval.ApprovedByActorId, ApprovedAtUtc = approval.ApprovedAtUtc
+                    });
+                }
+                else
+                {
+                    current.RightsEvidence = approval.RightsEvidence;
+                    current.ApprovedByActorId = approval.ApprovedByActorId;
+                    current.ApprovedAtUtc = approval.ApprovedAtUtc;
+                    current.RevokedByActorId = null;
+                    current.RevokedAtUtc = null;
+                    current.Version++;
+                }
+            }
+        }
         AppendRevision(session, actorId, reason, recordedAtUtc, action, previousStartUtc);
         await SyncRemindersAsync(session, reminderSync, occurrences ?? [], recordedAtUtc, ct).ConfigureAwait(false);
 
@@ -319,6 +351,7 @@ public sealed class PostgresCommunitySessionStore(SwiftAidDbContext dbContext) :
 
     private static void OverwriteEntity(CommunitySession session, CommunitySessionEntity entity)
     {
+        entity.OrganizationId = session.OrganizationId;
         entity.Version = session.Version;
         entity.Title = session.Title;
         entity.Summary = session.Summary;
@@ -334,7 +367,7 @@ public sealed class PostgresCommunitySessionStore(SwiftAidDbContext dbContext) :
         entity.DurationMinutes = session.DurationMinutes;
         entity.Capacity = session.Capacity;
         entity.MaterialsJson = JsonSerializer.Serialize(
-            session.Materials.Select(material => new MaterialJson(material.MaterialId, material.SourceVersion)));
+            session.Materials.Select(material => new MaterialJson(material.MaterialId, material.SourceVersion, material.RightsEvidence)));
         entity.Visibility = session.Visibility.ToString();
         entity.ChannelType = session.ChannelType.ToString();
         entity.ChannelLink = session.ChannelLink;
@@ -356,6 +389,7 @@ public sealed class PostgresCommunitySessionStore(SwiftAidDbContext dbContext) :
     {
         var session = (CommunitySession)RuntimeHelpers.GetUninitializedObject(typeof(CommunitySession));
         SetState(session, nameof(CommunitySession.SessionId), entity.SessionId);
+        SetState(session, nameof(CommunitySession.OrganizationId), entity.OrganizationId ?? string.Empty);
         SetState(session, nameof(CommunitySession.Version), entity.Version);
         SetState(session, nameof(CommunitySession.Title), entity.Title);
         SetState(session, nameof(CommunitySession.Summary), entity.Summary);
@@ -373,7 +407,7 @@ public sealed class PostgresCommunitySessionStore(SwiftAidDbContext dbContext) :
         SetState(session, nameof(CommunitySession.Capacity), entity.Capacity);
         SetState(session, nameof(CommunitySession.Materials),
             (IReadOnlyList<SessionMaterialRef>)(JsonSerializer.Deserialize<List<MaterialJson>>(entity.MaterialsJson) ?? [])
-                .Select(material => new SessionMaterialRef(material.MaterialId, material.SourceVersion))
+                .Select(material => new SessionMaterialRef(material.MaterialId, material.SourceVersion, material.RightsEvidence))
                 .ToArray());
         SetState(session, nameof(CommunitySession.Visibility),
             Enum.Parse<SessionVisibility>(entity.Visibility));
@@ -448,5 +482,5 @@ public sealed class PostgresCommunitySessionStore(SwiftAidDbContext dbContext) :
             session.CompletedAtUtc,
         });
 
-    private sealed record MaterialJson(string MaterialId, string SourceVersion);
+    private sealed record MaterialJson(string MaterialId, string SourceVersion, string? RightsEvidence = null);
 }

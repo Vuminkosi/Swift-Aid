@@ -46,6 +46,8 @@ public interface ICommunitySessionStore
 {
     Task<CommunitySession?> LoadAsync(Guid sessionId, CancellationToken ct);
 
+    Task<string?> GetOrganizationIdAsync(Guid sessionId, CancellationToken ct);
+
     Task InsertAsync(
         CommunitySession session,
         string actorId,
@@ -64,7 +66,8 @@ public interface ICommunitySessionStore
         IReadOnlyList<SessionReminderOccurrence>? occurrences,
         SessionRevisionAction action,
         DateTimeOffset? previousStartUtc,
-        CancellationToken ct);
+        CancellationToken ct,
+        IReadOnlyList<SessionMaterialApproval>? materialApprovals = null);
 
     Task<IReadOnlyList<CommunitySession>> ListPublicAsync(int take, CancellationToken ct);
 

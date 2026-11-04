@@ -13,17 +13,12 @@ using SwiftAid.Contracts.Sessions;
 
 namespace SwiftAid.Gateway.Endpoints;
 
-/// <summary>Marks officer-only session routes that require a trusted scoped
-/// authorization capability, which is not currently available in Gateway.</summary>
-public sealed record CommunitySessionScopedAuthorizationRequiredMetadata;
-
-/// <summary>Maps community-session officer command endpoints. These routes fail
-/// closed until a trusted scoped-staff authorization capability is available.</summary>
+/// <summary>Maps community-session routes. Staff authority is rechecked against current persisted organization ownership.</summary>
 /// <remarks>
 /// Every command carries the officer-provided expected version; a stale version fails
 /// with 409 so a retry re-reads before writing. State-rule violations (for example a
-/// past start or a missing self-review acknowledgement) fail with 422. The scoped
-/// authorization metadata gate returns a generic 404 before command services are called.
+/// past start or a missing self-review acknowledgement) fail with 422. A caller
+/// without current owner authority receives the same generic 404 as an unknown session.
 /// </remarks>
 public static class CommunitySessionEndpoints
 {
@@ -39,22 +34,15 @@ public static class CommunitySessionEndpoints
             OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme);
 
         var group = endpoints.MapGroup("/api/v1/sessions");
-        group.AddEndpointFilter(async (context, next) =>
-        {
-            if (context.HttpContext.GetEndpoint()?.Metadata
-                .GetMetadata<CommunitySessionScopedAuthorizationRequiredMetadata>() is not null)
-            {
-                context.HttpContext.Response.Headers.CacheControl = "no-store";
-                // Authentication alone does not establish officer authority.
-                // Return the same generic denial regardless of session identity.
-                return Results.NotFound();
-            }
-
-            return await next(context);
-        });
+        endpoints.MapGroup("/api/v1/organizations/{organizationId}/session-materials")
+            .MapDelete("/{materialId}/{sourceVersion}/approval", RevokeMaterialApprovalAsync)
+            .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = schemes })
+            .WithName("RevokeOrganizationSessionMaterialApproval")
+            .Produces(StatusCodes.Status204NoContent)
+            .Produces<ProblemDetails>(StatusCodes.Status401Unauthorized)
+            .Produces<ProblemDetails>(StatusCodes.Status404NotFound);
         group.MapGet("/{sessionId:guid}/history", HistoryAsync)
             .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = schemes })
-            .WithMetadata(new CommunitySessionScopedAuthorizationRequiredMetadata())
             .WithName("GetCommunitySessionHistory")
             .Produces<SessionHistoryPage>(StatusCodes.Status200OK)
             .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
@@ -62,7 +50,6 @@ public static class CommunitySessionEndpoints
             .Produces<ProblemDetails>(StatusCodes.Status404NotFound);
         group.MapPost("/", CreateDraftAsync)
             .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = schemes })
-            .WithMetadata(new CommunitySessionScopedAuthorizationRequiredMetadata())
             .WithMetadata(new RequestSizeLimitAttribute(MaximumRequestBodyBytes))
             .WithName("CreateCommunitySessionDraft")
             .Accepts<CreateSessionApiRequest>("application/json")
@@ -74,7 +61,6 @@ public static class CommunitySessionEndpoints
             .Produces<ProblemDetails>(StatusCodes.Status422UnprocessableEntity);
         group.MapPut("/{sessionId:guid}", UpdateAsync)
             .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = schemes })
-            .WithMetadata(new CommunitySessionScopedAuthorizationRequiredMetadata())
             .WithMetadata(new RequestSizeLimitAttribute(MaximumRequestBodyBytes))
             .WithName("UpdateCommunitySession")
             .Accepts<UpdateSessionApiRequest>("application/json")
@@ -86,7 +72,6 @@ public static class CommunitySessionEndpoints
             .Produces<ProblemDetails>(StatusCodes.Status422UnprocessableEntity);
         group.MapPost("/{sessionId:guid}/review", ReviewAsync)
             .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = schemes })
-            .WithMetadata(new CommunitySessionScopedAuthorizationRequiredMetadata())
             .WithMetadata(new RequestSizeLimitAttribute(MaximumRequestBodyBytes))
             .WithName("ReviewCommunitySession")
             .Accepts<ReviewSessionApiRequest>("application/json")
@@ -98,7 +83,6 @@ public static class CommunitySessionEndpoints
             .Produces<ProblemDetails>(StatusCodes.Status422UnprocessableEntity);
         group.MapPost("/{sessionId:guid}/schedule", ScheduleAsync)
             .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = schemes })
-            .WithMetadata(new CommunitySessionScopedAuthorizationRequiredMetadata())
             .WithMetadata(new RequestSizeLimitAttribute(MaximumRequestBodyBytes))
             .WithName("ScheduleCommunitySession")
             .Accepts<ScheduleSessionApiRequest>("application/json")
@@ -110,7 +94,6 @@ public static class CommunitySessionEndpoints
             .Produces<ProblemDetails>(StatusCodes.Status422UnprocessableEntity);
         group.MapPost("/{sessionId:guid}/cancel", CancelAsync)
             .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = schemes })
-            .WithMetadata(new CommunitySessionScopedAuthorizationRequiredMetadata())
             .WithMetadata(new RequestSizeLimitAttribute(MaximumRequestBodyBytes))
             .WithName("CancelCommunitySession")
             .Accepts<CancelSessionApiRequest>("application/json")
@@ -122,7 +105,6 @@ public static class CommunitySessionEndpoints
             .Produces<ProblemDetails>(StatusCodes.Status422UnprocessableEntity);
         group.MapPost("/{sessionId:guid}/complete", CompleteAsync)
             .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = schemes })
-            .WithMetadata(new CommunitySessionScopedAuthorizationRequiredMetadata())
             .WithMetadata(new RequestSizeLimitAttribute(MaximumRequestBodyBytes))
             .WithName("CompleteCommunitySession")
             .Accepts<CompleteSessionApiRequest>("application/json")
@@ -148,6 +130,30 @@ public static class CommunitySessionEndpoints
         {
             return Results.Problem(statusCode: StatusCodes.Status400BadRequest, title: "The history request is invalid.");
         }
+    }
+
+    private static async Task<IResult> RevokeMaterialApprovalAsync(
+        HttpContext context, string organizationId, string materialId, string sourceVersion,
+        [FromServices] IAntiforgery antiforgery, CancellationToken cancellationToken)
+    {
+        var actor = TryGetActor(context);
+        if (actor is null) return Results.Problem(statusCode: StatusCodes.Status401Unauthorized, title: "Authentication is required.");
+        if (await RequiresAntiforgeryAsync(context).ConfigureAwait(false))
+        {
+            try { await antiforgery.ValidateRequestAsync(context).ConfigureAwait(false); }
+            catch (AntiforgeryValidationException)
+            { return Results.Problem(statusCode: StatusCodes.Status400BadRequest, title: "Request verification failed."); }
+        }
+        var manager = context.RequestServices.GetService<ISessionMaterialApprovalManager>();
+        if (manager is null) return Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable, title: "Material approval is temporarily unavailable.");
+        try
+        {
+            return await manager.RevokeAsync(actor.ActorId, organizationId, materialId, sourceVersion, cancellationToken).ConfigureAwait(false)
+                ? Results.NoContent()
+                : Results.NotFound();
+        }
+        catch (UnauthorizedAccessException) { return Results.NotFound(); }
+        catch (ArgumentException) { return Results.Problem(statusCode: StatusCodes.Status400BadRequest, title: "The material approval request is invalid."); }
     }
 
     /// <summary>Maps a session command outcome to HTTP.</summary>
@@ -183,6 +189,9 @@ public static class CommunitySessionEndpoints
             InvalidOperationException => Results.Problem(
                 statusCode: StatusCodes.Status422UnprocessableEntity,
                 title: "The community session cannot make that change in its current state."),
+            KeyNotFoundException => Results.Problem(
+                statusCode: StatusCodes.Status404NotFound,
+                title: "The community session was not found."),
             UnauthorizedAccessException => Results.Problem(
                 statusCode: StatusCodes.Status404NotFound,
                 title: "The community session was not found."),
@@ -355,6 +364,7 @@ public static class CommunitySessionEndpoints
         ArgumentNullException.ThrowIfNull(request);
         return new CreateSessionDraftCommand(
             Guid.NewGuid(),
+            RequireText(request.OrganizationId, nameof(request.OrganizationId)),
             RequireText(request.Title, nameof(request.Title)),
             RequireText(request.Summary, nameof(request.Summary)),
             RequireText(request.AudienceDescription, nameof(request.AudienceDescription)),
@@ -568,7 +578,9 @@ public static class CommunitySessionEndpoints
                 throw new ArgumentException("Materials require an identifier and a source version.", nameof(materials));
             }
 
-            bound.Add(new SessionMaterialRef(material.MaterialId, material.SourceVersion));
+            if (material.RightsEvidence is { Length: > 4000 })
+                throw new ArgumentException("Material evidence is too long.", nameof(materials));
+            bound.Add(new SessionMaterialRef(material.MaterialId, material.SourceVersion, material.RightsEvidence));
         }
 
         return bound;
@@ -678,6 +690,7 @@ public static class CommunitySessionEndpoints
 
 /// <summary>Wire request to create a community-session draft. The server assigns the session identifier.</summary>
 public sealed record CreateSessionApiRequest(
+    string? OrganizationId,
     string? Title,
     string? Summary,
     string? AudienceDescription,
@@ -742,4 +755,5 @@ public sealed record CompleteSessionApiRequest(
 /// <summary>Wire reference to a human-authored source card and its bound version.</summary>
 public sealed record SessionMaterialApiRef(
     string? MaterialId,
-    string? SourceVersion);
+    string? SourceVersion,
+    string? RightsEvidence = null);
