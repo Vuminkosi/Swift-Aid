@@ -96,7 +96,7 @@ public sealed class CaseOccurrenceGrouping(ICaseQueueQuery queue, ICaseOccurrenc
                 .OrderByDescending(group => group.Count)
                 .ThenBy(group => group.Label, StringComparer.OrdinalIgnoreCase)
                 .Take(limit)
-                .Select(group => new CaseOccurrenceGroup(group.LocationId, group.Label, group.Count,
+                .Select(group => new CaseOccurrenceRegionGroup(group.LocationId, group.Label, group.Count,
                     group.CaseIds.Order().ToArray()))
                 .ToArray();
             var truncated = cursor is not null || incomplete || unknownLocations || groups.Count > limit;
@@ -124,8 +124,11 @@ public sealed class CaseOccurrenceGrouping(ICaseQueueQuery queue, ICaseOccurrenc
     }
 }
 
-public sealed record CaseOccurrenceGroup(string? LocationId, string Label, int Count, IReadOnlyList<Guid> CaseIds);
+public sealed record CaseOccurrenceRegionGroup(string? RegionId, string Label, int Count, IReadOnlyList<Guid> CaseIds)
+{
+    public string? LocationId => RegionId;
+}
 
 public sealed record CaseOccurrenceGroupingResult(CaseQueueAccess Access,
-    IReadOnlyList<CaseOccurrenceGroup> Groups, IReadOnlyList<CaseQueueItem> Cases,
+    IReadOnlyList<CaseOccurrenceRegionGroup> Groups, IReadOnlyList<CaseQueueItem> Cases,
     int ScannedCandidates, bool Truncated, bool UnknownLocations);
