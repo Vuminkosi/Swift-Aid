@@ -52,6 +52,10 @@ else
                 <MudText Typo="Typo.subtitle2">@membership.OrganizationId</MudText>
                 <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
                     <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">@membership.MembershipStatus</MudChip>
+                    @if (membership.IsOwner)
+                    {
+                        <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined">Owner</MudChip>
+                    }
                     @foreach (var workspace in membership.WorkspaceIds)
                     {
                         <MudChip T="string" Size="Size.Small" Variant="Variant.Text">@workspace</MudChip>

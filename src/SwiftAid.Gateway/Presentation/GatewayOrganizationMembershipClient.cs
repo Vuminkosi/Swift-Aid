@@ -40,7 +40,8 @@ public sealed class GatewayOrganizationMembershipClient(
                 membership.OrganizationId,
                 membership.OrganizationStatus,
                 membership.MembershipStatus,
-                membership.WorkspaceIds)).ToList());
+                membership.WorkspaceIds,
+                membership.IsOwner)).ToList());
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {

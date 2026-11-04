@@ -12,7 +12,8 @@ public sealed record ActorMembershipRecord(
     string MembershipStatus,
     IReadOnlyList<string> WorkspaceIds,
     DateTimeOffset ValidFromUtc,
-    DateTimeOffset? ExpiresAtUtc);
+    DateTimeOffset? ExpiresAtUtc,
+    bool IsOwner = false);
 
 public sealed record MembershipDirectoryRecord(string OrganizationId, string Status);
 
@@ -317,6 +318,11 @@ public sealed class OrganizationMembershipService(
                 _dbContext.Workspaces.Any(scope => scope.WorkspaceId == workspace.WorkspaceId && scope.Status == PersistentResourceStatus.Active))
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
+        var ownerOrganizationIds = await _dbContext.OrganizationOwners.AsNoTracking()
+            .Where(owner => owner.ActorId == actorId && organizationIds.Contains(owner.OrganizationId) && owner.RevokedAtUtc == null)
+            .Select(owner => owner.OrganizationId)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
 
         return memberships.Select(membership => new ActorMembershipRecord(
             membership.OrganizationId,
@@ -330,7 +336,11 @@ public sealed class OrganizationMembershipService(
                 .OrderBy(id => id, StringComparer.Ordinal)
                 .ToList(),
             membership.ValidFromUtc,
-            membership.ExpiresAtUtc)).ToList();
+            membership.ExpiresAtUtc,
+            membership.Status == PersistentMembershipStatus.Active && membership.ValidFromUtc <= _timeProvider.GetUtcNow() &&
+                (membership.ExpiresAtUtc is null || membership.ExpiresAtUtc > _timeProvider.GetUtcNow()) &&
+                organizations.TryGetValue(membership.OrganizationId, out var activeOrganization) && activeOrganization.Status == PersistentResourceStatus.Active &&
+                ownerOrganizationIds.Contains(membership.OrganizationId))).ToList();
     }
 
     public async Task<IReadOnlyList<MembershipDirectoryRecord>> SearchAsync(
