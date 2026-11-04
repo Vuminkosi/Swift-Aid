@@ -309,6 +309,7 @@ app.MapCaseTranslationEndpoints();
 app.MapSurveillanceSignalEndpoints();
 app.MapCaseTimelineEndpoints();
 app.MapEligibleHealthOfficerEndpoints();
+app.MapHealthOfficerDesignationEndpoints();
 app.MapFollowUpReviewEndpoints();
 app.MapCaseDetailEndpoints();
 app.MapCaseQueueEndpoints();

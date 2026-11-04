@@ -1,8 +1,8 @@
 # Ellai health-officer eligibility boundary
 
 The officer lookup is disabled by default (`Ellai:Operational:OfficerDirectory:Enabled`).
-It has an authenticated case-scoped candidate endpoint, but no model tool,
-assignment action, or designation-writing API in this slice. A designation is a controlled organizational role record,
+It has an authenticated case-scoped candidate endpoint and a separately gated
+designation-change endpoint, but no model tool or assignment action. A designation is a controlled organizational role record,
 not evidence of professional licensure. The registry is initially empty and its
 versioned rows are append-only; a later version supersedes an earlier one. The
 migration refuses rollback when records exist.
@@ -35,8 +35,10 @@ provisioned administrator event for the exact organization, country and sector,
 an active administrator membership and access epoch, and prohibits self-designation.
 Successful changes and command receipts are append-only and versioned. Authority
 events are also append-only; a later revoked or suspended event supersedes an
-earlier grant. The migration creates no administrators. There is no product
-administration endpoint or administrator-grant workflow yet. Production database
+earlier grant. The migration creates no administrators. The designation-change
+endpoint uses the authenticated principal and requires antiforgery for cookie
+sessions; it does not grant administrator authority. There is no administrator-grant
+workflow yet. Production database
 roles must be separated so the application cannot grant itself administrator
 authority, and an approved bootstrap and revocation process must be established
 before either gate is enabled. A designation is not a professional licence check.
