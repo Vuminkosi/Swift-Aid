@@ -43,7 +43,7 @@ public sealed class EllaiCommunitySessionsSpecialist(IChatClient client, IEllaiF
                 "\nYou are the community sessions specialist. Read only published public sessions. " +
                 "Never approve, submit, " +
                 "execute or invent an action. Return only a grounded Answer in the required final_decision JSON schema. " +
-                "Each claim text must exactly match one returned session line and cite its own session evidence. " +
+                "Each claim text must exactly match one returned session line and cite its own session evidence. For an empty search, use the exact returned search message and cite its PublicSessionSearch evidence. " +
                 "Set displayText and spokenText to claim texts joined by a newline, with no other prose.",
                 [new ChatMessage(ChatRole.User, task)], 2048, isCurrent, Read, usage, ct,
                 maxModelCalls: profile.MaxModelCalls).ConfigureAwait(false);
@@ -52,7 +52,7 @@ public sealed class EllaiCommunitySessionsSpecialist(IChatClient client, IEllaiF
         if (decision is null || decision.Kind != DecisionKind.Answer || decision.Claims.Count == 0 ||
             decision.UiIntents.Count != 0 || decision.PlanProposal is not null ||
             decision.Claims.Any(claim => claim.Kind != ClaimKind.Observed || claim.Evidence.Count == 0 ||
-                claim.Evidence.Any(reference => reference.SourceKind != "PublicSession")))
+                claim.Evidence.Any(reference => reference.SourceKind is not ("PublicSession" or "PublicSessionSearch"))))
             return new(EllaiSpecialistOutcome.Unverified, null);
 
         var grounded = new HashSet<(EvidenceRef Reference, string Line)>();
@@ -69,7 +69,11 @@ public sealed class EllaiCommunitySessionsSpecialist(IChatClient client, IEllaiF
                 return new(EllaiSpecialistOutcome.Stale, null);
             foreach (var reference in original.Evidence)
                 foreach (var line in original.ResultSummary.Split('\n'))
-                    if (line.StartsWith($"session {reference.ResourceId} · ", StringComparison.Ordinal))
+                    if (reference.SourceKind == "PublicSession" &&
+                        line.StartsWith($"session {reference.ResourceId} · ", StringComparison.Ordinal) ||
+                        reference.SourceKind == "PublicSessionSearch" && original.ItemCount == 0 &&
+                        reference == new EvidenceRef("PublicSessionSearch", "public-sessions", "1", "search", "public-sessions/1") &&
+                        line == original.ResultSummary)
                         grounded.Add((reference, line));
         }
         if (decision.Claims.Any(claim => claim.Evidence.Any(reference => !grounded.Contains((reference, claim.Text)))) ||

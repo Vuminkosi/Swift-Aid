@@ -114,7 +114,9 @@ public sealed record EllaiObservedToolResult(
             request.ToolName == EllaiToolNames.PublicSessions && result.ToolName == request.ToolName &&
                 request.Arguments.Count == 0 && result.Allowed && result.DenialReason is null &&
                 result.ReasonCode == EllaiToolReasonCodes.Ok &&
-                result.ItemCount == result.Evidence.Count && result.Evidence.Count <= 10
+                (result.ItemCount == result.Evidence.Count && result.ItemCount is > 0 and <= 10 ||
+                 result.ItemCount == 0 && result.Evidence.Count == 1 &&
+                 result.Evidence[0] == new EvidenceRef("PublicSessionSearch", "public-sessions", "1", "search", "public-sessions/1"))
                     ? ResultFingerprint(result) : null);
     }
 
