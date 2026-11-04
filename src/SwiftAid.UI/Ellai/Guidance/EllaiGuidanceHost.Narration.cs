@@ -16,7 +16,7 @@ public partial class EllaiGuidanceHost
         if (code is null || !ReferenceEquals(tour, _generatedTour) || _sessionView is null ||
             _generatedPlan is null || _guidanceProposalId is null) return;
         var step = _generatedPlan.Steps.SingleOrDefault(item => item.StepKey == tour.CurrentStep?.Id);
-        if (step?.ControlId is not ("report.narrative" or "report.time-location")) return;
+        if (step?.ControlId is not ("report.subject" or "report.narrative" or "report.time-location")) return;
         var request = new EllaiValidationNarrationRequest(_guidanceProposalId, _generatedPlan.PlanId,
             step.StepKey, version, code, DateTimeOffset.UtcNow.ToUnixTimeSeconds() / EllaiValidationNarrationRequest.WindowSeconds,
             _speechPreferences.EnglishVoiceId);

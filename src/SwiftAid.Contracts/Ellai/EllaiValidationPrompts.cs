@@ -7,6 +7,8 @@ public static class EllaiValidationPrompts
 
     private static readonly IReadOnlyDictionary<string, Prompt> Prompts = new Dictionary<string, Prompt>(StringComparer.Ordinal)
     {
+        ["subject-required"] = new("Choose whether this concern is about a person or an animal.", "I haven't captured whether this concern is about a person or an animal. Choose Human health or Animal health to continue."),
+        ["animal-scope-required"] = new("Choose an animal type or group before continuing.", "I haven't captured which animal or animal group this concern is about. Choose an animal type or group to continue."),
         ["narrative-required"] = new("Describe what happened or add an observation.", "I haven't captured a report description yet. Describe what happened or add an observation."),
         ["narrative-length"] = new("Keep the description under 6,000 characters.", "The report description is too long to capture. Shorten it to under 6,000 characters."),
         ["age-invalid"] = new("Enter age in whole years, or leave it blank if unknown.", "The reported age isn't captured as a valid whole number. Enter age in whole years, or leave it blank if unknown."),

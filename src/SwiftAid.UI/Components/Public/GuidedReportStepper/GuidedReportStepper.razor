@@ -63,7 +63,7 @@
         {
             <section class="guided-report__panel" aria-labelledby="report-type-title">
                 <h2 id="report-type-title" class="mud-typography mud-typography-h6 guided-report__step-heading" tabindex="-1" @ref="_stepHeading">Who or what is the concern about?</h2>
-                <div class="guided-report__subject-selector" data-ellai-control="report.subject" data-bonboarding-anchor='@EllaiReportUiManifest.AnchorFor("report.subject")'>
+                <div class="guided-report__subject-selector @ValidationClass(nameof(PublicReportDraft.SubjectScope))" data-ellai-control="report.subject" data-bonboarding-anchor='@EllaiReportUiManifest.AnchorFor("report.subject")' tabindex="-1" @ref="_subjectValidationTarget">
                     <MudRadioGroup T="ReportSubjectCategory?" Value="_subjectCategory" ValueChanged="SubjectCategoryChangedAsync" Class="guided-report__subject-group" aria-label="Report subject">
                         <div class="guided-report__choices">
                             <div class="@GetSubjectChoiceClass(ReportSubjectCategory.HumanHealth)">
@@ -81,7 +81,7 @@
                 </div>
                 @if (_subjectCategory == ReportSubjectCategory.AnimalHealth)
                 {
-                    <div class="guided-report__animal-scope-group">
+                    <div class="guided-report__animal-scope-group @ValidationClass(nameof(PublicReportDraft.SubjectScope))" tabindex="-1" @ref="_animalScopeValidationTarget">
                         <MudText Typo="Typo.body2" id="animal-scope-label">What is the concern about?</MudText>
                         <MudRadioGroup T="IntakeSubjectScope?" Value="Draft.SubjectScope" ValueChanged="AnimalScopeChangedAsync" aria-labelledby="animal-scope-label">
                             <div class="guided-report__animal-scope-options">
@@ -458,6 +458,8 @@
     private PublicReportDraft? _observedDraft;
     private ElementReference _stepHeading;
     private ElementReference _validationSummary;
+    private ElementReference _subjectValidationTarget;
+    private ElementReference _animalScopeValidationTarget;
     private ElementReference _narrativeValidationTarget;
     private ElementReference _ageValidationTarget;
     private ElementReference _observationsValidationTarget;
@@ -579,6 +581,8 @@
             _focusValidationFieldAfterRender = false;
             var target = _validationField switch
             {
+                nameof(PublicReportDraft.SubjectScope) => _subjectCategory == ReportSubjectCategory.AnimalHealth
+                    ? _animalScopeValidationTarget : _subjectValidationTarget,
                 nameof(PublicReportDraft.Narrative) => _narrativeValidationTarget,
                 nameof(PublicReportDraft.AgeYearsText) => _ageValidationTarget,
                 nameof(PublicReportDraft.ObservationsText) => _observationsValidationTarget,
@@ -959,16 +963,6 @@
     private void NotifySubjectScopeChanged()
     {
         var field = new FieldIdentifier(Draft, nameof(Draft.SubjectScope));
-        if (Draft.SubjectScope is null)
-        {
-            _messageStore.Clear(field);
-            _stepError = null;
-            _submitError = null;
-            _saveState = DraftSaveState.Unsaved;
-            _editContext.NotifyValidationStateChanged();
-            return;
-        }
-
         _editContext.NotifyFieldChanged(field);
     }
 
@@ -1143,6 +1137,11 @@
             _stepError = _subjectCategory == ReportSubjectCategory.AnimalHealth
                 ? "Choose an animal type or group before continuing."
                 : "Choose whether this concern is about a person or an animal.";
+            _followValidation = true;
+            AddError(nameof(PublicReportDraft.SubjectScope), _stepError);
+            _focusValidationFieldAfterRender = true;
+            _editContext.NotifyValidationStateChanged();
+            PublishValidation();
             return;
         }
 
@@ -1342,10 +1341,11 @@
         }
 
         _editContext.NotifyValidationStateChanged();
-        if (_followValidation && _step == 1)
+        if (_followValidation && _step is 0 or 1)
         {
             _messageStore.Clear();
-            if (ValidateDetails())
+            var isValid = _step == 0 ? ValidateSubject() : ValidateDetails();
+            if (isValid)
             {
                 _followValidation = false;
                 _validationMessage = null;
@@ -1356,6 +1356,20 @@
             }
             PublishValidation();
         }
+    }
+
+    private bool ValidateSubject()
+    {
+        _validationField = null;
+        _validationMessage = null;
+        if (HasCompleteSubject) return true;
+
+        var message = _subjectCategory == ReportSubjectCategory.AnimalHealth
+            ? "Choose an animal type or group before continuing."
+            : "Choose whether this concern is about a person or an animal.";
+        AddError(nameof(PublicReportDraft.SubjectScope), message);
+        _stepError = _validationMessage ?? message;
+        return false;
     }
 
     private bool IsObservationSelected(string observation) =>

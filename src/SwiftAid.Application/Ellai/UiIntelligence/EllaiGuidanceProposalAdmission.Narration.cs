@@ -43,7 +43,7 @@ public sealed partial class EllaiGuidanceProposalAdmission
             checkpoint.CurrentStepId != request.StepId || checkpoint.ScopeEpoch != authority.ScopeEpoch) return null;
         var step = checkpoint.Plan.Steps.SingleOrDefault(item => item.StepKey == request.StepId);
         if (step is null || !admission.Catalogue!.Descriptors.Any(item => item.ControlId == step.ControlId)) return null;
-        if (validationText is not null && step.ControlId is not ("report.narrative" or "report.time-location")) return null;
+        if (validationText is not null && step.ControlId is not ("report.subject" or "report.narrative" or "report.time-location")) return null;
         var turn = (await outbox.ReadConversationAsync(sessionId, authority.OwnerActorId, ct).ConfigureAwait(false))
             .MaxBy(item => item.Sequence);
         if (turn is null || turn.Outcome != "Completed") return null;
