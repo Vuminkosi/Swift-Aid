@@ -19,17 +19,29 @@ public sealed class ClassificationBackfillStore(SwiftAidDbContext db, IOptions<C
         var configuration = options.Value.Profile.Hash;
         var workerId = options.Value.WorkerId;
         var organizations = options.Value.Organizations;
-        return await (from job in db.Set<ClassificationBackfillEntity>().AsNoTracking()
-                      join link in db.WorkspaceOrganizations.AsNoTracking()
-                          on new { job.WorkspaceId, job.OrganizationId } equals new { link.WorkspaceId, link.OrganizationId }
-                      join workspace in db.Workspaces.AsNoTracking() on job.WorkspaceId equals workspace.WorkspaceId
-                      join organization in db.Organizations.AsNoTracking() on job.OrganizationId equals organization.OrganizationId
-                      where job.WorkerId == workerId && job.State == "Running" &&
-                            job.ConfigurationHash == configuration && organizations.Contains(job.OrganizationId) &&
-                            link.Status == PersistentResourceStatus.Active && workspace.Status == PersistentResourceStatus.Active &&
-                            organization.Status == PersistentResourceStatus.Active
-                      orderby job.UpdatedAtUtc, job.Id
-                      select (Guid?)job.Id).FirstOrDefaultAsync(ct).ConfigureAwait(false);
+        // Compare the first pending case in each snapshot, rather than the age of
+        // the job itself. Empty jobs remain eligible for completion afterwards.
+        return await db.Database.SqlQuery<Guid?>($"""
+            SELECT job."Id" AS "Value"
+            FROM swiftaid_classification.backfills job
+            JOIN workspace_organizations link ON link.workspace_id = job."WorkspaceId" AND link.organization_id = job."OrganizationId" AND link.status = 'Active'
+            JOIN workspaces workspace ON workspace.workspace_id = job."WorkspaceId" AND workspace.status = 'Active'
+            JOIN organizations organization ON organization.organization_id = job."OrganizationId" AND organization.status = 'Active'
+            LEFT JOIN LATERAL (
+                SELECT COALESCE((SELECT report.received_at_utc FROM swiftaid_intake.intake_promotions promotion
+                    JOIN swiftaid_intake.intake_reports report ON report.receipt_id = promotion.receipt_id
+                    WHERE promotion.case_id = c.case_id), c.created_at_utc) AS received_at_utc
+                FROM swiftaid_classification.backfill_items item
+                JOIN case_events e ON e.event_id = item."SourceEventId"
+                JOIN managed_cases c ON c.case_id = e.case_id AND c.workspace_id = job."WorkspaceId" AND c.organization_id = job."OrganizationId"
+                WHERE item."JobId" = job."Id" AND item."State" = 'Pending'
+                ORDER BY item."Ordinal" LIMIT 1
+            ) next_case ON TRUE
+            WHERE job."WorkerId" = {workerId} AND job."State" = 'Running' AND job."ConfigurationHash" = {configuration}
+                AND job."OrganizationId" = ANY ({organizations})
+            ORDER BY next_case.received_at_utc DESC NULLS LAST, job."UpdatedAtUtc", job."Id"
+            LIMIT 1
+            """).FirstOrDefaultAsync(ct).ConfigureAwait(false);
     }
 
     public async Task<ClassificationBackfillStatus> StartAsync(StartClassificationBackfill request, CancellationToken ct)
