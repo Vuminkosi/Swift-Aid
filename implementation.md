@@ -4584,3 +4584,9 @@ PASS: `dotnet build src/SwiftAid.Gateway/SwiftAid.Gateway.csproj --no-restore -m
 Guest UI authority now includes the registered navigation feature and a public-only capability. The navigation manifest requires that capability only for the Home control; Settings and all workspace destinations continue to require current authenticated authority. The guidance host permits an unauthenticated navigation only to the allowlisted `/` route and does not require a signed-in menu observation for that public route. This enables the existing conversation to return a guest to Home without granting access to account or case surfaces.
 
 PASS: Gateway build after source commit (`dotnet build src/SwiftAid.Gateway/SwiftAid.Gateway.csproj --no-restore -m:1 -nr:false -p:WasmBuildNative=false --verbosity quiet`, 0 warnings, 0 errors). PASS: `git diff --check`. No tests added or run, per user instruction. NOT VERIFIED: live browser guest navigation, authenticated Settings navigation, or deployed behavior. No migration.
+
+### Ellai surveillance evidence boundaries (2026-11-04)
+
+The reasoning prompt now distinguishes authorized case retrieval and administrative grouping from surveillance analysis. It explicitly says the current tool path cannot calculate radii, validate spatial clusters, provide a historical baseline or denominator, or confirm an outbreak. It directs Ellai to state missing evidence and prevents treating reported counts or a synthetic detector candidate as incidence or laboratory confirmation. No gated detector or signal-review action was exposed.
+
+PASS: Gateway build (`dotnet build src/SwiftAid.Gateway/SwiftAid.Gateway.csproj --no-restore -m:1 -nr:false -p:WasmBuildNative=false --verbosity quiet`, 0 warnings, 0 errors). PASS: `git diff --check`. No tests added or run, per user instruction. NOT VERIFIED: live provider behavior, seeded surveillance conversations, or browser rendering.
