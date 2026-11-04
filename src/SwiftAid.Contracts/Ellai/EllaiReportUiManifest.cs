@@ -40,7 +40,7 @@ public static class EllaiReportUiManifest
             productFactIds,
             NavigationId,
             anchorBindingKey,
-            ["HighlightControl"],
+            InputsFor(controlId).Count > 0 ? ["HighlightControl", "UpdatePublicReportDraft"] : ["HighlightControl"],
             riskClass,
             [GuidanceMode.Navigation, GuidanceMode.SystemTour, GuidanceMode.Presentation],
             prerequisites,

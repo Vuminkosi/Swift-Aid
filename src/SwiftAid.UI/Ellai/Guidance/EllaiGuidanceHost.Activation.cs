@@ -16,6 +16,7 @@ public partial class EllaiGuidanceHost
     private string? _lastCaseNavigationProposalId;
     private string? _lastCaseFilterProposalId;
     private string? _lastFeatureNavigationProposalId;
+    private string? _lastReportDraftEditProposalId;
     private readonly EllaiNavigationTrail _navigationTrail = new();
     private string? _guidanceNotice;
     private string? _validationGuidanceText;
@@ -140,6 +141,30 @@ public partial class EllaiGuidanceHost
         if (turn.Outcome != "Completed") return;
         newlyCompleted |= _pendingGuidanceTurn == turn.ClientUtteranceId;
         _pendingGuidanceTurn = null;
+        var reportEdits = turn.UiProposals.Where(item => item.Proposal.Kind == UiIntentKind.UpdatePublicReportDraft).Take(2).ToArray();
+        if (reportEdits.Length > 0)
+        {
+            if (reportEdits.Length == 1 && newlyCompleted && reportEdits[0].ProposalId != _lastReportDraftEditProposalId &&
+                reportEdits[0].Proposal is { FeatureId: "report", ResourceId: null, ControlId: "report.age-years" or "report.other-observations" or "report.locality" or "report.original-statement", Arguments.Count: 0 } &&
+                turn.UserText is { } userText)
+            {
+                _lastReportDraftEditProposalId = reportEdits[0].ProposalId;
+                var context = Services.GetService(typeof(EllaiPublicReportDraftContext)) as EllaiPublicReportDraftContext;
+                var controlId = reportEdits[0].Proposal.ControlId;
+                var applied = controlId switch
+                {
+                    "report.age-years" => context?.ApplyAgeCorrection(userText) == true,
+                    "report.other-observations" => context?.ApplyReportedObservation(userText) == true,
+                    "report.locality" => context?.ApplyReportedLocality(userText) == true,
+                    "report.original-statement" => context?.ApplyReportNarrativeStatement(userText) == true,
+                    _ => false
+                };
+                _guidanceNotice = applied
+                    ? "Updated the open report draft with your reported detail. Review it before saving or submitting."
+                    : "I could not capture that detail in the open report draft. Enter it in the report form to continue.";
+            }
+            return;
+        }
         var navigationProposals = turn.UiProposals.Where(item => item.Proposal.Kind == UiIntentKind.NavigateFeature).Take(2).ToArray();
         if (navigationProposals.Length > 0)
         {
@@ -205,6 +230,18 @@ public partial class EllaiGuidanceHost
         _guidanceProposalId = proposal.ProposalId;
         _guidanceProposalIsAccepted = false;
         _guidanceFeatureId = proposal.Proposal.Arguments.GetValueOrDefault("feature");
+        if (_guidanceFeatureId == "report")
+        {
+            var reportDraft = Services.GetService(typeof(EllaiPublicReportDraftContext)) as EllaiPublicReportDraftContext;
+            reportDraft?.BeginReportCapture();
+            if (turn.UserText is { } reportRequest)
+            {
+                reportDraft?.ApplyAgeCorrection(reportRequest);
+                reportDraft?.ApplyReportedObservation(reportRequest);
+                reportDraft?.ApplyReportedLocality(reportRequest);
+                reportDraft?.ApplyReportNarrativeStatement(reportRequest);
+            }
+        }
         // Conversation restoration offers an explicit action; only the currently awaited turn auto-starts.
         if (newlyCompleted) _ = StartProposedGuidanceAsync();
     }

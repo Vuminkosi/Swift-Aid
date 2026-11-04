@@ -93,6 +93,7 @@ public static class MauiProgram
 		builder.Services.AddScoped<SwiftAid.UI.Ellai.Guidance.EllaiDisplayedReceiptContext>();
 		builder.Services.AddScoped<SwiftAid.UI.Ellai.Guidance.EllaiValidationGuidance>();
 		builder.Services.AddScoped<SwiftAid.UI.Ellai.Guidance.EllaiCaseFilterContext>();
+		builder.Services.AddScoped<SwiftAid.UI.Ellai.Guidance.EllaiPublicReportDraftContext>();
 		builder.Services.AddMauiBlazorWebView();
 		builder.Services.AddSingleton<IThemeAppearanceSink, MobileThemeAppearanceSink>();
 		builder.Services.AddMudServices();

@@ -58,7 +58,8 @@ public sealed class EllaiExecutionPromptBuilder(EllaiPromptBuilder prompts, Ella
                 "resourceId=null, controlId=null and arguments containing only feature (the discovered feature ID) and objective (the user's goal). " +
                 "The application validates and prepares the plan. Do not invent routes, anchors, completed actions or say the tour has started before application confirmation. " +
                 "An explicit tour/demo/guidance request already authorizes starting read-only guidance. Emit the intent on that turn; " +
-                "do not ask Ready?, Want me to start?, or demand another confirmation. A yes/ready/let's go reply accepts the existing request. " +
+                "a direct request to create, start, or prepare a public report authorizes opening the discovered report workflow without asking for a tour. Discover feature=report and propose StartGuidance with objective=Create a public case report; this starts an unsaved capture flow and never saves or submits the report. " +
+                "Do not ask Ready?, Want me to start?, or demand another confirmation. A yes/ready/let's go reply accepts the existing request. " +
                 "When stored guidance is Ready or Paused and the user asks to start that same tour, use ControlGuidance command=resume " +
                 "to restore the existing plan instead of repeatedly proposing a new tour. If Generating, explain that preparation is in progress. " +
                 "This does not authorize form submission, tool approvals or consequential operations. " +
@@ -86,6 +87,7 @@ public sealed class EllaiExecutionPromptBuilder(EllaiPromptBuilder prompts, Ella
                 "authorize a write or prove data loading. Do not combine tab selection with guidance controls. " +
                 "Emit at most one guidance intent per turn. These are requested controls, not evidence that the client executed them.";
         }
+        system += "\n## Open public report capture\nWhen the user directly provides or corrects a reported fact for the active public report draft, propose exactly one UpdatePublicReportDraft intent only if the report capture is active. Use featureId=report, resourceId=null, empty arguments, and the matching controlId report.age-years, report.other-observations, report.locality, or report.original-statement. Never put report text, age, symptoms, locality, or other user values in the proposal. The application accepts only a bounded parse of the user's own utterance; if the draft is not active or the utterance cannot be captured, ask the user to enter or open the report. Do not infer symptoms, diagnoses, onset, age, or place. Preserve each reported statement as reported evidence and keep unknown facts unknown.";
         return system;
     }
 }

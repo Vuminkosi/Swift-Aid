@@ -747,6 +747,7 @@
             PublishValidation();
             _stepError = null;
             _submitError = null;
+            RegisterEllaiReportDraftContext();
         }
 
         if (HasCountryCatalogue &&
@@ -755,6 +756,85 @@
         {
             Draft.CountryConfirmed = false;
         }
+    }
+
+    private void RegisterEllaiReportDraftContext()
+    {
+        if (Services.GetService(typeof(SwiftAid.UI.Ellai.Guidance.EllaiPublicReportDraftContext)) is not
+            SwiftAid.UI.Ellai.Guidance.EllaiPublicReportDraftContext context) return;
+        context.Register(this, SetReportedAge, GetReportedAge, AddReportedObservation, SetReportedLocality, AppendReportedStatement);
+        if (!context.FlushPending(this))
+            _stepError = "Ellai could not apply the report detail. Enter it in the report form to continue.";
+    }
+
+    private bool SetReportedAge(int? age)
+    {
+        if (age is < 0 || Draft.SubjectScope is not (null or IntakeSubjectScope.Human)) return false;
+        if (Draft.SubjectScope is null)
+        {
+            Draft.SubjectScope = IntakeSubjectScope.Human;
+            _subjectCategory = ReportSubjectCategory.HumanHealth;
+            NotifyEllaiDraftEdit(nameof(Draft.SubjectScope));
+        }
+        Draft.AgeYearsText = age?.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        NotifyEllaiDraftEdit(nameof(Draft.AgeYearsText));
+        return true;
+    }
+
+    private int? GetReportedAge() => int.TryParse(Draft.AgeYearsText,
+        System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var age) ? age : null;
+
+    private bool AddReportedObservation(string observation)
+    {
+        var value = observation.Trim();
+        var existing = Draft.GetObservations();
+        if (string.IsNullOrWhiteSpace(value) || value.Length > 1000 || value.Contains('\r') || value.Contains('\n')) return false;
+        if (existing.Contains(value, StringComparer.Ordinal)) return true;
+        if (existing.Count >= 20) return false;
+        Draft.ObservationsText = string.Join(Environment.NewLine, existing.Append(value));
+        NotifyEllaiDraftEdit(nameof(Draft.ObservationsText));
+        return true;
+    }
+
+    private bool SetReportedLocality(string? locality)
+    {
+        if (locality is null)
+        {
+            Draft.Locality = null;
+            Draft.LocalityPresence = PresenceState.Unknown;
+            Draft.LocalityId = null;
+            Draft.LocationUnknown = string.IsNullOrWhiteSpace(Draft.CountryCode) &&
+                Draft.RegionPresence != PresenceState.Known && Draft.AreaPresence != PresenceState.Known;
+            NotifyEllaiDraftEdit(nameof(Draft.Locality));
+            return true;
+        }
+        var value = locality.Trim();
+        if (string.IsNullOrWhiteSpace(value) || value.Length > 200) return false;
+        Draft.Locality = value;
+        Draft.LocalityPresence = PresenceState.Known;
+        Draft.LocalityId = null;
+        Draft.LocationUnknown = false;
+        NotifyEllaiDraftEdit(nameof(Draft.Locality));
+        return true;
+    }
+
+    private bool AppendReportedStatement(string statement)
+    {
+        var value = statement.Trim();
+        if (string.IsNullOrWhiteSpace(value) || value.Length > 500 || value.Contains('\r') || value.Contains('\n')) return false;
+        var narrative = string.IsNullOrWhiteSpace(Draft.Narrative)
+            ? value : string.Join(Environment.NewLine, Draft.Narrative, value);
+        if (narrative.Length > 6000) return false;
+        Draft.Narrative = narrative;
+        NotifyEllaiDraftEdit(nameof(Draft.Narrative));
+        return true;
+    }
+
+    private void NotifyEllaiDraftEdit(string fieldName)
+    {
+        if (_editContext is not null)
+            _editContext.NotifyFieldChanged(new FieldIdentifier(Draft, fieldName));
+        _ = InvokeAsync(StateHasChanged);
     }
 
     private string SubjectLabel => Draft.SubjectScope switch
@@ -1535,6 +1615,9 @@
 
     public void Dispose()
     {
+        if (Services.GetService(typeof(SwiftAid.UI.Ellai.Guidance.EllaiPublicReportDraftContext)) is
+            SwiftAid.UI.Ellai.Guidance.EllaiPublicReportDraftContext context)
+            context.Remove(this);
         _validationMessage = null;
         _validationGuidance?.Publish(null);
         if (_editContext is not null)
