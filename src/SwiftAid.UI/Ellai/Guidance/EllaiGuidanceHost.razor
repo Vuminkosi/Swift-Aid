@@ -254,7 +254,7 @@
     private bool _voiceTranscriptionInProgress;
     private bool _startingVoiceCapture;
     private string? _greetedLiveSessionId;
-    private bool _readResponsesAloud;
+    private bool _readResponsesAloud = true;
     private bool _guidanceSpeechAutoEnabled;
     private bool _guidanceSpeechMutedByUser;
     private bool _responseAudioQueueRunning;
@@ -2903,7 +2903,7 @@
         _latestResponseAudioSequences.Clear();
         _latestUserText = null;
         _latestUserUtteranceId = null;
-        _readResponsesAloud = false;
+        _readResponsesAloud = true;
         _guidanceSpeechAutoEnabled = false;
         _guidanceSpeechMutedByUser = false;
         _thinkingUtteranceId = null;

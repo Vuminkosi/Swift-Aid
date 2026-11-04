@@ -492,19 +492,19 @@ public sealed partial class EllaiSurfaceLogicTests
     }
 
     [Fact]
-    public async Task GuidanceEnablesSpeechTemporarilyAndPreservesAnExplicitVoiceChoice()
+    public async Task SpeechDefaultsOnAndGuidancePreservesAnExplicitMute()
     {
         using var host = await CreateHost(new FakeReviewClient(), CreateSession(1), string.Empty);
-        Assert.False(GetField<bool>(host, "_readResponsesAloud"));
+        Assert.True(GetField<bool>(host, "_readResponsesAloud"));
         await InvokeAsync(host, "BeginGuidanceSpeech");
         Assert.True(GetField<bool>(host, "_readResponsesAloud"));
         await InvokeAsync(host, "EndGuidanceSpeech");
-        Assert.False(GetField<bool>(host, "_readResponsesAloud"));
+        Assert.True(GetField<bool>(host, "_readResponsesAloud"));
 
         await InvokeAsync(host, "ToggleResponseAudioAsync");
         await InvokeAsync(host, "BeginGuidanceSpeech");
         await InvokeAsync(host, "EndGuidanceSpeech");
-        Assert.True(GetField<bool>(host, "_readResponsesAloud"));
+        Assert.False(GetField<bool>(host, "_readResponsesAloud"));
     }
 
     [Theory]
@@ -717,15 +717,13 @@ public sealed partial class EllaiSurfaceLogicTests
     }
 
     [Fact]
-    public async Task ListenToggleReadsNewTypedRepliesUntilDisabledWithoutReplayingFinalReconciliation()
+    public async Task VoiceDefaultsToReadingTypedRepliesUntilDisabledWithoutReplayingFinalReconciliation()
     {
         using var host = await CreateHost(new FakeReviewClient(), CreateSession(version: 1), string.Empty);
         var speech = new RecordingJsModule();
         SetField(host, "_speechModule", speech);
         await InvokeAsync(host, "OnResponseReceived",
             new EllaiSessionResponseDto(1, "session-1", "First answer.", DateTimeOffset.UtcNow, "first"));
-        Assert.DoesNotContain("playResponse", speech.Invocations);
-        await InvokeAsync(host, "ToggleResponseAudioAsync");
         Assert.Single(speech.Invocations, call => call == "playResponse");
         await InvokeAsync(host, "OnResponseReceived",
             new EllaiSessionResponseDto(2, "session-1", "Next answer.", DateTimeOffset.UtcNow, "next", IsFinal: false));
