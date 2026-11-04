@@ -67,7 +67,8 @@ public sealed class EllaiCorrelationWork(SwiftAidDbContext db, IOptions<EllaiCor
                         WHERE ar.case_id = a.case_id AND br.case_id = b.case_id)
                     AND NOT EXISTS (SELECT 1 FROM ellai_correlation_candidates p WHERE p.first_case_id = a.case_id AND p.second_case_id = b.case_id
                         AND p.first_report_revision = a.report_revision AND p.second_report_revision = b.report_revision AND p.policy_version = {lease.PolicyVersion})
-                ORDER BY greatest(atime.received_at_utc, btime.received_at_utc) DESC, a.case_id, b.case_id
+                ORDER BY greatest(atime.received_at_utc, btime.received_at_utc) DESC,
+                    least(atime.received_at_utc, btime.received_at_utc) DESC, a.case_id, b.case_id
                 FOR SHARE OF a, b, w, o, wo LIMIT 1
                 """).SingleOrDefaultAsync(token).ConfigureAwait(false);
             if (pair is null) return false;
