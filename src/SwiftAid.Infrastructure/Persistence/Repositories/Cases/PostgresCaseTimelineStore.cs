@@ -165,10 +165,16 @@ public sealed class PostgresCaseTimelineStore(SwiftAidDbContext dbContext) : ICa
                       )
                     UNION ALL
                     SELECT p.source_event_id, p.activity_id, 'ops.organization', p.policy_version, p.recorded_at_utc,
-                        NULL::uuid, (c.aggregate_version = p.source_case_version AND c.workflow <> 'Resolved'),
+                        NULL::uuid, (c.aggregate_version = p.source_case_version AND c.workflow <> 'Resolved'
+                            AND COALESCE((SELECT report.received_at_utc FROM swiftaid_intake.intake_promotions promotion
+                                JOIN swiftaid_intake.intake_reports report ON report.receipt_id = promotion.receipt_id
+                                WHERE promotion.case_id = c.case_id), c.created_at_utc)
+                                BETWEEN clock_timestamp() - interval '30 days' AND clock_timestamp()
+                            AND COALESCE(schedule.policy_version = p.policy_version, FALSE)),
                         NULL::timestamptz, d.recorded_at_utc, 'Queue' || COALESCE(d.decision, '') || ':' || p.queue_code
                     FROM ellai_organization_proposals p
                     JOIN managed_cases c ON c.case_id = p.case_id
+                    LEFT JOIN ellai_operational_schedules schedule ON schedule.workspace_id = c.workspace_id AND schedule.role_id = 'ops.organization'
                     LEFT JOIN ellai_organization_decisions d ON d.suggestion_id = p.activity_id AND d.case_id = p.case_id
                     WHERE p.case_id = {caseId} AND p.source_event_id = ANY({ids})
                     UNION ALL

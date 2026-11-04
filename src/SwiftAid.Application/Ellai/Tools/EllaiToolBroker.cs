@@ -536,6 +536,11 @@ public sealed class EllaiToolBroker
                         true => " This recommendation is current at the time of this read.",
                         false => " This recommendation is historical; the follow-up has changed.",
                         _ => " Current follow-up status is unavailable."
+                    } : activity.RoleId == "ops.organization" ? activity.FollowUpIsCurrent switch
+                    {
+                        true => " This suggestion is current at the time of this read.",
+                        false => " This suggestion is historical; the case, policy or reporting window has changed.",
+                        _ => " Current suggestion status is unavailable."
                     } : "") +
                     (activity.FollowUpReviewedAtUtc is { } reviewedAt ? $" Staff review recorded at {reviewedAt:O}." : ""))));
         var id = caseId.ToString("D");

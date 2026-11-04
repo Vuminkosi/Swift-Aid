@@ -20,7 +20,10 @@ public sealed class PostgresOrganizationSuggestionDecisionService(
             string.IsNullOrWhiteSpace(rationale) || rationale.Length > 500 || rationale != rationale.Trim())
             return OrganizationDecisionOutcome.Invalid;
         ICaseCommandLease lease;
-        try { lease = await unitOfWork.BeginCaseAsync(actor, caseId, [], CaseLeaseMode.Write, ct).ConfigureAwait(false); }
+        // A review records a separate immutable artifact. A read lease keeps
+        // case authority stable without conflicting with the schedule worker's
+        // case read while the schedule policy is locked below.
+        try { lease = await unitOfWork.BeginCaseAsync(actor, caseId, [], CaseLeaseMode.Read, ct).ConfigureAwait(false); }
         catch (KeyNotFoundException) { return OrganizationDecisionOutcome.NotFoundOrNotAuthorized; }
         catch (InvalidOperationException error) when (error.Message is "The case authority scope is unavailable." or "The current case authority scope is unavailable.")
         { return OrganizationDecisionOutcome.NotFoundOrNotAuthorized; }
@@ -38,7 +41,11 @@ public sealed class PostgresOrganizationSuggestionDecisionService(
             if (previous is not null && (previous.SuggestionId != suggestionId || previous.CaseId != caseId ||
                 previous.ActorId != actor.ActorId || previous.Decision != decision.ToString())) return OrganizationDecisionOutcome.Conflict;
             var current = await db.Database.SqlQuery<CurrentRow>($"""
-                SELECT (c.aggregate_version = p.source_case_version AND c.workflow <> 'Resolved') AS "IsCurrent",
+                SELECT (c.aggregate_version = p.source_case_version AND c.workflow <> 'Resolved'
+                    AND COALESCE((SELECT report.received_at_utc FROM swiftaid_intake.intake_promotions promotion
+                        JOIN swiftaid_intake.intake_reports report ON report.receipt_id = promotion.receipt_id
+                        WHERE promotion.case_id = c.case_id), c.created_at_utc)
+                        BETWEEN clock_timestamp() - interval '30 days' AND clock_timestamp()) AS "IsCurrent",
                     EXISTS (SELECT 1 FROM ellai_organization_decisions d WHERE d.suggestion_id = p.activity_id) AS "IsDecided"
                 FROM ellai_organization_proposals p JOIN managed_cases c ON c.case_id = p.case_id
                 WHERE p.activity_id = {suggestionId} AND p.case_id = {caseId}
@@ -49,6 +56,19 @@ public sealed class PostgresOrganizationSuggestionDecisionService(
                 return System.Text.Encoding.UTF8.GetString(protector.Unprotect(previous.ProtectedRationale)) == rationale ? OrganizationDecisionOutcome.Replayed : OrganizationDecisionOutcome.Conflict;
             if (current.IsDecided) return OrganizationDecisionOutcome.AlreadyDecided;
             if (!current.IsCurrent) return OrganizationDecisionOutcome.Stale;
+            var currentPolicy = await db.Database.SqlQuery<bool>($"""
+                SELECT TRUE AS "Value" FROM ellai_organization_proposals p
+                JOIN managed_cases c ON c.case_id = p.case_id
+                JOIN ellai_operational_schedules schedule ON schedule.workspace_id = c.workspace_id
+                    AND schedule.role_id = 'ops.organization' AND schedule.policy_version = p.policy_version
+                WHERE p.activity_id = {suggestionId} AND p.case_id = {caseId}
+                    AND COALESCE((SELECT report.received_at_utc FROM swiftaid_intake.intake_promotions promotion
+                        JOIN swiftaid_intake.intake_reports report ON report.receipt_id = promotion.receipt_id
+                        WHERE promotion.case_id = c.case_id), c.created_at_utc)
+                        BETWEEN clock_timestamp() - interval '30 days' AND clock_timestamp()
+                LIMIT 1 FOR SHARE OF schedule
+                """).SingleOrDefaultAsync(ct).ConfigureAwait(false);
+            if (!currentPolicy) return OrganizationDecisionOutcome.Stale;
             var protectedRationale = protector.Protect(System.Text.Encoding.UTF8.GetBytes(rationale));
             var inserted = await db.Database.ExecuteSqlInterpolatedAsync($"""
                 INSERT INTO ellai_organization_decisions (suggestion_id, case_id, command_id, actor_id, decision, protected_rationale, recorded_at_utc)
