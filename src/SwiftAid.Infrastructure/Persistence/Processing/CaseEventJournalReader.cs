@@ -465,12 +465,24 @@ internal static class CaseEventJournalReader
 
     private static void ValidateContextV2(JsonElement element, ReportContextV2Payload? context)
     {
-        RequireProperties(element, ["occurrence", "capturedAtUtc", "capturedOffset", "capturedZoneId", "capturePrecision", "location"]);
+        var hasOnset = element.TryGetProperty("onset", out var onsetElement);
+        RequireProperties(element, hasOnset
+            ? ["occurrence", "capturedAtUtc", "capturedOffset", "capturedZoneId", "capturePrecision", "location", "onset"]
+            : ["occurrence", "capturedAtUtc", "capturedOffset", "capturedZoneId", "capturePrecision", "location"]);
         if (context is null || context.Occurrence is null || context.Location is null ||
             !IsExactEnumValue(element, "capturePrecision", context.CapturePrecision) ||
             !Enum.IsDefined(context.CapturePrecision) ||
             !Enum.IsDefined(context.Location.Source) || !Enum.IsDefined(context.Location.Precision)) throw InvalidJournal();
         ValidateFactV2(element.GetProperty("occurrence"), context.Occurrence);
+        if (hasOnset && onsetElement.ValueKind != JsonValueKind.Null)
+        {
+            if (context.Onset is null) throw InvalidJournal();
+            ValidateFactV2(onsetElement, context.Onset);
+        }
+        else if (context.Onset is not null)
+        {
+            throw InvalidJournal();
+        }
         var location = element.GetProperty("location");
         RequireProperties(location, ["countryCode", "region", "area", "locality", "latitude", "longitude", "accuracyMetres", "source", "precision", "catalogueVersion"]);
         if (!IsExactEnumValue(location, "source", context.Location.Source) || !IsExactEnumValue(location, "precision", context.Location.Precision)) throw InvalidJournal();
@@ -777,7 +789,8 @@ internal static class CaseEventJournalReader
     private static CaseReportEventData ToDomainReportV2(CaseReportV2Payload payload)
     {
         var context = new ReportContext(ToDomainFact(payload.Context.Occurrence), payload.Context.CapturedAtUtc,
-            payload.Context.CapturedOffset, payload.Context.CapturedZoneId, payload.Context.CapturePrecision, payload.Context.Location);
+            payload.Context.CapturedOffset, payload.Context.CapturedZoneId, payload.Context.CapturePrecision, payload.Context.Location,
+            payload.Context.Onset is null ? null : ToDomainFact(payload.Context.Onset));
         var evidence = new ReportEvidence(
             payload.Evidence.Narrative is null ? null : ToDomainText(payload.Evidence.Narrative),
             payload.Evidence.Observations.Select(ToDomainText),

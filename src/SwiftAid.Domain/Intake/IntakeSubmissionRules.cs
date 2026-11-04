@@ -47,6 +47,7 @@ public static class IntakeSubmissionRules
 
         ValidateTime(submission.CapturedAt);
         ValidateTime(submission.Occurrence);
+        if (submission.Onset is not null) ValidateTime(submission.Onset);
         ValidateLocation(submission.Location);
         ValidateConfirmations(submission.Confirmations, submission.Location.CountryCode, submission.Location.CatalogueVersion!,
             submission.OriginalAudioAttachmentIds.Count > 0);

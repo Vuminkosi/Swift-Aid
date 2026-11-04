@@ -22,6 +22,10 @@ public sealed record IntakeSubmission(
     /// <summary>Gender as explicitly reported for a human subject; null means not provided or unknown.</summary>
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public ReportedGender? Gender { get; init; }
+
+    /// <summary>Reporter-supplied symptom or sign onset; null means the older draft did not capture it.</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public ReportedTime? Onset { get; init; }
 }
 
 public enum ReportedGender { Female, Male, Other }

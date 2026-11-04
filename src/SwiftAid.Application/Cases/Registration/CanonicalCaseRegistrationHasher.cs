@@ -162,6 +162,8 @@ public static class CanonicalCaseRegistrationHasher
         WriteNullableString(writer, "capturedOffset", context.CapturedOffset);
         WriteNullableString(writer, "capturedZoneId", context.CapturedZoneId);
         writer.WriteString("capturePrecision", EnumName(context.CapturePrecision));
+        if (context.Onset is { } onset)
+            WriteReportedFact(writer, "onset", onset, WriteReportedTime);
         writer.WritePropertyName("location");
         writer.WriteStartObject();
         writer.WriteString("countryCode", context.Location.CountryCode);

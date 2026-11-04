@@ -48,7 +48,8 @@ public static class IntakePromotionMapper
             submission.CapturedAt.OriginalOffset,
             submission.CapturedAt.ZoneId,
             submission.CapturedAt.Precision,
-            submission.Location);
+            submission.Location,
+            submission.Onset is null ? null : ToReportedTimeFact(sourcePrefix, "onset", submission.Onset));
         var evidence = ToEvidence(sourcePrefix, submission);
         var confirmations = new ReportConfirmations(
             submission.Confirmations.ReportReviewConfirmed,
@@ -104,10 +105,15 @@ public static class IntakePromotionMapper
 
     private static ReportedFact<ReportedTime> ToOccurrenceFact(string sourcePrefix, ReportedTime occurrence)
     {
-        var provenance = new ReportProvenance(ReportSourceKind.ReporterObservation, $"{sourcePrefix}:occurrence");
-        return occurrence is { Value: null, Precision: ReportedTimePrecision.Unknown }
+        return ToReportedTimeFact(sourcePrefix, "occurrence", occurrence);
+    }
+
+    private static ReportedFact<ReportedTime> ToReportedTimeFact(string sourcePrefix, string factName, ReportedTime time)
+    {
+        var provenance = new ReportProvenance(ReportSourceKind.ReporterObservation, $"{sourcePrefix}:{factName}");
+        return time is { Value: null, LocalDate: null, RangeStart: null, RangeEnd: null, Precision: ReportedTimePrecision.Unknown }
             ? ReportedFact<ReportedTime>.Unknown(provenance)
-            : ReportedFact<ReportedTime>.Known(occurrence, provenance);
+            : ReportedFact<ReportedTime>.Known(time, provenance);
     }
 
     private static ReportEvidence ToEvidence(string sourcePrefix, IntakeSubmission submission)

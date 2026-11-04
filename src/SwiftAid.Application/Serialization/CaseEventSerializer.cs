@@ -198,7 +198,8 @@ public sealed class CaseEventSerializer
         if (!Enum.IsDefined(context.CapturePrecision) || !Enum.IsDefined(context.Location.Source) || !Enum.IsDefined(context.Location.Precision))
             throw new InvalidDataException("Report context contains an unsupported enum value.");
         return new ReportContextV2Payload(MapFact(context.Occurrence), context.CapturedAtUtc, context.CapturedOffset,
-            context.CapturedZoneId, context.CapturePrecision, context.Location);
+            context.CapturedZoneId, context.CapturePrecision, context.Location,
+            context.Onset is null ? null : MapFact(context.Onset));
     }
 
     private static ReportEvidenceV2Payload MapEvidence(ReportEvidence evidence) => new(

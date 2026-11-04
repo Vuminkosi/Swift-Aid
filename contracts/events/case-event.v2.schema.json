@@ -58,6 +58,7 @@
         "capturedOffset": { "type": ["string", "null"], "pattern": "^[+-]((0[0-9]|1[0-3]):[0-5][0-9]|14:00)$" },
         "capturedZoneId": { "type": ["string", "null"] },
         "capturePrecision": { "enum": ["Exact", "DateOnly", "Approximate", "Unknown"] },
+        "onset": { "oneOf": [{ "$ref": "#/$defs/reportedTimeFact" }, { "type": "null" }], "description": "Optional reporter-supplied symptom or sign onset; never inferred from capture, receipt or upload time." },
         "location": { "$ref": "#/$defs/location" }
       }
     },
