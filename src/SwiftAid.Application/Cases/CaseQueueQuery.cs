@@ -137,7 +137,7 @@ public sealed class CaseQueueQuery(
             throw new ArgumentOutOfRangeException(nameof(limit), "The queue limit must be between 1 and 500.");
         }
 
-        var continuation = DecodeCursor(cursor);
+        var continuation = DecodeCursor(cursor, filter);
 
         const int candidateBatchSize = 200;
         IReadOnlyList<CaseQueueCandidate> candidates;
@@ -194,16 +194,24 @@ public sealed class CaseQueueQuery(
     }
 
     private static string EncodeCursor(CaseQueueCandidate candidate, CaseQueueFilter? filter) =>
-        $"{GetSortTimestamp(candidate, filter).UtcDateTime.Ticks:x}.{candidate.CaseId:N}";
+        $"{(filter?.NewestReportedFirst == true ? "r1." : "")}{GetSortTimestamp(candidate, filter).UtcDateTime.Ticks:x}.{candidate.CaseId:N}";
 
     private static DateTimeOffset GetSortTimestamp(CaseQueueCandidate candidate, CaseQueueFilter? filter) =>
         filter?.NewestReportedFirst == true
             ? candidate.ReportedAtUtc ?? candidate.CreatedAtUtc ?? candidate.LastRecordedAtUtc
             : candidate.LastRecordedAtUtc;
 
-    private static CaseQueueContinuation? DecodeCursor(string? value)
+    private static CaseQueueContinuation? DecodeCursor(string? value, CaseQueueFilter? filter)
     {
         if (value is null) return null;
+        // Earlier newest-reported cursors used case promotion time, which
+        // cannot safely resume a receipt-time ordering. Require a fresh page.
+        if (filter?.NewestReportedFirst == true)
+        {
+            if (!value.StartsWith("r1.", StringComparison.Ordinal))
+                throw new ArgumentException("The case queue cursor has expired; refresh the queue.", nameof(value));
+            value = value[3..];
+        }
         var separator = value.IndexOf('.');
         if (value.Length is < 34 or > 49 || separator is < 1 or > 16 ||
             !long.TryParse(value.AsSpan(0, separator), System.Globalization.NumberStyles.HexNumber,
