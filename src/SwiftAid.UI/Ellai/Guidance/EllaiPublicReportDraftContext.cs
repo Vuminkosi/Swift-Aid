@@ -42,7 +42,7 @@ public sealed class EllaiPublicReportDraftContext
     {
         if (utterance is null || utterance.Length > 1000 || utterance.Contains('\r') || utterance.Contains('\n')) return false;
         const RegexOptions options = RegexOptions.IgnoreCase | RegexOptions.CultureInvariant;
-        if (!Regex.IsMatch(utterance, @"^\s*(?:she|he|the patient)\s+(?:has|reports|is experiencing|experienced)\s+\S.*[.!?]?\s*$", options))
+        if (!Regex.IsMatch(utterance, @"^\s*(?:she|he|the patient)\s+(?:has|reports|is experiencing|experienced)\s+[^.!?\r\n]+[.!?]?\s*$", options))
             return false;
         Func<string, bool>? addObservation;
         lock (_gate) addObservation = _addObservation;
