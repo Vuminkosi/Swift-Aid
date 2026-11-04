@@ -115,7 +115,8 @@ public sealed class EllaiQualitySweep(SwiftAidDbContext db, EllaiQualityWork wor
                     return finished ? "complete" : "stale-lease";
                 }
             }
-            return "batch-limit";
+            finished = await schedule.CompleteAsync(lease, ct);
+            return finished ? "batch-limit" : "stale-lease";
         }
         finally
         {

@@ -115,7 +115,8 @@ public sealed class EllaiCorrelationSweep(SwiftAidDbContext db, EllaiCorrelation
                     return finished ? "complete" : "stale-lease";
                 }
             }
-            return "batch-limit";
+            finished = await schedule.CompleteAsync(lease, ct);
+            return finished ? "batch-limit" : "stale-lease";
         }
         finally
         {
