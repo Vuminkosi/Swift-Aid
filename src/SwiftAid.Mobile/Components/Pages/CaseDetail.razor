@@ -68,9 +68,14 @@
             if (client is not null)
             {
                 var result = await client.GetAsync(id);
-                if (request == _reportRequest && _loadedCaseId == id && result.Succeeded)
+                if (request == _reportRequest && _loadedCaseId == id && result.Succeeded && result.Value?.CaseId == id)
                     _reportDetails = result.Value;
             }
+        }
+        catch (Exception)
+        {
+            if (request == _reportRequest && _loadedCaseId == id)
+                _reportDetails = null;
         }
         finally { if (request == _reportRequest) _reportLoading = false; }
     }
@@ -81,6 +86,7 @@
     private long _correctionRequest;
     private CaseDetailMentionTargetsView? _mentionTargets;
     private CaseDetailObservationsView? _observations;
+    private long _observationsRequest;
     private long _discussionRequest;
     private CaseDetailDiscussionView? _discussion;
     private long _evidenceRequest;
@@ -101,11 +107,19 @@
             if (parsedCaseId != _loadedCaseId)
             {
                 _loadedCaseId = parsedCaseId;
+                _mentionTargets = null;
                 _discussionRequest++;
                 _evidenceRequest++;
                 _downloadRequest++;
                 _workRequest++;
-                await Task.WhenAll(LoadReportAsync(), LoadOverviewAsync(), LoadCorrectionAsync(), LoadDiscussionAsync(), LoadEvidenceAsync(), LoadObservationsAsync(), LoadWorkAsync());
+                await Task.WhenAll(
+                    RenderWhenLoadedAsync(LoadReportAsync(), parsedCaseId),
+                    RenderWhenLoadedAsync(LoadOverviewAsync(), parsedCaseId),
+                    RenderWhenLoadedAsync(LoadCorrectionAsync(), parsedCaseId),
+                    RenderWhenLoadedAsync(LoadDiscussionAsync(), parsedCaseId),
+                    RenderWhenLoadedAsync(LoadEvidenceAsync(), parsedCaseId),
+                    RenderWhenLoadedAsync(LoadObservationsAsync(), parsedCaseId),
+                    RenderWhenLoadedAsync(LoadWorkAsync(), parsedCaseId));
             }
         }
         else
@@ -120,12 +134,22 @@
             _correction = null;
             _discussionRequest++;
             _discussion = null;
+            _mentionTargets = null;
+            _observationsRequest++;
+            _observations = null;
             _evidenceRequest++;
             _evidence = null;
             _downloadRequest++;
             _workRequest++;
             ClearWorkProjection(OperationsSurfaceState.Unavailable, "Open a case to review its coordination work.");
         }
+    }
+
+    private async Task RenderWhenLoadedAsync(Task load, Guid caseId)
+    {
+        await load;
+        if (_loadedCaseId == caseId)
+            await InvokeAsync(StateHasChanged);
     }
 
     private async Task<CaseDetailCorrectionView?> LoadCorrectionAsync()
@@ -252,6 +276,7 @@
                 _workSnapshot = snapshot;
                 _workItems = items;
                 _workState = items.Count == 0 ? OperationsSurfaceState.Empty : OperationsSurfaceState.Populated;
+                _workStatusMessage = result.Message;
             }
             else
             {
@@ -610,6 +635,7 @@
     private async Task LoadObservationsAsync()
     {
         var caseId = _loadedCaseId;
+        var request = ++_observationsRequest;
         if (caseId == Guid.Empty) { _observations = new CaseDetailObservationsView(CaseDetailPanelState.Unavailable, Array.Empty<CaseDetailObservationRecord>()); return; }
         var client = ServiceProvider.GetService<ICaseObservationClient>();
         if (client is null) { _observations = new CaseDetailObservationsView(CaseDetailPanelState.Unavailable, Array.Empty<CaseDetailObservationRecord>()); return; }
@@ -617,12 +643,12 @@
         try
         {
             var result = await client.GetAsync(caseId, new PageRequest(1, 50));
-            if (caseId != _loadedCaseId) return;
+            if (request != _observationsRequest || caseId != _loadedCaseId) return;
             _observations = result.Succeeded && result.Metadata.IsAvailable && result.Value is { IsValid: true } snapshot && snapshot.CaseId == caseId
                 ? new CaseDetailObservationsView(snapshot.Items.Items.Count == 0 ? CaseDetailPanelState.Empty : CaseDetailPanelState.Populated, snapshot.Items.Items.Select(item => new CaseDetailObservationRecord(item.ObservationKey, (CaseDetailObservationCategory)item.Category, item.Observation, item.SourceLabel, item.EvidenceKeys, item.OccurredAtUtc, item.RecordedAtUtc, item.ActorDisplayLabel, item.AggregateVersion)).ToArray(), snapshot.AggregateVersion)
                 : new CaseDetailObservationsView(ResultPanelState(result.Code), Array.Empty<CaseDetailObservationRecord>());
         }
-        catch (Exception) { if (caseId == _loadedCaseId) _observations = new CaseDetailObservationsView(CaseDetailPanelState.Error, Array.Empty<CaseDetailObservationRecord>()); }
+        catch (Exception) { if (request == _observationsRequest && caseId == _loadedCaseId) _observations = new CaseDetailObservationsView(CaseDetailPanelState.Error, Array.Empty<CaseDetailObservationRecord>()); }
     }
 
     private async Task<CaseDetailCommandOutcome> AppendDiscussionAsync(CaseDetailDiscussionPostRequest request)

@@ -6,6 +6,23 @@ namespace SwiftAid.Ui.Tests;
 
 public sealed class PublicReportDraftTimeTests
 {
+    [Fact]
+    public void CaptureChoices_RoundTripAndDoNotApplyHumanGenderToAnimals()
+    {
+        var draft = Draft();
+        draft.Gender = ReportedGender.Female;
+        draft.DeathRelated = true;
+        var saved = Submit(draft);
+        var restored = PublicReportDraft.FromSubmission(saved);
+        Assert.Equal(ReportedGender.Female, restored.Gender);
+        Assert.True(restored.DeathRelated);
+
+        restored.SubjectScope = IntakeSubjectScope.Herd;
+        var animal = Submit(restored);
+        Assert.Null(animal.Gender);
+        Assert.True(animal.DeathRelated);
+    }
+
     private static PublicReportDraft Draft() => new()
     {
         SubjectScope = IntakeSubjectScope.Human,

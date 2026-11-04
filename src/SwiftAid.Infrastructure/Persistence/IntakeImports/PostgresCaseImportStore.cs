@@ -135,6 +135,20 @@ public sealed class PostgresCaseImportStore(SwiftAidDbContext db, IDataProtectio
             accepted, rejected, counts.GetValueOrDefault("RetryableFailure"), counts.GetValueOrDefault("Processing"), job.ErrorCode, job.UpdatedAtUtc, job.OrganizationId);
     }
 
+    public async Task<bool?> MatchesContextAsync(ActorContext actor, Guid importId, CaseImportContext context, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(actor);
+        CaseCsvImportService.ValidateContext(context);
+        if (importId == Guid.Empty) throw new CaseImportException("invalid-import");
+        var job = await db.Set<CaseImportEntity>().AsNoTracking()
+            .SingleOrDefaultAsync(row => row.ImportId == importId && row.ActorId == actor.ActorId, ct);
+        if (job is null) return null;
+        await EnsureScopeAsync(actor, job.WorkspaceId, job.CountryCode, clock.GetUtcNow(), ct, job.OrganizationId);
+        var proposed = SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(context));
+        try { return CryptographicOperations.FixedTimeEquals(job.ContextHash, proposed); }
+        finally { CryptographicOperations.ZeroMemory(proposed); }
+    }
+
     private async Task<CaseImportEntity> LockAsync(CaseImportLease lease, DateTimeOffset now, CancellationToken ct)
     {
         var rows = await db.Set<CaseImportEntity>().FromSqlInterpolated($"""

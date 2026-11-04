@@ -1,18 +1,17 @@
 using System.Net;
 using System.Text.Json;
 using SwiftAid.Client.Presentation;
-using SwiftAid.Mobile.Services.Http;
 
 namespace SwiftAid.Mobile.Services.Presentation;
 
-/// <summary>Case summary through the gateway cookie session.</summary>
-public sealed class CaseDetailSummaryHttpClient(CookieSessionHttpClient session) : ICaseDetailSummaryClient
+/// <summary>Case summary through the authenticated gateway transport.</summary>
+public sealed class CaseDetailSummaryHttpClient(HttpClient client) : ICaseDetailSummaryClient
 {
     private const string Capability = "case-detail";
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
-    private readonly CookieSessionHttpClient _session = session ?? throw new ArgumentNullException(nameof(session));
+    private readonly HttpClient _client = client ?? throw new ArgumentNullException(nameof(client));
 
     public async Task<UiCapabilityResult<CaseDetailSummary>> GetAsync(
         Guid caseId,
@@ -26,10 +25,10 @@ public sealed class CaseDetailSummaryHttpClient(CookieSessionHttpClient session)
 
         try
         {
-            using var response = await _session.GetAsync(
+            using var response = await _client.GetAsync(
                 $"/api/v1/cases/{caseId:D}/summary",
                 cancellationToken).ConfigureAwait(false);
-            if (response.StatusCode == HttpStatusCode.Unauthorized)
+            if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
             {
                 return Denied();
             }
@@ -50,7 +49,7 @@ public sealed class CaseDetailSummaryHttpClient(CookieSessionHttpClient session)
             }
 
             var summary = await ReadAsync<CaseDetailSummary>(response, cancellationToken).ConfigureAwait(false);
-            return summary is { IsValid: true }
+            return summary is { IsValid: true } && summary.CaseId == caseId
                 ? Success(summary)
                 : Retryable("The case is temporarily unavailable.");
         }

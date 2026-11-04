@@ -110,6 +110,17 @@
                         </MudRadioGroup>
                     </div>
                 }
+                @if (_subjectCategory is not null)
+                {
+                    <div class="guided-report__animal-scope-group">
+                        <MudText Typo="Typo.body2" id="report-death-label">Is this concern related to a death?</MudText>
+                        <MudRadioGroup T="bool?" @bind-Value="Draft.DeathRelated" aria-labelledby="report-death-label">
+                            <MudRadio T="bool?" Value="@((bool?)true)" Color="Color.Primary">Yes</MudRadio>
+                            <MudRadio T="bool?" Value="@((bool?)false)" Color="Color.Primary">No</MudRadio>
+                            <MudRadio T="bool?" Value="@((bool?)null)" Color="Color.Primary">Unknown</MudRadio>
+                        </MudRadioGroup>
+                    </div>
+                }
                 @if (!HasCompleteSubject)
                 {
                     <MudText Typo="Typo.caption" Color="Color.Secondary" role="status">
@@ -385,13 +396,17 @@
                     @if (Draft.SubjectScope == IntakeSubjectScope.Human)
                     {
                         <div><dt>Reported gender</dt><dd>@GenderSummary</dd></div>
+                    }
+                    <div><dt>Death related</dt><dd>@(Draft.DeathRelated is null ? "Unknown" : Draft.DeathRelated.Value ? "Yes" : "No")</dd></div>
+                    @if (Draft.SubjectScope == IntakeSubjectScope.Human)
+                    {
                         <div><dt>Reported age in years</dt><dd>@UnknownIfEmpty(Draft.AgeYearsText)</dd></div>
                     }
                     <div><dt>Original statement</dt><dd>@UnknownIfEmpty(Draft.Narrative)</dd><dd class="guided-report__provenance">Your words, shown as entered</dd></div>
                     <div><dt>Separate observations</dt><dd>@ObservationSummary</dd><dd class="guided-report__provenance">You entered these details. No others were added.</dd></div>
                     <div><dt>Reported symptom or sign onset</dt><dd>@OnsetSummary</dd><dd class="guided-report__provenance">@OnsetProvenance</dd></div>
                     <div><dt>Event occurrence time</dt><dd>@TimeSummary</dd><dd class="guided-report__provenance">@(Draft.OccurrencePrecision == ReportedTimePrecision.Unknown ? "Not provided; remains unknown" : "From the time you entered")</dd></div>
-                    <div><dt>Country</dt><dd>@CountrySummary</dd><dd class="guided-report__provenance">@(string.IsNullOrWhiteSpace(Draft.CountryCode) ? "Not provided; remains unknown" : "You selected this")</dd></div>
+                    <div><dt>Country</dt><dd>@CountrySummary</dd><dd class="guided-report__provenance">@(string.IsNullOrWhiteSpace(Draft.CountryCode) ? "Not provided; remains unknown" : "Review the selected country")</dd></div>
                     <div><dt>Location</dt><dd>@LocationSummary</dd><dd class="guided-report__provenance">@LocationProvenance</dd></div>
                     <div><dt>Animal type or group</dt><dd>Unknown</dd><dd class="guided-report__provenance">Not asked here; remains unknown.</dd></div>
                     <div><dt>Affected, deceased, and at-risk counts</dt><dd>Unknown</dd><dd class="guided-report__provenance">Not entered; remains unknown.</dd></div>
@@ -1816,15 +1831,26 @@
         var savedStep = _step;
         try
         {
-            var submission = Draft.ToDraftSubmission(
-                CountryCatalogueVersion,
-                ProcessingPolicyReference,
-                ProcessingPolicyVersion,
-                Countries,
-                CountryCatalogueIsCurrent,
-                CurrentDraftId is { } previousId && SavedDraft?.ClientSubmissionId == previousId ? SavedDraft : null);
-            _savingSnapshot = PublicReportDraft.FromSubmission(submission);
-            _activeSaveRequest = new PublicReportSaveRequest(CurrentDraftId, submission);
+            IntakeSubmission submission;
+            GuestDraftFormSnapshot? formSnapshot = null;
+            try
+            {
+                submission = Draft.ToDraftSubmission(
+                    CountryCatalogueVersion, ProcessingPolicyReference, ProcessingPolicyVersion, Countries,
+                    CountryCatalogueIsCurrent,
+                    CurrentDraftId is { } previousId && SavedDraft?.ClientSubmissionId == previousId ? SavedDraft : null);
+            }
+            catch (InvalidOperationException)
+            {
+                formSnapshot = Draft.ToFormSnapshot();
+                submission = new PublicReportDraft { SubjectScope = Draft.SubjectScope }
+                    .ToDraftSubmission(null, null, null, [], false, null);
+            }
+            if (formSnapshot is null && !Draft.IsLosslesslyRepresentedBy(submission))
+                formSnapshot = Draft.ToFormSnapshot();
+            _savingSnapshot = formSnapshot is null ? PublicReportDraft.FromSubmission(submission) :
+                PublicReportDraft.FromFormSnapshot(formSnapshot);
+            _activeSaveRequest = new PublicReportSaveRequest(CurrentDraftId, submission, formSnapshot);
             await OnSaveDraft.InvokeAsync(_activeSaveRequest);
             var savedId = _activeSaveRequest.PersistedDraftId ?? _savingDraftId;
             var sameReport = ReferenceEquals(Draft, sourceDraft) && (CurrentDraftId == _savingDraftId || CurrentDraftId == savedId)
@@ -1863,6 +1889,7 @@
 
     private static bool DraftMatches(PublicReportDraft actual, PublicReportDraft expected) =>
         actual.SubjectScope == expected.SubjectScope &&
+        actual.DeathRelated == expected.DeathRelated &&
         actual.AgeYearsText == expected.AgeYearsText &&
         actual.Gender == expected.Gender &&
         actual.Narrative == expected.Narrative &&

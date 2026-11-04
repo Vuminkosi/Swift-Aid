@@ -105,7 +105,7 @@
                 var editorGeneration = _editorGeneration;
                 @if (capability.CanCreate || capability.CanEdit || capability.CanReview || capability.CanSchedule || capability.CanCancel || capability.CanComplete)
                 {
-                <SessionEditor @ref="_sessionEditor" @key="(_editorGeneration, _editingVersion)"
+                <SessionEditor @ref="_sessionEditor" @key="(nameof(SessionEditor), _editorGeneration, _editingVersion)"
                            ManagementCapabilities="capability"
                            SessionId="_editingSessionId"
                            ExpectedVersion="_editingVersion"
@@ -126,7 +126,7 @@
                 }
                 @if (capability.CanViewHistory && _editingSessionId is { } historySessionId)
                 {
-                    <SessionHistoryPanel @key="(_editorGeneration, _editingVersion)" SessionId="historySessionId"
+                    <SessionHistoryPanel @key="(nameof(SessionHistoryPanel), _editorGeneration, _editingVersion)" SessionId="historySessionId"
                                          SessionVersion="_editingVersion" LoadHistoryAsync="LoadSessionHistoryAsync" />
                 }
             }

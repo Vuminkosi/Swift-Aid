@@ -129,6 +129,15 @@
         </MudButton>
     }
 
+    @if (!_processingPolicyIsAvailable || !_countryCatalogueIsCurrent || string.IsNullOrWhiteSpace(_privacyNoticeReference) || string.IsNullOrWhiteSpace(_privacyNoticeVersion))
+    {
+        <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" role="status">
+            Current report-handling and location information is needed before sending. You can save a draft when device storage is available.
+            <MudButton Variant="Variant.Text" Color="Color.Primary" Size="Size.Small" StartIcon="@Icons.Material.Filled.Refresh"
+                       Disabled="_metadataLoading" OnClick="RetryReportMetadataAsync">@(_metadataLoading ? "Checking…" : "Retry")</MudButton>
+        </MudAlert>
+    }
+
     @if (!IsTrackingView)
     {
         <MudHidden Breakpoint="Breakpoint.MdAndUp">
@@ -157,6 +166,7 @@
                              DraftSavingAvailable="_storageAvailable"
                              SubmitAvailable="@CanSubmitReport"
                              CurrentDraftId="_activeDraftId"
+                             SavedDraft="_activeSubmission"
                              Draft="_reportDraft"
                              OnSaveDraft="SaveDraftAsync"
                              EditableDraftSnapshotsSupported="true"
@@ -230,6 +240,7 @@
     private string? _processingPolicyAcknowledgementLabel;
     private bool _countryCatalogueIsCurrent;
     private bool _processingPolicyIsAvailable;
+    private bool _metadataLoading = true;
     private bool _historyAudioCheckComplete;
     private bool _historyAudioCheckFailed;
     private readonly Dictionary<Guid, HistorySendEligibility> _historySendEligibility = [];
@@ -303,16 +314,27 @@
     {
         AudioCapture.StateChanged += AudioStateChanged;
         _audioState = AudioCapture.CurrentState;
-        await LoadProcessingPolicyAsync();
-        await LoadSubmissionMetadataAsync();
-        await ReloadSavedReportsAsync();
-        await RetryPendingAudioCleanupAsync();
         RememberDraftSnapshot();
+        await ReloadSavedReportsAsync();
+        await InvokeAsync(StateHasChanged);
+        try
+        {
+            await LoadProcessingPolicyAsync();
+            await LoadSubmissionMetadataAsync();
+            if (_storageAvailable) await CheckHistoryAudioAsync(_history);
+        }
+        finally { _metadataLoading = false; }
+        await RetryPendingAudioCleanupAsync();
     }
 
     private async Task LoadSubmissionMetadataAsync()
     {
-        _textLimits = null;
+        _countryCatalogueIsCurrent = false;
+        _countryCatalogueVersion = null;
+        _privacyNoticeReference = null;
+        _privacyNoticeVersion = null;
+        _countries = [];
+        _geoCountries = [];
         try
         {
             var metadata = await IntakeTransport.GetMetadataAsync(CancellationToken.None);
@@ -324,6 +346,7 @@
             if (!string.Equals(metadata.CountryCatalogueVersion, catalogue.Version, StringComparison.Ordinal) ||
                 !string.Equals(metadata.CountryCatalogueReference, catalogue.Reference, StringComparison.Ordinal))
             {
+                UpdateSendUnavailableReason();
                 return;
             }
 
@@ -349,6 +372,33 @@
 
         UpdateSendUnavailableReason();
     }
+
+    private async Task RetryReportMetadataAsync()
+    {
+        if (_metadataLoading) return;
+        _metadataLoading = true;
+        try
+        {
+            await LoadProcessingPolicyAsync();
+            await LoadSubmissionMetadataAsync();
+            if (_activeSubmission is { } active) ResetStaleConfirmations(active);
+            if (_storageAvailable) await CheckHistoryAudioAsync(_history);
+        }
+        finally { _metadataLoading = false; }
+    }
+
+    private void ResetStaleConfirmations(IntakeSubmission submission)
+    {
+        var confirmation = submission.Confirmations;
+        if (!GuestSubmissionConfirmationPolicy.ProcessingIsCurrent(confirmation, _processingPolicyReference, _processingPolicyVersion))
+            _reportDraft.ProcessingConfirmed = false;
+        if (!GuestSubmissionConfirmationPolicy.CountryIsCurrent(confirmation, _reportDraft.CountryCode, _countryCatalogueVersion))
+            _reportDraft.CountryConfirmed = false;
+    }
+
+    private bool ConfirmationsAreCurrent(IntakeSubmission submission) =>
+        GuestSubmissionConfirmationPolicy.ProcessingIsCurrent(submission.Confirmations, _processingPolicyReference, _processingPolicyVersion) &&
+        GuestSubmissionConfirmationPolicy.CountryIsCurrent(submission.Confirmations, submission.Location.CountryCode, _countryCatalogueVersion);
 
     private async Task<GeoPlaceQueryResult> SearchPlacesAsync(
         string query,
@@ -381,10 +431,8 @@
         try
         {
             var result = await ProcessingPolicyClient.GetPolicyAsync(CancellationToken.None);
-            if (!result.Succeeded || !result.Metadata.IsAvailable || result.Value is null ||
-                string.IsNullOrWhiteSpace(result.Value.Reference) ||
-                string.IsNullOrWhiteSpace(result.Value.Version) ||
-                string.IsNullOrWhiteSpace(result.Metadata.Notice))
+            if (!result.Succeeded || !result.Metadata.IsAvailable ||
+                result.Metadata.Provenance != UiCapabilityProvenance.LiveService || result.Value is not { IsValid: true })
             {
                 _processingPolicyIsAvailable = false;
                 _processingPolicyReference = null;
@@ -467,12 +515,13 @@
                 return;
             }
 
-            var restored = editable is null ? PublicReportDraft.FromSubmission(draft!.Submission) : PublicReportDraft.FromFormSnapshot(editable.FormSnapshot);
             var submission = editable?.Submission ?? draft!.Submission;
             _activeDraftId = clientSubmissionId;
             _activeSubmission = submission;
             _activeFormSnapshot = editable?.FormSnapshot;
-            _reportDraft = restored;
+            _reportDraft = editable is null ? PublicReportDraft.FromSubmission(submission) :
+                PublicReportDraft.FromFormSnapshot(editable.FormSnapshot);
+            ResetStaleConfirmations(submission);
             await RefreshSavedVoiceAsync(clientSubmissionId, submission);
             RememberDraftSnapshot();
             _pageMessage = "Draft opened. Changes remain on this device until you save them.";
@@ -501,7 +550,13 @@
         var previousSubmission = editable?.Submission ?? previous?.Submission;
         var submission = previousSubmission is null ? request.Submission : request.Submission with
         {
-            OriginalAudioAttachmentIds = previousSubmission.OriginalAudioAttachmentIds.ToArray()
+            OriginalAudioAttachmentIds = previousSubmission.OriginalAudioAttachmentIds.ToArray(),
+            Confirmations = request.Submission.Confirmations with
+            {
+                RecordingConfirmed = previousSubmission.Confirmations.RecordingConfirmed,
+                RecordingPolicyReference = previousSubmission.Confirmations.RecordingPolicyReference,
+                RecordingPolicyVersion = previousSubmission.Confirmations.RecordingPolicyVersion
+            }
         };
         var saved = request.FormSnapshot is { } snapshot
             ? request.PreviousDraftId is { } editableId
@@ -566,6 +621,12 @@
                 return;
             }
 
+            if (!ConfirmationsAreCurrent(draft.Submission))
+            {
+                _pageMessage = "Report-handling information or the country list changed. Open the draft and review your confirmations.";
+                return;
+            }
+
             await SubmissionStore.QueueAsync(clientSubmissionId);
             await SubmitQueuedAsync();
         }
@@ -582,8 +643,10 @@
 
     private async Task SendNewReportAsync(IntakeSubmission submission)
     {
-        if (_sending || !CanSubmitReport)
+        if (_sending || !CanSubmitReport || !ConfirmationsAreCurrent(submission))
         {
+            if (!_sending && CanSubmitReport && !ConfirmationsAreCurrent(submission))
+                _pageMessage = "Report-handling information or the country list changed. Review your confirmations before sending.";
             return;
         }
 
@@ -892,6 +955,11 @@
                         false,
                         "This report has an original voice note saved on this device. Voice upload is not available yet; the note remains saved here.");
                 }
+                else if (!ConfirmationsAreCurrent(draft.Submission))
+                {
+                    _historySendEligibility[report.ClientSubmissionId] = new(false,
+                        "Open this draft to review current report-handling information and country confirmation.");
+                }
                 else
                 {
                     _historySendEligibility[report.ClientSubmissionId] = HasRequiredReportMetadata
@@ -1118,19 +1186,16 @@
             GuestDraftFormSnapshot? formSnapshot = null;
             try
             {
-                submission = _reportDraft.ToSubmission(
-                    _countryCatalogueVersion,
-                    _processingPolicyReference,
-                    _processingPolicyVersion,
-                    _countries,
-                    _countryCatalogueIsCurrent,
-                    allowUnverifiedCountryForDraft: true);
+                submission = _reportDraft.ToDraftSubmission(
+                    _countryCatalogueVersion, _processingPolicyReference, _processingPolicyVersion,
+                    _countries, _countryCatalogueIsCurrent,
+                    _activeDraftId is { } savedId && _activeSubmission?.ClientSubmissionId == savedId ? _activeSubmission : null);
             }
             catch (InvalidOperationException)
             {
                 formSnapshot = _reportDraft.ToFormSnapshot();
                 submission = new PublicReportDraft { SubjectScope = _reportDraft.SubjectScope }
-                    .ToSubmission(null, null, null, [], false);
+                    .ToDraftSubmission(null, null, null, [], false, null);
             }
             if (formSnapshot is null && !_reportDraft.IsLosslesslyRepresentedBy(submission))
                 formSnapshot = _reportDraft.ToFormSnapshot();

@@ -26,6 +26,8 @@ public sealed record IntakeSubmission(
     /// <summary>Reporter-supplied symptom or sign onset; null means the older draft did not capture it.</summary>
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public ReportedTime? Onset { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public bool? DeathRelated { get; init; }
 }
 
 public enum ReportedGender { Female, Male, Other }

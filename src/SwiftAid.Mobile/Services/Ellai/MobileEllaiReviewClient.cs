@@ -9,8 +9,8 @@ namespace SwiftAid.Mobile.Services.Ellai;
 
 /// <summary>
 /// Selects the Gateway's authenticated or guest Ellai contract for each
-/// session. Guest sessions remain pinned to the antiforgery-protected guest
-/// routes for their lifetime, even if account state changes afterward.
+/// session. Known sessions remain pinned to their original route even if
+/// account state changes afterward; the Gateway still authorizes every call.
 /// </summary>
 public sealed class MobileEllaiReviewClient : IEllaiReviewClient
 {
@@ -19,8 +19,13 @@ public sealed class MobileEllaiReviewClient : IEllaiReviewClient
     private readonly IMobileAuthenticationSession _authentication;
     private readonly IGuestSubmissionPersistence? _intakePersistence;
     private readonly ConcurrentDictionary<string, byte> _guestSessions = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, byte> _accountSessions = new(StringComparer.Ordinal);
 
     public bool UsesGatewayPcmAudioDownload => true;
+
+    public Uri CreateLiveVoiceWebSocketUri(Uri baseUri, string sessionId, string voiceCaptureId,
+        long voiceCaptureOffsetSamples = 0) =>
+        ClientFor(sessionId).CreateLiveVoiceWebSocketUri(baseUri, sessionId, voiceCaptureId, voiceCaptureOffsetSamples);
 
     public void ConfigureSpeechPreferences(EllaiLanguagePreferences preferences)
     {
@@ -39,8 +44,9 @@ public sealed class MobileEllaiReviewClient : IEllaiReviewClient
         {
             var signedIn = await _authentication.IsSignedInAsync(cancellationToken).ConfigureAwait(false);
             var page = await (signedIn ? _authenticated : _guest).ListSessionHistoryAsync(offset, cancellationToken).ConfigureAwait(false);
-            if (!signedIn && page is not null)
-                foreach (var session in page.Sessions) _guestSessions.TryAdd(session.SessionId, 0);
+            if (page is not null)
+                foreach (var session in page.Sessions)
+                    (signedIn ? _accountSessions : _guestSessions).TryAdd(session.SessionId, 0);
             return page;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
@@ -86,10 +92,10 @@ public sealed class MobileEllaiReviewClient : IEllaiReviewClient
         }
         var client = isSignedIn ? _authenticated : _guest;
         var result = await client.StartSessionAsync(mode, cancellationToken).ConfigureAwait(false);
-        if (!isSignedIn && result.Status == EllaiClientOperationStatus.Accepted
+        if (result.Status == EllaiClientOperationStatus.Accepted
             && result.Session is { SessionId.Length: > 0 } session)
         {
-            _guestSessions.TryAdd(session.SessionId, 0);
+            (isSignedIn ? _accountSessions : _guestSessions).TryAdd(session.SessionId, 0);
         }
 
         return result;
@@ -104,13 +110,15 @@ public sealed class MobileEllaiReviewClient : IEllaiReviewClient
         if (_authenticated is null || _guest is null) return new(EllaiClientOperationStatus.Unavailable);
         if (_guestSessions.ContainsKey(sessionId))
             return await _guest.ResumeSessionAsync(sessionId, cancellationToken).ConfigureAwait(false);
+        if (_accountSessions.ContainsKey(sessionId))
+            return await _authenticated.ResumeSessionAsync(sessionId, cancellationToken).ConfigureAwait(false);
         try
         {
             var signedIn = await _authentication.IsSignedInAsync(cancellationToken).ConfigureAwait(false);
             var result = await (signedIn ? _authenticated : _guest).ResumeSessionAsync(sessionId, cancellationToken)
                 .ConfigureAwait(false);
-            if (!signedIn && result.Status == EllaiClientOperationStatus.Accepted)
-                _guestSessions.TryAdd(sessionId, 0);
+            if (result.Status == EllaiClientOperationStatus.Accepted)
+                (signedIn ? _accountSessions : _guestSessions).TryAdd(sessionId, 0);
             return result;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
@@ -123,10 +131,6 @@ public sealed class MobileEllaiReviewClient : IEllaiReviewClient
 
     public Task<bool> GrantVoiceCaptureConsentAsync(string sessionId, CancellationToken cancellationToken) =>
         ClientFor(sessionId).GrantVoiceCaptureConsentAsync(sessionId, cancellationToken);
-
-    public Uri CreateLiveVoiceWebSocketUri(Uri baseUri, string sessionId, string voiceCaptureId,
-        long voiceCaptureOffsetSamples = 0) =>
-        ClientFor(sessionId).CreateLiveVoiceWebSocketUri(baseUri, sessionId, voiceCaptureId, voiceCaptureOffsetSamples);
 
     public Uri CreateReportVoiceWebSocketUri(Uri baseUri, string sessionId, string voiceCaptureId,
         long voiceCaptureOffsetSamples = 0) =>
@@ -169,18 +173,9 @@ public sealed class MobileEllaiReviewClient : IEllaiReviewClient
         string sessionId, CancellationToken cancellationToken, long afterSequence = 0) =>
         ClientFor(sessionId).GetVoiceTurnStatusAsync(sessionId, cancellationToken, afterSequence);
 
-    public async Task<EllaiSessionCancelResult> CancelSessionAsync(
-        string sessionId, long expectedSessionVersion, CancellationToken cancellationToken)
-    {
-        var result = await ClientFor(sessionId)
-            .CancelSessionAsync(sessionId, expectedSessionVersion, cancellationToken).ConfigureAwait(false);
-        if (result.Status == EllaiClientOperationStatus.Cancelled)
-        {
-            _guestSessions.TryRemove(sessionId, out _);
-        }
-
-        return result;
-    }
+    public Task<EllaiSessionCancelResult> CancelSessionAsync(
+        string sessionId, long expectedSessionVersion, CancellationToken cancellationToken) =>
+        ClientFor(sessionId).CancelSessionAsync(sessionId, expectedSessionVersion, cancellationToken);
 
     public Task<EllaiSessionEventPageDto?> PollEventsAsync(
         string sessionId, long cursor, int waitSeconds, CancellationToken cancellationToken) =>

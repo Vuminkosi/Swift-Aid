@@ -14,6 +14,7 @@ public interface IWorkspaceImportClient
     Task<IReadOnlyList<CaseImportWorkspace>> GetWorkspacesAsync(CancellationToken ct);
     Task<IReadOnlyList<CaseImportHistoryItem>> GetRecentAsync(CaseImportWorkspace workspace, CancellationToken ct);
     Task<CaseImportSummary?> GetAsync(Guid importId, CancellationToken ct);
+    Task<bool> MatchesContextAsync(Guid importId, CaseImportContext context, CancellationToken ct);
     Task<IReadOnlyList<CaseImportRowOutcome>> GetIssuesAsync(Guid importId, long afterRow, CancellationToken ct);
     Task<CaseImportBatchResult> ImportAsync(Guid importId, CaseImportContext context, CaseCsvBatch batch, CancellationToken ct);
 }
@@ -51,6 +52,11 @@ public sealed class WorkspaceImportClient(AuthenticationStateProvider authentica
 
     public Task<CaseImportSummary?> GetAsync(Guid importId, CancellationToken ct) =>
         InScopeAsync((services, actor) => services.GetRequiredService<ICaseImportStore>().GetAsync(actor, importId, ct));
+
+    public Task<bool> MatchesContextAsync(Guid importId, CaseImportContext context, CancellationToken ct) =>
+        InScopeAsync(async (services, actor) =>
+            await services.GetRequiredService<ICaseImportStore>().MatchesContextAsync(actor, importId, context, ct)
+                ?? throw new CaseImportException("not-authorized"));
 
     public Task<IReadOnlyList<CaseImportRowOutcome>> GetIssuesAsync(Guid importId, long afterRow, CancellationToken ct) =>
         InScopeAsync((services, actor) => services.GetRequiredService<ICaseImportWorkspaceReader>().GetIssuesAsync(actor, importId, afterRow, ct));

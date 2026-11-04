@@ -9,6 +9,7 @@ using Microsoft.Extensions.DependencyInjection;
 using OpenIddict.Validation.AspNetCore;
 using SwiftAid.Application.Authorization;
 using SwiftAid.Application.Sessions;
+using SwiftAid.Client.Presentation;
 using SwiftAid.Contracts.Sessions;
 
 namespace SwiftAid.Gateway.Endpoints;
@@ -33,8 +34,10 @@ public static class CommunitySessionEndpoints
             IdentityConstants.ApplicationScheme,
             OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme);
 
-        var group = endpoints.MapGroup("/api/v1/sessions");
+        var group = endpoints.MapGroup("/api/v1/sessions")
+            .AddEndpointFilter(RequireCurrentAccountAsync);
         endpoints.MapGroup("/api/v1/organizations/{organizationId}/session-materials")
+            .AddEndpointFilter(RequireCurrentAccountAsync)
             .MapDelete("/{materialId}/{sourceVersion}/approval", RevokeMaterialApprovalAsync)
             .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = schemes })
             .WithName("RevokeOrganizationSessionMaterialApproval")
@@ -116,8 +119,24 @@ public static class CommunitySessionEndpoints
             .Produces<ProblemDetails>(StatusCodes.Status422UnprocessableEntity);
     }
 
+    private static async ValueTask<object?> RequireCurrentAccountAsync(EndpointFilterInvocationContext invocation,
+        EndpointFilterDelegate next)
+    {
+        var context = invocation.HttpContext;
+        context.Response.Headers.CacheControl = "private, no-store";
+        var access = context.RequestServices.GetService<IWorkspaceAccessRequest>();
+        if (access is null) return Results.NotFound();
+        var current = await access.GetAsync(context.User, null, context.RequestAborted).ConfigureAwait(false);
+        if (!current.Succeeded)
+            return current.Code == UiCapabilityResultCode.Denied
+                ? Results.NotFound()
+                : Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+        return await next(invocation).ConfigureAwait(false);
+    }
+
     private static async Task<IResult> HistoryAsync(HttpContext context, Guid sessionId, long? beforeVersion, int? limit, CancellationToken cancellationToken)
     {
+        context.Response.Headers.CacheControl = "private, no-store";
         var actor = TryGetActor(context);
         var reader = context.RequestServices.GetService<ICommunitySessionHistoryReader>();
         if (actor is null || reader is null) return Results.NotFound();

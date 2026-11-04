@@ -15,34 +15,26 @@
 <ChangePasswordSurface Snapshot="_password" OnRefresh="RefreshAsync" OnSave="ChangePasswordAsync" />
 
 <MudPaper Class="pa-4 mb-4" Elevation="0">
-    <MudText Typo="Typo.subtitle1">Connected sign-in methods</MudText>
-    @if (_account is null)
+    <MudText Typo="Typo.subtitle1">Device session</MudText>
+    @if (_accountLoading)
     {
-        <MudProgressLinear Indeterminate="true" Color="Color.Primary" aria-label="Loading sign-in methods" />
+        <MudProgressLinear Indeterminate="true" Color="Color.Primary" aria-label="Loading device session" />
+    }
+    else if (_account is null)
+    {
+        <MudText Typo="Typo.body2" role="status">Your device session could not be loaded.</MudText>
+        <MudButton Variant="Variant.Text" Color="Color.Primary" Size="Size.Small" OnClick="LoadAccountAsync"
+                   StartIcon="@Icons.Material.Filled.Refresh">Try again</MudButton>
     }
     else if (!_account.IsSignedIn)
     {
-        <MudText Typo="Typo.body2">Sign in to review your sign-in methods.</MudText>
+        <MudText Typo="Typo.body2">Sign in to view your device session.</MudText>
     }
     else
     {
-        <SwiftAidSettingsGroup Label="Methods" HeadingId="security-methods-heading">
-            @foreach (var provider in _account.Providers)
-            {
-                <SwiftAidSettingsRow Title="@provider.Name"
-                                     Description="@provider.StatusMessage">
-                    <Trailing>
-                        <MudChip T="string" Size="Size.Small"
-                                 Color="@(provider.IsConnected ? Color.Success : Color.Default)"
-                                 Variant="Variant.Outlined">
-                            @(provider.IsConnected ? "Connected" : provider.IsAvailable ? "Available" : "Unavailable")
-                        </MudChip>
-                    </Trailing>
-                </SwiftAidSettingsRow>
-            }
-        </SwiftAidSettingsGroup>
+        <MudText Typo="Typo.body2">This device is signed in.</MudText>
         <MudText Typo="Typo.caption">
-            Only this device session is shown here. Remote session management is not supported.
+            Linked sign-in methods and remote sessions cannot be managed here yet.
         </MudText>
     }
 </MudPaper>
@@ -50,6 +42,7 @@
 @code {
     private ChangePasswordSnapshot _password = ChangePasswordSnapshot.Loading;
     private AccountPresentationState? _account;
+    private bool _accountLoading = true;
 
     private HttpPasswordAuthClient AuthClient =>
         (HttpPasswordAuthClient?)ServiceProvider.GetService(typeof(HttpPasswordAuthClient))
@@ -79,27 +72,57 @@
 
     protected override async Task OnInitializedAsync()
     {
-        _account = (await AccountClient.GetStateAsync()).Value;
-        await RefreshAsync();
+        await Task.WhenAll(LoadAccountAsync(), RefreshAsync());
+    }
+
+    private async Task LoadAccountAsync()
+    {
+        if (!_accountLoading) _accountLoading = true;
+        _account = null;
+        try
+        {
+            var result = await AccountClient.GetStateAsync();
+            _account = result.Succeeded ? result.Value : null;
+        }
+        catch (Exception)
+        {
+            _account = null;
+        }
+        finally
+        {
+            _accountLoading = false;
+            await InvokeAsync(StateHasChanged);
+        }
     }
 
     private async Task RefreshAsync()
     {
-        var profile = await ProfileClient.GetAsync();
-        if (profile.Value is null)
+        try
         {
-            _password = profile.Code == UiCapabilityResultCode.Denied
-                ? ChangePasswordSnapshot.SignedOut
-                : ChangePasswordSnapshot.Unavailable with
-                {
-                    StatusMessage = profile.Message ?? ChangePasswordSnapshot.Unavailable.StatusMessage
-                };
-            return;
-        }
+            var profile = await ProfileClient.GetAsync();
+            if (profile.Value is null)
+            {
+                _password = profile.Code == UiCapabilityResultCode.Denied
+                    ? ChangePasswordSnapshot.SignedOut
+                    : ChangePasswordSnapshot.Unavailable with
+                    {
+                        StatusMessage = profile.Message ?? ChangePasswordSnapshot.Unavailable.StatusMessage
+                    };
+                return;
+            }
 
-        _password = profile.Value.IsSignedIn
-            ? new ChangePasswordSnapshot(ChangePasswordViewState.Ready, false)
-            : ChangePasswordSnapshot.SignedOut;
+            _password = profile.Value.IsSignedIn
+                ? new ChangePasswordSnapshot(ChangePasswordViewState.Ready, false)
+                : ChangePasswordSnapshot.SignedOut;
+        }
+        catch (Exception)
+        {
+            _password = ChangePasswordSnapshot.Unavailable;
+        }
+        finally
+        {
+            await InvokeAsync(StateHasChanged);
+        }
     }
 
     private async Task ChangePasswordAsync(ChangePasswordRequest request)

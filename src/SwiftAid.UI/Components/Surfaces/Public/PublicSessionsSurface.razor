@@ -314,6 +314,10 @@
                     <div><dt>Session capacity</dt><dd>@capacity</dd></div>
                 }
             </dl>
+            @if (SessionSupplementaryContent is not null)
+            {
+                @SessionSupplementaryContent(selected)
+            }
 
             <div class="public-session-details__materials">
                 <MudText Typo="Typo.subtitle2" HtmlTag="h3">Linked materials</MudText>
@@ -497,6 +501,7 @@
     [Parameter] public EventCallback<Guid?> OnManageSession { get; set; }
     [Parameter] public Func<bool>? HasPendingEditorInput { get; set; }
     [Parameter] public RenderFragment<SessionManagementPresentation>? StaffSessionEditorContent { get; set; }
+    [Parameter] public RenderFragment<PublicSessionView>? SessionSupplementaryContent { get; set; }
     [Parameter] public SessionManagementPresentation? StaffEditorCapabilities { get; set; }
     [Parameter] public long StaffEditorOpenRequest { get; set; }
 

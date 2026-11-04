@@ -1,0 +1,17 @@
+@page "/welcome-fixture"
+@inject SwiftAid.Ui.TestHost.SessionHistoryFixture Authentication
+
+<SwiftAidThemeProvider />
+<MudPopoverProvider />
+@if (_ready)
+{
+    <Welcome />
+}
+
+@code {
+    private bool _ready;
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (firstRender) { Authentication.ChangeIdentity(false, false); _ready = true; StateHasChanged(); }
+    }
+}

@@ -459,33 +459,49 @@
 
         _reportVoiceCapture = reportCapture;
         _startingVoiceCapture = true;
-        var nativePermission = Services.GetService<IEllaiMicrophonePermission>();
-        if (nativePermission is not null
-            && !await nativePermission.RequestAsync(CancellationToken.None).ConfigureAwait(false))
+        try
+        {
+            var nativePermission = Services.GetService<IEllaiMicrophonePermission>();
+            if (nativePermission is not null
+                && !await nativePermission.RequestAsync(CancellationToken.None).ConfigureAwait(false))
+            {
+                _startingVoiceCapture = false;
+                StatusText = "Microphone permission was denied. You can still type to Ellai.";
+                Phase = EllaiStatusPhases.NeedsInput;
+                return;
+            }
+
+            if (!_voiceCaptureConsentGranted)
+            {
+                if (!await ReviewClient.GrantVoiceCaptureConsentAsync(session.SessionId, CancellationToken.None)
+                        .ConfigureAwait(false))
+                {
+                    _startingVoiceCapture = false;
+                    StatusText = "We couldn't confirm your permission to use the microphone. No audio was recorded.";
+                    Phase = EllaiStatusPhases.Blocked;
+                    return;
+                }
+
+                if (_sessionView?.SessionId != session.SessionId || _sessionView.Status != "Active")
+                {
+                    _startingVoiceCapture = false;
+                    return;
+                }
+                _voiceCaptureConsentGranted = true;
+            }
+        }
+        catch (Exception)
         {
             _startingVoiceCapture = false;
-            StatusText = "Microphone permission was denied. You can still type to Ellai.";
+            StatusText = "Microphone access could not be checked. You can still type to Ellai.";
             Phase = EllaiStatusPhases.NeedsInput;
             return;
         }
 
-        if (reportCancellation.IsCancellationRequested)
+        if (_sessionView?.SessionId != session.SessionId || _sessionView.Status != "Active")
         {
             _startingVoiceCapture = false;
             return;
-        }
-
-        if (!_voiceCaptureConsentGranted)
-        {
-            if (!await ReviewClient.GrantVoiceCaptureConsentAsync(session.SessionId, CancellationToken.None)
-                    .ConfigureAwait(false))
-            {
-                _startingVoiceCapture = false;
-                StatusText = "We couldn't confirm your permission to use the microphone. No audio was recorded.";
-                Phase = EllaiStatusPhases.Blocked;
-                return;
-            }
-            _voiceCaptureConsentGranted = true;
         }
 
         if (reportCancellation.IsCancellationRequested)

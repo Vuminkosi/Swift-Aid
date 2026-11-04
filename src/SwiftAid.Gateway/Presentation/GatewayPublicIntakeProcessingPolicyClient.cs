@@ -16,16 +16,15 @@ public sealed class GatewayPublicIntakeProcessingPolicyClient(
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (!IsSafeReference(_options.ProcessingPolicyReference) ||
-            !IsSafeVersion(_options.ProcessingPolicyVersion))
+        var policy = new PublicReportProcessingPolicy(
+            _options.ProcessingPolicyReference,
+            _options.ProcessingPolicyVersion);
+        if (!_options.IsValid || !policy.IsValid)
         {
             return Task.FromResult(UiCapabilityResults.Unavailable<PublicReportProcessingPolicy>(
                 "public-intake-processing-policy"));
         }
 
-        var policy = new PublicReportProcessingPolicy(
-            _options.ProcessingPolicyReference,
-            _options.ProcessingPolicyVersion);
         var metadata = new UiCapabilityMetadata(
             "public-intake-processing-policy",
             UiCapabilityResults.ContractVersion,
@@ -38,28 +37,4 @@ public sealed class GatewayPublicIntakeProcessingPolicyClient(
             metadata));
     }
 
-    private static bool IsSafeReference(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value) || value.Length > 256 ||
-            !string.Equals(value, value.Trim(), StringComparison.Ordinal) ||
-            value.Any(char.IsControl) || value.Contains('\\'))
-        {
-            return false;
-        }
-
-        if (value.StartsWith("/", StringComparison.Ordinal))
-        {
-            return !value.StartsWith("//", StringComparison.Ordinal) &&
-                !value.Contains("..", StringComparison.Ordinal);
-        }
-
-        return Uri.TryCreate(value, UriKind.Absolute, out var uri) &&
-            string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) &&
-            !string.IsNullOrWhiteSpace(uri.Host) &&
-            string.IsNullOrEmpty(uri.UserInfo);
-    }
-
-    private static bool IsSafeVersion(string? value) =>
-        !string.IsNullOrWhiteSpace(value) && value.Length <= 64 &&
-        value.All(character => char.IsAsciiLetterOrDigit(character) || character is '.' or '-' or '_');
 }

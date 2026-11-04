@@ -3,6 +3,7 @@
 @using SwiftAid.Mobile.Components.Notifications
 @using SwiftAid.Mobile.Services.Authentication
 @using SwiftAid.Mobile.Services.Welcome
+@using SwiftAid.Mobile.Services
 @using SwiftAid.Client.Navigation
 @using SwiftAid.UI.Components.Surfaces.Shell
 @using SwiftAid.UI.Ellai
@@ -114,7 +115,7 @@
 @if (ShouldShowEllai)
 {
     <EllaiGuidanceHost RevealNavigation="RevealNavigationAsync" />
-    <EllaiLauncherMenu PublicHelpOnly="true" OnModeSelected="RequestEllaiMode" />
+    <EllaiLauncherMenu PublicHelpOnly="@MobileShellAccessPolicy.PublicEllaiOnly(_authenticationResolved, _signedIn)" OnModeSelected="RequestEllaiMode" />
 }
 
 @code {
@@ -180,21 +181,7 @@
             return string.IsNullOrEmpty(path) ? "/" : path;
         }
     }
-    private bool IsPublicSafeRoute => CurrentPath.Equals("/", StringComparison.OrdinalIgnoreCase) ||
-        CurrentPath.Equals("/welcome", StringComparison.OrdinalIgnoreCase) ||
-        CurrentPath.Equals("/report", StringComparison.OrdinalIgnoreCase) ||
-        CurrentPath.Equals("/ellai/about", StringComparison.OrdinalIgnoreCase) ||
-        CurrentPath.Equals("/education", StringComparison.OrdinalIgnoreCase) ||
-        CurrentPath.Equals("/sessions", StringComparison.OrdinalIgnoreCase) ||
-        CurrentPath.Equals("/account", StringComparison.OrdinalIgnoreCase) ||
-        CurrentPath.Equals("/more", StringComparison.OrdinalIgnoreCase) ||
-        CurrentPath.Equals("/not-found", StringComparison.OrdinalIgnoreCase) ||
-        CurrentPath.Equals("/sign-in", StringComparison.OrdinalIgnoreCase) ||
-        CurrentPath.Equals("/forgot-password", StringComparison.OrdinalIgnoreCase) ||
-        CurrentPath.Equals("/reset-password", StringComparison.OrdinalIgnoreCase) ||
-        CurrentPath.Equals("/register", StringComparison.OrdinalIgnoreCase) ||
-        CurrentPath.Equals("/verify-email", StringComparison.OrdinalIgnoreCase) ||
-        CurrentPath.Equals("/welcome-complete", StringComparison.OrdinalIgnoreCase);
+    private bool IsPublicSafeRoute => MobileShellAccessPolicy.IsPublicPath(CurrentPath);
     private string CasesHref => _signedIn ? "/my-cases" : "/report?view=tracking";
     private void RequestEllaiMode(SwiftAid.Contracts.Ellai.EllaiMode mode) => EllaiLauncher.Request(mode);
     private string SignInHref

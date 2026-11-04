@@ -64,6 +64,7 @@
 
 @code {
     private IntakeReceipt? _receipt;
+    private readonly WebReportSubmissionIdentity _submissionIdentity = new();
     private Guid? _currentDraftId;
     private long _serverValidationSequence;
     private long _activeServerValidationRevision;
@@ -321,6 +322,7 @@
 
     private async Task SendReportAsync(IntakeSubmission submission)
     {
+        submission = _submissionIdentity.Assign(submission);
         if (_sending || !_storageAvailable || !CanSubmitReport) return;
         _sending = true;
         _activeServerValidationRevision = 0;

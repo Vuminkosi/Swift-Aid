@@ -56,6 +56,23 @@
     }
     else
     {
+        <MudHidden Breakpoint="Breakpoint.MdAndDown" Invert="true">
+            <div class="intake-coordination__list" role="list" aria-label="Unrouted intake reports">
+                @foreach (var entry in _entries)
+                {
+                    <MudPaper Outlined="true" Class="intake-coordination__item" role="listitem">
+                        <MudText Typo="Typo.body2">Received: @entry.ReceivedAtUtc.ToLocalTime().ToString("g")</MudText>
+                        <MudChip T="string" Size="Size.Small" Color="Color.Default">@entry.Status</MudChip>
+                        <MudChip T="string" Size="Size.Small" Color="Color.Warning">@FriendlyRouting(entry.RoutingStatus)</MudChip>
+                        <MudText Typo="Typo.body2">Country: @entry.CountryCode</MudText>
+                        <MudText Typo="Typo.body2">Area: @AreaLabel(entry)</MudText>
+                        <MudText Typo="Typo.body2">Reviewer: @ShortActor(entry.CoordinatorActorId)</MudText>
+                        <MudButton Variant="Variant.Text" Size="Size.Small" Color="Color.Primary" StartIcon="@Icons.Material.Filled.RateReview" Disabled="@(_loading || _acting)" OnClick="() => SelectAsync(entry)" aria-label="@RowAccessibleName(entry)">Review</MudButton>
+                    </MudPaper>
+                }
+            </div>
+        </MudHidden>
+        <MudHidden Breakpoint="Breakpoint.MdAndDown">
         <MudTable Items="_entries" Hover="true" Dense="true" aria-label="Unrouted intake reports">
             <HeaderContent>
                 <MudTh>Received</MudTh>
@@ -76,6 +93,7 @@
                 <MudTd><MudButton Variant="Variant.Text" Size="Size.Small" Color="Color.Primary" StartIcon="@Icons.Material.Filled.RateReview" Disabled="@(_loading || _acting)" OnClick="() => SelectAsync(context)" aria-label="@RowAccessibleName(context)">Review</MudButton></MudTd>
             </RowTemplate>
         </MudTable>
+        </MudHidden>
     }
 
     @if (_selectedReceiptId is not null)

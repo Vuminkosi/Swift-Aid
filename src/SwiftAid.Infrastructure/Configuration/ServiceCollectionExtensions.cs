@@ -458,6 +458,10 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ICaseMonitoringSummaryStore, PostgresCaseMonitoringSummaryStore>();
         services.AddScoped<ICaseMonitoringSummaryQuery, CaseMonitoringSummaryQuery>();
         services.AddScoped<ICaseMonitoringQueueStore, PostgresCaseMonitoringQueueStore>();
+        services.AddScoped<ICaseMonitoringPageStore, PostgresCaseMonitoringPageStore>();
+        services.AddScoped<ICaseMonitoringPageQuery, CaseMonitoringPageQuery>();
+        services.AddScoped<ICaseWorkDiscoveryStore, PostgresCaseWorkDiscoveryStore>();
+        services.AddScoped<ICaseWorkDiscoveryQuery, CaseWorkDiscoveryQuery>();
         services.AddScoped<ICaseMonitoringQueueQuery, CaseMonitoringQueueQuery>();
         // Community sessions ride the same pipeline flag: when the pipeline is disabled the
         // service stays unregistered and the staff/public session endpoints fail closed

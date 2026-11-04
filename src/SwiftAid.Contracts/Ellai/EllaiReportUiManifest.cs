@@ -64,7 +64,8 @@ public static class EllaiReportUiManifest
         [
             new("report.subject-kind", "Human health or animal health", "selection", true, "Always", "Choose one concern type."),
             new("report.animal-scope", "Individual, herd, flock or other group", "selection", true, "Animal health selected", "Choose the reported animal scope; do not infer it."),
-            new("report.gender", "Reported gender", "selection", false, "Human health selected", "Capture only when the reporter explicitly states it; otherwise leave unknown.")
+            new("report.gender", "Reported gender", "selection", false, "Human health selected", "Capture only when the reporter explicitly states it; otherwise leave unknown."),
+            new("report.death-related", "Is this concern related to a death?", "selection", false, "Human or animal health selected", "Choose yes, no or unknown; do not infer it.")
         ],
         "report.narrative" =>
         [

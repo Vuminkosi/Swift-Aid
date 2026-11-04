@@ -30,12 +30,15 @@
     @if (OnFilterChanged.HasDelegate)
     {
         <MudStack Row="true" Spacing="2" Wrap="Wrap.Wrap" Class="operations-work-management__filters" aria-label="Work filters">
+            @if (ShowKindFilter)
+            {
             <MudSelect T="OperationsWorkKind?" Value="@Filter.Kind" ValueChanged="SetKindFilterAsync" Label="Work type" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true" Disabled="@IsBusy" Class="operations-work-management__filter">
                 @foreach (var kind in Enum.GetValues<OperationsWorkKind>())
                 {
                     <MudSelectItem T="OperationsWorkKind?" Value="@((OperationsWorkKind?)kind)">@WorkTypeLabel(kind)</MudSelectItem>
                 }
             </MudSelect>
+            }
             <MudSelect T="OperationsWorkStatus?" Value="@Filter.Status" ValueChanged="SetStatusFilterAsync" Label="Status" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true" Disabled="@IsBusy" Class="operations-work-management__filter">
                 @foreach (var status in FilterableStatuses)
                 {
@@ -339,6 +342,7 @@
     [Parameter] public OperationsSurfaceState State { get; set; } = OperationsSurfaceState.Unavailable;
     [Parameter] public IReadOnlyList<OperationsWorkItem> Items { get; set; } = Array.Empty<OperationsWorkItem>();
     [Parameter] public WorkFilter Filter { get; set; } = new(null, null, null, 1, 25);
+    [Parameter] public bool ShowKindFilter { get; set; } = true;
     [Parameter] public bool HasPreviousPage { get; set; }
     [Parameter] public bool HasNextPage { get; set; }
     [Parameter] public bool IsBusy { get; set; }

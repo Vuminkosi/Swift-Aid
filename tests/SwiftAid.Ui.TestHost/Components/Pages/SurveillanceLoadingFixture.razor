@@ -1,0 +1,20 @@
+@page "/surveillance-loading-fixture"
+@inject SwiftAid.Ui.TestHost.SurveillanceLoadingFixture Service
+
+<SwiftAidThemeProvider />
+<MudPopoverProvider />
+<MudDialogProvider />
+<button @onclick="Service.FailDetails">Fail signal details</button>
+<button @onclick="Service.DenyDetails">Deny signal details</button>
+@if (_ready)
+{
+    <Surveillance />
+}
+
+@code {
+    private bool _ready;
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (firstRender) { _ready = true; StateHasChanged(); }
+    }
+}

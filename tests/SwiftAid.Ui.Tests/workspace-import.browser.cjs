@@ -3,7 +3,7 @@
 const assert = require("node:assert/strict");
 const path = require("node:path");
 const fs = require("node:fs");
-const { chromium } = (() => { try { return require("playwright"); } catch { return require("playwright-core"); } })();
+const { chromium } = (() => { if (process.env.SWIFTAID_PLAYWRIGHT_PACKAGE) return require(process.env.SWIFTAID_PLAYWRIGHT_PACKAGE); try { return require("playwright"); } catch { return require("playwright-core"); } })();
 
 async function main() {
     const base = process.env.SWIFTAID_IMPORT_BROWSER_URL;
@@ -30,6 +30,15 @@ async function main() {
         await page.getByLabel("Case reports file", { exact: true }).setInputFiles(process.env.SWIFTAID_IMPORT_BROWSER_FILE);
         await page.getByRole("checkbox", { name: /reviewed these reports/ }).check();
         await page.getByRole("checkbox", { name: /may be processed/ }).check();
+        const original = fs.readFileSync(process.env.SWIFTAID_IMPORT_BROWSER_FILE);
+        const changed = Buffer.from(original);
+        changed[changed.length - 3] = changed[changed.length - 3] === 65 ? 66 : 65;
+        await page.getByLabel("Case reports file", { exact: true }).setInputFiles({ name: "changed.csv", mimeType: "text/csv", buffer: changed });
+        const checkpointBeforeMismatch = await page.locator(".case-imports__counts").innerText();
+        await page.getByRole("button", { name: "Resume import", exact: true }).click();
+        await page.getByText("The selected file or import settings differ from the original import. Select the original file and settings to resume.", { exact: true }).waitFor();
+        assert.equal(await page.locator(".case-imports__counts").innerText(), checkpointBeforeMismatch);
+        await page.getByLabel("Case reports file", { exact: true }).setInputFiles(process.env.SWIFTAID_IMPORT_BROWSER_FILE);
         await page.getByRole("button", { name: "Resume import", exact: true }).click();
         await page.getByText("Import complete. Your cases are saved.", { exact: true }).waitFor({ timeout: 60000 });
         const counts = await page.locator(".case-imports__counts").innerText();

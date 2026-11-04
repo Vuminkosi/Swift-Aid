@@ -201,6 +201,21 @@ public sealed class WebGuestIntakeServiceTests
         Assert.Equal(result.Message, result.Metadata.Notice);
         Assert.Equal(1, intake.SubmitCalls);
     }
+    [Fact]
+    public void WebReportIdentity_ReusesIdentityForRetryAndChangesItForEditedReport()
+    {
+        var identity = new WebReportSubmissionIdentity();
+        var report = GuestSubmissionSamples.Human() with { ClientSubmissionId = Guid.Empty };
+
+        var first = identity.Assign(report);
+        var retry = identity.Assign(report);
+        var edited = identity.Assign(report with { Narrative = "Updated report" });
+
+        Assert.NotEqual(Guid.Empty, first.ClientSubmissionId);
+        Assert.Equal(first.ClientSubmissionId, retry.ClientSubmissionId);
+        Assert.NotEqual(first.ClientSubmissionId, edited.ClientSubmissionId);
+    }
+
     private sealed class ScopedLifetime : IDisposable
     {
         public bool Disposed { get; private set; }

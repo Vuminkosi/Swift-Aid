@@ -1,0 +1,28 @@
+@page "/case-detail-loading-fixture"
+@inject SwiftAid.Ui.TestHost.CaseDetailLoadingFixture Service
+
+<SwiftAidThemeProvider />
+<MudPopoverProvider />
+<MudDialogProvider />
+<button @onclick="SwitchCase">Open second case</button>
+<button @onclick="Service.Release">Release observations</button>
+@if (_ready)
+{
+    <CaseDetail CaseId="@_caseId" />
+}
+
+@code {
+    private string _caseId = SwiftAid.Ui.TestHost.CaseDetailLoadingFixture.FirstCase.ToString();
+    private bool _ready;
+
+    private void SwitchCase() => _caseId = SwiftAid.Ui.TestHost.CaseDetailLoadingFixture.SecondCase.ToString();
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _ready = true;
+            StateHasChanged();
+        }
+    }
+}

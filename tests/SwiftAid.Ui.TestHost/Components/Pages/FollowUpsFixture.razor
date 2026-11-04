@@ -1,0 +1,16 @@
+@page "/follow-ups-fixture"
+@inject SwiftAid.Ui.TestHost.AssignmentsFixture Service
+
+<SwiftAidThemeProvider />
+<MudPopoverProvider />
+<MudDialogProvider />
+<button @onclick="() => Service.Denied = true">Revoke queue access</button>
+@if (_ready) { <FollowUps /> }
+
+@code {
+    private bool _ready;
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (firstRender) { _ready = true; StateHasChanged(); }
+    }
+}

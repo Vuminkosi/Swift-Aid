@@ -7,6 +7,81 @@ namespace SwiftAid.Client.Tests;
 public sealed class CommandBackedWorkManagementClientTests
 {
     [Fact]
+    public async Task CaseScopedWorkReadsBeyondGlobalLimitAndDoesNotUseGlobalQueue()
+    {
+        var pages = new ScopedPages();
+        var monitoring = new UnavailableMonitoringClient();
+        var client = new CommandBackedWorkManagementClient(new StubCommandClient(), monitoring, new StubTimelineClient(), pages);
+        var result = await client.GetAsync(CaseId, new WorkManagementQuery(new PageRequest(9, 25), WorkManagementKind.FollowUp));
+        Assert.Equal(UiCapabilityResultCode.Success, result.Code);
+        Assert.Equal(205, result.Value!.Items.TotalCount);
+        Assert.Equal(5, result.Value.Items.Items.Count);
+        Assert.Equal(new[] { 0, 100, 200 }, pages.Offsets);
+        Assert.Equal(0, monitoring.Calls);
+        Assert.Null(result.Message);
+    }
+
+    [Theory]
+    [InlineData(CaseMonitoringPageAccess.Stale, UiCapabilityResultCode.Conflict)]
+    [InlineData(CaseMonitoringPageAccess.NotFoundOrNotAuthorized, UiCapabilityResultCode.Denied)]
+    [InlineData(CaseMonitoringPageAccess.Unavailable, UiCapabilityResultCode.Unavailable)]
+    public async Task CaseScopedWorkDiscardsEarlierPagesWhenContinuationFails(CaseMonitoringPageAccess failure, UiCapabilityResultCode expected)
+    {
+        var client = new CommandBackedWorkManagementClient(new StubCommandClient(), new UnavailableMonitoringClient(),
+            new StubTimelineClient(), new ScopedPages { ContinuationFailure = failure });
+        var result = await client.GetAsync(CaseId, new WorkManagementQuery(new PageRequest(1, 25)));
+        Assert.Equal(expected, result.Code);
+        Assert.Null(result.Value);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task CaseScopedWorkRejectsDuplicateOrUnknownRows(bool duplicate)
+    {
+        var client = new CommandBackedWorkManagementClient(new StubCommandClient(), new UnavailableMonitoringClient(),
+            new StubTimelineClient(), new ScopedPages { Duplicate = duplicate, UnknownStatus = !duplicate });
+        var result = await client.GetAsync(CaseId, new WorkManagementQuery(new PageRequest(1, 25)));
+        Assert.Equal(UiCapabilityResultCode.Unavailable, result.Code);
+        Assert.Null(result.Value);
+    }
+
+    [Fact]
+    public async Task OverdueFilterIncludesAcknowledgedFollowUpsPastTheirDueDate()
+    {
+        var client = new CommandBackedWorkManagementClient(new StubCommandClient(), new UnavailableMonitoringClient(),
+            new StubTimelineClient(), new ScopedPages { AcknowledgedPastDue = true });
+        var result = await client.GetAsync(CaseId,
+            new WorkManagementQuery(new PageRequest(1, 25), WorkManagementKind.FollowUp, OverdueOnly: true));
+        Assert.Equal(UiCapabilityResultCode.Success, result.Code);
+        Assert.Equal(205, result.Value!.Items.TotalCount);
+        Assert.All(result.Value.Items.Items, item => Assert.True(item.AssignedToCurrentActor));
+    }
+
+    private sealed class ScopedPages : ICaseMonitoringPageClient
+    {
+        public List<int> Offsets { get; } = [];
+        public CaseMonitoringPageAccess? ContinuationFailure { get; init; }
+        public bool Duplicate { get; init; }
+        public bool UnknownStatus { get; init; }
+        public bool AcknowledgedPastDue { get; init; }
+        public Task<CaseMonitoringPageResult> GetAsync(Guid caseId, int offset, int limit, long version, CancellationToken cancellationToken = default)
+        {
+            Assert.Equal(CaseId, caseId);
+            Assert.Equal(7, version);
+            Offsets.Add(offset);
+            if (offset > 0 && ContinuationFailure is { } failure) return Task.FromResult(new CaseMonitoringPageResult(failure, null));
+            var items = Enumerable.Range(offset, Math.Min(limit, 205 - offset)).Select(index =>
+                new CaseMonitoringPageItem(new MonitoringQueueItem(caseId, MonitoringQueueKind.FollowUp,
+                    Guid.Parse($"{(Duplicate && index == 100 ? 1 : index + 1):x8}-0000-0000-0000-000000000001"), "Follow-up", "worker",
+                    AcknowledgedPastDue ? DateTimeOffset.UtcNow.AddDays(-1) : DateTimeOffset.UtcNow,
+                    UnknownStatus && index == 0 ? "Unknown" : AcknowledgedPastDue ? "Acknowledged" : "Scheduled", false, DateTimeOffset.UtcNow, 1), true)).ToArray();
+            return Task.FromResult(new CaseMonitoringPageResult(CaseMonitoringPageAccess.Found,
+                new CaseMonitoringPage(caseId, version, items, offset + items.Length < 205 ? offset + limit : null)));
+        }
+    }
+
+    [Fact]
     public async Task Assignment_query_and_post_action_refresh_do_not_depend_on_monitoring()
     {
         var header = Header() with { AssignmentVersion = 2, AssignmentRecordedAtUtc = DateTimeOffset.UtcNow,
@@ -18,6 +93,7 @@ public sealed class CommandBackedWorkManagementClientTests
         var query = new WorkManagementQuery(new PageRequest(1, 25), WorkManagementKind.Assignment);
         var result = await client.GetAsync(CaseId, query);
         Assert.Equal(UiCapabilityResultCode.Success, result.Code);
+        Assert.Null(result.Message);
         var item = Assert.Single(result.Value!.Items.Items);
         Assert.Contains(WorkManagementAction.AcknowledgeAssignment, item.AvailableActions);
         var accepted = await client.ExecuteAsync(new WorkManagementCommand(CaseId, item.WorkKey,
@@ -79,6 +155,15 @@ public sealed class CommandBackedWorkManagementClientTests
     private static readonly Guid FollowUpId = Guid.Parse("22222222-2222-2222-2222-222222222222");
     private static readonly Guid EscalationId = Guid.Parse("33333333-3333-3333-3333-333333333333");
     private static readonly Guid AssistanceId = Guid.Parse("44444444-4444-4444-4444-444444444444");
+
+    [Fact]
+    public async Task MonitoringBackedWorkDisclosesThatTheSourceIsBounded()
+    {
+        var result = await CreateClient().GetAsync(CaseId,
+            new WorkManagementQuery(new PageRequest(1, 25), WorkManagementKind.Assistance));
+        Assert.True(result.Succeeded);
+        Assert.Equal(CommandBackedWorkManagementClient.LimitedMonitoringNotice, result.Message);
+    }
 
     [Fact]
     public async Task Assistance_projects_open_state_and_receipt_confirmation_sends_provenance()

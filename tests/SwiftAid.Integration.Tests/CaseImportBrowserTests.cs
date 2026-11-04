@@ -70,7 +70,7 @@ public sealed class CaseImportBrowserTests(ITestOutputHelper output)
         var commands = Enumerable.Range(0, 250).Select(_ => Guid.NewGuid()).ToArray();
         var csv = CaseImportPostgresTests.Csv(commands[0]);
         csv += string.Concat(commands.Skip(1).Select(command => CaseImportPostgresTests.Csv(command).Split('\n', 2)[1]));
-        var directory = Path.Combine(root, "tests", "SwiftAid.Ui.Tests", "artifacts", "pipeline-imports-20261101");
+        var directory = Path.Combine(root, ".codex", "case-list-browser", "import-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
         var file = Path.Combine(directory, "synthetic-import.csv");
         await File.WriteAllTextAsync(file, csv);

@@ -3,16 +3,26 @@
 @using SwiftAid.UI.Components.Surfaces.Operations
 @attribute [Microsoft.AspNetCore.Authorization.Authorize]
 @inject IMapAggregateClient MapAggregateClient
+@inject ISurveillanceMapDetailsClient MapDetailsClient
+@inject SurveillancePlaceLookupClient PlaceLookup
 
 <PageTitle>Surveillance | SwiftAid</PageTitle>
 <OperationsMapSurface Title="Regional activity"
                       Eyebrow="Operations"
-                      Description="Totals for cases assigned to you that you may still read, grouped by country and region. The map places country totals only; it does not show report locations or health patterns."
-                      State="_state" Areas="_areas"
+                      Description="Explore authorized report totals by place and review available signals. Map markers use public place references, not precise case locations."
+                      State="_state" Areas="_areas" Details="_details" DetailsLoading="_detailsLoading" Focus="_focus" FocusCountry="@NullIfEmpty(_regionCode)"
                       UpdatedAtUtc="_updatedAtUtc" ContractVersion="_contractVersion"
                       PeriodLabel="@PeriodDescription" StatusMessage="@_message"
                       OnRetry="LoadAsync">
     <FilterContent>
+        @if (_placeNotice is not null)
+        {
+            <MudText Typo="Typo.body2" role="status">@_placeNotice</MudText>
+        }
+        @if (_details is not null)
+        {
+            <MudText Typo="Typo.caption" Color="Color.Secondary">Mapped reports and signals cover the workspace selected in your account.</MudText>
+        }
         <MudTextField T="string" Label="Country or region code" Value="@_regionCode"
                       ValueChanged="RegionChangedAsync" Placeholder="All areas" Clearable="true" />
         <MudSelect T="MapAggregatePeriod" Label="Time window" Value="_period"
@@ -34,14 +44,51 @@
     private DateTimeOffset? _updatedAtUtc;
     private string _contractVersion = "Unknown";
     private string? _message;
+    private SwiftAid.Contracts.Surveillance.SurveillanceMapDetails? _details;
+    private bool _detailsLoading;
     private long _requestGeneration;
+    private long _locationGeneration;
+    private OperationsMapSurface.MapFocus? _focus;
+    private string? _placeNotice;
+
+    [SupplyParameterFromQuery(Name = "country")] public string? Country { get; set; }
+    [SupplyParameterFromQuery(Name = "place")] public string? Place { get; set; }
+    [SupplyParameterFromQuery(Name = "region")] public string? Region { get; set; }
+    [SupplyParameterFromQuery(Name = "area")] public string? Area { get; set; }
+    private string? _loadedLocation;
 
     private string PeriodDescription => _period == MapAggregatePeriod.Days90 ? "the last 90 days (by record creation)" : "the last 30 days (by record creation)";
 
-    protected override Task OnInitializedAsync() => LoadAsync();
+    protected override async Task OnParametersSetAsync()
+    {
+        var key = $"{Country}|{Place}|{Region}|{Area}";
+        if (key == _loadedLocation) return;
+        _loadedLocation = key;
+        var generation = ++_locationGeneration;
+        _focus = null;
+        _placeNotice = null;
+        _regionCode = Country is { Length: 2 } && Country.All(char.IsAsciiLetter) ? Country.ToUpperInvariant() : "SZ";
+        await LoadAsync();
+        if (generation != _locationGeneration || _regionCode.Length == 0 ||
+            string.IsNullOrWhiteSpace(Area) && string.IsNullOrWhiteSpace(Region)) return;
+        var place = await PlaceLookup.FindAsync(_regionCode, Place, Region, Area);
+        if (generation != _locationGeneration) return;
+        if (place is { Latitude: { } latitude, Longitude: { } longitude })
+        {
+            _focus = new(latitude, longitude, place.Name);
+            _placeNotice = $"{Region ?? place.CountryName} | {place.Name}. Marker shows the public place reference, not a case location. Totals remain at country level.";
+        }
+        else
+        {
+            _placeNotice = "The place reference could not be resolved. Country totals are shown below.";
+        }
+    }
 
     private Task RegionChangedAsync(string value)
     {
+        _locationGeneration++;
+        _focus = null;
+        _placeNotice = null;
         _regionCode = value;
         return LoadAsync();
     }
@@ -59,6 +106,8 @@
         _areas = Array.Empty<OperationsMapSurface.AreaAggregateView>();
         _updatedAtUtc = null;
         _message = null;
+        _details = null;
+        _detailsLoading = true;
 
         try
         {
@@ -97,6 +146,30 @@
             _areas = aggregatePage.Areas.Items.Select(ToView).ToArray();
             _updatedAtUtc = result.Metadata.UpdatedAtUtc;
             _state = _areas.Count == 0 ? OperationsSurfaceState.Empty : OperationsSurfaceState.Populated;
+            if (_regionCode is { Length: 2 } && _regionCode.All(char.IsAsciiLetter))
+            {
+                await InvokeAsync(StateHasChanged);
+                try
+                {
+                    var details = await MapDetailsClient.GetAsync(_regionCode, _period);
+                    if (requestGeneration != _requestGeneration) return;
+                    if (details.Code == UiCapabilityResultCode.Denied)
+                    {
+                        _areas = Array.Empty<OperationsMapSurface.AreaAggregateView>();
+                        _updatedAtUtc = null;
+                        _state = OperationsSurfaceState.Denied;
+                    }
+                    else
+                    {
+                        _details = details.Succeeded ? details.Value : null;
+                    }
+                }
+                catch (Exception)
+                {
+                    if (requestGeneration == _requestGeneration)
+                        _details = null;
+                }
+            }
         }
         catch (Exception)
         {
@@ -108,6 +181,14 @@
             _areas = Array.Empty<OperationsMapSurface.AreaAggregateView>();
             _state = OperationsSurfaceState.Error;
             _message = "Map totals could not be loaded. Try again when your connection is available.";
+        }
+        finally
+        {
+            if (requestGeneration == _requestGeneration)
+            {
+                _detailsLoading = false;
+                await InvokeAsync(StateHasChanged);
+            }
         }
     }
 

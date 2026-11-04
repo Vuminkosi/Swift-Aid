@@ -2110,7 +2110,7 @@ public sealed class EllaiAgentFrameworkContractTests
         Assert.Equal(structured, client.SawStructuredResponse);
     }
 
-    private sealed class VerifiedSegmentStreamingClient(string provisionalText) : IChatClient
+    private sealed class VerifiedSegmentStreamingClient : IChatClient
     {
         public TaskCompletionSource FirstPart { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);

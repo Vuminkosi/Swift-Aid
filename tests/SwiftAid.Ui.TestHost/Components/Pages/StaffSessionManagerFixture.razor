@@ -1,0 +1,46 @@
+@page "/staff-session-manager-fixture"
+@inject SwiftAid.Ui.TestHost.SessionHistoryFixture Authentication
+@inject SwiftAid.Ui.TestHost.StaffSessionManagerFixture Service
+@inject SwiftAid.Ui.TestHost.StaffSubscriptionFixture Subscription
+@using SwiftAid.Ui.TestHost.Components.Sessions
+@using SwiftAid.UI.Components.Surfaces.Public
+
+<SwiftAidThemeProvider />
+<MudPopoverProvider />
+<MudDialogProvider />
+<main data-fixture-ready="@_ready.ToString().ToLowerInvariant()">
+    <button @onclick="() => Authentication.ChangeIdentity(true, false)">Switch account</button>
+    <button @onclick="() => Authentication.ChangeIdentity(true, true)">Return owner</button>
+    <button @onclick="() => Service.LoseNextCreate = true">Lose next create response</button>
+    <button @onclick="() => Service.ConflictNextUpdate = true">Conflict next update</button>
+    <button @onclick="() => Service.PauseNextCreate = true">Pause next create</button>
+    <button @onclick="Service.ReleaseCreate">Release create</button>
+    <button @onclick="StateHasChanged">Refresh create count</button>
+    <button @onclick="() => TrySubscribeAsync(true)">Test mismatched reminder</button>
+    <button @onclick="() => TrySubscribeAsync(false)">Test valid reminder</button>
+    <output id="reminder-mutations">@Subscription.SubscribeCalls</output>
+    <output id="reminder-result">@_reminderResult</output>
+    <output id="fixture-create-count">@Service.Creates</output>
+    <MobileSessionManagementLink />
+    <StaffSessions @ref="_staffSessions" />
+</main>
+
+@code {
+    private bool _ready;
+    private StaffSessions? _staffSessions;
+    private string? _reminderResult;
+    private async Task TrySubscribeAsync(bool mismatch)
+    {
+        Subscription.Mismatch = mismatch;
+        var action = new PublicSessionsSurface.SessionSubscriptionAction(SwiftAid.Ui.TestHost.StaffSubscriptionFixture.SessionId,
+            PublicSessionsSurface.SessionSubscriptionActionKind.Subscribe, 3, "consent", PublicSessionsSurface.SessionReminderChannel.Email);
+        var method = typeof(StaffSessions).GetMethod("ExecuteSubscriptionActionAsync", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+        var task = (Task<PublicSessionsSurface.SessionSubscriptionPanelState?>)method.Invoke(_staffSessions, [action])!;
+        var result = await task;
+        _reminderResult = result?.IsError == true ? "error" : result?.Status.ToString();
+    }
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (firstRender) { _ready = true; StateHasChanged(); }
+    }
+}

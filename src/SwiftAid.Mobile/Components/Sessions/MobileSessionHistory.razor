@@ -1,0 +1,72 @@
+@using SwiftAid.Client.Presentation
+@using SwiftAid.Contracts.Sessions
+@using SwiftAid.UI.Components.Sessions
+@using SwiftAid.Mobile.Services.Authentication
+@implements IDisposable
+@inject IStaffSessionHistoryClient HistoryClient
+@inject IMobileAuthenticationSession AuthenticationSession
+
+@if (_allowed)
+{
+    <SessionHistoryPanel SessionId="Session.SessionId" SessionVersion="Session.Version" LoadHistoryAsync="LoadAsync" />
+}
+
+@code {
+    [Parameter, EditorRequired] public PublicSessionView Session { get; set; } = default!;
+    private bool _allowed;
+    private long _generation;
+    private Guid _sessionId;
+    private long _version;
+    private bool _disposed;
+
+    protected override void OnInitialized() => AuthenticationSession.AuthenticationStateChanged += AuthenticationChanged;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_sessionId == Session.SessionId && _version == Session.Version) return;
+        _sessionId = Session.SessionId;
+        _version = Session.Version;
+        var generation = Interlocked.Increment(ref _generation);
+        _allowed = false;
+        await RefreshAccessAsync(generation);
+    }
+
+    private async Task RefreshAccessAsync(long generation)
+    {
+        try
+        {
+            if (!await AuthenticationSession.IsSignedInAsync()) return;
+            var sessionId = _sessionId;
+            var result = await HistoryClient.ReadAsync(sessionId, null);
+            if (!_disposed && generation == Volatile.Read(ref _generation))
+                _allowed = result.Succeeded && result.Value?.SessionId == sessionId;
+        }
+        catch (Exception) { }
+    }
+
+    private void AuthenticationChanged(object? sender, EventArgs args)
+    {
+        var generation = Interlocked.Increment(ref _generation);
+        _ = InvokeAsync(async () =>
+        {
+            if (_disposed || generation != Volatile.Read(ref _generation)) return;
+            _allowed = false;
+            StateHasChanged();
+            await RefreshAccessAsync(generation);
+            if (!_disposed && generation == Volatile.Read(ref _generation)) StateHasChanged();
+        });
+    }
+
+    private async Task<SessionHistoryPage?> LoadAsync(Guid sessionId, long? beforeVersion)
+    {
+        var result = await HistoryClient.ReadAsync(sessionId, beforeVersion);
+        return result.Succeeded ? result.Value : null;
+    }
+
+    public void Dispose()
+    {
+        _disposed = true;
+        Interlocked.Increment(ref _generation);
+        AuthenticationSession.AuthenticationStateChanged -= AuthenticationChanged;
+    }
+}

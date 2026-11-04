@@ -837,6 +837,62 @@ public sealed partial class EllaiSurfaceLogicTests
     }
 
     [Fact]
+    public async Task VoicePermissionFailureLeavesTextAvailableAndAllowsRetry()
+    {
+        using var host = await CreateHost(new FakeReviewClient(), CreateSession(1), string.Empty);
+        var services = new ServiceCollection().AddSingleton<IEllaiMicrophonePermission>(new ThrowingMicrophonePermission()).BuildServiceProvider();
+        SetProperty(host, "Services", services);
+        SetField(host, "_captureModule", new RecordingJsModule());
+        SetField(host, "_microphoneCaptureAvailable", true);
+
+        await InvokeAsync(host, "StartLiveCaptureAsync");
+
+        Assert.False(GetField<bool>(host, "_startingVoiceCapture"));
+        Assert.False(GetField<bool>(host, "_isRecordingAudio"));
+        Assert.Contains("type to Ellai", GetField<string>(host, "StatusText"));
+        Assert.True(GetProperty<bool>(host, "CanStartVoiceCapture"));
+    }
+
+    [Fact]
+    public async Task VoiceConsentFailureLeavesCaptureStoppedAndAllowsRetry()
+    {
+        var client = new FakeReviewClient { VoiceConsentHandler = () => Task.FromException<bool>(new HttpRequestException()) };
+        using var host = await CreateHost(client, CreateSession(1), string.Empty);
+        SetField(host, "_captureModule", new RecordingJsModule());
+        SetField(host, "_microphoneCaptureAvailable", true);
+
+        await InvokeAsync(host, "StartLiveCaptureAsync");
+
+        Assert.False(GetField<bool>(host, "_startingVoiceCapture"));
+        Assert.False(GetField<bool>(host, "_isRecordingAudio"));
+        Assert.False(GetField<bool>(host, "_voiceCaptureConsentGranted"));
+        Assert.True(GetProperty<bool>(host, "CanStartVoiceCapture"));
+    }
+
+    [Fact]
+    public async Task VoiceConsentForPreviousSessionDoesNotAuthorizeNewSession()
+    {
+        var consent = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var client = new FakeReviewClient { VoiceConsentHandler = () => consent.Task };
+        using var host = await CreateHost(client, CreateSession(1), string.Empty);
+        SetField(host, "_captureModule", new RecordingJsModule());
+        SetField(host, "_microphoneCaptureAvailable", true);
+        var start = InvokeTask(host, "StartLiveCaptureAsync");
+        SetField(host, "_sessionView", CreateSession(1) with { SessionId = "session-2" });
+        consent.SetResult(true);
+        await start;
+
+        Assert.False(GetField<bool>(host, "_voiceCaptureConsentGranted"));
+        Assert.False(GetField<bool>(host, "_startingVoiceCapture"));
+        Assert.False(GetField<bool>(host, "_isRecordingAudio"));
+    }
+
+    private sealed class ThrowingMicrophonePermission : IEllaiMicrophonePermission
+    {
+        public Task<bool> RequestAsync(CancellationToken cancellationToken) => throw new InvalidOperationException();
+    }
+
+    [Fact]
     public void AudioProcessingStatusShowsEffectiveAndUnreportedCapabilities()
     {
         var status = new EllaiAudioProcessingStatus("iOS", true, null, null, true);
@@ -2631,13 +2687,9 @@ public sealed partial class EllaiSurfaceLogicTests
 
         public Exception? RejectionException { get; init; }
 
-        public Func<CancellationToken, Task<bool>>? ReportConsentHandler { get; init; }
-        public Task<bool> GrantReportVoiceConsentAsync(string sessionId, CancellationToken cancellationToken) =>
-            ReportConsentHandler?.Invoke(cancellationToken) ?? Task.FromResult(false);
-
-        public Func<CancellationToken, Task<bool>>? VoiceConsentHandler { get; init; }
+        public Func<Task<bool>>? VoiceConsentHandler { get; init; }
         public Task<bool> GrantVoiceCaptureConsentAsync(string sessionId, CancellationToken cancellationToken) =>
-            VoiceConsentHandler?.Invoke(cancellationToken) ?? Task.FromResult(true);
+            VoiceConsentHandler?.Invoke() ?? Task.FromResult(true);
 
         public Task<EllaiVoiceTranscriptionResult?> TranscribeVoiceAsync(
             string sessionId,

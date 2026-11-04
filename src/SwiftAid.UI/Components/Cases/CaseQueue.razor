@@ -29,6 +29,20 @@
     }
     else
     {
+        <MudHidden Breakpoint="Breakpoint.MdAndDown" Invert="true">
+            <div class="case-queue__list" role="list" aria-label="Assigned cases">
+                @foreach (var item in _items)
+                {
+                    <MudPaper Outlined="true" Class="case-queue__item" role="listitem">
+                        <MudLink Href="@($"/case/{item.CaseId:D}")" aria-label="@($"Open {DisplayWorkflow(item.Workflow)} case from {item.CountryCode}, updated {item.UpdatedAtUtc.ToLocalTime():g}")">Open case</MudLink>
+                        <MudChip T="string" Size="Size.Small" Color="@WorkflowColor(item.Workflow)">@DisplayWorkflow(item.Workflow)</MudChip>
+                        <MudText Typo="Typo.body2">Country: @item.CountryCode</MudText>
+                        <MudText Typo="Typo.body2">Updated: @item.UpdatedAtUtc.ToLocalTime().ToString("g")</MudText>
+                    </MudPaper>
+                }
+            </div>
+        </MudHidden>
+        <MudHidden Breakpoint="Breakpoint.MdAndDown">
         <MudTable Items="_items" Hover="true" Dense="true" aria-label="Assigned cases">
             <HeaderContent>
                 <MudTh>Case</MudTh>
@@ -48,6 +62,7 @@
                 <MudTd DataLabel="Updated">@context.UpdatedAtUtc.ToLocalTime().ToString("g")</MudTd>
             </RowTemplate>
         </MudTable>
+        </MudHidden>
         <MudText Typo="Typo.caption" Color="Color.Secondary" Class="case-queue__notice">
             Newest activity first. Only cases assigned to you and available to view appear here.
         </MudText>

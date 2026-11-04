@@ -8,6 +8,19 @@
         ? "The update outcome could not be confirmed. Compare your submitted proposal with the current server version before making further changes."
         : "Your update was not saved. Compare your submitted proposal with the current server version, then make the changes you still want in the editor below.")</MudText>
     <MudText Typo="Typo.caption">Your version: @Proposal.ExpectedVersion · Current version: @Current.Version</MudText>
+    <MudHidden Breakpoint="Breakpoint.MdAndDown" Invert="true">
+        <div class="session-conflict-list" role="list" aria-label="Proposed and current session details">
+            @foreach (var row in Rows)
+            {
+                <div class="session-conflict-list__item" role="listitem">
+                    <MudText Typo="Typo.subtitle2">@row.Label</MudText>
+                    <MudText Typo="Typo.body2">Your proposal: @row.Proposed</MudText>
+                    <MudText Typo="Typo.body2">Current session: @row.Current</MudText>
+                </div>
+            }
+        </div>
+    </MudHidden>
+    <MudHidden Breakpoint="Breakpoint.MdAndDown">
     <div class="session-conflict-table">
         <table class="mud-table-root" aria-label="Proposed and current session details">
             <thead><tr><th scope="col">Field</th><th scope="col">Your proposal</th><th scope="col">Current session</th></tr></thead>
@@ -19,6 +32,7 @@
             </tbody>
         </table>
     </div>
+    </MudHidden>
     <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="OnDismiss">Dismiss comparison</MudButton>
 </MudPaper>
 

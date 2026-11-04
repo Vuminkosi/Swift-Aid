@@ -16,7 +16,9 @@ using Microsoft.Extensions.Options;
 using OpenIddict.Validation.AspNetCore;
 using SwiftAid.Application.Authorization;
 using SwiftAid.Application.Intake.Imports;
+using SwiftAid.Client.Intake.Imports;
 using SwiftAid.Gateway.Endpoints;
+using SwiftAid.Gateway.Ingestion;
 using SwiftAid.Infrastructure.Persistence;
 using SwiftAid.Infrastructure.Persistence.IntakeImports;
 
@@ -25,6 +27,123 @@ namespace SwiftAid.Integration.Tests;
 [Collection(IntakePostgresCollection.Name)]
 public sealed class CaseImportEndpointTests
 {
+    [IntakePostgresFact]
+    public async Task MobileImportClientUsesRealEndpointAndRecoversDurableResult()
+    {
+        await using var fixture = await CaseImportPostgresTests.Fixture.CreateAsync();
+        await using var host = await Host.StartAsync(fixture);
+        host.Client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "synthetic-import-token");
+        var client = new WorkspaceImportHttpClient(host.Client);
+        var id = Guid.NewGuid();
+        Assert.Null(await client.GetAsync(id));
+        var serverContext = CaseImportPostgresTests.Context;
+        var scope = Assert.Single((await client.GetWorkspacesAsync()).Where(item =>
+            item.WorkspaceId == serverContext.WorkspaceId && item.CountryCode == "ZW"));
+        var context = new WorkspaceImportContext(serverContext.WorkspaceId, serverContext.Confirmations, serverContext.OrganizationId);
+        using var reader = new StringReader(CaseImportPostgresTests.Csv(Guid.NewGuid()));
+        SwiftAid.Contracts.Intake.Imports.CaseCsvBatch? batch = null;
+        await foreach (var item in SwiftAid.Contracts.Intake.Imports.CaseCsvBatchReader.ReadAsync(reader)) batch = item;
+        Assert.NotNull(batch);
+        var result = await client.ImportAsync(id, context, batch);
+        Assert.Equal("Accepted", Assert.Single(result.Rows).Status);
+        Assert.Equal("Completed", result.Summary!.State);
+        Assert.Equal(2, (await client.GetAsync(id))!.NextRow);
+        Assert.True(await client.MatchesContextAsync(id, context));
+        Assert.False(await client.MatchesContextAsync(id, context with { FileSha256 = new string('a', 64) }));
+        Assert.Contains(await client.GetRecentAsync(scope), item => item.ImportId == id);
+        Assert.Empty(await client.GetIssuesAsync(id, 0));
+        var replay = await client.ImportAsync(id, context, batch);
+        Assert.Equal("Replayed", Assert.Single(replay.Rows).Status);
+        Assert.Equal(1, replay.Summary!.Accepted);
+        await fixture.Db.ActorAccessStates.Where(row => row.ActorId == "officer-1")
+            .ExecuteUpdateAsync(setters => setters.SetProperty(row => row.AccessEpoch, 8));
+        var denied = await Assert.ThrowsAsync<WorkspaceImportException>(() => client.GetRecentAsync(scope));
+        Assert.Equal("not-authorized", denied.Code);
+        var contextDenied = await Assert.ThrowsAsync<WorkspaceImportException>(() => client.MatchesContextAsync(id, context));
+        Assert.Equal("not-authorized", contextDenied.Code);
+    }
+
+    [IntakePostgresFact]
+    public async Task MobileImportClientContinuesFromDurableCheckpoint()
+    {
+        await using var fixture = await CaseImportPostgresTests.Fixture.CreateAsync();
+        await using var host = await Host.StartAsync(fixture);
+        host.Client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "synthetic-import-token");
+        var client = new WorkspaceImportHttpClient(host.Client);
+        var id = Guid.NewGuid();
+        var serverContext = CaseImportPostgresTests.Context;
+        var context = new WorkspaceImportContext(serverContext.WorkspaceId, serverContext.Confirmations, serverContext.OrganizationId, new string('a', 64));
+        var first = new SwiftAid.Contracts.Intake.Imports.CaseCsvBatch(1, 1, false, CaseImportPostgresTests.Csv(Guid.NewGuid()));
+        var second = new SwiftAid.Contracts.Intake.Imports.CaseCsvBatch(2, 1, true, CaseImportPostgresTests.Csv(Guid.NewGuid()));
+        var initial = await client.ImportAsync(id, context, first);
+        Assert.Equal("Paused", initial.Summary!.State);
+        var checkpoint = (await client.GetAsync(id))!;
+        Assert.Equal(2, checkpoint.NextRow);
+        Assert.True(await client.MatchesContextAsync(id, context));
+        Assert.False(await client.MatchesContextAsync(id, context with { FileSha256 = new string('b', 64) }));
+        Assert.False(await client.MatchesContextAsync(id, context with { FileSha256 = null }));
+        Assert.Null(await fixture.Store.MatchesContextAsync(CaseRegistrationBackendTests.CreateOfficer("another-actor"),
+            id, serverContext with { FileSha256 = new string('a', 64) }, default));
+        Assert.Equal(checkpoint, await client.GetAsync(id));
+        var mismatch = await Assert.ThrowsAsync<WorkspaceImportException>(() => client.ImportAsync(id,
+            context with { FileSha256 = new string('b', 64) }, second));
+        Assert.Equal("import-context-conflict", mismatch.Code);
+        Assert.Equal(2, (await client.GetAsync(id))!.NextRow);
+        var completed = await client.ImportAsync(id, context, second);
+        Assert.Equal("Completed", completed.Summary!.State);
+        Assert.Equal(3, completed.Summary.NextRow);
+        Assert.Equal(2, completed.Summary.Accepted);
+    }
+
+    [IntakePostgresFact]
+    public async Task WebStartedFingerprintCanBeVerifiedAndContinuedByMobile()
+    {
+        await using var fixture = await CaseImportPostgresTests.Fixture.CreateAsync();
+        await using var host = await Host.StartAsync(fixture);
+        host.Client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "synthetic-import-token");
+        var principal = new ClaimsPrincipal(new ClaimsIdentity([
+            new Claim(ClaimTypes.NameIdentifier, "officer-1"), new Claim(ActorContext.AccessEpochClaimType, "7")], "fixture"));
+        var web = new WorkspaceImportClient(new CommunityFixedAuthenticationStateProvider(principal),
+            host.Services.GetRequiredService<IServiceScopeFactory>());
+        var mobile = new WorkspaceImportHttpClient(host.Client);
+        var source = CaseImportPostgresTests.Context with { FileSha256 = new string('c', 64) };
+        var context = new WorkspaceImportContext(source.WorkspaceId, source.Confirmations, source.OrganizationId, source.FileSha256);
+        var id = Guid.NewGuid();
+        var initial = await web.ImportAsync(id, source,
+            new CaseCsvBatch(1, 1, false, CaseImportPostgresTests.Csv(Guid.NewGuid())), default);
+        Assert.Equal("Paused", initial.Summary!.State);
+        Assert.True(await mobile.MatchesContextAsync(id, context));
+        Assert.True(await web.MatchesContextAsync(id, source, default));
+        var completed = await mobile.ImportAsync(id, context, new SwiftAid.Contracts.Intake.Imports.CaseCsvBatch(
+            2, 1, true, CaseImportPostgresTests.Csv(Guid.NewGuid())));
+        Assert.Equal("Completed", completed.Summary!.State);
+        Assert.Equal(2, completed.Summary.Accepted);
+    }
+
+    [IntakePostgresFact]
+    public async Task MobileStartedFingerprintCanBeVerifiedAndContinuedByWeb()
+    {
+        await using var fixture = await CaseImportPostgresTests.Fixture.CreateAsync();
+        await using var host = await Host.StartAsync(fixture);
+        host.Client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "synthetic-import-token");
+        var principal = new ClaimsPrincipal(new ClaimsIdentity([
+            new Claim(ClaimTypes.NameIdentifier, "officer-1"), new Claim(ActorContext.AccessEpochClaimType, "7")], "fixture"));
+        var web = new WorkspaceImportClient(new CommunityFixedAuthenticationStateProvider(principal),
+            host.Services.GetRequiredService<IServiceScopeFactory>());
+        var mobile = new WorkspaceImportHttpClient(host.Client);
+        var source = CaseImportPostgresTests.Context with { FileSha256 = new string('d', 64) };
+        var context = new WorkspaceImportContext(source.WorkspaceId, source.Confirmations, source.OrganizationId, source.FileSha256);
+        var id = Guid.NewGuid();
+        var initial = await mobile.ImportAsync(id, context, new SwiftAid.Contracts.Intake.Imports.CaseCsvBatch(
+            1, 1, false, CaseImportPostgresTests.Csv(Guid.NewGuid())));
+        Assert.Equal("Paused", initial.Summary!.State);
+        Assert.True(await web.MatchesContextAsync(id, source, default));
+        var completed = await web.ImportAsync(id, source,
+            new CaseCsvBatch(2, 1, true, CaseImportPostgresTests.Csv(Guid.NewGuid())), default);
+        Assert.Equal("Completed", completed.Summary!.State);
+        Assert.Equal(2, (await mobile.GetAsync(id))!.Accepted);
+    }
+
     [IntakePostgresFact]
     public async Task Real_http_import_requires_authentication_and_csrf_and_restores_durable_status()
     {
@@ -38,6 +157,13 @@ public sealed class CaseImportEndpointTests
         cookieRequest.Headers.Add("Cookie", "swiftaid-import-test=authenticated");
         using var csrf = await host.Client.SendAsync(cookieRequest);
         Assert.Equal(HttpStatusCode.BadRequest, csrf.StatusCode);
+        using var contextCheck = new HttpRequestMessage(HttpMethod.Post, $"/api/v1/case-imports/{id:D}/context-check")
+        {
+            Content = System.Net.Http.Json.JsonContent.Create(CaseImportPostgresTests.Context)
+        };
+        contextCheck.Headers.Add("Cookie", "swiftaid-import-test=authenticated");
+        using var rejectedContextCheck = await host.Client.SendAsync(contextCheck);
+        Assert.Equal(HttpStatusCode.BadRequest, rejectedContextCheck.StatusCode);
         using var authorized = Request(id, command);
         authorized.Headers.Authorization = new AuthenticationHeaderValue("Bearer", "synthetic-import-token");
         using var accepted = await host.Client.SendAsync(authorized);
@@ -100,6 +226,7 @@ public sealed class CaseImportEndpointTests
     {
         public static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
         public HttpClient Client { get; } = client;
+        public IServiceProvider Services => app.Services;
 
         public static async Task<Host> StartAsync(CaseImportPostgresTests.Fixture fixture, SwiftAid.Application.Intake.IIntakeSubmissionValidator? validator = null)
         {
@@ -118,6 +245,8 @@ public sealed class CaseImportEndpointTests
                 .UseNpgsql(fixture.Db.Database.GetConnectionString()).UseOpenIddict().Options));
             builder.Services.AddScoped<ICaseImportStore>(services => new PostgresCaseImportStore(
                 services.GetRequiredService<SwiftAidDbContext>(), fixture.Protection, TimeProvider.System));
+            builder.Services.AddScoped<ICaseImportWorkspaceReader>(services =>
+                (PostgresCaseImportStore)services.GetRequiredService<ICaseImportStore>());
             builder.Services.AddScoped(services => fixture.CreateService(services.GetRequiredService<SwiftAidDbContext>(), services.GetRequiredService<ICaseImportStore>(), validator));
             var app = builder.Build();
             app.UseAuthentication();

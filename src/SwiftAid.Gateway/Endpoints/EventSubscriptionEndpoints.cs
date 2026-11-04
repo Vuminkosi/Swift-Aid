@@ -164,6 +164,8 @@ public static class EventSubscriptionEndpoints
 
     private static async Task<bool> HasValidRequestAsync(HttpContext context, IAntiforgery antiforgery)
     {
+        if (!await CaseCommandEndpoints.RequiresAntiforgeryAsync(context).ConfigureAwait(false))
+            return true;
         try
         {
             await antiforgery.ValidateRequestAsync(context).ConfigureAwait(false);

@@ -36,6 +36,7 @@
             await _module.InvokeAsync<bool>("updateComponent", _instanceId, state);
         }
         catch (JSDisconnectedException) { }
+        catch (JSException) { }
         finally { _lifecycle.Release(); }
     }
 
@@ -50,10 +51,12 @@
             {
                 try { await _module.InvokeVoidAsync("removeComponent", _instanceId); }
                 catch (JSDisconnectedException) { }
+                catch (JSException) { }
                 finally { await _module.DisposeAsync(); }
             }
         }
         catch (JSDisconnectedException) { }
+        catch (JSException) { }
         finally { _lifecycle.Release(); }
     }
 }

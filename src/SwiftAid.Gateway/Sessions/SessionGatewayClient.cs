@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.Extensions.DependencyInjection;
 using SwiftAid.Application.Authorization;
 using SwiftAid.Contracts.Sessions;
+using SwiftAid.Gateway.Endpoints;
 
 namespace SwiftAid.Gateway.Sessions;
 
@@ -98,7 +99,7 @@ public sealed class SessionGatewayClient(
         Guid sessionId,
         CancellationToken cancellationToken = default)
     {
-        var actor = await GetActorAsync().ConfigureAwait(false);
+        var actor = await GetActorAsync(cancellationToken).ConfigureAwait(false);
         var service = _serviceProvider.GetService<ICommunitySessionService>();
         if (actor is null || service is null)
         {
@@ -118,7 +119,7 @@ public sealed class SessionGatewayClient(
     public async Task<string?> GetCurrentActorIdAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var actor = await GetActorAsync().ConfigureAwait(false);
+        var actor = await GetActorAsync(cancellationToken).ConfigureAwait(false);
         return actor?.ActorId;
     }
 
@@ -128,7 +129,7 @@ public sealed class SessionGatewayClient(
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(command);
-        var actor = await GetActorAsync().ConfigureAwait(false);
+        var actor = await GetActorAsync(cancellationToken).ConfigureAwait(false);
         if (actor is null)
         {
             return new SessionStaffOutcome(
@@ -198,23 +199,21 @@ public sealed class SessionGatewayClient(
             message.Contains("changed before", StringComparison.OrdinalIgnoreCase);
     }
 
-    private async Task<ActorContext?> GetActorAsync()
+    private async Task<ActorContext?> GetActorAsync(CancellationToken cancellationToken)
     {
-        var state = await _authenticationStateProvider.GetAuthenticationStateAsync().ConfigureAwait(false);
-        var principal = state.User;
-        if (principal?.Identity?.IsAuthenticated != true)
-        {
-            return null;
-        }
-
         try
         {
-            return ActorContext.FromValidatedPrincipal(principal);
+            cancellationToken.ThrowIfCancellationRequested();
+            var principal = (await _authenticationStateProvider.GetAuthenticationStateAsync().ConfigureAwait(false)).User;
+            if (principal?.Identity?.IsAuthenticated != true) return null;
+            var actor = ActorContext.FromValidatedPrincipal(principal);
+            var access = _serviceProvider.GetService<IWorkspaceAccessRequest>();
+            if (access is null) return null;
+            var current = await access.GetAsync(principal, null, cancellationToken).ConfigureAwait(false);
+            return current.Succeeded && current.Metadata.IsAvailable && current.Value is not null ? actor : null;
         }
-        catch (UnauthorizedAccessException)
-        {
-            return null;
-        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch (Exception exception) when (exception is not OutOfMemoryException) { return null; }
     }
 
 }

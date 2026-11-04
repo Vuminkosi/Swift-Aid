@@ -5,6 +5,23 @@ namespace SwiftAid.Ui.Tests;
 public sealed class SessionSubscriptionPresentationTests
 {
     [Fact]
+    public void SubscribeRequiresMatchingCurrentLiveConsentAndSupportedChannel()
+    {
+        var id = Guid.NewGuid();
+        var metadata = new UiCapabilityMetadata("session-subscriptions", "1", UiCapabilityProvenance.LiveService, DateTimeOffset.UtcNow, true);
+        var options = new UiCapabilityResult<SubscriptionOptions>(UiCapabilityResultCode.Success,
+            new SubscriptionOptions(id, "consent", 3, "Consent", [SubscriptionChannel.Email], true), metadata);
+        Assert.True(SessionSubscriptionPresentation.CanSubscribe(options, id, "consent", 3, SubscriptionChannel.Email));
+        Assert.False(SessionSubscriptionPresentation.CanSubscribe(options, Guid.NewGuid(), "consent", 3, SubscriptionChannel.Email));
+        Assert.False(SessionSubscriptionPresentation.CanSubscribe(options, id, "other", 3, SubscriptionChannel.Email));
+        Assert.False(SessionSubscriptionPresentation.CanSubscribe(options, id, "consent", 4, SubscriptionChannel.Email));
+        Assert.False(SessionSubscriptionPresentation.CanSubscribe(options, id, "consent", 3, SubscriptionChannel.MobilePush));
+        Assert.False(SessionSubscriptionPresentation.CanSubscribe(options with { Value = options.Value! with { IsCurrent = false } }, id, "consent", 3, SubscriptionChannel.Email));
+        Assert.False(SessionSubscriptionPresentation.CanSubscribe(options with { Metadata = metadata with { Provenance = UiCapabilityProvenance.SyntheticDevelopment } }, id, "consent", 3, SubscriptionChannel.Email));
+        Assert.False(SessionSubscriptionPresentation.CanSubscribe(options with { Metadata = metadata with { IsAvailable = false } }, id, "consent", 3, SubscriptionChannel.Email));
+    }
+
+    [Fact]
     public void ReadAndConsentOptionsMustMatchTheRequestedSession()
     {
         var id = Guid.NewGuid();

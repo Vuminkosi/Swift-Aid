@@ -1,0 +1,56 @@
+@using SwiftAid.Client.Presentation
+@using SwiftAid.Mobile.Services.Authentication
+@implements IDisposable
+@inject IMobileAuthenticationSession AuthenticationSession
+@inject IStaffSessionEditorClient StaffSessionEditor
+
+@if (_canManage)
+{
+    <MudButton Href="/sessions/manage" Variant="Variant.Text" Color="Color.Primary" StartIcon="@Icons.Material.Filled.EditCalendar">
+        Manage sessions
+    </MudButton>
+}
+
+@code {
+    private bool _canManage;
+    private bool _disposed;
+    private long _generation;
+
+    protected override async Task OnInitializedAsync()
+    {
+        AuthenticationSession.AuthenticationStateChanged += AuthenticationChanged;
+        await RefreshAsync(Interlocked.Increment(ref _generation));
+    }
+
+    private async Task RefreshAsync(long generation)
+    {
+        try
+        {
+            if (!await AuthenticationSession.IsSignedInAsync()) return;
+            var result = await StaffSessionEditor.GetManagementCapabilitiesAsync(null, null);
+            if (!_disposed && generation == Volatile.Read(ref _generation))
+                _canManage = result.Succeeded && result.Value is { IsCurrent: true, CanCreate: true };
+        }
+        catch (Exception) { }
+    }
+
+    private void AuthenticationChanged(object? sender, EventArgs args)
+    {
+        var generation = Interlocked.Increment(ref _generation);
+        _ = InvokeAsync(async () =>
+        {
+            if (_disposed || generation != Volatile.Read(ref _generation)) return;
+            _canManage = false;
+            StateHasChanged();
+            await RefreshAsync(generation);
+            if (!_disposed && generation == Volatile.Read(ref _generation)) StateHasChanged();
+        });
+    }
+
+    public void Dispose()
+    {
+        _disposed = true;
+        Interlocked.Increment(ref _generation);
+        AuthenticationSession.AuthenticationStateChanged -= AuthenticationChanged;
+    }
+}

@@ -4,6 +4,7 @@ using System.Text.Json.Serialization;
 using Microsoft.Extensions.DependencyInjection;
 using SwiftAid.Application.Intake;
 using SwiftAid.Contracts.Intake;
+using SwiftAid.Client.Presentation.PublicWorkflows;
 
 namespace SwiftAid.Gateway.Endpoints;
 
@@ -36,6 +37,9 @@ public static class PublicIntakeEndpoints
         routes.MapGet("/metadata", GetMetadata)
             .AllowAnonymous()
             .WithName("GetPublicIntakeMetadata");
+        routes.MapGet("/processing-policy", GetProcessingPolicyAsync)
+            .AllowAnonymous()
+            .WithName("GetPublicIntakeProcessingPolicy");
         routes.MapGet("/metadata/countries", GetCountriesAsync)
             .AllowAnonymous()
             .WithName("GetPublicIntakeCountries");
@@ -45,6 +49,22 @@ public static class PublicIntakeEndpoints
         routes.MapGet("/geo/children", GetGeoChildrenAsync)
             .AllowAnonymous()
             .WithName("GetPublicGeoRegistryChildren");
+    }
+
+    private static async Task<IResult> GetProcessingPolicyAsync(HttpContext context, CancellationToken cancellationToken)
+    {
+        context.Response.Headers.CacheControl = "no-store";
+        var provider = TryGetService<IPublicIntakeProcessingPolicyClient>(context.RequestServices);
+        if (provider is null) return Unavailable();
+        try
+        {
+            var result = await provider.GetPolicyAsync(cancellationToken).ConfigureAwait(false);
+            return result.Succeeded && result.Metadata.IsAvailable &&
+                result.Metadata.Provenance == SwiftAid.Client.Presentation.UiCapabilityProvenance.LiveService &&
+                result.Value is { IsValid: true } policy ? Results.Ok(policy) : Unavailable();
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch (Exception exception) when (exception is not OutOfMemoryException) { return Unavailable(); }
     }
 
     private static IResult GetMetadata(HttpContext context)

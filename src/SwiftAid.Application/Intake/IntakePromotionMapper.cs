@@ -130,6 +130,8 @@ public static class IntakePromotionMapper
             .ToList();
         if (submission.Gender is { } gender)
             observations.Add(new ReportedText($"Reported gender: {gender}", ReporterProvenance(sourcePrefix, "gender")));
+        if (submission.DeathRelated is { } deathRelated)
+            observations.Add(new ReportedText($"Death related: {(deathRelated ? "Yes" : "No")}", ReporterProvenance(sourcePrefix, "death-related")));
         ReportEvidenceReference? originalAudio = submission.OriginalAudioAttachmentIds.Count == 0
             ? null
             : new ReportEvidenceReference(

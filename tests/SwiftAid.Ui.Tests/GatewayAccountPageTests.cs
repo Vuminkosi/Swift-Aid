@@ -406,6 +406,14 @@ public sealed class GatewayAccountPageTests
 
         public Task<IReadOnlyList<MembershipRequestRecord>> GetMyRequestsAsync(string actorId, CancellationToken cancellationToken) =>
             throw new InvalidOperationException("probe failure");
+
+        public Task<OrganizationOwnerChangeStatus> GrantOwnerAsync(
+            string actorId, string organizationId, string targetActorId, CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("probe failure");
+
+        public Task<OrganizationOwnerChangeStatus> RevokeOwnerAsync(
+            string actorId, string organizationId, string targetActorId, CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("probe failure");
     }
 
     private sealed class TimeoutInvitationService : IOrganizationInvitationService

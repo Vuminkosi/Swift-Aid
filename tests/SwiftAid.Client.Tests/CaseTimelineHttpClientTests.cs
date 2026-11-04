@@ -25,6 +25,20 @@ public sealed class CaseTimelineHttpClientTests
         Assert.Equal(header.CaseId, result.Timeline!.Header.CaseId);
     }
 
+    [Fact]
+    public async Task Get_RejectsTimelineForAnotherCase()
+    {
+        var header = new CaseTimelineHeader(
+            Guid.NewGuid(), "org-zw-1", "workspace-1", "ZW", "Active", "officer-1", 3, 1,
+            DateTimeOffset.UtcNow);
+        var client = Create(JsonResponse(HttpStatusCode.OK, new CaseTimeline(header, [])));
+
+        var result = await client.GetAsync(Guid.NewGuid(), null);
+
+        Assert.Equal(CaseTimelineAccess.NotFoundOrNotAuthorized, result.Access);
+        Assert.Null(result.Timeline);
+    }
+
     [Theory]
     [InlineData(HttpStatusCode.Unauthorized)]
     [InlineData(HttpStatusCode.NotFound)]

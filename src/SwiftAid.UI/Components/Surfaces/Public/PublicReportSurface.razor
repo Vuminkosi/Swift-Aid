@@ -8,7 +8,8 @@
     <GuidedReportStepper Draft="Draft"
                          TextLimits="TextLimits"
                          CurrentDraftId="CurrentDraftId"
-                         Countries="ReportCountries"
+                         SavedDraft="SavedDraft"
+                         Countries="Countries"
                          CountryCatalogueVersion="@CountryCatalogueVersion"
                          CountryCatalogueIsCurrent="CountryCatalogueIsCurrent"
                          PrivacyNoticeReference="@PrivacyNoticeReference"
@@ -177,6 +178,7 @@
     [Parameter] public bool DraftSavingAvailable { get; set; }
     [Parameter] public bool SubmitAvailable { get; set; }
     [Parameter] public Guid? CurrentDraftId { get; set; }
+    [Parameter] public IntakeSubmission? SavedDraft { get; set; }
     [Parameter, EditorRequired] public PublicReportDraft Draft { get; set; } = default!;
     [Parameter] public EventCallback<PublicReportSaveRequest> OnSaveDraft { get; set; }
     [Parameter] public bool EditableDraftSnapshotsSupported { get; set; }

@@ -1,17 +1,26 @@
 @page "/monitoring"
 @using SwiftAid.Contracts.Cases
 @using SwiftAid.UI.Components.Cases
-@inject IMonitoringQueueClient MonitoringClient
+@using SwiftAid.Mobile.Services.Presentation
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@inject MobileMonitoringQueueClient MonitoringClient
 
 <PageTitle>Monitoring | SwiftAid</PageTitle>
 
-<div class="monitoring-page">
-    <h1>Monitoring</h1>
-    <p>Open follow-ups and unacknowledged escalations for cases you can access. Overdue work is highlighted.</p>
-
-    <h2>Assigned to me</h2>
-    <MonitoringQueue Client="MonitoringClient" Scope="MonitoringQueueScope.Assigned" />
-
-    <h2>All open work</h2>
-    <MonitoringQueue Client="MonitoringClient" Scope="MonitoringQueueScope.Open" />
-</div>
+<MudContainer MaxWidth="MaxWidth.Medium" Class="workspace-page monitoring-page">
+    <header class="mb-4">
+        <MudText Typo="Typo.overline" Color="Color.Secondary">Workspace</MudText>
+        <MudText Typo="Typo.h5" HtmlTag="h1">Monitoring</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary">Review open work for cases you can access. Overdue work is highlighted.</MudText>
+    </header>
+    <MudStack Spacing="4">
+        <section aria-labelledby="monitoring-assigned-heading">
+            <MudText Typo="Typo.subtitle1" HtmlTag="h2" id="monitoring-assigned-heading">Assigned to me</MudText>
+            <MonitoringQueue Client="MonitoringClient" Scope="MonitoringQueueScope.Assigned" />
+        </section>
+        <section aria-labelledby="monitoring-open-heading">
+            <MudText Typo="Typo.subtitle1" HtmlTag="h2" id="monitoring-open-heading">All open work</MudText>
+            <MonitoringQueue Client="MonitoringClient" Scope="MonitoringQueueScope.Open" />
+        </section>
+    </MudStack>
+</MudContainer>

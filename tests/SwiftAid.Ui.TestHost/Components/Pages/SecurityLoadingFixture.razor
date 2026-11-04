@@ -1,0 +1,19 @@
+@page "/security-loading-fixture"
+@inject SwiftAid.Ui.TestHost.SecurityLoadingFixture Service
+
+<SwiftAidThemeProvider />
+<MudPopoverProvider />
+<MudDialogProvider />
+<button @onclick="Service.ReleaseProfile">Release profile</button>
+@if (_ready)
+{
+    <Security />
+}
+
+@code {
+    private bool _ready;
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (firstRender) { _ready = true; StateHasChanged(); }
+    }
+}

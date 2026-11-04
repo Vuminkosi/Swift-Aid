@@ -1,0 +1,24 @@
+@page "/case-imports-fixture"
+@inject SwiftAid.Ui.TestHost.GuestReportLoadingFixture PolicyFixture
+@inject SwiftAid.Ui.TestHost.CaseImportFixture ImportFixture
+
+<SwiftAidThemeProvider />
+<MudPopoverProvider />
+<MudDialogProvider />
+@if (_ready) { <CaseImports /> }
+<button @onclick="ImportFixture.Revoke">Revoke import access</button>
+
+@code {
+    private bool _ready;
+    [SupplyParameterFromQuery(Name = "paused")] public bool Paused { get; set; }
+    [SupplyParameterFromQuery(Name = "bound")] public bool Bound { get; set; }
+    protected override void OnInitialized()
+    {
+        PolicyFixture.ReleaseValidPolicy();
+        if (Paused || Bound) ImportFixture.SeedPaused(Bound);
+    }
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (firstRender) { _ready = true; StateHasChanged(); }
+    }
+}

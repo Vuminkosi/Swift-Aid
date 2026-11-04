@@ -100,7 +100,7 @@ public sealed class CommunitySessionEndpointTests
     }
 
     [Fact]
-    public void OfficerRoutesRequireAuthenticationAndScopedCapabilityMetadata()
+    public void OfficerRoutesRequireConfiguredAuthenticationSchemes()
     {
         var builder = WebApplication.CreateBuilder();
         builder.Services.AddAuthorization();
@@ -122,7 +122,6 @@ public sealed class CommunitySessionEndpointTests
         {
             var authorization = Assert.Single(route.Metadata.GetOrderedMetadata<IAuthorizeData>());
             Assert.Equal(expectedSchemes, authorization.AuthenticationSchemes);
-            Assert.NotNull(route.Metadata.GetMetadata<CommunitySessionScopedAuthorizationRequiredMetadata>());
         }
     }
 
@@ -177,13 +176,13 @@ public sealed class CommunitySessionEndpointTests
     [Fact]
     public async Task CookieWithoutAntiforgeryToken_IsRejected()
     {
-        await using var host = await TestSessionHost.StartAsync();
+        await using var host = await TestSessionHost.StartAsync(currentAccount: true);
         using var request = CreateJsonRequest(HttpMethod.Post, "/api/v1/sessions", ValidCreateRequest());
         TestAuthenticationHandler.AddCookieAuthentication(request);
 
         using var response = await host.Client.SendAsync(request);
 
-        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Equal(0, host.Service.ExecuteCalls);
     }
 
@@ -201,26 +200,26 @@ public sealed class CommunitySessionEndpointTests
     [Fact]
     public async Task CreateDraft_WithoutTitle_IsRejected()
     {
-        await using var host = await TestSessionHost.StartAsync();
+        await using var host = await TestSessionHost.StartAsync(currentAccount: true);
         var request = ValidCreateRequest() with { Title = " " };
         using var message = CreateJsonRequest(HttpMethod.Post, "/api/v1/sessions", request);
 
         using var response = await host.SendBearerAsync(message);
 
-        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Equal(0, host.Service.ExecuteCalls);
     }
 
     [Fact]
     public async Task Update_WithZeroVersion_IsRejected()
     {
-        await using var host = await TestSessionHost.StartAsync();
+        await using var host = await TestSessionHost.StartAsync(currentAccount: true);
         var request = ValidUpdateRequest() with { ExpectedVersion = 0 };
         using var message = CreateJsonRequest(HttpMethod.Put, $"/api/v1/sessions/{KnownSessionId:D}", request);
 
         using var response = await host.SendBearerAsync(message);
 
-        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Equal(0, host.Service.ExecuteCalls);
     }
 
@@ -335,6 +334,28 @@ public sealed class CommunitySessionEndpointTests
         Assert.False(outcome.Succeeded);
         Assert.Equal(0, service.StaffReadCalls);
         Assert.Equal(0, service.ExecuteCalls);
+    }
+
+    [Fact]
+    public async Task InProcessClientRechecksCurrentAccountBeforeEachMutation()
+    {
+        var service = new FakeCommunitySessionService();
+        var access = new SyntheticWorkspaceAccessRequest();
+        using var services = new ServiceCollection().AddSingleton<ICommunitySessionService>(service)
+            .AddSingleton<IWorkspaceAccessRequest>(access).BuildServiceProvider();
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim(ClaimTypes.NameIdentifier, "actor-1"), new Claim("swiftaid_access_epoch", "1")], "test"));
+        var client = new SessionGatewayClient(new CommunityFixedAuthenticationStateProvider(principal), services);
+        var command = new CancelSessionCommand(KnownSessionId, 1, "venue flooded", "venue closed", DateTimeOffset.UtcNow);
+        Assert.True((await client.ExecuteAsync(command)).Succeeded);
+        access.Current = false;
+        Assert.False((await client.ExecuteAsync(command)).Succeeded);
+        Assert.Equal(1, service.ExecuteCalls);
+        Assert.Null(await client.GetCurrentActorIdAsync());
+        access.Current = true;
+        access.Unavailable = true;
+        Assert.False((await client.ExecuteAsync(command)).Succeeded);
+        Assert.Equal(1, service.ExecuteCalls);
     }
 
     [Fact]
@@ -716,6 +737,7 @@ public sealed class CommunitySessionEndpointTests
     }
 
     private static CreateSessionApiRequest ValidCreateRequest() => new(
+        "org-zw-1",
         "Dry-season holding hygiene",
         "Practical steps for clean holding areas.",
         "Livestock keepers near Harare showgrounds",
@@ -890,7 +912,7 @@ public sealed class CommunitySessionEndpointTests
         }
 
         public static async Task<TestSessionHost> StartAsync(
-            IReadOnlyList<PublicSessionView>? items = null, bool withPublished = false)
+            IReadOnlyList<PublicSessionView>? items = null, bool withPublished = false, bool currentAccount = false)
         {
             var service = new FakeCommunitySessionService { WithPublished = withPublished };
             var builder = WebApplication.CreateBuilder();
@@ -907,6 +929,7 @@ public sealed class CommunitySessionEndpointTests
                     OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme, _ => { });
             builder.Services.AddAuthorization();
             builder.Services.AddSingleton<ICommunitySessionService>(service);
+            if (currentAccount) builder.Services.AddSingleton<IWorkspaceAccessRequest>(new SyntheticWorkspaceAccessRequest());
             var app = builder.Build();
             app.UseAuthentication();
             app.UseAuthorization();

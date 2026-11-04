@@ -99,10 +99,10 @@ public sealed class PublicReportDraft : IValidatableObject
 
     [Required(ErrorMessage = "Choose whether this concern is about a person or an animal.")]
     public IntakeSubjectScope? SubjectScope { get; set; }
+    public ReportedGender? Gender { get; set; }
+    public bool? DeathRelated { get; set; }
 
     public string? AgeYearsText { get; set; }
-
-    public ReportedGender? Gender { get; set; }
 
     public bool HasValidAge() => string.IsNullOrWhiteSpace(AgeYearsText) ||
         int.TryParse(AgeYearsText, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out _);
@@ -249,8 +249,20 @@ public sealed class PublicReportDraft : IValidatableObject
         string? processingPolicyReference,
         string? processingPolicyVersion,
         IReadOnlyList<PublicCountryOption> countries,
-        bool countryCatalogueIsCurrent,
-        bool allowUnverifiedCountryForDraft = false)
+        bool countryCatalogueIsCurrent) =>
+        BuildSubmission(countryCatalogueVersion, processingPolicyReference, processingPolicyVersion, countries,
+            countryCatalogueIsCurrent, null, forDraft: false);
+
+    /// <summary>Preserves an existing draft country locally without treating its old catalogue as current.</summary>
+    public IntakeSubmission ToDraftSubmission(
+        string? countryCatalogueVersion, string? processingPolicyReference, string? processingPolicyVersion,
+        IReadOnlyList<PublicCountryOption> countries, bool countryCatalogueIsCurrent, IntakeSubmission? savedDraft) =>
+        BuildSubmission(countryCatalogueVersion, processingPolicyReference, processingPolicyVersion, countries,
+            countryCatalogueIsCurrent, savedDraft, forDraft: true);
+
+    private IntakeSubmission BuildSubmission(
+        string? countryCatalogueVersion, string? processingPolicyReference, string? processingPolicyVersion,
+        IReadOnlyList<PublicCountryOption> countries, bool countryCatalogueIsCurrent, IntakeSubmission? savedDraft, bool forDraft)
     {
         ArgumentNullException.ThrowIfNull(countries);
 
@@ -270,17 +282,22 @@ public sealed class PublicReportDraft : IValidatableObject
                 CountryCode.Trim(),
                 StringComparison.OrdinalIgnoreCase));
 
-        var hasCurrentCountry = countryCatalogueIsCurrent &&
-            !string.IsNullOrWhiteSpace(countryCatalogueVersion) && selectedCountry is not null;
-        var enteredCountry = CountryCode?.Trim().ToUpperInvariant();
-        var canPreserveUnverifiedCountry = allowUnverifiedCountryForDraft && enteredCountry is { Length: 2 } &&
-            enteredCountry.All(char.IsAsciiLetter);
-        if (!string.IsNullOrWhiteSpace(CountryCode) && !hasCurrentCountry && !canPreserveUnverifiedCountry)
+        var currentCountry = countryCatalogueIsCurrent && !string.IsNullOrWhiteSpace(countryCatalogueVersion)
+            ? selectedCountry : null;
+        var savedCountry = savedDraft?.Location.CountryCode;
+        var retainSavedCountry = forDraft && currentCountry is null &&
+            savedCountry is { Length: 2 } && savedCountry.All(char.IsAsciiLetter) &&
+            string.Equals(savedCountry, savedCountry.ToUpperInvariant(), StringComparison.Ordinal) &&
+            string.Equals(CountryCode, savedCountry, StringComparison.OrdinalIgnoreCase);
+
+        if (!string.IsNullOrWhiteSpace(CountryCode) && currentCountry is null && !retainSavedCountry)
         {
             throw new InvalidOperationException(
                 "The selected country is not in the current country list. Choose a current country or mark the location unknown.");
         }
 
+        var effectiveCountry = currentCountry?.Code ?? (retainSavedCountry ? savedCountry : null);
+        var effectiveCatalogueVersion = retainSavedCountry ? savedDraft!.Location.CatalogueVersion : countryCatalogueVersion;
         var observations = GetObservations();
         if (!HasValidObservations(observations))
             throw new InvalidOperationException("Use at most 20 observations, 1,000 characters each and 20,000 characters in total.");
@@ -348,7 +365,7 @@ public sealed class PublicReportDraft : IValidatableObject
                 LocationPrecision.Unknown,
                 null)
             : new LocationContext(
-                hasCurrentCountry ? selectedCountry!.Code : canPreserveUnverifiedCountry ? enteredCountry! : string.Empty,
+                effectiveCountry ?? string.Empty,
                 ToOptionalPlace(RegionPresence, Region, RegionId),
                 ToOptionalPlace(AreaPresence, Area, AreaId),
                 ToOptionalPlace(LocalityPresence, Locality, LocalityId),
@@ -357,15 +374,15 @@ public sealed class PublicReportDraft : IValidatableObject
                 null,
                 LocationSource.Reporter,
                 LocationPrecision.Approximate,
-                hasCurrentCountry ? countryCatalogueVersion : null);
+                effectiveCatalogueVersion);
 
         var countryCode = location.CountryCode;
         var confirmations = new IntakeConfirmations(
             ReportReviewConfirmed,
             countryCode,
-            hasCurrentCountry ? countryCatalogueVersion! : string.Empty,
-            hasCurrentCountry && CountryConfirmed,
-            ProcessingConfirmed,
+            effectiveCatalogueVersion ?? string.Empty,
+            CountryConfirmed && !retainSavedCountry,
+            ProcessingConfirmed && (!forDraft || !string.IsNullOrWhiteSpace(processingPolicyReference) && !string.IsNullOrWhiteSpace(processingPolicyVersion)),
             processingPolicyReference ?? string.Empty,
             processingPolicyVersion ?? string.Empty,
             null,
@@ -384,10 +401,10 @@ public sealed class PublicReportDraft : IValidatableObject
             location,
             confirmations)
         {
-            Onset = onset,
+            Gender = SubjectScope == IntakeSubjectScope.Human ? Gender : null,
+            DeathRelated = DeathRelated,
             AgeYears = SubjectScope == IntakeSubjectScope.Human && !string.IsNullOrWhiteSpace(AgeYearsText)
-                ? int.Parse(AgeYearsText, System.Globalization.CultureInfo.InvariantCulture) : null,
-            Gender = SubjectScope == IntakeSubjectScope.Human ? Gender : null
+                ? int.Parse(AgeYearsText, System.Globalization.CultureInfo.InvariantCulture) : null
         };
     }
 

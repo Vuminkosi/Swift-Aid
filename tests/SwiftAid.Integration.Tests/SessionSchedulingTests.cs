@@ -1302,6 +1302,7 @@ public sealed class SessionSchedulingTests
     private static CreateSessionDraftCommand CreateDraft(Guid sessionId, string creator) =>
         new(
             sessionId,
+            "org-zw-1",
             "Malaria prevention talk",
             "An evening talk on bed nets and stagnant water.",
             "Adults in the Budiriro catchment",

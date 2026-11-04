@@ -2,18 +2,17 @@ using System.Net;
 using System.Text.Json;
 using SwiftAid.Client.Presentation;
 using SwiftAid.Contracts.Cases;
-using SwiftAid.Mobile.Services.Http;
 
 namespace SwiftAid.Mobile.Services.Presentation;
 
-/// <summary>Authorized report evidence through the gateway cookie session.</summary>
-public sealed class CaseReportDetailsHttpClient(CookieSessionHttpClient session) : ICaseReportDetailsClient
+/// <summary>Authorized report evidence through the authenticated gateway transport.</summary>
+public sealed class CaseReportDetailsHttpClient(HttpClient client) : ICaseReportDetailsClient
 {
     private const string Capability = "case-detail";
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
-    private readonly CookieSessionHttpClient _session = session ?? throw new ArgumentNullException(nameof(session));
+    private readonly HttpClient _client = client ?? throw new ArgumentNullException(nameof(client));
 
     public async Task<UiCapabilityResult<CaseReportDetails>> GetAsync(
         Guid caseId,
@@ -27,10 +26,10 @@ public sealed class CaseReportDetailsHttpClient(CookieSessionHttpClient session)
 
         try
         {
-            using var response = await _session.GetAsync(
+            using var response = await _client.GetAsync(
                 $"/api/v1/cases/{caseId:D}/report-details",
                 cancellationToken).ConfigureAwait(false);
-            if (response.StatusCode == HttpStatusCode.Unauthorized)
+            if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
             {
                 return Denied();
             }

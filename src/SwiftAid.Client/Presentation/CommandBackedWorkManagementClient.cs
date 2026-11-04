@@ -12,8 +12,10 @@ namespace SwiftAid.Client.Presentation;
 public sealed class CommandBackedWorkManagementClient(
     ICaseCommandClient commands,
     IMonitoringQueueClient monitoring,
-    ICaseTimelineClient timeline) : IWorkManagementClient
+    ICaseTimelineClient timeline,
+    ICaseMonitoringPageClient? caseMonitoring = null) : IWorkManagementClient
 {
+    public const string LimitedMonitoringNotice = "This view checks a limited monitoring queue, so some work may not be shown.";
     private const int MonitoringLimit = 200;
     private const string FollowUpPrefix = "fu:";
     private const string EscalationPrefix = "esc:";
@@ -50,6 +52,41 @@ public sealed class CommandBackedWorkManagementClient(
         if (query.Kind == WorkManagementKind.Assignment)
         {
             return CreateSnapshot(header, MapAssignment(header), query);
+        }
+
+        if (caseMonitoring is not null)
+        {
+            try
+            {
+                var rows = new List<CaseMonitoringPageItem>();
+                var seen = new HashSet<(MonitoringQueueKind, Guid)>();
+                var offset = 0;
+                while (true)
+                {
+                    var pageResult = await caseMonitoring.GetAsync(caseId, offset, 100, header.AggregateVersion, cancellationToken).ConfigureAwait(false);
+                    if (pageResult.Access == CaseMonitoringPageAccess.NotFoundOrNotAuthorized) return Denied<WorkManagementSnapshot>();
+                    if (pageResult.Access == CaseMonitoringPageAccess.Stale) return Conflict<WorkManagementSnapshot>("The case changed. Refresh and try again.");
+                    if (pageResult.Access != CaseMonitoringPageAccess.Found || pageResult.Page is not { } page ||
+                        page.CaseId != caseId || page.AggregateVersion != header.AggregateVersion || page.Items is null || page.Items.Count > 100 ||
+                        page.Items.Any(item => item?.Work is null || item.Work.CaseId != caseId || item.Work.WorkItemId == Guid.Empty ||
+                            !Enum.IsDefined(item.Work.Kind) || item.Work.AggregateVersion <= 0 || item.Work.AggregateVersion > header.AggregateVersion ||
+                            string.IsNullOrWhiteSpace(item.Work.Status) || !seen.Add((item.Work.Kind, item.Work.WorkItemId))))
+                        return Unavailable<WorkManagementSnapshot>("The case work could not be confirmed.");
+                    rows.AddRange(page.Items);
+                    if (page.NextOffset is not { } next) break;
+                    if (next != offset + 100 || page.Items.Count != 100 || next > 1_000_000)
+                        return Unavailable<WorkManagementSnapshot>("The case work could not be confirmed.");
+                    offset = next;
+                }
+
+                var mapped = rows.Select(item => TryMapItem(item.Work, item.AssignedToCurrentActor)).ToArray();
+                if (mapped.Any(item => item is null))
+                    return Unavailable<WorkManagementSnapshot>("The case work could not be confirmed.");
+                var scopedItems = mapped.Select(item => item!).Concat(MapAssignment(header));
+                return CreateSnapshot(header, scopedItems, query);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+            catch (Exception) { return Unavailable<WorkManagementSnapshot>("Coordination work is temporarily unavailable."); }
         }
 
         MonitoringQueueResult assigned;
@@ -92,7 +129,7 @@ public sealed class CommandBackedWorkManagementClient(
             .Select(mapped => mapped!)
             .Concat(MapAssignment(header));
 
-        return CreateSnapshot(header, items, query);
+        return CreateSnapshot(header, items, query) with { Message = LimitedMonitoringNotice };
     }
 
     private static UiCapabilityResult<WorkManagementSnapshot> CreateSnapshot(
@@ -190,7 +227,7 @@ public sealed class CommandBackedWorkManagementClient(
         if (query.OverdueOnly is { } overdueOnly)
         {
             var isOverdue = item.DueAtUtc is { } due && due < DateTimeOffset.UtcNow &&
-                item.Status is WorkManagementStatus.Scheduled or WorkManagementStatus.Requested or
+                item.Status is WorkManagementStatus.Scheduled or WorkManagementStatus.Acknowledged or WorkManagementStatus.Requested or
                     WorkManagementStatus.Accepted or WorkManagementStatus.InProgress or WorkManagementStatus.Provided;
             if (isOverdue != overdueOnly)
             {
@@ -229,13 +266,14 @@ public sealed class CommandBackedWorkManagementClient(
             return null;
         }
 
-        return item.Kind switch
+        var mapped = item.Kind switch
         {
             MonitoringQueueKind.FollowUp => MapFollowUp(item, assignedToCurrentActor),
             MonitoringQueueKind.Escalation => MapEscalation(item),
             MonitoringQueueKind.Assistance => MapAssistance(item),
             _ => null,
         };
+        return mapped is null ? null : mapped with { AssignedToCurrentActor = assignedToCurrentActor };
     }
 
     private static WorkManagementItem? MapAssistance(MonitoringQueueItem item)
