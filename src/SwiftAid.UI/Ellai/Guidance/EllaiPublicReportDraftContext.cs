@@ -111,6 +111,26 @@ public sealed class EllaiPublicReportDraftContext
         return applied && (reportedGender is null || Apply(new(PendingEditKind.Gender, Gender: reportedGender)));
     }
 
+    public bool ApplyInitialReportDetails(string? utterance)
+    {
+        if (utterance is null || utterance.Length > 500 || utterance.Contains('\r') || utterance.Contains('\n')) return false;
+        var match = Regex.Match(utterance,
+            @"^\s*(?:create|make|start)\s+(?:a\s+)?(?:draft\s+)?(?:case|report)\s+for\s+(?:a\s+)?(?<age>\d{1,3})[- ]year[- ]old\s+(?<subject>patient|woman|man|girl|boy)(?:\s+in\s+(?<locality>[\p{L}\p{N}][\p{L}\p{N} '\-]{0,199}?))?(?:\s+with\s+(?<observation>[\p{L}\p{N}][\p{L}\p{N} '\-]{0,199}))?[.!?]?\s*$",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        if (!match.Success || !int.TryParse(match.Groups["age"].Value,
+                System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var age))
+            return false;
+
+        var applied = Apply(new(PendingEditKind.Age, Age: age));
+        var reportedGender = GenderForDescriptor(match.Groups["subject"].Value);
+        if (reportedGender is { } gender) applied &= Apply(new(PendingEditKind.Gender, Gender: gender));
+        if (match.Groups["locality"].Success)
+            applied &= Apply(new(PendingEditKind.Locality, Text: match.Groups["locality"].Value.Trim()));
+        if (match.Groups["observation"].Success)
+            applied &= Apply(new(PendingEditKind.Observation, Text: match.Groups["observation"].Value.Trim()));
+        return applied;
+    }
+
     public bool ApplyReportedGender(string? utterance)
     {
         if (utterance is null || utterance.Length > 200 || utterance.Contains('\r') || utterance.Contains('\n')) return false;

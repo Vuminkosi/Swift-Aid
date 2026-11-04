@@ -226,8 +226,11 @@ public partial class EllaiGuidanceHost
             if (turn.UserText is { } reportRequest)
             {
                 reportDraft?.ApplyReportNarrativeStatement(reportRequest);
-                reportDraft?.ApplyAgeCorrection(reportRequest);
-                reportDraft?.ApplyReportedGender(reportRequest);
+                if (reportDraft?.ApplyInitialReportDetails(reportRequest) != true)
+                {
+                    reportDraft?.ApplyAgeCorrection(reportRequest);
+                    reportDraft?.ApplyReportedGender(reportRequest);
+                }
             }
         }
         // Conversation restoration offers an explicit action; only the currently awaited turn auto-starts.

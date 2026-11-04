@@ -4620,3 +4620,9 @@ PASS: Gateway build (dotnet build src/SwiftAid.Gateway/SwiftAid.Gateway.csproj -
 The active public report workflow now accepts a direct add/include observation request such as "Add headache." through the existing same-turn, empty-argument draft-edit proposal. The captured observation is the user's exact text after the command; no symptom is inferred, and existing duplicate and length limits still apply. This closes the explicit add step in conversation scenario 2.4.
 
 PASS: Gateway build (dotnet build src/SwiftAid.Gateway/SwiftAid.Gateway.csproj --no-restore -m:1 -nr:false -p:WasmBuildNative=false --verbosity quiet, 0 warnings, 0 errors); git diff --check. Tests were not added or run, per user instruction. NOT VERIFIED: live model proposal selection, browser draft mutation, or end-to-end conversation behavior.
+
+### Ellai initial report details in a create request - 2026-11-04
+
+The initial create-draft utterance can now carry a whole-year age, an explicitly described patient category, a case locality introduced with "in", and one observation introduced with "with". A strict sentence parser places only those stated values into the existing report draft context while the generic guidance proposal remains free of report values. It does not infer a country, patient residence, diagnosis, or onset time. This covers the first turn of conversation scenario 2.4.
+
+PASS: Gateway build (dotnet build src/SwiftAid.Gateway/SwiftAid.Gateway.csproj --no-restore -m:1 -nr:false -p:WasmBuildNative=false --verbosity quiet, 0 warnings, 0 errors); git diff --check. Tests were not added or run, per user instruction. NOT VERIFIED: live model selection, browser capture, and the complete report save/submit conversation.
