@@ -34,11 +34,23 @@ public sealed class ClassificationBackfillStore(SwiftAidDbContext db, IOptions<C
                 FROM swiftaid_classification.backfill_items item
                 JOIN case_events e ON e.event_id = item."SourceEventId"
                 JOIN managed_cases c ON c.case_id = e.case_id AND c.workspace_id = job."WorkspaceId" AND c.organization_id = job."OrganizationId"
+                LEFT JOIN swiftaid_classification.results result ON result."Id" = item."ResultId"
                 WHERE item."JobId" = job."Id" AND item."State" = 'Pending'
+                    AND (result."Id" IS NULL OR result."State" IN ('Completed', 'Failed') OR
+                        ((result."LeaseUntilUtc" IS NULL OR result."LeaseUntilUtc" <= clock_timestamp()) AND
+                         (result."AvailableAtUtc" IS NULL OR result."AvailableAtUtc" <= clock_timestamp())) OR
+                        ((result."LeaseUntilUtc" IS NULL OR result."LeaseUntilUtc" <= clock_timestamp()) AND
+                        NOT (COALESCE((SELECT report.received_at_utc FROM swiftaid_intake.intake_promotions promotion
+                            JOIN swiftaid_intake.intake_reports report ON report.receipt_id = promotion.receipt_id
+                            WHERE promotion.case_id = c.case_id), c.created_at_utc)
+                            BETWEEN clock_timestamp() - interval '30 days' AND clock_timestamp())))
                 ORDER BY item."Ordinal" LIMIT 1
             ) next_case ON TRUE
             WHERE job."WorkerId" = {workerId} AND job."State" = 'Running' AND job."ConfigurationHash" = {configuration}
                 AND job."OrganizationId" = ANY ({organizations})
+                AND (next_case.received_at_utc IS NOT NULL OR NOT EXISTS (
+                    SELECT 1 FROM swiftaid_classification.backfill_items pending
+                    WHERE pending."JobId" = job."Id" AND pending."State" = 'Pending'))
             ORDER BY next_case.received_at_utc DESC NULLS LAST, job."UpdatedAtUtc", job."Id"
             LIMIT 1
             """).FirstOrDefaultAsync(ct).ConfigureAwait(false);
@@ -119,8 +131,11 @@ public sealed class ClassificationBackfillStore(SwiftAidDbContext db, IOptions<C
         // Limit each reconciliation transaction; independent jobs and live consumers are not serialized.
         await db.Database.ExecuteSqlInterpolatedAsync($"""
             WITH pending AS (
-                SELECT * FROM swiftaid_classification.backfill_items
-                WHERE "JobId" = {id} AND "State" = 'Pending' ORDER BY "Ordinal" LIMIT 100
+                SELECT item.* FROM swiftaid_classification.backfill_items item
+                JOIN swiftaid_classification.results result ON result."Id" = item."ResultId"
+                WHERE item."JobId" = {id} AND item."State" = 'Pending'
+                    AND result."State" IN ('Completed', 'Failed')
+                ORDER BY item."Ordinal" LIMIT 100
             ), finished AS (
                 SELECT i."SourceEventId", r."Id" AS result_id,
                     CASE WHEN r."State" = 'Failed' THEN 'Failed'
@@ -153,7 +168,10 @@ public sealed class ClassificationBackfillStore(SwiftAidDbContext db, IOptions<C
             FROM swiftaid_classification.backfill_items item
             JOIN case_events e ON e.event_id = item."SourceEventId"
             JOIN managed_cases c ON c.case_id = e.case_id
+            LEFT JOIN swiftaid_classification.results result ON result."Id" = item."ResultId"
             WHERE item."JobId" = {id} AND item."State" = 'Pending'
+                AND (result."Id" IS NULL OR (result."State" NOT IN ('Completed', 'Failed') AND
+                    (result."State" <> 'Leased' OR result."LeaseUntilUtc" IS NULL OR result."LeaseUntilUtc" <= clock_timestamp())))
                 AND NOT (COALESCE((SELECT report.received_at_utc FROM swiftaid_intake.intake_promotions promotion
                     JOIN swiftaid_intake.intake_reports report ON report.receipt_id = promotion.receipt_id
                     WHERE promotion.case_id = c.case_id), c.created_at_utc)
@@ -183,7 +201,11 @@ public sealed class ClassificationBackfillStore(SwiftAidDbContext db, IOptions<C
             SELECT e.event_id AS "Value" FROM swiftaid_classification.backfill_items item
             JOIN case_events e ON e.event_id = item."SourceEventId"
             JOIN managed_cases c ON c.case_id = e.case_id
+            LEFT JOIN swiftaid_classification.results result ON result."Id" = item."ResultId"
             WHERE item."JobId" = {id} AND item."State" = 'Pending'
+                AND (result."Id" IS NULL OR result."State" IN ('Completed', 'Failed') OR
+                    ((result."LeaseUntilUtc" IS NULL OR result."LeaseUntilUtc" <= clock_timestamp()) AND
+                     (result."AvailableAtUtc" IS NULL OR result."AvailableAtUtc" <= clock_timestamp())))
                 AND COALESCE((SELECT report.received_at_utc FROM swiftaid_intake.intake_promotions promotion
                     JOIN swiftaid_intake.intake_reports report ON report.receipt_id = promotion.receipt_id
                     WHERE promotion.case_id = c.case_id), c.created_at_utc)
