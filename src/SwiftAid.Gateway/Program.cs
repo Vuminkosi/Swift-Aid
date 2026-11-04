@@ -129,6 +129,8 @@ builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiUtteranceSubmissionSe
 builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiPolicyService>();
 builder.Services.AddScoped<SwiftAid.Application.Ellai.IEllaiLocationReplayProtector, SwiftAid.Gateway.Ellai.EllaiLocationReplayProtector>();
 builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiToolBroker>();
+builder.Services.Configure<SwiftAid.Infrastructure.HealthEvidence.ApprovedHealthSourceOptions>(builder.Configuration.GetSection("Ellai:HealthSources"));
+builder.Services.AddSingleton<SwiftAid.Application.HealthEvidence.IApprovedHealthSourceRegistry, SwiftAid.Infrastructure.HealthEvidence.ConfiguredHealthSourceRegistry>();
 builder.Services.AddScoped(_ => new SwiftAid.Application.Ellai.EllaiTechnicalDocs(
     SwiftAid.Application.Ellai.EllaiTechnicalDocs.TryResolvePath(
         builder.Environment.ContentRootPath,
@@ -331,6 +333,7 @@ app.MapFollowUpReviewEndpoints();
 app.MapOrganizationDecisionEndpoints();
 app.MapCaseCorrelationEndpoints();
 app.MapSpatialAnalysisEndpoints();
+app.MapHealthSourceEndpoints();
 app.MapCorrelationDecisionEndpoints();
 app.MapCaseDetailEndpoints();
 app.MapCaseQueueEndpoints();
