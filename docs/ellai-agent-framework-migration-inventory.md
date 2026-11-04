@@ -4372,3 +4372,27 @@ an answer after a registry change; together with the worker timeout and seeding
 controls the filter passed 4/4. The disposable container was removed. Initial
 seeding and custom registry implementations still rely on cooperative cancellation;
 network-partition and deployed Gateway behavior remain unverified.
+
+### Current rendered location search and replay — 2026-11-04
+
+At `76956360`, the current Debug Gateway and live Muse completed a synthetic
+two-turn location conversation in headless Chromium against freshly migrated
+PostGIS 17 with NATS disabled. The first turn searched for Rusape, the browser
+refreshed, and the follow-up recalled the place. Both turns completed, session
+cancellation succeeded and the browser reported zero page errors. A read-only
+database query confirmed `ellai_locations` and a protected replay scope in both
+turn traces. This exercised first-use registry seeding and subsequent location
+reads on the current Gateway; it did not inject a noncooperative database call.
+
+The synthetic place name was also present, case-insensitively, in public
+registry `ResourceId` and `EvidenceId` values in both traces. Protecting replay
+arguments therefore does not hide all location information in a trace. Earlier
+statements in this inventory that a plaintext place name was not observed should
+not be read as proof that location-identifying registry IDs are absent.
+
+PASS: `node tests/SwiftAid.Ui.Tests/ellai-conversation.browser.cjs` with
+`SWIFTAID_RUN_LIVE_ELLAI=1`, the local Playwright package, the isolated Gateway
+URL and synthetic search/follow-up prompts. The task-owned Gateway and database
+container were stopped; the task-created local test key directory remains.
+This run does not verify deployed behavior, physical devices, provider
+reliability or privacy of registry identifiers beyond the observed scope.
