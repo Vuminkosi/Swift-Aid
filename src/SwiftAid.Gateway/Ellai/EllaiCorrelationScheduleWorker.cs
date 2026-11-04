@@ -63,5 +63,3 @@ public sealed class EllaiCorrelationScheduleWorker(IServiceScopeFactory scopes,
         }
     }
 }
-
-

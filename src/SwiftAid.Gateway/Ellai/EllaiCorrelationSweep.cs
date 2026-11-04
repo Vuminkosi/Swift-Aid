@@ -128,5 +128,3 @@ public sealed class EllaiCorrelationSweep(SwiftAidDbContext db, EllaiCorrelation
         }
     }
 }
-
-
