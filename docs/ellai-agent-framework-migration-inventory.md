@@ -4226,3 +4226,25 @@ FullyQualifiedName~NotificationBridgeConsumesFromProvisionedStreamAndRemovesItsC
 passed 1/1; the post-commit `--no-build --no-restore` rerun also passed 1/1.
 The fixture's disposable MinIO, Redis and NATS containers were removed. Deployed
 stream provisioning and delivery remain unverified.
+
+### Strict decision and provisional-segment JSON — 2026-11-04
+
+The model-turn parser accepted duplicate properties, including case variants,
+and silently ignored undeclared fields in final decisions. Five synthetic
+regressions reproduced those cases. The final parser now rejects duplicate
+properties recursively and disallows unmapped decision members; the existing
+repair path handles invalid responses. One old parser fixture was corrected to
+remove an undeclared claim field. Separately, three synthetic tests showed that
+duplicate or undeclared segment fields could be published before final parsing.
+The provisional segment parser now rejects those shapes before publication.
+
+PASS: the combined `EllaiModelTurnParserTests|EllaiAgentFrameworkContractTests`
+filter passed 181/181 with `dotnet test
+tests/SwiftAid.Application.Tests/SwiftAid.Application.Tests.csproj --no-restore
+-m:1 -nr:false`. The full application suite passed 1,262, failed 0 and skipped
+19 after commits `98999d88` and `5aef1439`, using `--no-build --no-restore
+-m:1 -nr:false`. After the final-parser change and before the segment-parser
+change, two live Muse probes covering a brokered streamed decision and a
+capability follow-up passed 2/2 with `ELLAI_LIVE=1`. The latest segment-parser
+change has synthetic verification only; deployed behavior and malformed live
+provider output remain unverified.
