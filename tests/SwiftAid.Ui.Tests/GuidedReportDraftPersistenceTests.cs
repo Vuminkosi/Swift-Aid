@@ -109,6 +109,53 @@ public sealed partial class GuidedReportDraftPersistenceTests
     }
 
     [Fact]
+    public async Task ValidDraftSaveRetainsOriginalWhitespaceAndHiddenInput()
+    {
+        var draft = CreateDraft("  Synthetic original entry  ");
+        draft.ObservationsText = "first observation\n\nsecond observation";
+        draft.OccurrencePrecision = ReportedTimePrecision.Unknown;
+        draft.OccurrenceOffset = "+02:";
+        PublicReportSaveRequest? saved = null;
+        var component = CreateStepper(draft, request =>
+        {
+            saved = request;
+            request.ConfirmPersisted(Guid.NewGuid(), formSnapshotPersisted: request.FormSnapshot is not null);
+            return Task.CompletedTask;
+        });
+        component.EditableDraftSnapshotsSupported = true;
+
+        await InvokeSaveDraftAsync(component);
+
+        Assert.Equal("Saved", GetSaveState(component));
+        Assert.NotNull(saved?.FormSnapshot);
+        var restored = PublicReportDraft.FromFormSnapshot(saved.FormSnapshot);
+        Assert.Equal("  Synthetic original entry  ", restored.Narrative);
+        Assert.Equal("first observation\n\nsecond observation", restored.ObservationsText);
+        Assert.Equal("+02:", restored.OccurrenceOffset);
+        Assert.Empty(component.GetState().ValidationIssues);
+    }
+
+    [Fact]
+    public async Task LosslessValidDraftDoesNotRequireAnEditableSnapshot()
+    {
+        var draft = CreateDraft();
+        PublicReportSaveRequest? saved = null;
+        var component = CreateStepper(draft, request =>
+        {
+            saved = request;
+            request.ConfirmPersisted(Guid.NewGuid());
+            return Task.CompletedTask;
+        });
+        component.EditableDraftSnapshotsSupported = true;
+
+        await InvokeSaveDraftAsync(component);
+
+        Assert.Equal("Saved", GetSaveState(component));
+        Assert.NotNull(saved);
+        Assert.Null(saved.FormSnapshot);
+    }
+
+    [Fact]
     public void RestoredSnapshotKeepsEvidenceButRequiresCurrentReviewAndConfirmations()
     {
         var draft = CreateDraft("Synthetic original entry");

@@ -38,6 +38,24 @@ public sealed class MobileDraftSnapshotTests
     }
 
     [Fact]
+    public async Task SaveBeforeLeavingPreservesOriginalSpacingEvenWhenReportConverts()
+    {
+        var store = new GuestDraftStore(new MemoryStore());
+        var host = NewHost(store);
+        var draft = new PublicReportDraft { SubjectScope = IntakeSubjectScope.Human, Narrative = "  Synthetic spacing  " };
+        Set(host, "_reportDraft", draft);
+        Set(host, "_storageAvailable", true);
+        Set(host, "_showUnsavedExitPrompt", true);
+
+        await InvokeAsync(host, "SaveDraftAndContinueAsync");
+
+        var id = Assert.IsType<Guid>(Get<Guid?>(host, "_activeDraftId"));
+        var saved = await store.GetEditableDraftAsync(id);
+        Assert.NotNull(saved);
+        Assert.Equal("  Synthetic spacing  ", PublicReportDraft.FromFormSnapshot(saved.FormSnapshot).Narrative);
+    }
+
+    [Fact]
     public async Task SaveBeforeLeavingPersistsIncompleteFormSnapshot()
     {
         var store = new GuestDraftStore(new MemoryStore());

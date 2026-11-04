@@ -1097,6 +1097,8 @@
                 submission = new PublicReportDraft { SubjectScope = _reportDraft.SubjectScope }
                     .ToSubmission(null, null, null, [], false);
             }
+            if (formSnapshot is null && !_reportDraft.IsLosslesslyRepresentedBy(submission))
+                formSnapshot = _reportDraft.ToFormSnapshot();
             if (_activeDraftId.HasValue && _activeSubmission is not null)
             {
                 submission = submission with

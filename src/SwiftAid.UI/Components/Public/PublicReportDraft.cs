@@ -9,6 +9,24 @@ public sealed class PublicReportDraft : IValidatableObject
 {
     public PublicReportDraft Copy() => (PublicReportDraft)MemberwiseClone();
 
+    public bool IsLosslesslyRepresentedBy(IntakeSubmission submission)
+    {
+        var restored = FromSubmission(submission);
+        using var source = System.Text.Json.JsonDocument.Parse(System.Text.Json.JsonSerializer.Serialize(this));
+        using var target = System.Text.Json.JsonDocument.Parse(System.Text.Json.JsonSerializer.Serialize(restored));
+        foreach (var property in source.RootElement.EnumerateObject())
+        {
+            if (!target.RootElement.TryGetProperty(property.Name, out var value)) return false;
+            if (IsEmptyText(property.Value) && IsEmptyText(value)) continue;
+            if (property.Value.ValueKind != value.ValueKind || property.Value.GetRawText() != value.GetRawText()) return false;
+        }
+        return true;
+
+        static bool IsEmptyText(System.Text.Json.JsonElement value) =>
+            value.ValueKind == System.Text.Json.JsonValueKind.Null ||
+            value.ValueKind == System.Text.Json.JsonValueKind.String && value.GetString() == string.Empty;
+    }
+
     public GuestDraftFormSnapshot ToFormSnapshot()
     {
         var snapshot = new GuestDraftFormSnapshot(GuestDraftFormSnapshot.CurrentSchemaVersion,

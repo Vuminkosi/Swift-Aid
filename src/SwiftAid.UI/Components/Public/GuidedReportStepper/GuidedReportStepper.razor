@@ -1375,6 +1375,9 @@
                 var carrier = new PublicReportDraft { SubjectScope = Draft.SubjectScope };
                 submission = carrier.ToSubmission(null, null, null, [], false);
             }
+            if (formSnapshot is null && EditableDraftSnapshotsSupported &&
+                !sourceSnapshot.IsLosslesslyRepresentedBy(submission))
+                formSnapshot = sourceSnapshot.ToFormSnapshot();
             _savingSnapshot = formSnapshot is null ? PublicReportDraft.FromSubmission(submission) : sourceSnapshot.Copy();
             _activeSaveRequest = new PublicReportSaveRequest(CurrentDraftId, submission, formSnapshot);
             await OnSaveDraft.InvokeAsync(_activeSaveRequest);
