@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.TestHost" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <ProjectReference Include="../../src/SwiftAid.Gateway/SwiftAid.Gateway.csproj" />
+    <Compile Include="../SwiftAid.Integration.Tests/ReportVoiceEndpointTests.cs" Link="ReportVoiceEndpointTests.cs" />
+    <Compile Include="../SwiftAid.Ui.Tests/ReportVoiceAssistantContextTests.cs" Link="ReportVoiceAssistantContextTests.cs" />
+    <Compile Include="../SwiftAid.Ui.Tests/ReportVoiceAutofillTests.cs" Link="ReportVoiceAutofillTests.cs" />
+    <Compile Include="../SwiftAid.Ui.Tests/ReportVoiceAssistantRenderTests.cs" Link="ReportVoiceAssistantRenderTests.cs" />
+    <Compile Include="../SwiftAid.Ui.Tests/ReportVoiceLiveProviderTests.cs" Link="ReportVoiceLiveProviderTests.cs" />
+    <Compile Include="../SwiftAid.Ui.Tests/PublicReportCountrySelectionTests.cs" Link="PublicReportCountrySelectionTests.cs" />
+    <Compile Include="../SwiftAid.Ui.Tests/GuidedReportDraftPersistenceTests*.cs" Link="Draft/%(Filename)%(Extension)" />
+    <Compile Include="../SwiftAid.Ui.Tests/PublicReportOfflineDraftTests.cs" Link="PublicReportOfflineDraftTests.cs" />
+    <Compile Include="../SwiftAid.Ui.Tests/EllaiSurfaceLogicTests*.cs" Link="Ellai/%(Filename)%(Extension)" />
+    <Using Include="Xunit" />
+  </ItemGroup>
+</Project>
