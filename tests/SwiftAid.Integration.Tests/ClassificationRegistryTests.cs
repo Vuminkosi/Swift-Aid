@@ -22,7 +22,12 @@ namespace SwiftAid.Integration.Tests;
 public sealed class ClassificationRegistryTests
 {
     [CachedBartPostgresFact]
-    public async Task Real_bart_result_is_read_by_framework_without_source_or_lease_disclosure()
+    public Task Real_bart_result_is_read_by_framework_without_source_or_lease_disclosure() => RunRealBartReadAsync(liveMuse: false);
+
+    [CachedBartMusePostgresFact]
+    public Task Live_muse_reads_real_bart_result_without_source_or_lease_disclosure() => RunRealBartReadAsync(liveMuse: true);
+
+    private static async Task RunRealBartReadAsync(bool liveMuse)
     {
         await using var fixture = await CaseImportPostgresTests.Fixture.CreateAsync();
         var notice = await ImportAsync(fixture);
@@ -64,20 +69,24 @@ public sealed class ClassificationRegistryTests
             var policy = new CaseAccessPolicy(new PostgresCurrentAccessGrantStore(fixture.Db, unit), new PostgresCaseAccessDescriptorStore(fixture.Db, unit));
             var query = new PostgresCaseClassificationQuery(fixture.Db, policy, unit, Options.Create(settings));
             var broker = new EllaiToolBroker(new EllaiPolicyService(), new EllaiConsentService(), classification: query);
-            using var model = new ClassificationToolClient(notice.SourceId);
-            var executor = new EllaiFrameworkExecutor(model, new EllaiPromptBuilder("Synthetic policy", "fixture"),
+            using var scriptedModel = liveMuse ? null : new ClassificationToolClient(notice.SourceId);
+            using var liveModel = liveMuse ? new ClassificationCaptureClient(EllaiMuseChatClientFactory.Create(EllaiOptions.Bind(Environment.GetEnvironmentVariable))) : null;
+            var executor = new EllaiFrameworkExecutor((IChatClient?)liveModel ?? scriptedModel!, new EllaiPromptBuilder("Synthetic policy", "fixture"),
                 broker, new EllaiUsageLedger(), new InMemoryEllaiUsageStore());
-            var work = new EllaiUtteranceWork("real-bart-session", "scope", "Read classification evidence.",
+            var utterance = liveMuse
+                ? $"Use ellai_classification_evidence with case_id {notice.SourceId:D} to read the persisted semantic classification. Explain briefly that it is not a diagnosis."
+                : "Read classification evidence.";
+            var work = new EllaiUtteranceWork("real-bart-session", "scope", utterance,
                 "public.product-help", null, EllaiMode.Ask, 1, "cycle", CaseImportPostgresTests.Actor, true, "consent/0",
                 EllaiProcessingClassification.UserProvidedNonSensitive, EllaiProcessingClassification.UserProvidedNonSensitive,
                 new HashSet<string> { EllaiToolNames.ClassificationEvidence }, EllaiConsentService.PublicProductHelpPurpose, "turn");
             var turn = await EllaiUtteranceRunner.RunOneAsync(work,
                 new EllaiUtteranceServices(executor, null, null, new EllaiConsentService(), InvokeToolAsync: broker.InvokeAsync), 1024, default);
             Assert.True(turn.Completed, turn.FailureCode);
-            Assert.True(model.SawToolResult);
-            Assert.Contains(lease.ResultId.ToString("D"), model.ToolResultText, StringComparison.OrdinalIgnoreCase);
-            Assert.DoesNotContain(lease.LeaseId.ToString("D"), model.ToolResultText);
-            Assert.DoesNotContain(lease.Text, model.ToolResultText);
+            var toolResultText = liveModel?.ToolResultText ?? scriptedModel!.ToolResultText;
+            Assert.Contains(lease.ResultId.ToString("D"), toolResultText, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain(lease.LeaseId.ToString("D"), toolResultText);
+            Assert.DoesNotContain(lease.Text, toolResultText);
         }
         finally
         {
@@ -101,6 +110,30 @@ public sealed class ClassificationRegistryTests
             if (Environment.GetEnvironmentVariable("SWIFTAID_RUN_CLASSIFICATION_LIVE") != "1" ||
                 Environment.GetEnvironmentVariable("SWIFTAID_RUN_INTAKE_POSTGRES_FIXTURES") != "1")
                 Skip = "Requires opt-in disposable PostgreSQL, the local classification image and cached BART volume.";
+        }
+    }
+
+    private sealed class CachedBartMusePostgresFactAttribute : FactAttribute
+    {
+        public CachedBartMusePostgresFactAttribute()
+        {
+            if (Environment.GetEnvironmentVariable("ELLAI_LIVE") != "1" ||
+                Environment.GetEnvironmentVariable("SWIFTAID_RUN_CLASSIFICATION_LIVE") != "1" ||
+                Environment.GetEnvironmentVariable("SWIFTAID_RUN_INTAKE_POSTGRES_FIXTURES") != "1")
+                Skip = "Requires live Muse, disposable PostgreSQL, the local classification image and cached BART volume.";
+        }
+    }
+
+    private sealed class ClassificationCaptureClient(IChatClient inner) : DelegatingChatClient(inner)
+    {
+        public string ToolResultText { get; private set; } = string.Empty;
+        public override Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null,
+            CancellationToken cancellationToken = default)
+        {
+            var copied = messages.ToArray();
+            var results = copied.SelectMany(message => message.Contents).OfType<FunctionResultContent>().ToArray();
+            if (results.Length != 0) ToolResultText = JsonSerializer.Serialize(results);
+            return base.GetResponseAsync(copied, options, cancellationToken);
         }
     }
 
