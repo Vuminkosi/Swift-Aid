@@ -289,6 +289,8 @@
 
     protected override void OnInitialized()
     {
+        _reportVoiceContext = Services.GetService<EllaiPublicReportDraftContext>();
+        _reportVoiceContext?.RegisterVoiceController(this, StartReportVoiceCaptureAsync, StopReportVoiceCaptureAsync);
         _validationGuidance = Services.GetService<EllaiValidationGuidance>();
         if (_validationGuidance is not null)
             _validationGuidance.Changed += OnValidationGuidanceChanged;
@@ -420,10 +422,10 @@
         && !_startingSession && !_startingVoiceCapture && !_voiceTranscriptionInProgress
         && !_isRecordingAudio && !_cancelOutcomeUnknown && !_startOutcomeUnknown;
 
-    private async Task StartVoiceCaptureAsync(EllaiVoiceCaptureMode mode)
+    private async Task StartVoiceCaptureAsync(EllaiVoiceCaptureMode mode, bool reportCapture = false)
     {
         var session = _sessionView;
-        var useNativeLiveCapture = mode == EllaiVoiceCaptureMode.Live
+        var useNativeLiveCapture = (mode == EllaiVoiceCaptureMode.Live || reportCapture)
             && _nativeVoiceCapture?.IsAvailable == true;
         var useBrowserLiveVoiceWebSocket = mode == EllaiVoiceCaptureMode.Live
             && !useNativeLiveCapture && !ReviewClient.UsesGatewayPcmAudioDownload;
@@ -444,6 +446,7 @@
             return;
         }
 
+        _reportVoiceCapture = reportCapture;
         _startingVoiceCapture = true;
         var nativePermission = Services.GetService<IEllaiMicrophonePermission>();
         if (nativePermission is not null
@@ -549,7 +552,7 @@
                 {
                     useNativeLiveCapture = false;
                     _ = await _captureModule.InvokeAsync<string>(
-                        "startCapture", _captureDotnetReference, true, session.SessionId);
+                        "startCapture", _captureDotnetReference, mode == EllaiVoiceCaptureMode.Live, session.SessionId);
                 }
             }
             else
@@ -557,8 +560,9 @@
                 _ = await _captureModule!.InvokeAsync<string>(
                     "startCapture", _captureDotnetReference, mode == EllaiVoiceCaptureMode.Live, session.SessionId,
                     useBrowserLiveVoiceWebSocket
-                        ? _speechPreferences.ApplyToVoiceUri(ReviewClient.CreateLiveVoiceWebSocketUri(
-                            new Uri(Navigation.BaseUri), session.SessionId, _liveVoiceCaptureId!)).ToString()
+                        ? _speechPreferences.ApplyToVoiceUri(_reportVoiceCapture
+                            ? ReviewClient.CreateReportVoiceWebSocketUri(new Uri(Navigation.BaseUri), session.SessionId, _liveVoiceCaptureId!)
+                            : ReviewClient.CreateLiveVoiceWebSocketUri(new Uri(Navigation.BaseUri), session.SessionId, _liveVoiceCaptureId!)).ToString()
                         : string.Empty);
             }
             _nativeVoiceCaptureActive = useNativeLiveCapture;
@@ -642,8 +646,9 @@
         _liveVoiceStream = new PcmChannelReadStream(_liveVoiceChunks.Reader);
         _liveVoiceCts = CancellationTokenSource.CreateLinkedTokenSource(
             _cts?.Token ?? CancellationToken.None);
-        _liveVoiceTranscriptionTask = ReviewClient.TranscribeLiveVoiceStreamAsync(
-            sessionId, _liveVoiceStream, _liveVoiceCts.Token, _liveVoiceCaptureId);
+        _liveVoiceTranscriptionTask = _reportVoiceCapture
+            ? ReviewClient.TranscribeReportLiveVoiceStreamAsync(sessionId, _liveVoiceStream, _liveVoiceCts.Token, _liveVoiceCaptureId)
+            : ReviewClient.TranscribeLiveVoiceStreamAsync(sessionId, _liveVoiceStream, _liveVoiceCts.Token, _liveVoiceCaptureId);
         if (!isReconnect)
         {
             _liveVoiceReconnectRequired = false;
@@ -765,8 +770,9 @@
                 var replay = SnapshotCapturedAudio();
                 try
                 {
-                    var socketUrl = _speechPreferences.ApplyToVoiceUri(ReviewClient.CreateLiveVoiceWebSocketUri(
-                        new Uri(Navigation.BaseUri), sessionId, _liveVoiceCaptureId!, 0)).ToString();
+                    var socketUrl = _speechPreferences.ApplyToVoiceUri(_reportVoiceCapture
+                        ? ReviewClient.CreateReportVoiceWebSocketUri(new Uri(Navigation.BaseUri), sessionId, _liveVoiceCaptureId!, 0)
+                        : ReviewClient.CreateLiveVoiceWebSocketUri(new Uri(Navigation.BaseUri), sessionId, _liveVoiceCaptureId!, 0)).ToString();
                     var connected = await _captureModule!.InvokeAsync<bool>(
                         "reconnectVoiceStream", socketUrl, replay).ConfigureAwait(false);
                     if (!connected)
@@ -1161,6 +1167,9 @@
             if (completedTurn.ServerSubmission && completedTurn.Admission is null) break;
             _lastCompletedVoiceTurnSequence = completedTurn.Sequence;
             var transcript = completedTurn.Transcript.Trim();
+            QueueReportVoiceTurn(sessionId, completedTurn.TurnId ?? completedTurn.ProviderTurnId, completedTurn.VoiceCaptureId, transcript);
+            if (_reportVoiceCapture && string.Equals(completedTurn.VoiceCaptureId, _liveVoiceCaptureId, StringComparison.Ordinal))
+                continue;
             if (completedTurn.ServerSubmission)
             {
                 ReconcileVoiceAdmission(completedTurn.TurnId, transcript, completedTurn.Admission);
@@ -1336,13 +1345,24 @@
         ReadOnlyMemory<byte> pcm,
         CancellationToken cancellationToken)
     {
-        if (!_isRecordingAudio || _captureMode != EllaiVoiceCaptureMode.Live || pcm.Length is 0 or > 8_192
+        if (!_isRecordingAudio || pcm.Length is 0 or > 8_192
             || (pcm.Length & 1) != 0)
         {
             return;
         }
 
         var bytes = pcm.ToArray();
+        if (_captureMode == EllaiVoiceCaptureMode.Recorded)
+        {
+            if (!TryAppendCapturedAudio(bytes, out _)) _ = InvokeAsync(StopVoiceCaptureAsync);
+            Array.Clear(bytes);
+            return;
+        }
+        if (_captureMode != EllaiVoiceCaptureMode.Live)
+        {
+            Array.Clear(bytes);
+            return;
+        }
         ObserveOtherNativeBargeIn(bytes);
         await UpdateNativeVoiceGlowAsync(bytes);
         if (!TryAppendCapturedAudio(bytes, out var offset))
@@ -1438,6 +1458,7 @@
             await _captureModule.InvokeVoidAsync("cancelCapture");
         }
         _isRecordingAudio = false;
+        if (_reportVoiceCapture) _reportVoiceContext?.MarkVoiceStopped(failed: true);
         await StopVoiceTurnStatusPollingAsync();
         await CancelLiveVoiceStreamAsync();
         DiscardCapturedAudio();
@@ -1456,6 +1477,7 @@
             }
 
             _isRecordingAudio = false;
+            if (_reportVoiceCapture) _reportVoiceContext?.MarkVoiceStopped(failed: true);
             await StopVoiceTurnStatusPollingAsync();
             await CancelLiveVoiceStreamAsync();
             _nativeVoiceCaptureActive = false;
@@ -1583,7 +1605,11 @@
                         await InvokeAsync(StateHasChanged);
                         try
                         {
-                            _ = await ReviewClient.TranscribeVoiceAsync(
+                            _ = _reportVoiceCapture
+                                ? await ReviewClient.TranscribeReportVoiceAsync(
+                                    session.SessionId, pendingAudio.Audio, EllaiVoiceCaptureMode.Live,
+                                    _cts?.Token ?? CancellationToken.None, _liveVoiceCaptureId, pendingAudio.StartSample).ConfigureAwait(false)
+                                : await ReviewClient.TranscribeVoiceAsync(
                                 session.SessionId,
                                 pendingAudio.Audio,
                                 EllaiVoiceCaptureMode.Live,
@@ -1627,8 +1653,9 @@
                 Array.Clear(capturedAudio);
                 try
                 {
-                    result = await ReviewClient.TranscribeVoiceAsync(
-                        session.SessionId, payload, mode.Value, CancellationToken.None, _liveVoiceCaptureId).ConfigureAwait(false);
+                    result = _reportVoiceCapture
+                        ? await ReviewClient.TranscribeReportVoiceAsync(session.SessionId, payload, mode.Value, CancellationToken.None, _liveVoiceCaptureId).ConfigureAwait(false)
+                        : await ReviewClient.TranscribeVoiceAsync(session.SessionId, payload, mode.Value, CancellationToken.None, _liveVoiceCaptureId).ConfigureAwait(false);
                 }
                 finally
                 {
@@ -1658,6 +1685,8 @@
             }
 
             var transcript = result.Transcript.Trim();
+            QueueReportVoiceTurn(session.SessionId, result.ClientUtteranceId ?? _liveVoiceCaptureId ?? Guid.NewGuid().ToString("N"), _liveVoiceCaptureId, transcript);
+            if (_reportVoiceCapture) return;
             if (result.ServerSubmission)
             {
                 await InvokeAsync(() => ReconcileVoiceAdmission(result.ClientUtteranceId, transcript, result.Admission));
@@ -1712,6 +1741,7 @@
             _isRecordingAudio = false;
             _voiceTranscriptionInProgress = false;
             _captureMode = null;
+            if (_reportVoiceCapture) _reportVoiceContext?.MarkVoiceStopped();
             _liveVoiceCaptureEnding = true;
             if (_liveVoiceChunks is not null || _browserLiveVoiceWebSocket)
             {
@@ -3168,6 +3198,7 @@
 
     public void Dispose()
     {
+        _reportVoiceContext?.RemoveVoiceController(this);
         if (_validationGuidance is not null)
             _validationGuidance.Changed -= OnValidationGuidanceChanged;
         Navigation.LocationChanged -= TrackNavigation;

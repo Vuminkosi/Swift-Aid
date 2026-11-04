@@ -124,6 +124,14 @@ public sealed class MobileEllaiReviewClient : IEllaiReviewClient
     public Task<bool> GrantVoiceCaptureConsentAsync(string sessionId, CancellationToken cancellationToken) =>
         ClientFor(sessionId).GrantVoiceCaptureConsentAsync(sessionId, cancellationToken);
 
+    public Uri CreateLiveVoiceWebSocketUri(Uri baseUri, string sessionId, string voiceCaptureId,
+        long voiceCaptureOffsetSamples = 0) =>
+        ClientFor(sessionId).CreateLiveVoiceWebSocketUri(baseUri, sessionId, voiceCaptureId, voiceCaptureOffsetSamples);
+
+    public Uri CreateReportVoiceWebSocketUri(Uri baseUri, string sessionId, string voiceCaptureId,
+        long voiceCaptureOffsetSamples = 0) =>
+        ClientFor(sessionId).CreateReportVoiceWebSocketUri(baseUri, sessionId, voiceCaptureId, voiceCaptureOffsetSamples);
+
     public Task<bool> GrantReportVoiceConsentAsync(string sessionId, CancellationToken cancellationToken) =>
         ClientFor(sessionId).GrantReportVoiceConsentAsync(sessionId, cancellationToken);
 
@@ -142,6 +150,16 @@ public sealed class MobileEllaiReviewClient : IEllaiReviewClient
         long voiceCaptureOffsetSamples = 0) =>
         ClientFor(sessionId).TranscribeLiveVoiceStreamAsync(
             sessionId, audio, cancellationToken, voiceCaptureId, voiceCaptureOffsetSamples);
+
+    public Task<EllaiVoiceTranscriptionResult?> TranscribeReportVoiceAsync(
+        string sessionId, byte[] audio, EllaiVoiceCaptureMode mode, CancellationToken cancellationToken,
+        string? voiceCaptureId = null, long voiceCaptureOffsetSamples = 0) =>
+        ClientFor(sessionId).TranscribeReportVoiceAsync(sessionId, audio, mode, cancellationToken, voiceCaptureId, voiceCaptureOffsetSamples);
+
+    public Task<EllaiVoiceTranscriptionResult?> TranscribeReportLiveVoiceStreamAsync(
+        string sessionId, Stream audio, CancellationToken cancellationToken, string? voiceCaptureId = null,
+        long voiceCaptureOffsetSamples = 0) =>
+        ClientFor(sessionId).TranscribeReportLiveVoiceStreamAsync(sessionId, audio, cancellationToken, voiceCaptureId, voiceCaptureOffsetSamples);
 
     public Task<EllaiVoiceTurnStatusDto?> GetVoiceTurnStatusAsync(
         string sessionId, CancellationToken cancellationToken, long afterSequence = 0) =>

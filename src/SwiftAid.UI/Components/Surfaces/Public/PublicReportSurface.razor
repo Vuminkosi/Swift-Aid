@@ -29,6 +29,7 @@
                          DraftSavedMessage="Your report draft is saved on this device. It has not been sent."
                          OnSubmit="@(SubmitAvailable ? OnSendReport : default)">
         <DetailsLeadContent>
+            <ReportVoiceAssistant />
             @if (ShowVoiceCapture)
             {
                 <section class="public-report-voice" aria-labelledby="public-report-voice-title">

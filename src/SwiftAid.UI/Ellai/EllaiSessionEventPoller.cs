@@ -304,9 +304,19 @@ public sealed class EllaiReviewHttpClient(HttpClient http, bool useGuestRoutes =
         return await _http.SendAsync(request, ct).ConfigureAwait(false);
     }
 
-    public async Task<EllaiVoiceTranscriptionResult?> TranscribeVoiceAsync(
+    public Task<EllaiVoiceTranscriptionResult?> TranscribeVoiceAsync(
         string sessionId, byte[] audio, EllaiVoiceCaptureMode mode, CancellationToken cancellationToken,
-        string? voiceCaptureId = null, long voiceCaptureOffsetSamples = 0)
+        string? voiceCaptureId = null, long voiceCaptureOffsetSamples = 0) =>
+        TranscribeVoiceCoreAsync(sessionId, audio, mode, cancellationToken, voiceCaptureId, voiceCaptureOffsetSamples, true);
+
+    public Task<EllaiVoiceTranscriptionResult?> TranscribeReportVoiceAsync(
+        string sessionId, byte[] audio, EllaiVoiceCaptureMode mode, CancellationToken cancellationToken,
+        string? voiceCaptureId = null, long voiceCaptureOffsetSamples = 0) =>
+        TranscribeVoiceCoreAsync(sessionId, audio, mode, cancellationToken, voiceCaptureId, voiceCaptureOffsetSamples, false);
+
+    private async Task<EllaiVoiceTranscriptionResult?> TranscribeVoiceCoreAsync(
+        string sessionId, byte[] audio, EllaiVoiceCaptureMode mode, CancellationToken cancellationToken,
+        string? voiceCaptureId, long voiceCaptureOffsetSamples, bool submitConversation)
     {
         if (string.IsNullOrWhiteSpace(sessionId) || audio is null || audio.Length == 0
             || audio.Length > 32 * 1024 * 1024)
@@ -314,7 +324,7 @@ public sealed class EllaiReviewHttpClient(HttpClient http, bool useGuestRoutes =
             return null;
         }
 
-        var route = $"{SessionRoute(sessionId)}/voice/{(mode == EllaiVoiceCaptureMode.Live ? "recover" : "recorded")}?serverSubmission=true";
+        var route = $"{SessionRoute(sessionId)}/voice/{(mode == EllaiVoiceCaptureMode.Live ? "recover" : "recorded")}?serverSubmission={submitConversation.ToString().ToLowerInvariant()}";
         if (!string.IsNullOrWhiteSpace(voiceCaptureId) || voiceCaptureOffsetSamples > 0)
         {
             var query = new List<string>();
@@ -349,9 +359,19 @@ public sealed class EllaiReviewHttpClient(HttpClient http, bool useGuestRoutes =
         }
     }
 
-    public async Task<EllaiVoiceTranscriptionResult?> TranscribeLiveVoiceStreamAsync(
+    public Task<EllaiVoiceTranscriptionResult?> TranscribeLiveVoiceStreamAsync(
         string sessionId, Stream audio, CancellationToken cancellationToken, string? voiceCaptureId = null,
-        long voiceCaptureOffsetSamples = 0)
+        long voiceCaptureOffsetSamples = 0) =>
+        TranscribeLiveVoiceStreamCoreAsync(sessionId, audio, cancellationToken, voiceCaptureId, voiceCaptureOffsetSamples, true);
+
+    public Task<EllaiVoiceTranscriptionResult?> TranscribeReportLiveVoiceStreamAsync(
+        string sessionId, Stream audio, CancellationToken cancellationToken, string? voiceCaptureId = null,
+        long voiceCaptureOffsetSamples = 0) =>
+        TranscribeLiveVoiceStreamCoreAsync(sessionId, audio, cancellationToken, voiceCaptureId, voiceCaptureOffsetSamples, false);
+
+    private async Task<EllaiVoiceTranscriptionResult?> TranscribeLiveVoiceStreamCoreAsync(
+        string sessionId, Stream audio, CancellationToken cancellationToken, string? voiceCaptureId,
+        long voiceCaptureOffsetSamples, bool submitConversation)
     {
         if (string.IsNullOrWhiteSpace(sessionId) || audio is null || !audio.CanRead)
         {
@@ -360,8 +380,10 @@ public sealed class EllaiReviewHttpClient(HttpClient http, bool useGuestRoutes =
 
         if (_http.BaseAddress is null || string.IsNullOrWhiteSpace(voiceCaptureId)) return null;
         var uri = CreateLiveVoiceWebSocketUri(_http.BaseAddress, sessionId, voiceCaptureId, voiceCaptureOffsetSamples);
+        if (!submitConversation)
+            uri = new Uri(uri.AbsoluteUri.Replace("serverSubmission=true", "serverSubmission=false", StringComparison.Ordinal));
         await EllaiLiveVoiceWebSocketClient.SendAsync(_http, uri, audio, cancellationToken, speechDetectorFactory, voiceCaptureId, voiceCaptureOffsetSamples).ConfigureAwait(false);
-        return new EllaiVoiceTranscriptionResult(string.Empty, ServerSubmission: true);
+        return new EllaiVoiceTranscriptionResult(string.Empty, ServerSubmission: submitConversation);
     }
 
     public async Task<EllaiVoiceTurnStatusDto?> GetVoiceTurnStatusAsync(

@@ -1,0 +1,114 @@
+@using Microsoft.Extensions.DependencyInjection
+@using SwiftAid.Contracts.Ellai
+@using SwiftAid.UI.Ellai.Guidance
+@inject IServiceProvider Services
+@implements IDisposable
+
+<section aria-labelledby="report-voice-assistance-title" class="public-report-voice">
+    <MudText id="report-voice-assistance-title" Typo="Typo.subtitle1" HtmlTag="h3">Speak to fill your report</MudText>
+    <MudText Typo="Typo.body2">
+        Your speech is sent for transcription and AI-assisted extraction. The transcript is added to your report;
+        review it and any suggested details for mistakes. This does not save an original voice note.
+    </MudText>
+    <MudCheckBox T="bool" Value="_confirmed" ValueChanged="ConsentChangedAsync" Color="Color.Primary"
+                 Label="I agree to send my speech and transcript for report assistance." />
+    @if (_context?.VoiceRecording == true)
+    {
+        <MudButton ButtonType="ButtonType.Button" Variant="Variant.Outlined" Color="Color.Error"
+                   Disabled="_busy" OnClick="StopAsync">Stop speaking</MudButton>
+    }
+    else
+    {
+        <div class="public-report-voice__actions">
+            <MudButton ButtonType="ButtonType.Button" Variant="Variant.Outlined" Color="Color.Primary"
+                       Disabled="@(!_confirmed || _busy || _context?.VoiceAvailable != true)" OnClick="StartLiveAsync">
+                Speak live
+            </MudButton>
+            <MudButton ButtonType="ButtonType.Button" Variant="Variant.Outlined" Color="Color.Primary"
+                       Disabled="@(!_confirmed || _busy || _context?.VoiceAvailable != true)" OnClick="StartRecordedAsync">
+                Record then transcribe
+            </MudButton>
+        </div>
+    }
+    <MudText Typo="Typo.caption" role="status" aria-live="polite">
+        @(_context?.VoiceStatus ?? "Voice assistance is unavailable. You can type your report.")
+    </MudText>
+    @if (_applyFailed)
+    {
+        <MudText Typo="Typo.caption" role="alert">This detail could not be added. Enter or correct it in the report.</MudText>
+    }
+    @if (_context?.VoiceSuggestions is { Count: > 0 } suggestions)
+    {
+        <MudText Typo="Typo.subtitle2" HtmlTag="h4">Suggested details to review</MudText>
+        <MudText Typo="Typo.caption">Some directly stated details may already be filled in. Check names, numbers and negation; use or enter the other suggestions as needed.</MudText>
+        <ul>
+            @foreach (var suggestion in suggestions)
+            {
+                <li>
+                    <strong>@suggestion.Field:</strong> @suggestion.Value
+                    <span> — heard: “@suggestion.Evidence”</span>
+                    @if (suggestion.Field is "age" or "locality" or "observation")
+                    {
+                        <MudButton ButtonType="ButtonType.Button" Variant="Variant.Text" Size="Size.Small"
+                                   OnClick="@(() => Apply(suggestion))">Use detail</MudButton>
+                    }
+                </li>
+            }
+        </ul>
+    }
+</section>
+
+@code {
+    private EllaiPublicReportDraftContext? _context;
+    private bool _confirmed;
+    private bool _busy;
+    private bool _applyFailed;
+
+    protected override void OnInitialized()
+    {
+        _context = Services.GetService<EllaiPublicReportDraftContext>();
+        if (_context is not null) _context.VoiceChanged += OnVoiceChanged;
+    }
+
+    private Task StartLiveAsync() => StartAsync(EllaiVoiceCaptureMode.Live);
+    private Task StartRecordedAsync() => StartAsync(EllaiVoiceCaptureMode.Recorded);
+
+    private async Task ConsentChangedAsync(bool confirmed)
+    {
+        _confirmed = confirmed;
+        if (confirmed || _context is null) return;
+        var recording = _context.VoiceRecording;
+        _context.EndReportVoiceAssistance();
+        if (recording) await _context.StopReportVoiceAsync();
+    }
+
+    private async Task StartAsync(EllaiVoiceCaptureMode mode)
+    {
+        if (!_confirmed || _busy || _context is null) return;
+        _busy = true;
+        try { await _context.StartReportVoiceAsync(mode); }
+        finally { _busy = false; }
+    }
+
+    private async Task StopAsync()
+    {
+        if (_busy || _context is null) return;
+        _busy = true;
+        try { await _context.StopReportVoiceAsync(); }
+        finally { _busy = false; }
+    }
+
+    private void Apply(SwiftAid.Contracts.Intake.ReportVoiceSuggestion suggestion) =>
+        _applyFailed = _context?.ApplyVoiceSuggestion(suggestion) != true;
+
+    private void OnVoiceChanged() => _ = InvokeAsync(StateHasChanged);
+
+    public void Dispose()
+    {
+        if (_context is null) return;
+        _context.VoiceChanged -= OnVoiceChanged;
+        var recording = _context.VoiceRecording;
+        _context.EndReportVoiceAssistance();
+        if (recording) _ = _context.StopReportVoiceAsync();
+    }
+}

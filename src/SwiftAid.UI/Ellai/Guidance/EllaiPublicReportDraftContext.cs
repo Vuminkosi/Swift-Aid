@@ -3,7 +3,7 @@ using System.Text.RegularExpressions;
 namespace SwiftAid.UI.Ellai.Guidance;
 
 /// <summary>Short lived bridge from a validated Ellai intent to the mounted public report form.</summary>
-public sealed class EllaiPublicReportDraftContext
+public sealed partial class EllaiPublicReportDraftContext
 {
     private const int MaximumAgeCorrectionHistory = 10;
 
@@ -34,17 +34,27 @@ public sealed class EllaiPublicReportDraftContext
     }
 
     public void Register(object owner, Func<int?, bool> setAge, Func<int?> getAge, Func<string, bool> addObservation,
-        Func<string?, bool> setLocality, Func<string, bool> appendNarrative)
+        Func<string?, bool> setLocality, Func<string, bool> appendNarrative, object? reportIdentity = null,
+        Func<SwiftAid.Contracts.Intake.ReportVoiceSuggestion, string, bool>? autoFillVoice = null)
     {
+        Func<Task>? stopVoice = null;
         lock (_gate)
         {
+            if (_voiceReportIdentity is not null && !ReferenceEquals(_voiceReportIdentity, reportIdentity))
+            {
+                if (_voiceRecording) stopVoice = _stopVoice;
+                ResetVoiceAssistanceLocked();
+            }
+            _voiceReportIdentity = reportIdentity;
             _owner = owner;
             _setAge = setAge;
             _getAge = getAge;
             _addObservation = addObservation;
             _setLocality = setLocality;
             _appendNarrative = appendNarrative;
+            _autoFillVoice = autoFillVoice;
         }
+        if (stopVoice is not null) _ = stopVoice();
     }
 
     public bool FlushPending(object owner)
@@ -71,19 +81,25 @@ public sealed class EllaiPublicReportDraftContext
 
     public void Remove(object owner)
     {
+        Func<Task>? stopVoice = null;
         lock (_gate)
         {
             if (!ReferenceEquals(_owner, owner)) return;
+            if (_voiceRecording) stopVoice = _stopVoice;
             _owner = null;
+            _voiceReportIdentity = null;
             _setAge = null;
             _getAge = null;
             _addObservation = null;
             _setLocality = null;
             _appendNarrative = null;
+            _autoFillVoice = null;
             _pending.Clear();
             _previousAges.Clear();
             _captureActive = false;
+            ResetVoiceAssistanceLocked();
         }
+        if (stopVoice is not null) _ = stopVoice();
     }
 
     public bool ApplyAgeCorrection(string? utterance)

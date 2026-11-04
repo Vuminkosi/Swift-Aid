@@ -326,8 +326,8 @@
                     {
                         <div><dt>Reported age in years</dt><dd>@UnknownIfEmpty(Draft.AgeYearsText)</dd></div>
                     }
-                    <div><dt>Original statement</dt><dd>@UnknownIfEmpty(Draft.Narrative)</dd><dd class="guided-report__provenance">Your words, shown as entered</dd></div>
-                    <div><dt>Separate observations</dt><dd>@ObservationSummary</dd><dd class="guided-report__provenance">You entered these details. No others were added.</dd></div>
+                    <div><dt>Original statement</dt><dd>@UnknownIfEmpty(Draft.Narrative)</dd><dd class="guided-report__provenance">Review entered words and any machine transcript for accuracy.</dd></div>
+                    <div><dt>Separate observations</dt><dd>@ObservationSummary</dd><dd class="guided-report__provenance">Review any suggested observations against the transcript.</dd></div>
                     <div><dt>Reported time</dt><dd>@TimeSummary</dd><dd class="guided-report__provenance">@(Draft.OccurrencePrecision == ReportedTimePrecision.Unknown ? "Not provided; remains unknown" : "From the time you entered")</dd></div>
                     <div><dt>Country</dt><dd>@CountrySummary</dd><dd class="guided-report__provenance">@(string.IsNullOrWhiteSpace(Draft.CountryCode) ? "Not provided; remains unknown" : "You selected this")</dd></div>
                     <div><dt>Location</dt><dd>@LocationSummary</dd><dd class="guided-report__provenance">@LocationProvenance</dd></div>
@@ -766,7 +766,8 @@
     {
         if (Services.GetService(typeof(SwiftAid.UI.Ellai.Guidance.EllaiPublicReportDraftContext)) is not
             SwiftAid.UI.Ellai.Guidance.EllaiPublicReportDraftContext context) return;
-        context.Register(this, SetReportedAge, GetReportedAge, AddReportedObservation, SetReportedLocality, AppendReportedStatement);
+        context.Register(this, SetReportedAge, GetReportedAge, AddReportedObservation, SetReportedLocality,
+            AppendReportedStatement, Draft, AutoFillVoiceSuggestion);
         if (!context.FlushPending(this))
             _stepError = "Ellai could not apply the report detail. Enter it in the report form to continue.";
     }
@@ -787,6 +788,19 @@
 
     private int? GetReportedAge() => int.TryParse(Draft.AgeYearsText,
         System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var age) ? age : null;
+
+    private bool AutoFillVoiceSuggestion(SwiftAid.Contracts.Intake.ReportVoiceSuggestion suggestion, string transcript)
+    {
+        if (!ReportVoiceAutofill.CanApply(suggestion, transcript, Draft,
+                field => _editContext?.IsModified(new FieldIdentifier(Draft, field)) == true)) return false;
+        return suggestion.Field switch
+        {
+            "age" when int.TryParse(suggestion.Value, out var age) => SetReportedAge(age),
+            "locality" => SetReportedLocality(suggestion.Value),
+            "observation" => AddReportedObservation(suggestion.Evidence),
+            _ => false
+        };
+    }
 
     private bool AddReportedObservation(string observation)
     {
@@ -825,7 +839,7 @@
     private bool AppendReportedStatement(string statement)
     {
         var value = statement.Trim();
-        if (string.IsNullOrWhiteSpace(value) || value.Length > 500 || value.Contains('\r') || value.Contains('\n')) return false;
+        if (string.IsNullOrWhiteSpace(value) || value.Length > 6000) return false;
         var narrative = string.IsNullOrWhiteSpace(Draft.Narrative)
             ? value : string.Join(Environment.NewLine, Draft.Narrative, value);
         if (narrative.Length > 6000) return false;

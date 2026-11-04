@@ -41,6 +41,24 @@ public sealed class ReportVoiceEndpointTests
         Assert.Equal("fixture-token", handler.LastAntiforgery);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ReportRecordingUsesExistingTranscriptionRouteWithoutSubmittingConversation(bool guest)
+    {
+        var handler = new FixtureHttpHandler();
+        using var http = new HttpClient(handler) { BaseAddress = new Uri("https://localhost/") };
+        var client = new EllaiReviewHttpClient(http, guest);
+
+        await client.TranscribeReportVoiceAsync("session", [1, 2], EllaiVoiceCaptureMode.Recorded, default, "capture");
+        Assert.Contains("serverSubmission=false", handler.LastQuery);
+        await client.TranscribeVoiceAsync("session", [1, 2], EllaiVoiceCaptureMode.Recorded, default, "capture");
+        Assert.Contains("serverSubmission=true", handler.LastQuery);
+        var socket = ((IEllaiReviewClient)client).CreateReportVoiceWebSocketUri(new Uri("https://localhost/"), "session", "capture");
+        Assert.Contains("serverSubmission=false", socket.Query);
+        Assert.Contains(guest ? "/guest/" : "/ellai/sessions/", socket.AbsolutePath);
+    }
+
     [Fact]
     public async Task HttpRequiresConsentAndRejectsOtherOwnersAndCookieWithoutAntiforgery()
     {
@@ -103,6 +121,7 @@ public sealed class ReportVoiceEndpointTests
     {
         public string? LastPath { get; private set; }
         public string? LastAntiforgery { get; private set; }
+        public string? LastQuery { get; private set; }
 
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
@@ -112,6 +131,7 @@ public sealed class ReportVoiceEndpointTests
                     Content = JsonContent.Create(new { requestToken = "fixture-token" })
                 });
             LastPath = request.RequestUri!.AbsolutePath;
+            LastQuery = request.RequestUri.Query;
             LastAntiforgery = request.Headers.TryGetValues("X-CSRF-TOKEN", out var values) ? values.Single() : null;
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
             {

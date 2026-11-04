@@ -279,9 +279,19 @@ public sealed class EllaiReviewGatewayClient(
         }
     }
 
-    public async Task<EllaiVoiceTranscriptionResult?> TranscribeVoiceAsync(
+    public Task<EllaiVoiceTranscriptionResult?> TranscribeVoiceAsync(
         string sessionId, byte[] audio, EllaiVoiceCaptureMode mode, CancellationToken cancellationToken,
-        string? voiceCaptureId = null, long voiceCaptureOffsetSamples = 0)
+        string? voiceCaptureId = null, long voiceCaptureOffsetSamples = 0) =>
+        TranscribeVoiceCoreAsync(sessionId, audio, mode, cancellationToken, voiceCaptureId, voiceCaptureOffsetSamples, true);
+
+    public Task<EllaiVoiceTranscriptionResult?> TranscribeReportVoiceAsync(
+        string sessionId, byte[] audio, EllaiVoiceCaptureMode mode, CancellationToken cancellationToken,
+        string? voiceCaptureId = null, long voiceCaptureOffsetSamples = 0) =>
+        TranscribeVoiceCoreAsync(sessionId, audio, mode, cancellationToken, voiceCaptureId, voiceCaptureOffsetSamples, false);
+
+    private async Task<EllaiVoiceTranscriptionResult?> TranscribeVoiceCoreAsync(
+        string sessionId, byte[] audio, EllaiVoiceCaptureMode mode, CancellationToken cancellationToken,
+        string? voiceCaptureId, long voiceCaptureOffsetSamples, bool submitConversation)
     {
         if (audio is null || audio.Length == 0 || audio.Length > EllaiVoiceTranscriptionService.MaximumAudioBytes
             || !await OwnsSessionAsync(sessionId, cancellationToken).ConfigureAwait(false))
@@ -303,7 +313,7 @@ public sealed class EllaiReviewGatewayClient(
             using var stream = new MemoryStream(audio, writable: false);
             return await voice.TranscribeAsync(
                     sessionId, mode, stream, audio.LongLength, cancellationToken,
-                    voiceCaptureId, voiceCaptureOffsetSamples, submissionPrincipal: principal)
+                    voiceCaptureId, voiceCaptureOffsetSamples, submissionPrincipal: submitConversation ? principal : null)
                 .ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)

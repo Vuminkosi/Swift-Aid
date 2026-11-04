@@ -247,6 +247,12 @@ public interface IEllaiReviewClient
         return new UriBuilder(uri) { Scheme = uri.Scheme == "https" ? "wss" : "ws" }.Uri;
     }
 
+    Uri CreateReportVoiceWebSocketUri(Uri baseUri, string sessionId, string voiceCaptureId, long voiceCaptureOffsetSamples = 0)
+    {
+        var uri = CreateLiveVoiceWebSocketUri(baseUri, sessionId, voiceCaptureId, voiceCaptureOffsetSamples);
+        return new Uri(uri.AbsoluteUri.Replace("serverSubmission=true", "serverSubmission=false", StringComparison.Ordinal));
+    }
+
     /// <summary>Starts a durable session for the requested mode. A missing
     /// view is classified so confirmed denials are not presented as ambiguous
     /// remote outcomes; callers never invent a session id.</summary>
@@ -289,6 +295,16 @@ public interface IEllaiReviewClient
         string sessionId, Stream audio, CancellationToken cancellationToken, string? voiceCaptureId = null,
         long voiceCaptureOffsetSamples = 0) =>
         Task.FromResult<EllaiVoiceTranscriptionResult?>(null);
+
+    /// <summary>Report capture uses the same voice transport without submitting a conversational turn.</summary>
+    Task<EllaiVoiceTranscriptionResult?> TranscribeReportVoiceAsync(
+        string sessionId, byte[] audio, EllaiVoiceCaptureMode mode, CancellationToken cancellationToken,
+        string? voiceCaptureId = null, long voiceCaptureOffsetSamples = 0) =>
+        Task.FromResult<EllaiVoiceTranscriptionResult?>(null);
+
+    Task<EllaiVoiceTranscriptionResult?> TranscribeReportLiveVoiceStreamAsync(
+        string sessionId, Stream audio, CancellationToken cancellationToken, string? voiceCaptureId = null,
+        long voiceCaptureOffsetSamples = 0) => Task.FromResult<EllaiVoiceTranscriptionResult?>(null);
 
     Task<EllaiVoiceTurnStatusDto?> GetVoiceTurnStatusAsync(
         string sessionId, CancellationToken cancellationToken, long afterSequence = 0) =>

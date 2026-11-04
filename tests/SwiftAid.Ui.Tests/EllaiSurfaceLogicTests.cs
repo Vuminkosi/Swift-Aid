@@ -2351,6 +2351,19 @@ public sealed partial class EllaiSurfaceLogicTests
 
         public int LiveTranscriptionCalls { get; private set; }
 
+        public Func<string, byte[], EllaiVoiceCaptureMode, CancellationToken, Task<EllaiVoiceTranscriptionResult?>>? ReportVoiceHandler { get; init; }
+        public Func<string, string, CancellationToken, Task<SwiftAid.Contracts.Intake.ReportVoiceExtractionResponse?>>? ReportExtractionHandler { get; init; }
+
+        public Task<EllaiVoiceTranscriptionResult?> TranscribeReportVoiceAsync(string sessionId, byte[] audio,
+            EllaiVoiceCaptureMode mode, CancellationToken cancellationToken, string? voiceCaptureId = null,
+            long voiceCaptureOffsetSamples = 0) => ReportVoiceHandler?.Invoke(sessionId, audio, mode, cancellationToken)
+                ?? Task.FromResult<EllaiVoiceTranscriptionResult?>(null);
+
+        public Task<SwiftAid.Contracts.Intake.ReportVoiceExtractionResponse?> ExtractReportVoiceAsync(
+            string sessionId, string transcript, CancellationToken cancellationToken) =>
+            ReportExtractionHandler?.Invoke(sessionId, transcript, cancellationToken)
+                ?? Task.FromResult<SwiftAid.Contracts.Intake.ReportVoiceExtractionResponse?>(null);
+
         public Func<string, byte[], EllaiVoiceCaptureMode, CancellationToken,
             Task<EllaiVoiceTranscriptionResult?>>? VoiceTranscriptionHandler { get; init; }
 
