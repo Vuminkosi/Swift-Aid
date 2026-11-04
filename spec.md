@@ -413,6 +413,7 @@ The mobile experience has three logical stages: **capture → review known/unkno
 | SA-REP-12 | P0 | Atomically establish initial ownership when a permitted reporting worker's case is accepted, then return its authoritative receipt/version. |
 | SA-REP-13 | P0 | Accept a report with a pending original-audio attachment reference without pretending the audio is already uploaded or transcribed. |
 | SA-REP-14 | P1 | Provide additional photo/document evidence only after attachment-type validation, authorization, and privacy requirements are implemented. Image capture must not imply image-based diagnosis. |
+| SA-REP-15 | P1 | During Ellai guided reporting, accept only bounded, explicitly reported details into the unsaved report draft. Never save or submit from conversational capture. When validation fails, explain the missing or invalid field, focus and highlight that field, and address validation issues one at a time; revalidate after correction before moving to the next issue. Preserve unknown facts as unknown. |
 
 ### 6.3 Confirmation rules
 

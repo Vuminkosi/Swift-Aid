@@ -4503,3 +4503,12 @@ PASS: 20 focused GuidedReportDraftPersistenceTests and EllaiReportAnchorTests; c
 Live signed-in Chromium reproduced Send report remaining disabled when the three confirmations were checked in display order. HandleFieldChanged cleared report review on country/processing acknowledgement. These acknowledgements now preserve review; edits to narrative or country still invalidate it. Report.razor now passes actual catalogue/privacy string values rather than literal field names. No policy or server validation bypass.
 
 Regression before fix: 2 failed, 3 passed. After fix: 25 focused UI tests passed (GuidedReportDraftPersistenceTests and EllaiReportAnchorTests). Evidence: .codex/ellai-confirmation-before.log and .codex/ellai-confirmation-after.log. Live retest pending deployment.
+
+
+### Ellai guided report capture and sequential validation (2026-11-04)
+
+The report UI accepts a value-free `UpdatePublicReportDraft` intent only for registered report inputs. A scoped, short-lived context buffers at most ten bounded edits while the report route mounts, then applies only supported parses of the user's own utterance to the unsaved draft. It supports explicit age, observations, locality, unknown age/location, onset and reported statements. It does not save or submit. Invalid or unsupported utterances receive a truthful capture failure notice; unknown values remain unknown.
+
+Report validation focuses and highlights one invalid field at a time. It announces the first issue; after the user corrects that field, the form revalidates and focuses the next issue. Approved value-free narration names the missing or invalid item and its repair action, including invalid age, so spoken guidance does not imply unsubmitted data was saved. User-entered report values are not included in narration requests.
+
+PASS: `git diff --check`; Gateway build `dotnet build src\SwiftAid.Gateway\SwiftAid.Gateway.csproj --no-restore -m:1 -nr:false -p:WasmBuildNative=false` (0 warnings, 0 errors); Android build `dotnet build src\SwiftAid.Mobile\SwiftAid.Mobile.csproj --no-restore -f net10.0-android -m:1 -nr:false` (0 warnings, 0 errors). No tests were added or run at the user's direction. Browser interaction, audible speech, and physical Android behavior remain NOT VERIFIED.
