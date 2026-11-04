@@ -534,7 +534,7 @@ public sealed class EllaiToolBroker
                     (activity.RoleId == "ops.followup" ? activity.FollowUpIsCurrent switch
                     {
                         true => " This recommendation is current at the time of this read.",
-                        false => " This recommendation is historical; the follow-up has changed.",
+                        false => " This recommendation is historical; the report, follow-up, policy or reporting window has changed.",
                         _ => " Current follow-up status is unavailable."
                     } : activity.RoleId == "ops.organization" ? activity.FollowUpIsCurrent switch
                     {

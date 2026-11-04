@@ -155,8 +155,8 @@
                                                 @if (activity.RoleId == "ops.followup" && activity.FollowUpIsCurrent == false)
                                                 {
                                                     <span>@(activity.RecommendationKind?.StartsWith("Clarification:", StringComparison.Ordinal) == true
-                                                        ? "Historical suggestion; the report has changed or the case is resolved."
-                                                        : "Historical recommendation; the follow-up has changed.")</span>
+                                                        ? "Historical suggestion; the report, policy or reporting window has changed, or the case is resolved."
+                                                        : "Historical recommendation; the follow-up, policy or reporting window has changed.")</span>
                                                 }
                                                 else if (activity.RoleId == "ops.followup" && activity.FollowUpIsCurrent is null)
                                                 {

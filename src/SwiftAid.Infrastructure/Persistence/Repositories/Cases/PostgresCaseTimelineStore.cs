@@ -179,28 +179,40 @@ public sealed class PostgresCaseTimelineStore(SwiftAidDbContext dbContext) : ICa
                     WHERE p.case_id = {caseId} AND p.source_event_id = ANY({ids})
                     UNION ALL
                     SELECT p.source_event_id, p.activity_id, 'ops.followup', p.policy_version, p.recorded_at_utc,
-                        NULL::uuid, (c.report_revision = source.report_revision AND c.workflow <> 'Resolved'),
+                        NULL::uuid, (c.report_revision = source.report_revision AND c.workflow <> 'Resolved'
+                            AND COALESCE(schedule.policy_version = p.policy_version, FALSE)
+                            AND COALESCE((SELECT report.received_at_utc FROM swiftaid_intake.intake_promotions promotion
+                                JOIN swiftaid_intake.intake_reports report ON report.receipt_id = promotion.receipt_id
+                                WHERE promotion.case_id = c.case_id), c.created_at_utc)
+                                BETWEEN clock_timestamp() - interval '30 days' AND clock_timestamp()),
                         NULL::timestamptz, review.recorded_at_utc, 'Clarification:' || p.finding_code
                     FROM ellai_clarification_proposals p
                     JOIN managed_cases c ON c.case_id = p.case_id
+                    LEFT JOIN ellai_operational_schedules schedule ON schedule.workspace_id = c.workspace_id AND schedule.role_id = 'ops.followup'
                     JOIN case_events source ON source.event_id = p.source_event_id AND source.case_id = p.case_id
                     LEFT JOIN ellai_clarification_reviews review ON review.recommendation_id = p.activity_id AND review.case_id = p.case_id
                     WHERE {includeFollowUp} AND p.case_id = {caseId} AND p.source_event_id = ANY({ids})
                     UNION ALL
                     SELECT r.source_event_id, r.activity_id, 'ops.followup', r.policy_version, r.recorded_at_utc,
-                        r.follow_up_id, CASE WHEN r.recommendation_kind = 'OfficerAcknowledgementDue' THEN
+                        r.follow_up_id, (COALESCE(schedule.policy_version = r.policy_version, FALSE)
+                            AND COALESCE((SELECT report.received_at_utc FROM swiftaid_intake.intake_promotions promotion
+                                JOIN swiftaid_intake.intake_reports report ON report.receipt_id = promotion.receipt_id
+                                WHERE promotion.case_id = c.case_id), c.created_at_utc)
+                                BETWEEN clock_timestamp() - interval '30 days' AND clock_timestamp()
+                            AND CASE WHEN r.recommendation_kind = 'OfficerAcknowledgementDue' THEN
                             (f.assignee_actor_id = a.officer_actor_id AND f.status = 'Scheduled'
                             AND f.acknowledged_version IS DISTINCT FROM 0
                             AND (f.current_schedule_version = a.aggregate_version OR f.acknowledged_version = 1)
                             AND e.status <> 'Closed' AND c.workflow <> 'Resolved')
                         ELSE (f.current_schedule_version = r.schedule_version AND
                             f.current_schedule_event_id = r.source_event_id AND f.due_at_utc = r.due_at_utc AND
-                            f.status IN ('Scheduled', 'Acknowledged') AND c.workflow <> 'Resolved') END,
+                            f.status IN ('Scheduled', 'Acknowledged') AND c.workflow <> 'Resolved') END),
                         r.due_at_utc, review.recorded_at_utc, r.recommendation_kind
                     FROM ellai_follow_up_recommendations r
                     LEFT JOIN ellai_follow_up_reviews review ON review.recommendation_id = r.activity_id
                     JOIN managed_case_follow_ups f ON f.follow_up_id = r.follow_up_id AND f.case_id = r.case_id
                     JOIN managed_cases c ON c.case_id = r.case_id
+                    LEFT JOIN ellai_operational_schedules schedule ON schedule.workspace_id = c.workspace_id AND schedule.role_id = 'ops.followup'
                     LEFT JOIN health_officer_escalation_assignments a ON a.assignment_id = r.officer_assignment_id
                     LEFT JOIN managed_case_escalations e ON e.escalation_id = a.escalation_id AND e.case_id = a.case_id
                     WHERE {includeFollowUp} AND (r.recommendation_kind = 'FollowUpDue' OR {includeOfficerEscalation})

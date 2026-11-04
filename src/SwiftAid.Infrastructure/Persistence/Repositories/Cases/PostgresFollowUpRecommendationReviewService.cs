@@ -17,7 +17,9 @@ public sealed class PostgresFollowUpRecommendationReviewService(
         if (caseId == Guid.Empty || recommendationId == Guid.Empty || commandId == Guid.Empty)
             return FollowUpRecommendationReviewOutcome.NotFoundOrNotAuthorized;
         ICaseCommandLease lease;
-        try { lease = await unitOfWork.BeginCaseAsync(actor, caseId, [], CaseLeaseMode.Write, ct).ConfigureAwait(false); }
+        // Reviews are separate immutable artifacts. A read lease keeps the case
+        // authority stable while remaining compatible with the scheduled reader.
+        try { lease = await unitOfWork.BeginCaseAsync(actor, caseId, [], CaseLeaseMode.Read, ct).ConfigureAwait(false); }
         catch (KeyNotFoundException) { return FollowUpRecommendationReviewOutcome.NotFoundOrNotAuthorized; }
         catch (InvalidOperationException error) when (error.Message is "The case authority scope is unavailable." or "The current case authority scope is unavailable.")
         { return FollowUpRecommendationReviewOutcome.NotFoundOrNotAuthorized; }
@@ -55,6 +57,7 @@ public sealed class PostgresFollowUpRecommendationReviewService(
                 if (previous is not null) return FollowUpRecommendationReviewOutcome.Replayed;
                 if (clarification.IsReviewed) return FollowUpRecommendationReviewOutcome.AlreadyReviewed;
                 if (!clarification.IsCurrent) return FollowUpRecommendationReviewOutcome.Stale;
+                if (!await LockCurrentPolicyAsync(caseId, recommendationId, true, ct).ConfigureAwait(false)) return FollowUpRecommendationReviewOutcome.Stale;
                 var added = await db.Database.ExecuteSqlInterpolatedAsync($"""
                     INSERT INTO ellai_clarification_reviews (recommendation_id, case_id, command_id, actor_id, recorded_at_utc)
                     VALUES ({recommendationId}, {caseId}, {commandId}, {actor.ActorId}, clock_timestamp())
@@ -90,6 +93,7 @@ public sealed class PostgresFollowUpRecommendationReviewService(
             if (current is null) return FollowUpRecommendationReviewOutcome.NotFoundOrNotAuthorized;
             if (current.IsReviewed) return FollowUpRecommendationReviewOutcome.AlreadyReviewed;
             if (!current.IsCurrent) return FollowUpRecommendationReviewOutcome.Stale;
+            if (!await LockCurrentPolicyAsync(caseId, recommendationId, false, ct).ConfigureAwait(false)) return FollowUpRecommendationReviewOutcome.Stale;
             var inserted = await db.Database.ExecuteSqlInterpolatedAsync($"""
                 INSERT INTO ellai_follow_up_reviews (recommendation_id, case_id, command_id, actor_id, recorded_at_utc)
                 VALUES ({recommendationId}, {caseId}, {commandId}, {actor.ActorId}, clock_timestamp())
@@ -100,6 +104,22 @@ public sealed class PostgresFollowUpRecommendationReviewService(
             return FollowUpRecommendationReviewOutcome.Recorded;
         }
     }
+
+    private Task<bool> LockCurrentPolicyAsync(Guid caseId, Guid recommendationId, bool clarification, CancellationToken ct) =>
+        db.Database.SqlQuery<bool>($"""
+            SELECT TRUE AS "Value" FROM managed_cases c
+            JOIN ellai_operational_schedules schedule ON schedule.workspace_id = c.workspace_id AND schedule.role_id = 'ops.followup'
+            WHERE c.case_id = {caseId}
+                AND COALESCE((SELECT report.received_at_utc FROM swiftaid_intake.intake_promotions promotion
+                    JOIN swiftaid_intake.intake_reports report ON report.receipt_id = promotion.receipt_id
+                    WHERE promotion.case_id = c.case_id), c.created_at_utc)
+                    BETWEEN clock_timestamp() - interval '30 days' AND clock_timestamp()
+                AND (({clarification} AND EXISTS (SELECT 1 FROM ellai_clarification_proposals p
+                    WHERE p.activity_id = {recommendationId} AND p.case_id = c.case_id AND p.policy_version = schedule.policy_version))
+                  OR (NOT {clarification} AND EXISTS (SELECT 1 FROM ellai_follow_up_recommendations r
+                    WHERE r.activity_id = {recommendationId} AND r.case_id = c.case_id AND r.policy_version = schedule.policy_version)))
+            LIMIT 1 FOR SHARE OF schedule
+            """).SingleOrDefaultAsync(ct);
 
     private sealed class ReviewRow
     {
