@@ -1,0 +1,29 @@
+@page "/eligible-officer-fixture"
+@using SwiftAid.Contracts.Cases
+@using SwiftAid.UI.Components.Surfaces.Operations.CaseDetail
+@using SwiftAid.UI.Components.Theme
+
+<SwiftAidThemeProvider />
+<MudPopoverProvider />
+<main data-fixture-ready="@_ready.ToString().ToLowerInvariant()">
+    <h1>Officer candidate fixture</h1>
+    <EligibleHealthOfficersPanel CaseId="_caseId" Client="_client" />
+    <button @onclick="ChangeCase">Change case</button>
+</main>
+
+@code {
+    private Guid _caseId = Guid.NewGuid();
+    private bool _ready;
+    private readonly FixtureClient _client = new();
+    private void ChangeCase() => _caseId = Guid.NewGuid();
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (firstRender) { _ready = true; StateHasChanged(); }
+    }
+    private sealed class FixtureClient : IEligibleHealthOfficerClient
+    {
+        public Task<EligibleHealthOfficerLookupResult> GetAsync(Guid caseId, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new EligibleHealthOfficerLookupResult(EligibleHealthOfficerLookupStatus.Available,
+                new([new(Guid.NewGuid(), 1, "synthetic-officer", "Synthetic Officer")], true)));
+    }
+}

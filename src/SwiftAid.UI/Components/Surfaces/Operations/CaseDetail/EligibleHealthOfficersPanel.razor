@@ -1,0 +1,102 @@
+@using Microsoft.Extensions.DependencyInjection
+@using SwiftAid.Contracts.Cases
+@inject IServiceProvider Services
+@implements IDisposable
+
+<section class="case-detail__section" aria-labelledby="eligible-officers-heading" aria-busy="@_loading.ToString().ToLowerInvariant()">
+    <MudText Typo="Typo.subtitle1" HtmlTag="h2" id="eligible-officers-heading">Health officer candidates</MudText>
+    <MudText Typo="Typo.body2">Find officers who meet this case's access and designation requirements at the time of lookup. Eligibility can change. This does not assign or notify an officer.</MudText>
+    <MudButton Variant="Variant.Outlined" Disabled="@(_loading || CaseId == Guid.Empty)" OnClick="LoadAsync">@(_loading ? "Checking…" : "Find eligible officers")</MudButton>
+    @if (_message is not null)
+    {
+        <MudText role="status" aria-live="polite">@_message</MudText>
+    }
+    @if (_page is { } page)
+    {
+        <ul aria-label="Eligible health officers">
+            @foreach (var officer in page.Items)
+            {
+                <li @key="officer.DesignationId">@(officer.DisplayLabel ?? "Name unavailable") <span>(reference: @officer.ActorId)</span></li>
+            }
+        </ul>
+        @if (page.HasMore)
+        {
+            <MudText Typo="Typo.caption">More candidates may be available; this list shows the first 20.</MudText>
+        }
+    }
+</section>
+
+@code {
+    [Parameter] public Guid CaseId { get; set; }
+    [Parameter] public IEligibleHealthOfficerClient? Client { get; set; }
+
+    private Guid _caseId;
+    private bool _loading;
+    private bool _disposed;
+    private long _generation;
+    private string? _message;
+    private EligibleHealthOfficerCandidatePage? _page;
+    private CancellationTokenSource _lifetime = new();
+
+    protected override void OnParametersSet()
+    {
+        if (_caseId == CaseId) return;
+        _caseId = CaseId;
+        _generation++;
+        _lifetime.Cancel();
+        _lifetime.Dispose();
+        _lifetime = new CancellationTokenSource();
+        _page = null;
+        _message = null;
+        _loading = false;
+    }
+
+    private async Task LoadAsync()
+    {
+        if (_loading || _disposed || CaseId == Guid.Empty) return;
+        var client = Client ?? Services.GetService<IEligibleHealthOfficerClient>();
+        if (client is null)
+        {
+            _page = null;
+            _message = "Officer lookup is unavailable right now.";
+            return;
+        }
+
+        var generation = ++_generation;
+        var caseId = CaseId;
+        var token = _lifetime.Token;
+        _page = null;
+        _message = null;
+        _loading = true;
+        try
+        {
+            var result = await client.GetAsync(caseId, token);
+            if (_disposed || generation != _generation || caseId != CaseId) return;
+            _page = result.Status == EligibleHealthOfficerLookupStatus.Available ? result.Page : null;
+            _message = result.Status switch
+            {
+                EligibleHealthOfficerLookupStatus.Available when _page is { Items.Count: 0 } => "No eligible officers were found for this case.",
+                EligibleHealthOfficerLookupStatus.Available when _page is not null => null,
+                EligibleHealthOfficerLookupStatus.Denied => "Officer lookup is unavailable for this case or account.",
+                _ => "Officer lookup is unavailable right now. Try again."
+            };
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { }
+        catch (Exception error) when (error is not OutOfMemoryException)
+        {
+            if (!_disposed && generation == _generation) _message = "Officer lookup is unavailable right now. Try again.";
+        }
+        finally
+        {
+            if (!_disposed && generation == _generation) _loading = false;
+        }
+    }
+
+    public void Dispose()
+    {
+        _disposed = true;
+        _generation++;
+        _lifetime.Cancel();
+        _lifetime.Dispose();
+    }
+}
