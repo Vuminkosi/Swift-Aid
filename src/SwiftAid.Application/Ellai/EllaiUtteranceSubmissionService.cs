@@ -16,7 +16,8 @@ public sealed class EllaiUtteranceSubmissionService(
     private static readonly IReadOnlySet<string> PublicHelpTools =
         new HashSet<string>(StringComparer.Ordinal)
         { EllaiToolNames.ProductFacts, EllaiToolNames.IngestionSchema, EllaiToolNames.ValidateObservations, EllaiToolNames.Locations,
-          EllaiToolNames.UiCatalogue, EllaiToolNames.UiObserve, EllaiToolNames.PublicSessions };
+          EllaiToolNames.UiCatalogue, EllaiToolNames.UiObserve, EllaiToolNames.PublicSessions,
+          EllaiToolNames.Now, EllaiToolNames.Capabilities, EllaiToolNames.Receipts };
 
     public async Task<EllaiUtteranceSubmitResult> SubmitAsync(
         string routeSessionId,

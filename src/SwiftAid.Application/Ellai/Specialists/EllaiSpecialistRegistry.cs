@@ -4,7 +4,7 @@ namespace SwiftAid.Application.Ellai.Specialists;
 
 /// <summary>A server-owned profile. A profile does not itself grant access to any tool.</summary>
 public sealed record EllaiSpecialistProfile(string AgentId, int Version, string FeatureFlag,
-    IReadOnlySet<string> ToolAllowlist, int MaxToolCalls = 2, int MaxModelCalls = 3, int TimeoutSeconds = 90);
+    IReadOnlySet<string> ToolAllowlist, int MaxToolCalls = 8, int MaxModelCalls = 4, int TimeoutSeconds = 90);
 
 /// <summary>Initial registry for bounded, read-only specialist work.</summary>
 public static class EllaiSpecialistRegistry
@@ -54,18 +54,18 @@ public static class EllaiSpecialistRegistry
         return !string.IsNullOrWhiteSpace(agentId) && Profiles.TryGetValue(agentId, out profile!);
     }
 
-    /// <summary>Restricts an already authorized context; the caller must obtain
-    /// the feature flag and parent context from trusted server state.</summary>
+    /// <summary>MVP specialists inherit the parent session's registered tools.
+    /// The caller obtains the enabled flag and parent scope from trusted server state;
+    /// the broker and underlying services still enforce their own authorization.</summary>
     public static bool TryCreateToolContext(string agentId, bool enabled, EllaiToolContext parent,
         out EllaiToolContext? specialist)
     {
         ArgumentNullException.ThrowIfNull(parent);
         specialist = null;
-        if (!enabled || !TryGet(agentId, out var profile) || parent.AllowedTools is null)
+        if (!enabled || !TryGet(agentId, out var profile))
             return false;
 
-        var allowed = profile.ToolAllowlist.Where(parent.AllowedTools.Contains)
-            .Where(EllaiToolContractCatalog.All.ContainsKey)
+        var allowed = (parent.AllowedTools ?? EllaiToolNames.All).Where(EllaiToolContractCatalog.All.ContainsKey)
             .ToFrozenSet(StringComparer.Ordinal);
         specialist = parent with { AllowedTools = allowed, RemainingCalls = Math.Min(parent.RemainingCalls, profile.MaxToolCalls) };
         return true;
