@@ -44,6 +44,7 @@ public sealed class EllaiSurveillanceSpecialist(IChatClient client, IEllaiFramew
                 "Never infer a diagnosis, outbreak, personal risk, urgency or confirmed incident. " +
                 "Return only a grounded Answer in the required final_decision JSON schema. " +
                 "Each claim must exactly match one returned record line and cite its matching evidence. " +
+                "When using a truncated case timeline, include its first line as a claim with the timeline evidence. " +
                 "Set displayText and spokenText to the claim texts joined by a newline, with no other prose.",
                 [new ChatMessage(ChatRole.User, task)], 2048, isCurrent, Read, usage, ct,
                 revalidateTool: revalidate, maxModelCalls: profile.MaxModelCalls).ConfigureAwait(false);

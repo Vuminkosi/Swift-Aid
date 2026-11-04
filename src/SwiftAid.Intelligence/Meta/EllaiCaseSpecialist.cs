@@ -67,6 +67,7 @@ public sealed class EllaiCaseSpecialist(IChatClient client, IEllaiFrameworkAgent
                 "topicRefs, resumeSuggestion and stopReason. Each factual claim has claimId, text, kind Observed and " +
                 "evidence copied exactly from the tool result: sourceKind, resourceId, version, fieldPath, evidenceId. " +
                 "Each claim text must exactly match a line from the cited case result. Set displayText and spokenText to the claim texts joined by newlines, with no other prose. " +
+                "When using a truncated case timeline, include its first line as a claim with the timeline evidence. " +
                 "Use empty arrays and null for unused fields.",
                 [new ChatMessage(ChatRole.User, task)], 2048, isCurrent, InvokeCaseTool, usage, ct,
                 revalidateTool: revalidate ?? invoke, revalidateStreamObservations: RevalidateObservations, maxModelCalls: profile.MaxModelCalls, allowEmptyCaseQueue: true).ConfigureAwait(false);

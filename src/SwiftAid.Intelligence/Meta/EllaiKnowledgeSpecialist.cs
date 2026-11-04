@@ -78,6 +78,7 @@ public sealed class EllaiKnowledgeSpecialist(IChatClient client, IEllaiFramework
                 "Return only a JSON object with final_decision containing schemaVersion 2, kind Answer, displayText, " +
                 "spokenText, claims, questions, uiIntents, planProposal, topicRefs, resumeSuggestion and stopReason. " +
                 "Each factual claim must have claimId, text, kind Observed, and evidence copied exactly from a tool result. For other admitted reads, each claim text must exactly match a returned source line; join claim texts with newlines for displayText and spokenText. " +
+                "When using a truncated case timeline, include its first line as a claim with the timeline evidence. " +
                 "Each evidence entry has sourceKind, resourceId, version, fieldPath and evidenceId. " +
                 "Use empty arrays for unused collections and null for unused optional values.",
                 [new ChatMessage(ChatRole.User, task)], 2048, isCurrent, InvokeKnowledgeTool, usage, ct,

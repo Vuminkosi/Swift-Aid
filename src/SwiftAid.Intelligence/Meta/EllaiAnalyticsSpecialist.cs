@@ -43,7 +43,8 @@ public sealed class EllaiAnalyticsSpecialist(IChatClient client, IEllaiFramework
                 "\nYou are the analytics specialist, not the supervisor. Delegation is unavailable here. " +
                 "Use the authorized owned-case count tool for count questions with an explicitly requested 1 to 365 day window, and any other admitted read tool when relevant to the user's SwiftAid question. " +
                 "Do not infer a window, calculate counts from samples, infer incidence, or invent evidence. " +
-                "If the count window is missing, ask for it. For other reads, each claim must exactly match a returned source line and cite its evidence; join claim texts with newlines for displayText and spokenText.",
+                "If the count window is missing, ask for it. For other reads, each claim must exactly match a returned source line and cite its evidence; join claim texts with newlines for displayText and spokenText. " +
+                "When using a truncated case timeline, include its first line as a claim with the timeline evidence.",
                 [new ChatMessage(ChatRole.User, task)], 1024, isCurrent, Read, usage, ct,
                 revalidateTool: revalidate, maxModelCalls: profile.MaxModelCalls).ConfigureAwait(false);
         }

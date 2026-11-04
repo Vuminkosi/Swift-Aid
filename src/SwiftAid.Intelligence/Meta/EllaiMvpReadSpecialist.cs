@@ -34,7 +34,9 @@ internal sealed class EllaiMvpReadSpecialist(IChatClient client, IEllaiFramework
             decision = await agent.RunAsync(context, trustedPolicy +
                 "\nYou are a SwiftAid specialist. Use any admitted read tool relevant to the question. " +
                 "Do not invent facts, execute actions, diagnose or provide medical advice. Return an Answer with observed claims; " +
-                "each claim must exactly match a returned source line and cite its evidence. Set displayText and spokenText to claim texts joined by newlines.",
+                "each claim must exactly match a returned source line and cite its evidence. " +
+                "When using a truncated case timeline, include its first line as a claim with the timeline evidence. " +
+                "Set displayText and spokenText to claim texts joined by newlines.",
                 [new ChatMessage(ChatRole.User, task)], 2048, isCurrent, Read, usage, ct,
                 revalidateTool: revalidate, maxModelCalls: profile.MaxModelCalls).ConfigureAwait(false);
         }

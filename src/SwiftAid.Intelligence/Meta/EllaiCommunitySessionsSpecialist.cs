@@ -44,6 +44,7 @@ public sealed class EllaiCommunitySessionsSpecialist(IChatClient client, IEllaiF
                 "Never approve, submit, " +
                 "execute or invent an action. Return only a grounded Answer in the required final_decision JSON schema. " +
                 "Each claim text must exactly match a returned source line and cite its evidence. For an empty session search, use the exact returned search message and cite its PublicSessionSearch evidence. " +
+                "When using a truncated case timeline, include its first line as a claim with the timeline evidence. " +
                 "Set displayText and spokenText to claim texts joined by a newline, with no other prose.",
                 [new ChatMessage(ChatRole.User, task)], 2048, isCurrent, Read, usage, ct,
                 revalidateTool: revalidate, maxModelCalls: profile.MaxModelCalls).ConfigureAwait(false);
