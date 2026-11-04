@@ -35,7 +35,10 @@ public sealed class EllaiUiRegistry
             throw new ArgumentException("Descriptor requires control and feature IDs.");
         }
 
-        _descriptors[descriptor.ControlId] = descriptor;
+        if (!_descriptors.TryAdd(descriptor.ControlId, descriptor))
+        {
+            throw new InvalidOperationException($"UI control '{descriptor.ControlId}' is already registered.");
+        }
     }
 
     /// <summary>Returns the goal-relevant, permission-filtered projection:
