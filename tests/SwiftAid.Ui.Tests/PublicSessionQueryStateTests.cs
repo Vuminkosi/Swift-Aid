@@ -39,6 +39,29 @@ public sealed class PublicSessionQueryStateTests
         Assert.Equal(allowed, Property<bool>(component, "HasStaffEditor"));
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task HistoryOnlySessionOpensOnlyWithExplicitCapability(bool canViewHistory)
+    {
+        var component = new PublicSessionsSurface();
+        var type = typeof(PublicSessionsSurface);
+        var id = Guid.NewGuid();
+        type.GetProperty(nameof(component.LoadManagementCapabilitiesAsync))!.SetValue(component,
+            (Func<Guid?, long?, Task<SessionManagementPresentation>>)((_, _) => Task.FromResult(SessionManagementPresentation.Unavailable())));
+        type.GetProperty(nameof(component.OnManageSession))!.SetValue(component, EventCallback.Factory.Create<Guid?>(new object(), _ => { }));
+        type.GetProperty(nameof(component.StaffSessionEditorContent))!.SetValue(component,
+            (RenderFragment<SessionManagementPresentation>)(_ => _ => { }));
+        type.GetProperty(nameof(component.StaffEditorCapabilities))!.SetValue(component,
+            new SessionManagementPresentation(true, true, id, 1, "Draft", false, false, false, false, false, false,
+                CanViewHistory: canViewHistory));
+        type.GetProperty(nameof(component.StaffEditorOpenRequest))!.SetValue(component, 1L);
+
+        await InvokeAsync(component, "OnParametersSetAsync");
+
+        Assert.Equal(canViewHistory, Property<bool>(component, "HasStaffEditor"));
+    }
+
     [Fact]
     public async Task OpeningAnotherEditorRequiresDiscardConfirmation()
     {

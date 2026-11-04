@@ -16,7 +16,8 @@ public sealed record SessionManagementPresentation(
     bool CanSchedule,
     bool CanCancel,
     bool CanComplete,
-    string? Message = null)
+    string? Message = null,
+    bool CanViewHistory = false)
 {
     public static SessionManagementPresentation Unavailable(string? message = null) => new(
         IsAvailable: false,

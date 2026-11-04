@@ -80,6 +80,7 @@ else
     builder.Services.AddScoped<IAccountPresentationClient, UnavailableAccountPresentationClient>();
 builder.Services.AddScoped<IWorkspaceAccessClient, GatewayWorkspaceAccessClient>();
 builder.Services.AddScoped<IStaffSessionEditorClient, GatewayStaffSessionEditorClient>();
+builder.Services.AddScoped<IStaffSessionHistoryClient, GatewayStaffSessionHistoryClient>();
 builder.Services.AddScoped<IMapAggregateClient, MapAggregateGatewayClient>();
 builder.Services.AddScoped<ISurveillanceMapDetailsClient, SurveillanceMapDetailsGatewayClient>();
 builder.Services.AddScoped<ICaseWorkspaceClient, CaseWorkspaceGatewayClient>();

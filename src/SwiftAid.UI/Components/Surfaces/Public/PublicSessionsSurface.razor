@@ -602,7 +602,7 @@
 
     private bool CanOpenSelectedSession => HasStaffEditorBindings && SelectedCapabilitiesMatchSelectedSession &&
         (_selectedCapabilities!.CanEdit || _selectedCapabilities!.CanReview || _selectedCapabilities!.CanSchedule ||
-         _selectedCapabilities!.CanCancel || _selectedCapabilities!.CanComplete);
+         _selectedCapabilities!.CanCancel || _selectedCapabilities!.CanComplete || _selectedCapabilities!.CanViewHistory);
 
     private SessionManagementPresentation? CurrentEditorCapabilities => _editorCapabilities ?? StaffEditorCapabilities;
 
@@ -1401,7 +1401,7 @@
         (capabilities.SessionId is null
             ? capabilities.CanCreate
             : capabilities.CanEdit || capabilities.CanReview || capabilities.CanSchedule ||
-              capabilities.CanCancel || capabilities.CanComplete);
+              capabilities.CanCancel || capabilities.CanComplete || capabilities.CanViewHistory);
 
     private async Task LoadSubscriptionForSelectedAsync(bool force)
     {

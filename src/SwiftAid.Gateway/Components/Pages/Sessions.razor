@@ -13,6 +13,7 @@
 @inject IPublicCommunitySessionClient PublicSessionClient
 @inject ISubscriptionClient SubscriptionClient
 @inject IStaffSessionEditorClient StaffSessionEditor
+@inject IStaffSessionHistoryClient StaffSessionHistory
 @inject NavigationManager Navigation
 @inject AuthenticationStateProvider AuthenticationState
 
@@ -102,6 +103,8 @@
             @if (CanRenderEditor(capability))
             {
                 var editorGeneration = _editorGeneration;
+                @if (capability.CanCreate || capability.CanEdit || capability.CanReview || capability.CanSchedule || capability.CanCancel || capability.CanComplete)
+                {
                 <SessionEditor @ref="_sessionEditor" @key="(_editorGeneration, _editingVersion)"
                            ManagementCapabilities="capability"
                            SessionId="_editingSessionId"
@@ -120,6 +123,12 @@
                            OnSchedule="reason => HandleScheduleAsync(reason, editorGeneration)"
                            OnCancel="submission => HandleCancelAsync(submission, editorGeneration)"
                            OnComplete="reason => HandleCompleteAsync(reason, editorGeneration)" />
+                }
+                @if (capability.CanViewHistory && _editingSessionId is { } historySessionId)
+                {
+                    <SessionHistoryPanel @key="(_editorGeneration, _editingVersion)" SessionId="historySessionId"
+                                         SessionVersion="_editingVersion" LoadHistoryAsync="LoadSessionHistoryAsync" />
+                }
             }
         </StaffSessionEditorContent>
     </PublicSessionsSurface>
@@ -176,6 +185,23 @@
     private bool IsCalendarRoute => string.Equals(Navigation.ToAbsoluteUri(Navigation.Uri).AbsolutePath.TrimEnd('/'),
         "/sessions/calendar", StringComparison.OrdinalIgnoreCase);
     private Func<Guid, long, Task<string?>> InvitationLoader => LoadInvitationAsync;
+
+    private async Task<SessionHistoryPage?> LoadSessionHistoryAsync(Guid sessionId, long? beforeVersion)
+    {
+        var epoch = Volatile.Read(ref _identityEpoch);
+        var actor = _actorId;
+        var version = _editingVersion;
+        if (string.IsNullOrWhiteSpace(actor) || _editingSessionId != sessionId || !_managementCapabilities.CanViewHistory ||
+            !CanRenderEditor(_managementCapabilities)) return null;
+        var result = await StaffSessionHistory.ReadAsync(sessionId, beforeVersion);
+        if (!IsCurrentIdentityEpoch(epoch) || !string.Equals(actor, _actorId, StringComparison.Ordinal) ||
+            _editingSessionId != sessionId || _editingVersion != version || !_managementCapabilities.CanViewHistory ||
+            !CanRenderEditor(_managementCapabilities) || !result.Succeeded || !result.Metadata.IsAvailable ||
+            result.Metadata.Provenance != UiCapabilityProvenance.LiveService || result.Value?.SessionId != sessionId)
+            return null;
+        return result.Value;
+    }
+
     private async Task<PublicSessionPage?> QuerySessionsAsync(PublicSessionQuery query)
     {
         var result = await PublicSessionClient.QueryPublicAsync(query);
@@ -277,7 +303,7 @@
             {
                 _managementCapabilities = presentation;
                 _canManageSessions = presentation.CanCreate || presentation.CanEdit || presentation.CanReview ||
-                    presentation.CanSchedule || presentation.CanCancel || presentation.CanComplete;
+                    presentation.CanSchedule || presentation.CanCancel || presentation.CanComplete || presentation.CanViewHistory;
                 if (_canManageSessions)
                 {
                     _serverError = null;
@@ -355,7 +381,8 @@
             capability.CanSchedule,
             capability.CanCancel,
             capability.CanComplete,
-            message);
+            message,
+            capability.CanViewHistory);
 
     private bool CanRenderEditor(SessionManagementPresentation presentation)
     {
@@ -373,7 +400,7 @@
             presentation.Version == _editingVersion &&
             string.Equals(presentation.Status, _editingStatus, StringComparison.OrdinalIgnoreCase) &&
             (presentation.CanEdit || presentation.CanReview || presentation.CanSchedule ||
-             presentation.CanCancel || presentation.CanComplete);
+             presentation.CanCancel || presentation.CanComplete || presentation.CanViewHistory);
     }
 
     private async Task ManageSessionAsync(Guid? sessionId)
@@ -462,7 +489,7 @@
                 var presentation = ToPresentation(capabilities, capabilityResult.Metadata.IsAvailable,
                     capabilityResult.Message ?? capabilityResult.Metadata.Notice);
                 var canManage = capabilities.CanEdit || capabilities.CanReview || capabilities.CanSchedule ||
-                    capabilities.CanCancel || capabilities.CanComplete;
+                    capabilities.CanCancel || capabilities.CanComplete || capabilities.CanViewHistory;
                 if (!canManage)
                 {
                     ClearEditorState();
