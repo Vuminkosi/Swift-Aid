@@ -207,6 +207,12 @@ public partial class EllaiGuidanceHost
         _guidanceProposalId = proposal.ProposalId;
         _guidanceProposalIsAccepted = false;
         _guidanceFeatureId = proposal.Proposal.Arguments.GetValueOrDefault("feature");
+        if (_guidanceFeatureId == "report")
+        {
+            var reportDraft = Services.GetService(typeof(EllaiPublicReportDraftContext)) as EllaiPublicReportDraftContext;
+            reportDraft?.BeginReportCapture();
+            if (turn.UserText is { } reportRequest) reportDraft?.ApplyReportNarrativeStatement(reportRequest);
+        }
         // Conversation restoration offers an explicit action; only the currently awaited turn auto-starts.
         if (newlyCompleted) _ = StartProposedGuidanceAsync();
     }

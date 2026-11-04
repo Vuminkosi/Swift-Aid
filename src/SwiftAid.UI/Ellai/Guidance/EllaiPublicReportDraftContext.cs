@@ -3,7 +3,7 @@ using SwiftAid.Contracts.Ellai;
 
 namespace SwiftAid.UI.Ellai.Guidance;
 
-/// <summary>Ephemeral bridge to one currently mounted public report draft. Proposal payloads carry no values.</summary>
+/// <summary>Ephemeral bridge to the active report flow. Proposal payloads carry no report values.</summary>
 public sealed class EllaiPublicReportDraftContext
 {
     private readonly object _gate = new();
@@ -12,6 +12,22 @@ public sealed class EllaiPublicReportDraftContext
     private Func<string, bool>? _addObservation;
     private Func<string, bool>? _setLocality;
     private Func<string, bool>? _appendNarrative;
+    private readonly List<PendingEdit> _pending = [];
+    private DateTimeOffset _captureExpiresAt;
+    private bool _captureActive;
+
+    private enum PendingEditKind { Age, Observation, Locality, Narrative }
+    private sealed record PendingEdit(PendingEditKind Kind, int? Age = null, string? Text = null);
+
+    public void BeginReportCapture()
+    {
+        lock (_gate)
+        {
+            if (!_captureActive || DateTimeOffset.UtcNow >= _captureExpiresAt) _pending.Clear();
+            _captureActive = true;
+            _captureExpiresAt = DateTimeOffset.UtcNow.AddMinutes(10);
+        }
+    }
 
     public void Register(object owner, Func<int, bool> setAge, Func<string, bool> addObservation,
         Func<string, bool>? setLocality = null, Func<string, bool>? appendNarrative = null)
@@ -26,6 +42,29 @@ public sealed class EllaiPublicReportDraftContext
         }
     }
 
+    public bool FlushPending(object owner)
+    {
+        PendingEdit[] pending;
+        lock (_gate)
+        {
+            if (!ReferenceEquals(_owner, owner)) return false;
+            if (!_captureActive || DateTimeOffset.UtcNow >= _captureExpiresAt)
+            {
+                var hadPendingEdits = _pending.Count > 0;
+                _pending.Clear();
+                _captureActive = false;
+                return !hadPendingEdits;
+            }
+            pending = _pending.ToArray();
+            _pending.Clear();
+            _captureActive = false;
+        }
+
+        var succeeded = true;
+        foreach (var edit in pending) succeeded &= Apply(edit);
+        return succeeded;
+    }
+
     public void Remove(object owner)
     {
         lock (_gate)
@@ -36,6 +75,8 @@ public sealed class EllaiPublicReportDraftContext
                 _addObservation = null;
                 _setLocality = null;
                 _appendNarrative = null;
+                _pending.Clear();
+                _captureActive = false;
             }
     }
 
@@ -50,9 +91,7 @@ public sealed class EllaiPublicReportDraftContext
             match = Regex.Match(utterance, @"^\s*(\d{1,10})[- ]year[- ]old\s+(?:patient|woman|man|girl|boy)\s*[.!?]?\s*$", options);
         if (!match.Success || !int.TryParse(match.Groups[1].Value, System.Globalization.NumberStyles.None,
                 System.Globalization.CultureInfo.InvariantCulture, out var age)) return false;
-        Func<int, bool>? setAge;
-        lock (_gate) setAge = _setAge;
-        return setAge?.Invoke(age) == true;
+        return Apply(new(PendingEditKind.Age, Age: age));
     }
 
     public bool ApplyReportedObservation(string? utterance)
@@ -61,9 +100,7 @@ public sealed class EllaiPublicReportDraftContext
         const RegexOptions options = RegexOptions.IgnoreCase | RegexOptions.CultureInvariant;
         if (!Regex.IsMatch(utterance, @"^\s*(?:she|he|the patient)\s+(?:has|reports|is experiencing|experienced)\s+[^.!?\r\n]+[.!?]?\s*$", options))
             return false;
-        Func<string, bool>? addObservation;
-        lock (_gate) addObservation = _addObservation;
-        return addObservation?.Invoke(utterance.Trim()) == true;
+        return Apply(new(PendingEditKind.Observation, Text: utterance.Trim()));
     }
 
     public bool ApplyReportedLocality(string? utterance)
@@ -73,9 +110,7 @@ public sealed class EllaiPublicReportDraftContext
         var match = Regex.Match(utterance,
             @"^\s*(?:(?:she|he|the patient)\s+)?lives?\s+in\s+([\p{L}\p{N}][\p{L}\p{N} '\-]{0,199})[.!?]?\s*$", options);
         if (!match.Success) return false;
-        Func<string, bool>? setLocality;
-        lock (_gate) setLocality = _setLocality;
-        return setLocality?.Invoke(match.Groups[1].Value.Trim()) == true;
+        return Apply(new(PendingEditKind.Locality, Text: match.Groups[1].Value.Trim()));
     }
 
     public bool ApplyReportNarrativeStatement(string? utterance)
@@ -87,8 +122,38 @@ public sealed class EllaiPublicReportDraftContext
         var isOnset = Regex.IsMatch(utterance,
             @"^\s*It\s+(?:started|began)\s+(?:yesterday|today|on\s+[^.!?\r\n]+)[.!?]?\s*$", options);
         if (!isConcern && !isOnset) return false;
-        Func<string, bool>? appendNarrative;
-        lock (_gate) appendNarrative = _appendNarrative;
-        return appendNarrative?.Invoke(utterance.Trim()) == true;
+        return Apply(new(PendingEditKind.Narrative, Text: utterance.Trim()));
+    }
+
+    private bool Apply(PendingEdit edit)
+    {
+        Func<bool>? apply;
+        lock (_gate)
+        {
+            apply = edit.Kind switch
+            {
+                PendingEditKind.Age when _setAge is { } setAge => () => setAge(edit.Age!.Value),
+                PendingEditKind.Observation when _addObservation is { } addObservation => () => addObservation(edit.Text!),
+                PendingEditKind.Locality when _setLocality is { } setLocality => () => setLocality(edit.Text!),
+                PendingEditKind.Narrative when _appendNarrative is { } appendNarrative => () => appendNarrative(edit.Text!),
+                _ => null
+            };
+            if (apply is null)
+            {
+                if (!_captureActive || _pending.Count >= 10)
+                    return false;
+                if (DateTimeOffset.UtcNow >= _captureExpiresAt)
+                {
+                    _captureActive = false;
+                    _pending.Clear();
+                    return false;
+                }
+
+                _pending.Add(edit);
+                return true;
+            }
+        }
+
+        return apply();
     }
 }

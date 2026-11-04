@@ -704,43 +704,6 @@
     protected override void OnParametersSet()
     {
         ArgumentNullException.ThrowIfNull(Draft);
-        EllaiDraftContext?.Register(this, age =>
-            {
-                if (Draft.SubjectScope != IntakeSubjectScope.Human) return false;
-                Draft.AgeYearsText = age.ToString(System.Globalization.CultureInfo.InvariantCulture);
-                _editContext.NotifyFieldChanged(new FieldIdentifier(Draft, nameof(Draft.AgeYearsText)));
-                return true;
-            }, observation =>
-            {
-                var existing = Draft.GetObservations();
-                if (existing.Contains(observation, StringComparer.Ordinal)) return true;
-                var updated = existing.Append(observation).ToArray();
-                if (!Draft.HasValidObservations(updated, MaximumObservations, MaximumObservationCharacters)) return false;
-                Draft.ObservationsText = string.Join(Environment.NewLine, updated);
-                _editContext.NotifyFieldChanged(new FieldIdentifier(Draft, nameof(Draft.ObservationsText)));
-                return true;
-            }, locality =>
-            {
-                if (!PublicReportDraft.IsValidPlaceName(PresenceState.Known, locality)) return false;
-                Draft.Locality = locality;
-                Draft.LocalityPresence = PresenceState.Known;
-                Draft.LocalityId = null;
-                Draft.LocationUnknown = false;
-                NotifyPlaceFieldsChanged();
-                return true;
-            }, statement =>
-            {
-                var current = Draft.Narrative?.Trim();
-                var lines = string.IsNullOrEmpty(current)
-                    ? Array.Empty<string>()
-                    : current.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-                if (lines.Contains(statement, StringComparer.Ordinal)) return true;
-                var updated = string.Join(Environment.NewLine, lines.Append(statement));
-                if (updated.Length > MaximumNarrativeCharacters) return false;
-                Draft.Narrative = updated;
-                _editContext.NotifyFieldChanged(new FieldIdentifier(Draft, nameof(Draft.Narrative)));
-                return true;
-            });
         if (ReferenceEquals(Draft, _observedDraft) && CurrentDraftId == _observedDraftId)
         {
             if (Draft.SubjectScope is not null)
@@ -748,6 +711,7 @@
                 _subjectCategory = GetSubjectCategory(Draft.SubjectScope);
             }
 
+            RegisterEllaiDraftContext();
             return;
         }
 
@@ -796,6 +760,52 @@
         {
             Draft.CountryConfirmed = false;
         }
+
+        RegisterEllaiDraftContext();
+    }
+
+    private void RegisterEllaiDraftContext()
+    {
+        if (EllaiDraftContext is null) return;
+        EllaiDraftContext.Register(this, age =>
+        {
+            if (Draft.SubjectScope is not (null or IntakeSubjectScope.Human)) return false;
+            Draft.AgeYearsText = age.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            _editContext.NotifyFieldChanged(new FieldIdentifier(Draft, nameof(Draft.AgeYearsText)));
+            return true;
+        }, observation =>
+        {
+            var existing = Draft.GetObservations();
+            if (existing.Contains(observation, StringComparer.Ordinal)) return true;
+            var updated = existing.Append(observation).ToArray();
+            if (!Draft.HasValidObservations(updated, MaximumObservations, MaximumObservationCharacters)) return false;
+            Draft.ObservationsText = string.Join(Environment.NewLine, updated);
+            _editContext.NotifyFieldChanged(new FieldIdentifier(Draft, nameof(Draft.ObservationsText)));
+            return true;
+        }, locality =>
+        {
+            if (!PublicReportDraft.IsValidPlaceName(PresenceState.Known, locality)) return false;
+            Draft.Locality = locality;
+            Draft.LocalityPresence = PresenceState.Known;
+            Draft.LocalityId = null;
+            Draft.LocationUnknown = false;
+            NotifyPlaceFieldsChanged();
+            return true;
+        }, statement =>
+        {
+            var current = Draft.Narrative?.Trim();
+            var lines = string.IsNullOrEmpty(current)
+                ? Array.Empty<string>()
+                : current.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            if (lines.Contains(statement, StringComparer.Ordinal)) return true;
+            var updated = string.Join(Environment.NewLine, lines.Append(statement));
+            if (updated.Length > MaximumNarrativeCharacters) return false;
+            Draft.Narrative = updated;
+            _editContext.NotifyFieldChanged(new FieldIdentifier(Draft, nameof(Draft.Narrative)));
+            return true;
+        });
+        if (!EllaiDraftContext.FlushPending(this))
+            _stepError = "Some details from this Ellai report conversation could not fit the form. Review the report and add those details manually.";
     }
 
     private string SubjectLabel => Draft.SubjectScope switch
