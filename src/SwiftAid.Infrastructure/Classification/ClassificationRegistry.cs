@@ -43,11 +43,19 @@ public sealed class ClassificationRegistry(
                                       Options.Organizations.Contains(job.OrganizationId) && item.SourceEventId == notice.MessageId
                                   select job.Id).AnyAsync(ct);
             if (!admitted) throw new UnauthorizedAccessException();
+        }
+        await LockAsync($"classification-inbox:{notice.MessageId}:{Options.Profile.Hash}", ct);
+        var sourceNotice = await db.CaseEvents.AsNoTracking().SingleOrDefaultAsync(e => e.EventId == notice.MessageId, ct);
+        if (sourceNotice is null || sourceNotice.CaseId != notice.SourceId || sourceNotice.AggregateVersion != notice.SourceVersion ||
+            sourceNotice.ReportRevision != notice.ReportRevision || sourceNotice.EventType != notice.EventType || sourceNotice.RecordedAtUtc != notice.RecordedAtUtc)
+            throw new ArgumentException("Notice does not match a committed source event.");
+        if (backfillJobId is { } checkedJobId)
+        {
             var expired = await db.Database.SqlQuery<bool>($"""
                 SELECT EXISTS (SELECT 1 FROM swiftaid_classification.backfill_items item
                     JOIN case_events e ON e.event_id = item."SourceEventId"
                     JOIN managed_cases c ON c.case_id = e.case_id
-                    WHERE item."JobId" = {admissionJobId} AND item."SourceEventId" = {notice.MessageId}
+                    WHERE item."JobId" = {checkedJobId} AND item."SourceEventId" = {notice.MessageId}
                         AND (item."State" = 'Expired' OR item."State" = 'Pending' AND NOT
                             (COALESCE((SELECT report.received_at_utc FROM swiftaid_intake.intake_promotions promotion
                             JOIN swiftaid_intake.intake_reports report ON report.receipt_id = promotion.receipt_id
@@ -60,11 +68,6 @@ public sealed class ClassificationRegistry(
                 return new ClassificationClaim("Expired", ConfigurationHash: Options.Profile.Hash);
             }
         }
-        await LockAsync($"classification-inbox:{notice.MessageId}:{Options.Profile.Hash}", ct);
-        var sourceNotice = await db.CaseEvents.AsNoTracking().SingleOrDefaultAsync(e => e.EventId == notice.MessageId, ct);
-        if (sourceNotice is null || sourceNotice.CaseId != notice.SourceId || sourceNotice.AggregateVersion != notice.SourceVersion ||
-            sourceNotice.ReportRevision != notice.ReportRevision || sourceNotice.EventType != notice.EventType || sourceNotice.RecordedAtUtc != notice.RecordedAtUtc)
-            throw new ArgumentException("Notice does not match a committed source event.");
         var header = await db.ManagedCases.AsNoTracking().SingleAsync(c => c.CaseId == notice.SourceId, ct);
         await RequireScopeAsync(header.WorkspaceId, header.OrganizationId, ct);
         // Use the same organization/workspace-before-case lock order as case
