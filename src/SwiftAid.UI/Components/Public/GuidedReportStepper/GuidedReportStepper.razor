@@ -719,6 +719,15 @@
                 Draft.ObservationsText = string.Join(Environment.NewLine, updated);
                 _editContext.NotifyFieldChanged(new FieldIdentifier(Draft, nameof(Draft.ObservationsText)));
                 return true;
+            }, locality =>
+            {
+                if (!PublicReportDraft.IsValidPlaceName(PresenceState.Known, locality)) return false;
+                Draft.Locality = locality;
+                Draft.LocalityPresence = PresenceState.Known;
+                Draft.LocalityId = null;
+                Draft.LocationUnknown = false;
+                NotifyPlaceFieldsChanged();
+                return true;
             });
         if (ReferenceEquals(Draft, _observedDraft) && CurrentDraftId == _observedDraftId)
         {

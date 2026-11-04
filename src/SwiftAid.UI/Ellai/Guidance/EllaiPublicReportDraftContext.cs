@@ -10,16 +10,17 @@ public sealed class EllaiPublicReportDraftContext
     private object? _owner;
     private Func<int, bool>? _setAge;
     private Func<string, bool>? _addObservation;
+    private Func<string, bool>? _setLocality;
 
-    public void Register(object owner, Func<int, bool> setAge, Func<string, bool> addObservation)
+    public void Register(object owner, Func<int, bool> setAge, Func<string, bool> addObservation, Func<string, bool>? setLocality = null)
     {
-        lock (_gate) { _owner = owner; _setAge = setAge; _addObservation = addObservation; }
+        lock (_gate) { _owner = owner; _setAge = setAge; _addObservation = addObservation; _setLocality = setLocality ?? (_ => false); }
     }
 
     public void Remove(object owner)
     {
         lock (_gate)
-            if (ReferenceEquals(_owner, owner)) { _owner = null; _setAge = null; _addObservation = null; }
+            if (ReferenceEquals(_owner, owner)) { _owner = null; _setAge = null; _addObservation = null; _setLocality = null; }
     }
 
     public bool ApplyAgeCorrection(string? utterance)
@@ -47,5 +48,17 @@ public sealed class EllaiPublicReportDraftContext
         Func<string, bool>? addObservation;
         lock (_gate) addObservation = _addObservation;
         return addObservation?.Invoke(utterance.Trim()) == true;
+    }
+
+    public bool ApplyReportedLocality(string? utterance)
+    {
+        if (utterance is null || utterance.Length > 240 || utterance.Contains('\r') || utterance.Contains('\n')) return false;
+        const RegexOptions options = RegexOptions.IgnoreCase | RegexOptions.CultureInvariant;
+        var match = Regex.Match(utterance,
+            @"^\s*(?:(?:she|he|the patient)\s+)?lives?\s+in\s+([\p{L}\p{N}][\p{L}\p{N} '\-]{0,199})[.!?]?\s*$", options);
+        if (!match.Success) return false;
+        Func<string, bool>? setLocality;
+        lock (_gate) setLocality = _setLocality;
+        return setLocality?.Invoke(match.Groups[1].Value.Trim()) == true;
     }
 }

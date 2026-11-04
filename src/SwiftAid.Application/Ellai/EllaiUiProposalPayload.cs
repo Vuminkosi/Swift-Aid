@@ -45,8 +45,8 @@ public static class EllaiUiProposalPayload
             throw new ArgumentException("Feature navigation requires one registered destination or local back command.");
         if (proposals.Any(proposal => proposal.Kind == UiIntentKind.UpdatePublicReportDraft &&
             (proposal.FeatureId != "report" || proposal.ResourceId is not null ||
-             proposal.ControlId is not ("report.age-years" or "report.other-observations") || proposal.Arguments.Count != 0)))
-            throw new ArgumentException("Report draft updates may target only value-free age or observation fields.");
+             proposal.ControlId is not ("report.age-years" or "report.other-observations" or "report.locality") || proposal.Arguments.Count != 0)))
+            throw new ArgumentException("Report draft updates may target only value-free age, observation, or locality fields.");
         if (proposals.Any(proposal => proposal.Kind == UiIntentKind.SetPermittedFilter && !EllaiCaseFilterProposal.IsValid(proposal)))
             throw new ArgumentException("Case filtering requires one bounded registered filter and no resource or authority arguments.");
         if (proposals.Any(proposal => proposal.Kind == UiIntentKind.OpenAuthorizedRecord && EllaiCaseNavigationProposal.ReadCaseId(proposal) is null))
