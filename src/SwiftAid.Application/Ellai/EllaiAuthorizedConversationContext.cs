@@ -249,6 +249,31 @@ public static class EllaiAuthorizedConversationContext
                     }
                     continue;
                 }
+                if (observation.ToolName == EllaiToolNames.PublicSessions)
+                {
+                    if (observation.PublicSessionsDigest is null || observation.ReasonCode != EllaiToolReasonCodes.Ok ||
+                        toolContext is null || invokeTool is null || toolContext.SessionId != turn.SessionId ||
+                        toolContext.Actor is null || toolContext.Actor.ActorId != actor.ActorId ||
+                        toolContext.Actor.AccessEpoch != actor.AccessEpoch)
+                        return decisions[turn.ClientUtteranceId] = false;
+                    try
+                    {
+                        var current = await invokeTool(toolContext, new EllaiToolRequest(EllaiToolNames.PublicSessions,
+                            new Dictionary<string, string>()), ct).ConfigureAwait(false);
+                        ct.ThrowIfCancellationRequested();
+                        if (current.ToolName != EllaiToolNames.PublicSessions || !current.Allowed || current.DenialReason is not null ||
+                            current.ReasonCode != EllaiToolReasonCodes.Ok || current.Truncated ||
+                            !current.Evidence.SequenceEqual(observation.Evidence) ||
+                            EllaiObservedToolResult.ResultFingerprint(current) != observation.PublicSessionsDigest)
+                            return decisions[turn.ClientUtteranceId] = false;
+                    }
+                    catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+                    catch (Exception error) when (error is not OutOfMemoryException)
+                    {
+                        return decisions[turn.ClientUtteranceId] = false;
+                    }
+                    continue;
+                }
                 if (observation.ToolName == EllaiToolNames.Locations)
                 {
                     var scope = observation.LocationReplayScope;

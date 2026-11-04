@@ -36,7 +36,7 @@ public sealed class EllaiFrameworkAgent
         string? frameworkSessionJson = null, int maxModelCalls = int.MaxValue,
         bool enableKnowledgeSpecialist = false, bool enableCaseSpecialist = false, bool enableAnalyticsSpecialist = false,
         bool allowEmptyCaseQueue = false, bool enableUiSpecialist = false, bool enableGeospatialSpecialist = false,
-        bool enableWorkflowSpecialist = false)
+        bool enableWorkflowSpecialist = false, bool enableCommunitySessionsSpecialist = false)
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentException.ThrowIfNullOrWhiteSpace(instructions);
@@ -339,6 +339,39 @@ public sealed class EllaiFrameworkAgent
             }
             tools.Add(AIFunctionFactory.Create(DelegateWorkflow, name: "ellai_delegate_workflow",
                 description: "Read current-session action receipt status; cannot approve or execute actions."));
+        }
+        if (enableCommunitySessionsSpecialist && context.AllowedTools?.Contains(EllaiToolNames.PublicSessions) == true)
+        {
+            var delegationCount = 0;
+            async Task<string> DelegateCommunitySessions(string task, CancellationToken token)
+            {
+                token.ThrowIfCancellationRequested();
+                if (Interlocked.Increment(ref delegationCount) != 1) return "Community sessions delegation limit reached.";
+                using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
+                deadline.CancelAfter(TimeSpan.FromSeconds(SwiftAid.Application.Ellai.Specialists.EllaiSpecialistRegistry.TryGet(
+                    SwiftAid.Application.Ellai.Specialists.EllaiSpecialistRegistry.CommunitySessions, out var profile) ? profile.TimeoutSeconds : 1));
+                try
+                {
+                    var result = await new EllaiCommunitySessionsSpecialist(_client, _agentFactory).RunAsync(task, instructions, context,
+                        usage, Current, InvokeGuardedTool, revalidateTool ?? invoke, deadline.Token,
+                        calls => Interlocked.Add(ref delegatedModelCalls, calls)).ConfigureAwait(false);
+                    if (result.Outcome != EllaiSpecialistOutcome.Completed || result.Decision is null)
+                    {
+                        Interlocked.Exchange(ref invalidDelegation, 1);
+                        return "Community sessions specialist could not verify an answer.";
+                    }
+                    var json = System.Text.Json.JsonSerializer.Serialize(result.Decision);
+                    if (json.Length <= 12000) return json;
+                    Interlocked.Exchange(ref invalidDelegation, 1);
+                    return "Community sessions specialist result exceeded its limit.";
+                }
+                catch (OperationCanceledException) when (!token.IsCancellationRequested && deadline.IsCancellationRequested)
+                { Interlocked.Exchange(ref invalidDelegation, 1); return "Community sessions specialist timed out."; }
+                catch (EllaiFrameworkFailureException)
+                { Interlocked.Exchange(ref invalidDelegation, 1); return "Community sessions specialist could not complete the request."; }
+            }
+            tools.Add(AIFunctionFactory.Create(DelegateCommunitySessions, name: "ellai_delegate_community_sessions",
+                description: "Read published public sessions; cannot schedule or execute actions."));
         }
         var guardedClient = new ModelCallGuard(_client, Current, usage, maxModelCalls);
         var functionClient = new FunctionInvokingChatClient(guardedClient)
@@ -651,6 +684,13 @@ public sealed class EllaiFrameworkAgent
             foreach (var line in lines) yield return line;
             yield break;
         }
+        if (toolName == EllaiToolNames.PublicSessions && reference.SourceKind == "PublicSession")
+        {
+            var prefix = $"session {reference.ResourceId} · ";
+            foreach (var line in lines.Where(line => line.StartsWith(prefix, StringComparison.Ordinal)))
+                yield return line;
+            yield break;
+        }
         if (reference.SourceKind == "CaseQueue" &&
             toolName is EllaiToolNames.State or EllaiToolNames.Topic or EllaiToolNames.Evidence &&
             Guid.TryParseExact(reference.ResourceId, "D", out var caseId) &&
@@ -669,7 +709,8 @@ public sealed class EllaiFrameworkAgent
         {
             var text = value.Trim();
             bool Matches(EvidenceRef reference, IReadOnlyList<string> lines) =>
-                (reference.SourceKind == "ProductFact" || reference.SourceKind == "CaseQueue" &&
+                (reference.SourceKind == "ProductFact" || reference.SourceKind == "PublicSession" &&
+                    text.StartsWith($"session {reference.ResourceId} ·", StringComparison.Ordinal) || reference.SourceKind == "CaseQueue" &&
                     (text.StartsWith($"case {reference.ResourceId};", StringComparison.Ordinal) ||
                      text.StartsWith($"case {reference.ResourceId} ·", StringComparison.Ordinal))) &&
                 lines.Contains(text, StringComparer.Ordinal);

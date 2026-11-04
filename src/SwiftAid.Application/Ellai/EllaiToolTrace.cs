@@ -73,7 +73,10 @@ public sealed record EllaiToolTrace(int Version, bool HistoryIncluded, IReadOnly
                     (item.ImportDestinationsDigest is null || item.ToolName == EllaiToolNames.ImportDestinations &&
                         item.ImportDestinationsDigest is { Length: 64 } &&
                         item.ImportDestinationsDigest.All(character => character is >= '0' and <= '9' or >= 'A' and <= 'F')) &&
-                    (item.LocationReplayScope is null || item.ToolName == EllaiToolNames.Locations && item.LocationReplayScope.IsValid()));
+                    (item.LocationReplayScope is null || item.ToolName == EllaiToolNames.Locations && item.LocationReplayScope.IsValid()) &&
+                    (item.PublicSessionsDigest is null || item.ToolName == EllaiToolNames.PublicSessions &&
+                        item.PublicSessionsDigest is { Length: 64 } &&
+                        item.PublicSessionsDigest.All(character => character is >= '0' and <= '9' or >= 'A' and <= 'F')));
             valid = valid && parsed!.Observations!.All(item => item.CaseTimelineReplayScope is null ||
                 item.ToolName == EllaiToolNames.CaseTimeline && item.CaseTimelineReplayScope.IsValid());
             if (valid) trace = parsed;

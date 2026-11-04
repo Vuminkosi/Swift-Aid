@@ -33,7 +33,7 @@ public sealed record EllaiObservedToolResult(
     EllaiUiObservationReplayScope? UiObservationReplayScope = null,
     EllaiClassificationReplayScope? ClassificationReplayScope = null,
     string? ImportDestinationsDigest = null,
-    EllaiLocationReplayScope? LocationReplayScope = null)
+    EllaiLocationReplayScope? LocationReplayScope = null, string? PublicSessionsDigest = null)
 {
     public const string CurrentStaticFeatureVersion = "state-feature/1";
     public const string CurrentClockVersion = "server-clock/1";
@@ -110,7 +110,12 @@ public sealed record EllaiObservedToolResult(
             request.ToolName == EllaiToolNames.Locations && result.ToolName == request.ToolName && result.Allowed &&
                 result.DenialReason is null && result.ReasonCode == EllaiToolReasonCodes.Ok && !result.Truncated &&
                 result.LocationReplayScope is { } locationScope && locationScope.IsValid() &&
-                locationScope.ResultDigest == ResultFingerprint(result) ? locationScope : null);
+                locationScope.ResultDigest == ResultFingerprint(result) ? locationScope : null,
+            request.ToolName == EllaiToolNames.PublicSessions && result.ToolName == request.ToolName &&
+                request.Arguments.Count == 0 && result.Allowed && result.DenialReason is null &&
+                result.ReasonCode == EllaiToolReasonCodes.Ok && !result.Truncated &&
+                result.ItemCount == result.Evidence.Count && result.Evidence.Count <= 10
+                    ? ResultFingerprint(result) : null);
     }
 
     public static bool IsCanonicalReceiptId(string? value) => value is { Length: 37 } &&

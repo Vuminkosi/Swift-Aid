@@ -6,6 +6,7 @@ using SwiftAid.Contracts.Cases;
 using SwiftAid.Contracts.Ellai;
 using SwiftAid.Application.Intake;
 using SwiftAid.Application.Intake.Imports;
+using SwiftAid.Contracts.Sessions;
 
 namespace SwiftAid.Application.Ellai;
 
@@ -51,12 +52,13 @@ public static class EllaiToolNames
     public const string ClassificationEvidence = "ellai_classification_evidence";
     public const string OwnedCaseCount = "ellai_owned_case_count";
     public const string CaseTimeline = "ellai_case_timeline";
+    public const string PublicSessions = "ellai_public_sessions";
 
     public static readonly IReadOnlySet<string> All = new HashSet<string>(StringComparer.Ordinal)
     {
         State, Evidence, Topic, Capabilities, Receipts, ProductFacts, Now,
         DocsSearch, DocsGet, UiCatalogue, UiObserve, IngestionSchema, ValidateObservations, Locations,
-        ImportDestinations, Imports, ImportStatus, ClassificationEvidence, OwnedCaseCount, CaseTimeline
+        ImportDestinations, Imports, ImportStatus, ClassificationEvidence, OwnedCaseCount, CaseTimeline, PublicSessions
     };
 }
 
@@ -211,6 +213,7 @@ public sealed class EllaiToolBroker
         $"{EllaiToolNames.UiObserve}(controls, view=current, context?, feature?) — live mounted-control facts.",
         $"{EllaiToolNames.IngestionSchema}() — canonical case CSV fields, capture requirements and authority boundaries; no submission.",
         $"{EllaiToolNames.ValidateObservations}(observations_json) — validate a bounded JSON array of original reported strings; no inference or submission.",
+        $"{EllaiToolNames.PublicSessions}() - list published public sessions, without registration or scheduling.",
         $"{EllaiToolNames.Locations}(q, country?, limit?) — search the public geographic registry; present matches for user selection, never guess a location.",
         $"{EllaiToolNames.ImportDestinations}() — current authorized organization/workspace/country destinations for Workspace imports; staff only.",
         $"{EllaiToolNames.Imports}(workspace_id, organization_id, country) — the current user's recent imports in one permitted destination; staff only.",
@@ -264,6 +267,7 @@ public sealed class EllaiToolBroker
     private readonly IDashboardAggregateQuery? _dashboard;
     private readonly ICaseTimelineQuery? _timeline;
     private readonly IEllaiLocationReplayProtector? _locationReplayProtector;
+    private readonly ICommunitySessionService? _communitySessions;
 
     /// <summary>Consent infrastructure is mandatory for consent-scoped reads.
     /// Ordinary typed messages use their own explicit classification and do
@@ -285,7 +289,8 @@ public sealed class EllaiToolBroker
         SwiftAid.Application.Classification.ICaseClassificationQuery? classification = null,
         SwiftAid.Application.Surveillance.ISignalReviewService? signals = null,
         EllaiUiAuthorityResolver? uiAuthority = null, IEllaiExactReferenceIndex? referenceIndex = null,
-        IDashboardAggregateQuery? dashboard = null, ICaseTimelineQuery? timeline = null, IEllaiLocationReplayProtector? locationReplayProtector = null)
+        IDashboardAggregateQuery? dashboard = null, ICaseTimelineQuery? timeline = null, IEllaiLocationReplayProtector? locationReplayProtector = null,
+        ICommunitySessionService? communitySessions = null)
     {
         _policy = policy ?? throw new ArgumentNullException(nameof(policy));
         _consent = consent ?? throw new ArgumentNullException(nameof(consent));
@@ -297,6 +302,7 @@ public sealed class EllaiToolBroker
         _dashboard = dashboard;
         _timeline = timeline;
         _locationReplayProtector = locationReplayProtector;
+        _communitySessions = communitySessions;
         _uiAuthority = uiAuthority ?? new EllaiUiAuthorityResolver();
         _uiRegistry = uiRegistry;
         _uiDiscovery = uiDiscovery;
@@ -430,6 +436,8 @@ public sealed class EllaiToolBroker
             return Bound(await ReadImportsAsync(context, request, ct).ConfigureAwait(false));
         if (canonical == EllaiToolNames.ClassificationEvidence)
             return Bound(await ReadClassificationAsync(context, request, ct).ConfigureAwait(false));
+        if (canonical == EllaiToolNames.PublicSessions)
+            return Bound(await ReadPublicSessionsAsync(request, ct).ConfigureAwait(false));
         if (canonical == EllaiToolNames.Evidence)
             return Bound(await ReadEvidenceAsync(context, request, referenceIndex ?? _referenceIndex, ct).ConfigureAwait(false));
         if (canonical == EllaiToolNames.OwnedCaseCount)
@@ -612,6 +620,27 @@ public sealed class EllaiToolBroker
             return Deny(request.ToolName, "Authorized case evidence is unavailable for this session.",
                 EllaiToolReasonCodes.Unavailable);
         }
+    }
+
+    private async Task<EllaiToolResult> ReadPublicSessionsAsync(EllaiToolRequest request, CancellationToken ct)
+    {
+        if (_communitySessions is null)
+            return Deny(request.ToolName, "Public sessions are unavailable.", EllaiToolReasonCodes.Unavailable);
+        try
+        {
+            const int limit = 10;
+            var page = await _communitySessions.QueryPublicAsync(new PublicSessionQuery(Limit: limit), ct).ConfigureAwait(false);
+            var items = page.Items;
+            var evidence = items.Select(item => new EvidenceRef("PublicSession", item.SessionId.ToString("D"),
+                item.Version.ToString(CultureInfo.InvariantCulture), "public-session", item.SessionId.ToString("D"))).ToArray();
+            var lines = items.Select(item => $"session {item.SessionId:D} · title {JsonSerializer.Serialize(item.Title)} · starts {item.StartUtc:O} · status {item.Status}");
+            return new EllaiToolResult(request.ToolName, true, null, evidence,
+                items.Count == 0 ? "No public sessions were found." : string.Join("\n", lines),
+                items.Count, page.Next is not null, EllaiToolReasonCodes.Ok);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        catch (Exception error) when (error is not OutOfMemoryException)
+        { return Deny(request.ToolName, "Public sessions are unavailable.", EllaiToolReasonCodes.Unavailable); }
     }
 
     private async Task<EllaiToolResult> ReadClassificationAsync(EllaiToolContext context, EllaiToolRequest request, CancellationToken ct)

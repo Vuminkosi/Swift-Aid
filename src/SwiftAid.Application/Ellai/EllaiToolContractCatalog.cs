@@ -72,6 +72,7 @@ public static class EllaiToolContractCatalog
             [EllaiToolNames.ClassificationEvidence] = Contract(EllaiToolNames.ClassificationEvidence, ("case_id", true)),
             [EllaiToolNames.OwnedCaseCount] = Contract(EllaiToolNames.OwnedCaseCount, ("window_days", true)),
             [EllaiToolNames.CaseTimeline] = Contract(EllaiToolNames.CaseTimeline, ("case_id", true)),
+            [EllaiToolNames.PublicSessions] = Contract(EllaiToolNames.PublicSessions),
         });
 
     /// <summary>Read-only contracts indexed by canonical advertised tool name.</summary>
