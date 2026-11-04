@@ -7,7 +7,7 @@
 <div class="public-report-surface">
     <GuidedReportStepper Draft="Draft"
                          CurrentDraftId="CurrentDraftId"
-                         Countries="Countries"
+                         Countries="ReportCountries"
                          CountryCatalogueVersion="@CountryCatalogueVersion"
                          CountryCatalogueIsCurrent="CountryCatalogueIsCurrent"
                          PrivacyNoticeReference="@PrivacyNoticeReference"
@@ -144,6 +144,17 @@
 @code {
     private bool _temporaryCleanupRetrying;
     private bool _temporaryCleanupRetryFailed;
+
+    private static readonly HashSet<string> SadcCountryCodes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "AO", "BW", "KM", "CD", "SZ", "LS", "MG", "MW",
+        "MU", "MZ", "NA", "SC", "ZA", "TZ", "ZM", "ZW"
+    };
+
+    private IReadOnlyList<PublicCountryOption> ReportCountries => Countries
+        .Where(country => SadcCountryCodes.Contains(country.Code) ||
+            string.Equals(country.Code, Draft.CountryCode, StringComparison.OrdinalIgnoreCase))
+        .ToArray();
 
     [Parameter] public IReadOnlyList<PublicCountryOption> Countries { get; set; } = [];
     [Parameter] public Func<string, string?, CancellationToken, Task<GeoPlaceQueryResult>>? PlaceSearchFunc { get; set; }
