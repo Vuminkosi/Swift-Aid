@@ -900,7 +900,7 @@ public sealed class EllaiFrameworkAgent
         return decision;
     }
 
-    private static IEnumerable<string> EvidenceLines(string toolName, EllaiToolResult result, EvidenceRef reference)
+    internal static IEnumerable<string> EvidenceLines(string toolName, EllaiToolResult result, EvidenceRef reference)
     {
         var lines = result.ResultSummary.Split('\n').Select(line => line.Trim()).Where(line => line.Length != 0);
         if (toolName == EllaiToolNames.ProductFacts && reference.SourceKind == "ProductFact" &&
@@ -945,6 +945,13 @@ public sealed class EllaiFrameworkAgent
         if (toolName == EllaiToolNames.PublicSessions && reference.SourceKind == "PublicSession")
         {
             var prefix = $"session {reference.ResourceId} · ";
+            foreach (var line in lines.Where(line => line.StartsWith(prefix, StringComparison.Ordinal)))
+                yield return line;
+            yield break;
+        }
+        if (toolName == EllaiToolNames.Receipts && reference.SourceKind == "Receipt")
+        {
+            var prefix = $"receipt {reference.ResourceId} · ";
             foreach (var line in lines.Where(line => line.StartsWith(prefix, StringComparison.Ordinal)))
                 yield return line;
             yield break;
