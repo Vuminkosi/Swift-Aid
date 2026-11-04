@@ -4271,3 +4271,24 @@ stopped. The consumer was still listed immediately after process termination,
 before its disposable NATS server was removed. The reused task-created local
 test key directory remains. This is local synthetic browser evidence, not
 deployment, physical-device, notification-delivery or provider-reliability proof.
+
+### Current live authorized recall and count — 2026-11-04
+
+At `f09d61b0`, three live Muse worker tests passed together against fresh,
+disposable PostGIS 17 and Qdrant 1.19 containers with synthetic records:
+`LiveMuseWorkerRecallsAuthorizedCaseFromPostgresAndQdrant`,
+`LiveMuseWorkerCommitsAuthorizedPostgresCount`, and
+`LiveMuseWorkerWithholdsCountAfterPostgresGrantExpires`. The recall case
+completed three turns including the index-failure fallback and expired-grant
+path; the count cases covered authorized publication and revocation during
+processing. This checks the current framework worker and broker, not a
+deployed Gateway or real records.
+
+PASS: with `OS=Windows_NT`, `ELLAI_LIVE=1`, `ELLAI_LIVE_QDRANT=1`, the
+dedicated framework PostgreSQL fixture and configured provider settings,
+`dotnet test tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj
+--no-restore -m:1 -nr:false -p:WasmBuildNative=false` with the three test-name
+filters passed 3/3. The TRX `ellai-live-authority-current-20261104.trx` remains
+under the integration test project's `TestResults`; both containers were
+removed. A single successful live run does not establish provider reliability
+or support for general analytics questions.
