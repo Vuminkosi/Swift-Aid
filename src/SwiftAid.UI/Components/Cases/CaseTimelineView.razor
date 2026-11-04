@@ -129,9 +129,23 @@
                                         @foreach (var activity in entry.AgentActivities)
                                         {
                                             <li>Ellai - @CaseAgentActivityPresentation.RoleLabel(activity.RoleId): @CaseAgentActivityPresentation.ActivityLabel(activity.RoleId, activity.RecommendationKind)
-                                                @if (activity.RoleId == "ops.organization" && activity.RecommendationKind?.StartsWith("Queue:", StringComparison.Ordinal) == true)
+                                                @if (activity.RoleId == "ops.organization" && activity.RecommendationKind is { } queueKind && queueKind.StartsWith("Queue", StringComparison.Ordinal) && queueKind.IndexOf(':') is var separator && separator >= 0)
                                                 {
-                                                    <span>Suggested queue: @activity.RecommendationKind[6..]. @(activity.FollowUpIsCurrent == true ? "Review required; no assignment was made." : "Historical suggestion; the case has changed.")</span>
+                                                    <span>Suggested queue: @queueKind[(separator + 1)..]. @(queueKind.StartsWith("QueueAccept:", StringComparison.Ordinal) ? "Accepted; no assignment was made." : queueKind.StartsWith("QueueReject:", StringComparison.Ordinal) ? "Rejected; no assignment was made." : activity.FollowUpIsCurrent == true ? "Review required; no assignment was made." : "Historical suggestion; the case has changed.")</span>
+                                                    @if (activity.FollowUpIsCurrent == true && activity.FollowUpReviewedAtUtc is null && OrganizationClient is not null)
+                                                    {
+                                                        @if (_organizationSuggestionId != activity.ActivityId)
+                                                        {
+                                                            <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="@(() => OpenOrganizationDecision(activity.ActivityId))">Review suggestion</MudButton>
+                                                        }
+                                                        else
+                                                        {
+                                                            <MudTextField T="string" @bind-Value="_organizationRationale" Label="Reason for your decision" Required="true" MaxLength="500" Lines="2" />
+                                                            <MudButton Variant="Variant.Text" Color="Color.Primary" Disabled="@_organizationSubmitting" OnClick="@(() => DecideOrganizationAsync(OrganizationDecision.Accept))">Accept suggestion</MudButton>
+                                                            <MudButton Variant="Variant.Text" Disabled="@_organizationSubmitting" OnClick="@(() => DecideOrganizationAsync(OrganizationDecision.Reject))">Reject suggestion</MudButton>
+                                                            <MudButton Variant="Variant.Text" Disabled="@_organizationSubmitting" OnClick="@(() => _organizationSuggestionId = null)">Cancel</MudButton>
+                                                        }
+                                                    }
                                                 }
                                                 <time datetime="@activity.RecordedAtUtc.ToString("O")">@activity.RecordedAtUtc.ToLocalTime().ToString("g")</time>
                                                 @if (activity.FollowUpReviewedAtUtc is { } reviewedAt)
@@ -290,6 +304,61 @@
     private string? _reviewMessage;
     private bool _reviewError;
     private readonly Dictionary<Guid, Guid> _reviewCommandIds = [];
+    private IOrganizationSuggestionDecisionClient? _organizationClient;
+    private IOrganizationSuggestionDecisionClient? OrganizationClient => _organizationClient ??= Services.GetService<IOrganizationSuggestionDecisionClient>();
+    private Guid? _organizationSuggestionId;
+    private string _organizationRationale = "";
+    private bool _organizationSubmitting;
+    private OrganizationDecisionRequest? _organizationPending;
+
+    private void OpenOrganizationDecision(Guid suggestionId)
+    {
+        _organizationSuggestionId = suggestionId;
+        _organizationRationale = "";
+        _organizationPending = null;
+        _reviewMessage = null;
+    }
+
+    private async Task DecideOrganizationAsync(OrganizationDecision decision)
+    {
+        if (_organizationSubmitting || _organizationSuggestionId is not { } suggestionId || OrganizationClient is not { } client) return;
+        var rationale = _organizationRationale.Trim();
+        if (rationale.Length is < 1 or > 500)
+        {
+            _reviewError = true;
+            _reviewMessage = "Enter a reason of up to 500 characters.";
+            return;
+        }
+        var caseId = CaseId;
+        if (_organizationPending is null || _organizationPending.Decision != decision || _organizationPending.Rationale != rationale)
+            _organizationPending = new(Guid.NewGuid(), decision, rationale);
+        _organizationSubmitting = true;
+        try
+        {
+            var result = await client.DecideAsync(caseId, suggestionId, _organizationPending);
+            if (CaseId != caseId) return;
+            _reviewError = result.Status is not (OrganizationDecisionOutcome.Recorded or OrganizationDecisionOutcome.Replayed or OrganizationDecisionOutcome.AlreadyDecided);
+            _reviewMessage = result.Status switch
+            {
+                OrganizationDecisionOutcome.Recorded or OrganizationDecisionOutcome.Replayed => "Decision recorded. No case assignment was made.",
+                OrganizationDecisionOutcome.AlreadyDecided => "A decision was already recorded. No case assignment was made.",
+                OrganizationDecisionOutcome.Stale => "The case changed; refresh before reviewing this suggestion.",
+                OrganizationDecisionOutcome.NotFoundOrNotAuthorized => "The suggestion is unavailable or you cannot review it.",
+                OrganizationDecisionOutcome.Invalid => "Enter a valid decision and reason.",
+                OrganizationDecisionOutcome.Conflict => "This request conflicts with an earlier decision. Refresh and try again.",
+                _ => "We couldn't confirm the decision. Try again when connected."
+            };
+            if (result.Status != OrganizationDecisionOutcome.Unavailable)
+            {
+                _organizationPending = null;
+                _organizationSuggestionId = null;
+                await RefreshAsync();
+            }
+        }
+        catch (Exception error) when (error is not OutOfMemoryException)
+        { if (CaseId == caseId) { _reviewError = true; _reviewMessage = "We couldn't confirm the decision. Try again when connected."; } }
+        finally { _organizationSubmitting = false; }
+    }
 
     private IReadOnlyList<(string FilterValue, string Label)> EventTypeOptions
     {

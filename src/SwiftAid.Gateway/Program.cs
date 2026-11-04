@@ -106,6 +106,7 @@ builder.Services.AddScoped<IPublicCommunitySessionClient, WebPublicCommunitySess
 builder.Services.AddScoped<SwiftAid.Contracts.Intake.IIntakeCoordinationClient, IntakeCoordinationGatewayClient>();
 builder.Services.AddScoped<SwiftAid.Contracts.Cases.ICaseTimelineClient, SwiftAid.Gateway.Cases.CaseTimelineGatewayClient>();
 builder.Services.AddScoped<SwiftAid.Contracts.Cases.IFollowUpRecommendationReviewClient, SwiftAid.Gateway.Cases.FollowUpReviewGatewayClient>();
+builder.Services.AddScoped<SwiftAid.Contracts.Cases.IOrganizationSuggestionDecisionClient, SwiftAid.Gateway.Cases.OrganizationDecisionGatewayClient>();
 builder.Services.AddScoped<SwiftAid.Contracts.Cases.IEligibleHealthOfficerClient, SwiftAid.Gateway.Cases.EligibleHealthOfficerGatewayClient>();
 builder.Services.AddScoped<SwiftAid.Contracts.Cases.IHealthOfficerAdministrationClient, SwiftAid.Gateway.Cases.HealthOfficerAdministrationGatewayClient>();
 if (builder.Configuration.GetValue<bool>("Ellai:Operational:OfficerDirectory:Enabled") &&
@@ -321,6 +322,7 @@ app.MapCaseTimelineEndpoints();
 app.MapEligibleHealthOfficerEndpoints();
 app.MapHealthOfficerDesignationEndpoints();
 app.MapFollowUpReviewEndpoints();
+app.MapOrganizationDecisionEndpoints();
 app.MapCaseDetailEndpoints();
 app.MapCaseQueueEndpoints();
 app.MapMapAggregateEndpoints();

@@ -404,6 +404,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ICaseTimelineStore, PostgresCaseTimelineStore>();
         services.AddScoped<ICaseTimelineQuery, CaseTimelineQuery>();
         services.AddScoped<IFollowUpRecommendationReviewService, PostgresFollowUpRecommendationReviewService>();
+        services.AddScoped<IOrganizationSuggestionDecisionService, PostgresOrganizationSuggestionDecisionService>();
         services.Configure<HealthOfficerDirectoryOptions>(configuration.GetSection("Ellai:Operational:OfficerDirectory"));
         services.AddScoped<IEligibleHealthOfficerStore, PostgresEligibleHealthOfficerStore>();
         services.AddScoped<IHealthOfficerEscalationReviewStore, PostgresHealthOfficerEscalationReviewStore>();
