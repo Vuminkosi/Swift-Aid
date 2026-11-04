@@ -80,9 +80,21 @@ public sealed class PostgresIntakePromotionSource : IIntakePromotionSource
             return null;
         }
 
-        return await _dbContext.IntakePromotions.AsNoTracking()
-            .Where(item => item.ReceiptId == receiptId)
-            .Select(item => (Guid?)item.CaseId)
-            .SingleOrDefaultAsync(ct).ConfigureAwait(false);
+        var now = _timeProvider.GetUtcNow().ToUniversalTime();
+        // A route can change after a receipt was promoted. A reviewer for the
+        // new route must not receive an identifier from the previous organization.
+        return await (from promotion in _dbContext.IntakePromotions.AsNoTracking()
+                      join report in _dbContext.IntakeReports.AsNoTracking()
+                          on promotion.ReceiptId equals report.ReceiptId
+                      join managedCase in _dbContext.ManagedCases.AsNoTracking()
+                          on promotion.CaseId equals managedCase.CaseId
+                      where promotion.ReceiptId == receiptId &&
+                          _dbContext.IntakeRoutes.AsNoTracking()
+                              .Where(route => route.IntakeQueueId == report.IntakeQueueId && route.IsActive &&
+                                  route.EffectiveFromUtc <= now && (route.ExpiresAtUtc == null || route.ExpiresAtUtc > now))
+                              .OrderByDescending(route => route.EffectiveFromUtc)
+                              .Select(route => route.ReceivingOrganizationId)
+                              .FirstOrDefault() == managedCase.OrganizationId
+                      select (Guid?)promotion.CaseId).SingleOrDefaultAsync(ct).ConfigureAwait(false);
     }
 }
