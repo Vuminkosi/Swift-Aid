@@ -14,8 +14,15 @@ public sealed class PostgresCaseCorrelationStore(SwiftAidDbContext db) : ICaseCo
                 p.first_report_revision AS "FirstRevision", p.second_report_revision AS "SecondRevision",
                 p.recorded_at_utc AS "RecordedAtUtc", p.reason_codes AS "Reasons", d.decision AS "Decision"
             FROM ellai_correlation_candidates p LEFT JOIN ellai_correlation_decisions d ON d.candidate_id = p.candidate_id
+            JOIN managed_cases a ON a.case_id = p.first_case_id
+            JOIN managed_cases b ON b.case_id = p.second_case_id
+            CROSS JOIN LATERAL (SELECT COALESCE((SELECT r.received_at_utc FROM swiftaid_intake.intake_promotions i
+                JOIN swiftaid_intake.intake_reports r ON r.receipt_id = i.receipt_id WHERE i.case_id = a.case_id), a.created_at_utc) AS received_at_utc) atime
+            CROSS JOIN LATERAL (SELECT COALESCE((SELECT r.received_at_utc FROM swiftaid_intake.intake_promotions i
+                JOIN swiftaid_intake.intake_reports r ON r.receipt_id = i.receipt_id WHERE i.case_id = b.case_id), b.created_at_utc) AS received_at_utc) btime
             WHERE p.first_case_id = {caseId} OR p.second_case_id = {caseId}
-            ORDER BY p.recorded_at_utc DESC, p.candidate_id DESC LIMIT {limit}
+            ORDER BY CASE WHEN p.first_case_id = {caseId} THEN btime.received_at_utc ELSE atime.received_at_utc END DESC,
+                p.candidate_id DESC LIMIT {limit}
             """).ToArrayAsync(ct).ConfigureAwait(false);
     }
 
