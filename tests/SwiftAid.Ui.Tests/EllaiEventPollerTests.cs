@@ -470,16 +470,18 @@ public sealed class EllaiEventPollerTests
 
         var reported = await client.ReportUiObservationAsync(
             "s-9",
-            new UiObservationReport("view-9", "ctx-9", "web", new[] { "cases.queue" }, CurrentNavigationId: "nav-cases", CompletedControlIds: ["report.subject"])
-                { ValidationInputIds = ["report.occurrence-date"] },
+            new UiObservationReport("view-9", "ctx-9", "web", new[] { "report.time-location" }, CurrentNavigationId: "nav-report", CompletedControlIds: ["report.subject"])
+                { ValidationInputIds = ["report.occurrence-date"],
+                    InputStates = [new("report.time-location", "report.occurrence-date", UiInputPresence.Invalid)] },
             CancellationToken.None);
 
         Assert.True(reported);
         Assert.Equal("POST", handler.LastMethod);
         Assert.Contains("api/v1/ellai/sessions/s-9/ui-observations", handler.LastPath, StringComparison.Ordinal);
-        Assert.Contains("\"currentNavigationId\":\"nav-cases\"", handler.LastBody);
+        Assert.Contains("\"currentNavigationId\":\"nav-report\"", handler.LastBody);
         Assert.Contains("\"completedControlIds\":[\"report.subject\"]", handler.LastBody);
         Assert.Contains("\"validationInputIds\":[\"report.occurrence-date\"]", handler.LastBody);
+        Assert.Contains("\"inputStates\":[{\"controlId\":\"report.time-location\",\"inputId\":\"report.occurrence-date\",\"presence\":3}]", handler.LastBody);
     }
 
     [Fact]

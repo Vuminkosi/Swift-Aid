@@ -471,12 +471,14 @@ public sealed class EllaiPrivilegedRouteAuthorizationTests
         Merge(started);
         var session = (await started.Content.ReadFromJsonAsync<EllaiSessionView>())!;
         var store = app.Services.GetRequiredService<CountingEllaiSessionStore>();
-        var observation = new ReportUiObservationApiRequest(session.SessionId, "view", "validation", "web", ["report.entry"],
-            [new("report.entry", UiObservationState.Ready)], ValidationInputIds: ["report.original-statement"]);
+        var observation = new ReportUiObservationApiRequest(session.SessionId, "view", "validation", "web", ["report.narrative"],
+            [new("report.narrative", UiObservationState.Ready)], ValidationInputIds: ["report.original-statement"],
+            InputStates: [new("report.narrative", "report.original-statement", UiInputPresence.Invalid)]);
         using (var observationResponse = await PostAsync($"/api/v1/ellai/guest/sessions/{session.SessionId}/ui-observations", observation, token))
             Assert.Equal(System.Net.HttpStatusCode.OK, observationResponse.StatusCode);
         var observed = await app.Services.GetRequiredService<IEllaiUiObservationStore>().LatestAsync(session.SessionId, default);
         Assert.Equal("report.original-statement", Assert.Single(observed!.ValidationInputIds!));
+        Assert.Equal(UiInputPresence.Invalid, Assert.Single(observed.InputStates!).Presence);
         using (var foreignObservation = await PostAsync("/api/v1/ellai/guest/sessions/session-1/ui-observations",
             observation with { SessionId = "session-1" }, token))
             Assert.Equal(System.Net.HttpStatusCode.NotFound, foreignObservation.StatusCode);
@@ -1051,20 +1053,35 @@ public sealed class EllaiPrivilegedRouteAuthorizationTests
         using var http = app.GetTestClient();
         var httpClient = new EllaiReviewHttpClient(http);
         var inProcess = new EllaiReviewGatewayClient(new FixedAuthenticationStateProvider(TestPrincipal()), app.Services);
-        var report = new UiObservationReport("view", "context", "web", ["report.entry"],
-            [new("report.entry", UiObservationState.Ready)]) { ValidationInputIds = ["report.original-statement"] };
+        var report = new UiObservationReport("view", "context", "web", ["report.narrative", "report.time-location"],
+            [new("report.narrative", UiObservationState.Ready), new("report.time-location", UiObservationState.Ready)])
+            { ValidationInputIds = ["report.original-statement"],
+                InputStates = [new("report.narrative", "report.original-statement", UiInputPresence.Invalid)] };
 
         Assert.Equal(!foreign, await httpClient.ReportUiObservationAsync("session-1", report, default));
         var store = app.Services.GetRequiredService<IEllaiUiObservationStore>();
         var afterHttp = await store.LatestAsync("session-1", default);
         if (foreign) Assert.Null(afterHttp);
-        else Assert.Equal("report.original-statement", Assert.Single(afterHttp!.ValidationInputIds!));
+        else
+        {
+            Assert.Equal("report.original-statement", Assert.Single(afterHttp!.ValidationInputIds!));
+            Assert.Equal(UiInputPresence.Invalid, Assert.Single(afterHttp.InputStates!).Presence);
+        }
 
-        var next = report with { ContextStamp = "next", ValidationInputIds = ["report.occurrence-date"] };
+        var next = report with { ContextStamp = "next", ValidationInputIds = ["report.occurrence-date"],
+            InputStates = [new("report.time-location", "report.occurrence-date", UiInputPresence.Entered)] };
         Assert.Equal(!foreign, await inProcess.ReportUiObservationAsync("session-1", next, default));
         var afterInProcess = await store.LatestAsync("session-1", default);
         if (foreign) Assert.Null(afterInProcess);
-        else Assert.Equal("report.occurrence-date", Assert.Single(afterInProcess!.ValidationInputIds!));
+        else
+        {
+            Assert.Equal("report.occurrence-date", Assert.Single(afterInProcess!.ValidationInputIds!));
+            Assert.Equal(UiInputPresence.Entered, Assert.Single(afterInProcess.InputStates!).Presence);
+            var invalid = next with { ContextStamp = "invalid", InputStates = [new("report.other", "report.occurrence-date", UiInputPresence.Entered)] };
+            Assert.False(await httpClient.ReportUiObservationAsync("session-1", invalid, default));
+            Assert.False(await inProcess.ReportUiObservationAsync("session-1", invalid, default));
+            Assert.Equal("next", (await store.LatestAsync("session-1", default))!.ContextStamp);
+        }
     }
 
     [Fact]
