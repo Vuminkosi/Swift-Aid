@@ -4292,3 +4292,18 @@ filters passed 3/3. The TRX `ellai-live-authority-current-20261104.trx` remains
 under the integration test project's `TestResults`; both containers were
 removed. A single successful live run does not establish provider reliability
 or support for general analytics questions.
+
+### Current live grounded streaming — 2026-11-04
+
+At `7eef9a38`, `LiveMuseStreamsEvidenceBackedSegmentBeforeCompletion` passed
+1/1 with the configured live Muse route. The framework invoked a synthetic
+tool and published its exact evidence-backed segment while the provider stream
+was still open; the final display text matched. The command was `dotnet test
+tests/SwiftAid.Application.Tests/SwiftAid.Application.Tests.csproj --no-build
+--no-restore -m:1 -nr:false --filter
+FullyQualifiedName~LiveMuseStreamsEvidenceBackedSegmentBeforeCompletion
+--logger 'trx;LogFileName=ellai-live-grounded-current-20261104.trx' --logger
+'console;verbosity=normal'`, with `ELLAI_LIVE=1` and provider settings in the
+test process. The TRX is retained in the application test project's
+`TestResults`. This is one direct-agent run with synthetic tool evidence, not
+browser playback, deployed behavior, or a provider reliability guarantee.
