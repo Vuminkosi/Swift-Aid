@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using SwiftAid.Application.Authorization;
+using SwiftAid.Application.Identity;
 using SwiftAid.Contracts.Commands;
 using SwiftAid.Infrastructure.Persistence;
 
@@ -48,6 +49,8 @@ public sealed record OrganizationCreateResult(
     OrganizationCreateStatus Status,
     string? OrganizationId = null);
 
+public enum OrganizationOwnerChangeStatus { Changed, Unchanged, Denied, Invalid, Unavailable }
+
 public interface IOrganizationMembershipService
 {
     Task<OrganizationCreateResult> CreateAsync(
@@ -66,18 +69,86 @@ public interface IOrganizationMembershipService
         CancellationToken cancellationToken);
 
     Task<IReadOnlyList<MembershipRequestRecord>> GetMyRequestsAsync(string actorId, CancellationToken cancellationToken);
+
+    Task<OrganizationOwnerChangeStatus> GrantOwnerAsync(string actorId, string organizationId, string targetActorId, CancellationToken cancellationToken);
+
+    Task<OrganizationOwnerChangeStatus> RevokeOwnerAsync(string actorId, string organizationId, string targetActorId, CancellationToken cancellationToken);
 }
 
 /// <summary>Member-side organization access: read memberships, browse the directory,
 /// request to join. Review and grants stay with staff tooling and authority tables.</summary>
 public sealed class OrganizationMembershipService(
     SwiftAidDbContext dbContext,
-    TimeProvider timeProvider) : IOrganizationMembershipService
+    TimeProvider timeProvider,
+    IOrganizationOwnerAuthorizer ownerAuthorizer) : IOrganizationMembershipService
 {
     private const int DirectoryLimit = 25;
 
     private readonly SwiftAidDbContext _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
     private readonly TimeProvider _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
+    private readonly IOrganizationOwnerAuthorizer _ownerAuthorizer = ownerAuthorizer ?? throw new ArgumentNullException(nameof(ownerAuthorizer));
+
+    public Task<OrganizationOwnerChangeStatus> GrantOwnerAsync(string actorId, string organizationId, string targetActorId, CancellationToken cancellationToken) =>
+        ChangeOwnerAsync(actorId, organizationId, targetActorId, revoke: false, cancellationToken);
+
+    public Task<OrganizationOwnerChangeStatus> RevokeOwnerAsync(string actorId, string organizationId, string targetActorId, CancellationToken cancellationToken) =>
+        ChangeOwnerAsync(actorId, organizationId, targetActorId, revoke: true, cancellationToken);
+
+    private async Task<OrganizationOwnerChangeStatus> ChangeOwnerAsync(
+        string actorId, string organizationId, string targetActorId, bool revoke, CancellationToken cancellationToken)
+    {
+        var organization = NormalizeOrganizationId(organizationId);
+        if (string.IsNullOrWhiteSpace(actorId) || organization is null || string.IsNullOrWhiteSpace(targetActorId))
+            return OrganizationOwnerChangeStatus.Invalid;
+        if (!await _ownerAuthorizer.IsActiveOwnerAsync(actorId, organization, cancellationToken).ConfigureAwait(false))
+            return OrganizationOwnerChangeStatus.Denied;
+
+        await using var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+        var lockedOrganization = await _dbContext.Organizations
+            .FromSqlInterpolated($"SELECT * FROM organizations WHERE organization_id = {organization} FOR UPDATE")
+            .SingleOrDefaultAsync(cancellationToken).ConfigureAwait(false);
+        if (lockedOrganization is null || lockedOrganization.Status != PersistentResourceStatus.Active)
+            return OrganizationOwnerChangeStatus.Denied;
+        if (!await _ownerAuthorizer.IsActiveOwnerAsync(actorId, organization, cancellationToken).ConfigureAwait(false))
+            return OrganizationOwnerChangeStatus.Denied;
+
+        var now = _timeProvider.GetUtcNow();
+        var targetMembership = await _dbContext.OrganizationMemberships.AsNoTracking().AnyAsync(membership =>
+            membership.OrganizationId == organization && membership.ActorId == targetActorId &&
+            membership.Status == PersistentMembershipStatus.Active && membership.ValidFromUtc <= now &&
+            (membership.ExpiresAtUtc == null || membership.ExpiresAtUtc > now), cancellationToken).ConfigureAwait(false);
+        if (!revoke && !targetMembership) return OrganizationOwnerChangeStatus.Denied;
+
+        var assignment = await _dbContext.OrganizationOwners.SingleOrDefaultAsync(owner =>
+            owner.OrganizationId == organization && owner.ActorId == targetActorId && owner.RevokedAtUtc == null,
+            cancellationToken).ConfigureAwait(false);
+        if (revoke)
+        {
+            if (assignment is null) return OrganizationOwnerChangeStatus.Unchanged;
+            var activeOwnerCount = await _dbContext.OrganizationOwners.CountAsync(owner =>
+                owner.OrganizationId == organization && owner.RevokedAtUtc == null &&
+                _dbContext.OrganizationMemberships.Any(membership => membership.OrganizationId == organization &&
+                    membership.ActorId == owner.ActorId && membership.Status == PersistentMembershipStatus.Active &&
+                    membership.ValidFromUtc <= now && (membership.ExpiresAtUtc == null || membership.ExpiresAtUtc > now)),
+                cancellationToken).ConfigureAwait(false);
+            if (activeOwnerCount <= 1) return OrganizationOwnerChangeStatus.Denied;
+            assignment.RevokedAtUtc = now;
+            assignment.RevokedByActorId = actorId;
+        }
+        else
+        {
+            if (assignment is not null) return OrganizationOwnerChangeStatus.Unchanged;
+            _dbContext.OrganizationOwners.Add(new OrganizationOwnerEntity
+            {
+                OwnerAssignmentId = Guid.NewGuid(), OrganizationId = organization, ActorId = targetActorId,
+                AssignedAtUtc = now, AssignedByActorId = actorId
+            });
+        }
+
+        await _dbContext.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        return OrganizationOwnerChangeStatus.Changed;
+    }
 
     public async Task<OrganizationCreateResult> CreateAsync(
         string actorId,
