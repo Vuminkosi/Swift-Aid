@@ -28,6 +28,10 @@ public sealed record CaseTimelineEntry(
     int SchemaVersion,
     string? ActorDisplayLabel = null)
 {
+    /// <summary>Committed derived activity linked to this source event, newest first.</summary>
+    public IReadOnlyList<CaseAgentActivity> AgentActivities { get; init; } = [];
+    public bool AgentActivitiesTruncated { get; init; }
+
     /// <summary>
     /// Returns only a bounded display label supplied by an authorized projection.
     /// The opaque ActorId must never be used as a UI fallback.
@@ -39,6 +43,9 @@ public sealed record CaseTimelineEntry(
             ? label
             : null;
 }
+
+public sealed record CaseAgentActivity(Guid ActivityId, string RoleId, string Label,
+    string Version, DateTimeOffset RecordedAtUtc);
 
 /// <summary>Minimum-necessary case header for the timeline view. No report content.</summary>
 public sealed record CaseTimelineHeader(

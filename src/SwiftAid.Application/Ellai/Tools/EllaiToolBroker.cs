@@ -127,6 +127,9 @@ public sealed record EllaiToolResult(
     /// <summary>Internal query identity for a replayable catalogue read.</summary>
     [System.Text.Json.Serialization.JsonIgnore]
     public EllaiUiCatalogueReplayScope? UiCatalogueReplayScope { get; init; }
+
+    [System.Text.Json.Serialization.JsonIgnore]
+    public EllaiCaseTimelineReplayScope? CaseTimelineReplayScope { get; init; }
 }
 
 /// <summary>Authorized typed evidence/app-state tool broker (ELL-T07 groundwork).
@@ -458,18 +461,25 @@ public sealed class EllaiToolBroker
 
         var entries = timeline.Entries.Where(entry => entry.Kind == CaseTimelineEntryKind.Authoritative)
             .Take(MaxItems).ToArray();
-        var lines = entries.Select(entry => $"{entry.RecordedAtUtc:O}: {entry.Label} (v{entry.AggregateVersion})");
+        var activityCount = entries.Sum(entry => entry.AgentActivities?.Count ?? 0);
+        var lines = entries.SelectMany(entry =>
+            new[] { $"{entry.RecordedAtUtc:O}: {entry.Label} (v{entry.AggregateVersion})" }
+                .Concat((entry.AgentActivities ?? []).Take(MaxItems).Select(activity =>
+                    $"{activity.RecordedAtUtc:O}: Ellai Data Quality assessed reported-data quality.")));
         var id = caseId.ToString("D");
         var evidence = new EvidenceRef("CaseQueue", id,
             timeline.Header.AggregateVersion.ToString(CultureInfo.InvariantCulture), null, id);
-        return new EllaiToolResult(request.ToolName, true, null, [evidence],
+        var truncated = timeline.HasOlderEntries || activityCount + entries.Length > MaxItems ||
+            entries.Any(entry => entry.AgentActivitiesTruncated);
+        var output = new EllaiToolResult(request.ToolName, true, null, [evidence],
             "Authorized case history; sealed report content and actor identifiers are not included. " +
-            (timeline.HasOlderEntries ? "Older entries exist.\n" : "\n") +
-            (entries.Length == 0 ? "No authoritative entries were returned." : string.Join("\n", lines)),
-            entries.Length, timeline.HasOlderEntries, EllaiToolReasonCodes.Ok)
+            (truncated ? "Some history or activity is omitted.\n" : "\n") +
+            (entries.Length == 0 ? "No authoritative entries were returned." : string.Join("\n", lines.Take(MaxItems))),
+            entries.Length, truncated, EllaiToolReasonCodes.Ok)
         {
             HistoryValidUntilUtc = DateTimeOffset.UtcNow.AddMinutes(5)
         };
+        return output with { CaseTimelineReplayScope = EllaiCaseTimelineReplayScope.Create(id, output) };
     }
 
     private async Task<EllaiToolResult> ReadOwnedCaseCountAsync(EllaiToolContext context, EllaiToolRequest request, CancellationToken ct)

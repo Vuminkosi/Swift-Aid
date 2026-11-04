@@ -18,7 +18,7 @@ const { chromium } = require(process.env.SWIFTAID_PLAYWRIGHT_PACKAGE || 'playwri
             await new Promise(resolve => setTimeout(resolve, 100));
         }
         const base = output.match(/Now listening on:\s*(http:\/\/127\.0\.0\.1:\d+)/)[1];
-        browser = await chromium.launch({ headless: true });
+        browser = await chromium.launch({ headless: true, executablePath: process.env.SWIFTAID_CHROMIUM_PATH || undefined });
         const page = await browser.newPage();
         const errors = [];
         page.on('pageerror', error => errors.push(error.message));
@@ -105,6 +105,7 @@ const { chromium } = require(process.env.SWIFTAID_PLAYWRIGHT_PACKAGE || 'playwri
             await page.getByRole('tab', { name: 'History', exact: true }).click();
             const titles = page.locator('.case-timeline__entry-title');
             await titles.getByText('Assistance requested', { exact: true }).waitFor();
+            await page.getByLabel('Ellai activity for this report revision').getByText('Ellai · Data Quality: Reported-data quality assessed', { exact: false }).waitFor();
             for (const label of [
                 'Assistance requested',
                 'Assistance responsibility accepted',
@@ -125,7 +126,7 @@ const { chromium } = require(process.env.SWIFTAID_PLAYWRIGHT_PACKAGE || 'playwri
             assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), `history horizontal overflow at ${width}px`);
             assert.deepEqual(errors, [], `history browser errors at ${width}px`);
         }
-        console.log('PASS synthetic assistance request, receipt, unmet-need, follow-up acknowledgement, and seven-event timeline at 390px and 1280px');
+        console.log('PASS synthetic assistance workflows and timeline with Ellai activity at 390px and 1280px');
     } finally {
         await browser?.close();
         host.kill();

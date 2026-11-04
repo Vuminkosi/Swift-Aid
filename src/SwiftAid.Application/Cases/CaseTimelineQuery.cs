@@ -17,6 +17,9 @@ public sealed record CaseTimelineRow(
     DateTimeOffset RecordedAtUtc,
     int SchemaVersion);
 
+public sealed record CaseAgentActivityRow(Guid SourceEventId, Guid ActivityId, string RoleId,
+    string Version, DateTimeOffset RecordedAtUtc);
+
 /// <summary>Persistence port for the authorized timeline read. Cursor pages arrive newest-first.</summary>
 public interface ICaseTimelineStore
 {
@@ -32,6 +35,9 @@ public interface ICaseTimelineStore
     Task<Guid?> GetPromotingReceiptAsync(Guid caseId, CancellationToken ct);
 
     Task<IReadOnlyList<CaseCollaboratorGrantView>> GetCollaboratorsAsync(Guid caseId, CancellationToken ct);
+
+    Task<IReadOnlyList<CaseAgentActivityRow>> GetAgentActivitiesAsync(Guid caseId, IReadOnlyList<Guid> eventIds,
+        CancellationToken ct) => Task.FromResult<IReadOnlyList<CaseAgentActivityRow>>([]);
 }
 
 public interface ICaseTimelineQuery
@@ -140,7 +146,17 @@ public sealed class CaseTimelineQuery(
                 .OrderBy(row => row.AggregateVersion)
                 .ThenBy(row => row.RecordedAtUtc)
                 .ToArray();
-            var entries = pageRows.Select(MapAuthoritative).ToList();
+            var activityRows = await _store.GetAgentActivitiesAsync(caseId, pageRows.Select(row => row.EventId).ToArray(), ct).ConfigureAwait(false);
+            var entries = pageRows.Select(row =>
+            {
+                var activities = activityRows.Where(activity => activity.SourceEventId == row.EventId).ToArray();
+                return MapAuthoritative(row) with
+                {
+                    AgentActivities = activities.Take(20).Select(activity => new CaseAgentActivity(activity.ActivityId,
+                        activity.RoleId, "Reported-data quality assessed", activity.Version, activity.RecordedAtUtc)).ToArray(),
+                    AgentActivitiesTruncated = activities.Length > 20
+                };
+            }).ToList();
 
             var receiptId = await _store.GetPromotingReceiptAsync(caseId, ct).ConfigureAwait(false);
             if (receiptId.HasValue && !hasOlderEntries)

@@ -7,6 +7,7 @@ internal sealed class AssistanceTimelineFixtureClient : ICaseTimelineClient
     private static readonly Guid CaseId = Guid.Parse("b2210000-2222-4222-8222-222222222222");
     private static readonly string[] AssistanceEvents =
     [
+        "CaseReported",
         "AssistanceRequested",
         "AssistanceAccepted",
         "AssistanceProgressRecorded",
@@ -41,7 +42,13 @@ internal sealed class AssistanceTimelineFixtureClient : ICaseTimelineClient
                 null,
                 createdAt.AddMinutes(index),
                 1,
-                "Synthetic reviewer"))
+                "Synthetic reviewer")
+            {
+                AgentActivities = eventType == "CaseReported"
+                    ? [new CaseAgentActivity(Guid.Parse("a1110000-1111-4111-8111-111111111111"), "ops.quality",
+                        "Reported-data quality assessed", "reported-facts-quality-v1", createdAt.AddMinutes(1))]
+                    : []
+            })
             .Where(entry => beforeAggregateVersion is null || entry.AggregateVersion < beforeAggregateVersion)
             .Take(limit ?? AssistanceEvents.Length)
             .ToArray();
@@ -55,6 +62,7 @@ internal sealed class AssistanceTimelineFixtureClient : ICaseTimelineClient
 
     private static string DisplayLabel(string eventType) => eventType switch
     {
+        "CaseReported" => "Report accepted",
         "AssistanceRequested" => "Assistance requested",
         "AssistanceAccepted" => "Assistance responsibility accepted",
         "AssistanceProgressRecorded" => "Assistance progress recorded",

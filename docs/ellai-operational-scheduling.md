@@ -27,6 +27,18 @@ Each handler must also implement durable operation idempotency and commit any
 case activity with its domain change; the transaction boundary does not supply
 those records automatically.
 
+The first handler, `EllaiQualityWork.RunOneAsync`, assesses one current report
+revision in a workspace permitted by the existing classification worker's
+organization configuration. It skips an existing assessment before reading
+protected evidence, and commits a new assessment and immutable, source-linked
+Ellai activity together under the schedule fence. It does not invoke inference,
+send messages or create a background conversation. The existing case timeline
+shows the activity beneath its source report event; Ellai re-reads the authorized
+timeline before replaying an answer so added activity invalidates stale history.
+The handler is not yet registered or invoked by a scheduled worker. Changing a
+schedule policy alone does not re-run an unchanged quality-rules version; policy
+change invalidation and affected-stage reprocessing remain outstanding.
+
 Disposable PostgreSQL coverage exercises concurrent claims, workspace scoping,
 expiry and replacement, stale-fence refusal, renewal deadline, abandon/reclaim,
 four- and eight-hour cursor advancement and rollback refusal. Production role

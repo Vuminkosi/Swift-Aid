@@ -28,7 +28,8 @@ public sealed record EllaiObservedToolResult(
     string? StaticFeatureVersion = null, DateTimeOffset? CaseSnapshotExpiresAtUtc = null,
     string? ClockVersion = null, EllaiCountReplayScope? CountReplayScope = null,
     EllaiUiCatalogueReplayScope? UiCatalogueReplayScope = null, string? CapabilityVersion = null,
-    string? ReceiptListDigest = null, string? ReceiptLookupId = null)
+    string? ReceiptListDigest = null, string? ReceiptLookupId = null,
+    EllaiCaseTimelineReplayScope? CaseTimelineReplayScope = null)
 {
     public const string CurrentStaticFeatureVersion = "state-feature/1";
     public const string CurrentClockVersion = "server-clock/1";
@@ -87,7 +88,9 @@ public sealed record EllaiObservedToolResult(
                 result.ReasonCode == EllaiToolReasonCodes.Ok && !result.Truncated &&
                 result.ItemCount == result.Evidence.Count && result.Evidence.Count <= 20
                     ? ReceiptListFingerprint(result) : null,
-            receiptLookupId);
+            receiptLookupId,
+            request.ToolName == EllaiToolNames.CaseTimeline && result.Allowed && !result.Truncated
+                ? result.CaseTimelineReplayScope : null);
     }
 
     public static bool IsCanonicalReceiptId(string? value) => value is { Length: 37 } &&
@@ -99,6 +102,20 @@ public sealed record EllaiObservedToolResult(
     {
         var content = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(new { result.ResultSummary, result.ItemCount, result.Evidence });
         return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(content));
+    }
+}
+
+/// <summary>Case identity and digest for a fresh authorized timeline re-read.</summary>
+public sealed record EllaiCaseTimelineReplayScope(string CaseId, string Digest)
+{
+    public bool IsValid() => Guid.TryParseExact(CaseId, "D", out var id) && id != Guid.Empty &&
+        CaseId == id.ToString("D") && Digest is { Length: 64 } &&
+        Digest.All(character => character is >= '0' and <= '9' or >= 'A' and <= 'F');
+
+    public static EllaiCaseTimelineReplayScope Create(string caseId, EllaiToolResult result)
+    {
+        var content = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(new { result.ResultSummary, result.ItemCount, result.Evidence });
+        return new(caseId, Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(content)));
     }
 }
 

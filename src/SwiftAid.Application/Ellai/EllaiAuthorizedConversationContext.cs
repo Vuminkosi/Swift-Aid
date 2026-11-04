@@ -104,6 +104,32 @@ public static class EllaiAuthorizedConversationContext
                     }
                     continue;
                 }
+                if (observation.ToolName == EllaiToolNames.CaseTimeline)
+                {
+                    var scope = observation.CaseTimelineReplayScope;
+                    if (toolContext is null || invokeTool is null || scope is null || !scope.IsValid() ||
+                        toolContext.SessionId != turn.SessionId || toolContext.Actor is null ||
+                        toolContext.Actor.ActorId != actor.ActorId || toolContext.Actor.AccessEpoch != actor.AccessEpoch ||
+                        observation.ReasonCode != EllaiToolReasonCodes.Ok || observation.Evidence.Count != 1 ||
+                        observation.Evidence[0].SourceKind != "CaseQueue" || observation.Evidence[0].ResourceId != scope.CaseId ||
+                        observation.CaseSnapshotExpiresAtUtc is not { } timelineExpiry || timelineExpiry <= DateTimeOffset.UtcNow)
+                        return decisions[turn.ClientUtteranceId] = false;
+                    try
+                    {
+                        var current = await invokeTool(toolContext, new EllaiToolRequest(EllaiToolNames.CaseTimeline,
+                            new Dictionary<string, string> { ["case_id"] = scope.CaseId }), ct).ConfigureAwait(false);
+                        ct.ThrowIfCancellationRequested();
+                        if (!current.Allowed || current.Truncated || current.CaseTimelineReplayScope != scope ||
+                            !current.Evidence.SequenceEqual(observation.Evidence))
+                            return decisions[turn.ClientUtteranceId] = false;
+                    }
+                    catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+                    catch (Exception error) when (error is not OutOfMemoryException)
+                    {
+                        return decisions[turn.ClientUtteranceId] = false;
+                    }
+                    continue;
+                }
                 if (observation.ToolName == EllaiToolNames.UiCatalogue)
                 {
                     var scope = observation.UiCatalogueReplayScope;
@@ -295,7 +321,7 @@ public static class EllaiAuthorizedConversationContext
                         return decisions[turn.ClientUtteranceId] = false;
                     continue;
                 }
-                if (observation.ToolName is not (EllaiToolNames.Topic or EllaiToolNames.Evidence or EllaiToolNames.CaseTimeline))
+                if (observation.ToolName is not (EllaiToolNames.Topic or EllaiToolNames.Evidence))
                     return decisions[turn.ClientUtteranceId] = false;
                 if (observation.CaseSnapshotExpiresAtUtc is not { } expires || expires <= DateTimeOffset.UtcNow)
                     return decisions[turn.ClientUtteranceId] = false;
