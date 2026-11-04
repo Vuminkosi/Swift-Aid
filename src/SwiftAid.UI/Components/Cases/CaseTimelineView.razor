@@ -29,6 +29,42 @@
     }
     else if (_timeline is not null)
     {
+        @if (_timeline.CurrentOfficerEscalations.Count > 0)
+        {
+            <section class="case-timeline__current-officers" aria-label="Current officer follow-ups">
+                <h3>Current officer follow-ups</h3>
+                <ul>
+                    @foreach (var officer in _timeline.CurrentOfficerEscalations)
+                    {
+                        <li>
+                            <strong>@(officer.SafeOfficerDisplayLabel ?? "Name unavailable")</strong>
+                            @if (officer.FollowUpAcknowledged == true)
+                            {
+                                <span>Follow-up acknowledged.</span>
+                            }
+                            else
+                            {
+                                @if (officer.FollowUpAcknowledged is null)
+                                {
+                                    <span>Acknowledgment status is unavailable.</span>
+                                }
+                                <span>@(officer.FollowUpAcknowledged == false ? "Acknowledgment due" : "Original acknowledgment deadline") <time datetime="@officer.AcknowledgementDueUtc.ToString("O")">@officer.AcknowledgementDueUtc.ToLocalTime().ToString("g")</time>.</span>
+                            }
+                            <span>Follow-up due <time datetime="@officer.FollowUpDueUtc.ToString("O")">@officer.FollowUpDueUtc.ToLocalTime().ToString("g")</time>.</span>
+                            @if (OnReviewFollowUp.HasDelegate)
+                            {
+                                <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="@(() => OnReviewFollowUp.InvokeAsync(officer.FollowUpId))">Review follow-up</MudButton>
+                            }
+                        </li>
+                    }
+                </ul>
+                @if (_timeline.CurrentOfficerEscalationsTruncated)
+                {
+                    <MudText Typo="Typo.caption">Additional current officer follow-ups are not shown.</MudText>
+                }
+                <MudText Typo="Typo.caption" Color="Color.Secondary">Dates use your local time.</MudText>
+            </section>
+        }
         @if (_timeline.Entries.Count == 0)
         {
             <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" role="status">
