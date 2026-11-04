@@ -4206,3 +4206,23 @@ FullyQualifiedName~LiveFrameworkPreservesAuthorizedCapabilityObservationForFollo
 supplied only to the test process. The TRX is retained under the application
 test project's `TestResults` directory. This single pass does not explain or
 resolve the earlier intermittent output-limit failure or verify deployment.
+
+### Notification JetStream consumer fixture — 2026-11-04
+
+The isolated browser Gateway runs above used a fresh JetStream server without
+the repository's notification-stream bootstrap; their notification consumer
+logged `NatsJSApiException`. A new disposable-service integration test confirms
+that creating a consumer on a missing stream raises that exception type. On a
+provisioned notification stream, the actual Gateway bridge created its
+consumer, acknowledged a synthetic published notification and removed the
+consumer on shutdown. This is consistent with the missing-bootstrap explanation,
+but the earlier redacted log did not retain the server error code, so its exact
+cause is not established. The test does not cover authenticated SSE delivery.
+
+PASS: with `OS=Windows_NT` and `SWIFTAID_RUN_LOCAL_PROVIDER_FIXTURES=1`,
+`dotnet test tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj
+--no-restore -m:1 -nr:false -p:WasmBuildNative=false --filter
+FullyQualifiedName~NotificationBridgeConsumesFromProvisionedStreamAndRemovesItsConsumer`
+passed 1/1; the post-commit `--no-build --no-restore` rerun also passed 1/1.
+The fixture's disposable MinIO, Redis and NATS containers were removed. Deployed
+stream provisioning and delivery remain unverified.
