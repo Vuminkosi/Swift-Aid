@@ -201,7 +201,8 @@ builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiTrainingVerifier>();
         builder.Services.AddScoped(sp => new SwiftAid.Application.Ellai.EllaiPromptBuilder(runtimePolicy.Text, runtimePolicy.Version));
         SwiftAid.Gateway.Ellai.EllaiReasoningRegistration.AddEllaiReasoningExecutor(
             builder.Services, ellai, builder.Configuration["Ellai:ExecutionEngine"],
-            builder.Configuration.GetValue<bool>("Ellai:Specialists:Knowledge:Enabled"));
+            builder.Configuration.GetValue<bool>("Ellai:Specialists:Knowledge:Enabled"),
+            builder.Configuration.GetValue<bool>("Ellai:Specialists:Case:Enabled"));
     }
 
     if (ellai.HasUploadAsrRoute)

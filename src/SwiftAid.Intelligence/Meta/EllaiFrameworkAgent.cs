@@ -34,7 +34,7 @@ public sealed class EllaiFrameworkAgent
         Func<string, CancellationToken, ValueTask>? onVerifiedStreamSegment = null,
         Func<CancellationToken, Task<bool>>? revalidateStreamObservations = null,
         string? frameworkSessionJson = null, int maxModelCalls = int.MaxValue,
-        bool enableKnowledgeSpecialist = false)
+        bool enableKnowledgeSpecialist = false, bool enableCaseSpecialist = false)
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentException.ThrowIfNullOrWhiteSpace(instructions);
@@ -145,6 +145,33 @@ public sealed class EllaiFrameworkAgent
             }
             tools.Add(AIFunctionFactory.Create(DelegateKnowledge, name: "ellai_delegate_knowledge",
                 description: "Delegate one bounded question about approved documentation to the knowledge specialist."));
+        }
+        if (enableCaseSpecialist && context.Actor is not null &&
+            context.AllowedTools?.Contains(EllaiToolNames.CaseTimeline) == true)
+        {
+            var delegationCount = 0;
+            async Task<string> DelegateCase(string task, CancellationToken token)
+            {
+                token.ThrowIfCancellationRequested();
+                if (Interlocked.Increment(ref delegationCount) != 1)
+                    return "Case delegation limit reached.";
+                try
+                {
+                    var result = await new EllaiCaseSpecialist(_client, _agentFactory).RunAsync(task,
+                        instructions, true, context, usage, Current, InvokeGuardedTool, token,
+                        calls => Interlocked.Add(ref delegatedModelCalls, calls)).ConfigureAwait(false);
+                    if (result.Outcome != EllaiSpecialistOutcome.Completed || result.Decision is null)
+                        return "Case specialist could not verify an answer.";
+                    var json = System.Text.Json.JsonSerializer.Serialize(result.Decision);
+                    return json.Length <= 12000 ? json : "Case specialist result exceeded its limit.";
+                }
+                catch (EllaiFrameworkFailureException)
+                {
+                    return "Case specialist could not complete the request.";
+                }
+            }
+            tools.Add(AIFunctionFactory.Create(DelegateCase, name: "ellai_delegate_case",
+                description: "Delegate one bounded question about an authorized case timeline to the case specialist."));
         }
         var guardedClient = new ModelCallGuard(_client, Current, usage, maxModelCalls);
         var functionClient = new FunctionInvokingChatClient(guardedClient)

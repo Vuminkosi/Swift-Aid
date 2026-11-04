@@ -27,7 +27,8 @@ public static class EllaiReasoningRegistration
     }
 
     public static IServiceCollection AddEllaiReasoningExecutor(
-        this IServiceCollection services, EllaiOptions options, string? executionEngine, bool enableKnowledgeSpecialist = false)
+        this IServiceCollection services, EllaiOptions options, string? executionEngine,
+        bool enableKnowledgeSpecialist = false, bool enableCaseSpecialist = false)
     {
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(options);
@@ -55,7 +56,7 @@ public static class EllaiReasoningRegistration
             sp.GetRequiredKeyedService<IChatClient>(FrameworkClientKey), sp.GetRequiredService<EllaiPromptBuilder>(),
             sp.GetRequiredService<EllaiToolBroker>(), sp.GetRequiredService<EllaiUsageLedger>(),
             sp.GetRequiredService<IEllaiUsageStore>(), agentFactory: sp.GetRequiredService<IEllaiFrameworkAgentFactory>(),
-            enableKnowledgeSpecialist: enableKnowledgeSpecialist));
+            enableKnowledgeSpecialist: enableKnowledgeSpecialist, enableCaseSpecialist: enableCaseSpecialist));
         return services;
     }
 }
