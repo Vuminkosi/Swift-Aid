@@ -1,3 +1,5 @@
+using SwiftAid.Application.Ellai;
+using SwiftAid.Application.Intake;
 using Microsoft.AspNetCore.Components;
 using SwiftAid.Contracts.Intake;
 using SwiftAid.Contracts.Ellai;
@@ -73,6 +75,49 @@ public sealed class ReportVoiceAssistantRenderTests
         Assert.Equal("SZ", draft.CountryCode);
         Assert.False(draft.CountryConfirmed);
         Assert.Equal("Mbabane", draft.Locality);
+    }
+
+    [Fact]
+    public async Task ShortModelExcerptsFillMultipleFieldsInRenderedReport()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddMudServices();
+        services.AddSingleton<IJSRuntime, NoOpJsRuntime>();
+        var context = new EllaiPublicReportDraftContext();
+        services.AddSingleton(context);
+        await using var provider = services.BuildServiceProvider();
+        await using var renderer = new HtmlRenderer(provider, provider.GetRequiredService<ILoggerFactory>());
+        var draft = new PublicReportDraft { SubjectScope = IntakeSubjectScope.Human };
+        const string transcript = "The patient is 35 years old. She lives in Mbabane.";
+        var extraction = await new ReportVoiceExtraction(new ShortExcerptCompletion()).ExtractAsync(transcript, default);
+        Assert.True(extraction.Available);
+        await renderer.Dispatcher.InvokeAsync(async () =>
+        {
+            await renderer.RenderComponentAsync<GuidedReportStepper>(ParameterView.FromDictionary(new Dictionary<string, object?>
+            {
+                [nameof(GuidedReportStepper.Draft)] = draft
+            }));
+            context.RegisterVoiceController(new object(), _ =>
+            {
+                context.BindVoiceCapture("capture");
+                return Task.FromResult(true);
+            }, () => Task.CompletedTask);
+            await context.StartReportVoiceAsync(EllaiVoiceCaptureMode.Live);
+            var lease = context.AdmitVoiceTurn("session", "turn", "capture")!;
+            Assert.True(context.AppendVoiceTranscript(lease.Generation, transcript));
+            context.CompleteVoiceTurn(lease.Generation, transcript, new("Ready", extraction.Fields
+                .Select(field => new ReportVoiceSuggestion(field.Field, field.Value, field.Evidence)).ToArray()));
+        });
+        Assert.Equal("35", draft.AgeYearsText);
+        Assert.Equal("Mbabane", draft.Locality);
+        Assert.Equal(transcript, draft.Narrative);
+    }
+
+    private sealed class ShortExcerptCompletion : IEllaiTurnCompletionClient
+    {
+        public Task<EllaiTurnCompletion> CompleteAsync(IReadOnlyList<EllaiChatMessage> messages, int maxTokens, CancellationToken ct) =>
+            Task.FromResult(new EllaiTurnCompletion("""{"fields":[{"field":"age","value":"35","evidence":"35 years old"},{"field":"locality","value":"Mbabane","evidence":"Mbabane"}]}""", 0, 0));
     }
 
     private sealed class NoOpJsRuntime : IJSRuntime

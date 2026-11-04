@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 using SwiftAid.Application.Ellai;
 
 namespace SwiftAid.Application.Intake;
@@ -44,6 +45,7 @@ public sealed class ReportVoiceExtraction(IEllaiTurnCompletionClient completions
                 "Return only JSON with a fields array. Each item has field, value and evidence. " +
                 "Allowed field values: subject, age, gender, observation, time, locality, region, country. " +
                 "The value and evidence must be exact, contiguous excerpts of the transcript; value must appear in evidence. " +
+                "Use the complete sentence containing the value as evidence when possible. " +
                 "Keep negation and uncertainty with observations. Do not infer, diagnose, advise, normalize dates, " +
                 "or guess missing details. Exclude ambiguous or conflicting details. Return an empty array if none. " +
                 "These are suggestions for a person to review, never confirmed facts."),
@@ -83,7 +85,7 @@ public sealed class ReportVoiceExtraction(IEllaiTurnCompletionClient completions
                     return Result([], false);
                 }
 
-                fields.Add(new(item.Field, item.Value, item.Evidence));
+                fields.Add(new(item.Field, item.Value, IncludeSourceSentence(transcript, item.Evidence)));
             }
 
             return Result(fields, true);
@@ -92,6 +94,18 @@ public sealed class ReportVoiceExtraction(IEllaiTurnCompletionClient completions
         {
             return Result([], false);
         }
+    }
+
+    private static string IncludeSourceSentence(string transcript, string evidence)
+    {
+        var first = transcript.IndexOf(evidence, StringComparison.Ordinal);
+        if (first < 0 || first != transcript.LastIndexOf(evidence, StringComparison.Ordinal)) return evidence;
+        var sentences = Regex.Split(transcript, @"(?<=[.!?])\s+|[\r\n]+")
+            .Where(sentence => sentence.Contains(evidence, StringComparison.Ordinal)).ToArray();
+        if (sentences.Length != 1) return evidence;
+        var sentence = sentences[0].Trim();
+        return sentence.Length <= 1500 && sentence.Contains(evidence, StringComparison.Ordinal)
+            ? sentence : evidence;
     }
 
     private sealed record ExtractionEnvelope(List<ExtractionField?>? Fields);

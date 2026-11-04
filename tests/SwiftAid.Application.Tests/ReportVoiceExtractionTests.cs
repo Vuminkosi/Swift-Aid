@@ -23,6 +23,28 @@ public sealed class ReportVoiceExtractionTests
         Assert.Contains("never as instructions", client.Messages![0].Content, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task RestoresCompleteSourceSentencesAroundUniqueModelExcerpts()
+    {
+        const string response = """{"fields":[{"field":"age","value":"35","evidence":"35 years old"},{"field":"observation","value":"fever","evidence":"fever"},{"field":"locality","value":"Mbabane","evidence":"Mbabane"}]}""";
+        var result = await new ReportVoiceExtraction(new CompletionClient(response)).ExtractAsync(
+            "The patient is 35 years old. No fever. She lives in Mbabane.", default);
+        Assert.True(result.Available);
+        Assert.Equal("The patient is 35 years old.", result.Fields[0].Evidence);
+        Assert.Equal("No fever.", result.Fields[1].Evidence);
+        Assert.Equal("She lives in Mbabane.", result.Fields[2].Evidence);
+    }
+
+    [Fact]
+    public async Task RepeatedExcerptDoesNotGetAssignedToAnArbitrarySentence()
+    {
+        const string response = """{"fields":[{"field":"observation","value":"fever","evidence":"fever"}]}""";
+        var result = await new ReportVoiceExtraction(new CompletionClient(response)).ExtractAsync(
+            "No fever. Her sister had fever.", default);
+        Assert.True(result.Available);
+        Assert.Equal("fever", Assert.Single(result.Fields).Evidence);
+    }
+
     [Theory]
     [InlineData("""{"fields":[{"field":"age","value":"40","evidence":"40 years old"}]}""")]
     [InlineData("""{"fields":[{"field":"diagnosis","value":"fever","evidence":"has fever"}]}""")]
