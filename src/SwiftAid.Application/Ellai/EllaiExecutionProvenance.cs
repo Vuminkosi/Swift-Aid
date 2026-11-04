@@ -177,7 +177,7 @@ public sealed record EllaiRetainedCaseReplay(string Reference, string? Field, st
             PlaceId is { Length: >= 1 and <= 120 } && PlaceId == PlaceId.Trim() && (Field is null or "observations")) &&
         (CaseId is null || Field == "submitter" && Guid.TryParseExact(CaseId, "D", out var caseId) &&
             caseId != Guid.Empty && CaseId == caseId.ToString("D")) &&
-        (GroupBy is null or "region" && (GroupBy is null || Field is null && PlaceId is null && CaseId is null)) && Digest is { Length: 64 } &&
+        (GroupBy is null || (GroupBy is "region" or "locality") && Field is null && PlaceId is null && CaseId is null) && Digest is { Length: 64 } &&
         Digest.All(character => character is >= '0' and <= '9' or >= 'A' and <= 'F');
 
     public static EllaiRetainedCaseReplay? Create(EllaiToolRequest request, EllaiToolResult result)
@@ -205,7 +205,7 @@ public sealed record EllaiRetainedCaseReplay(string Reference, string? Field, st
                 placeId.Length is < 1 or > 120 || placeId != placeId.Trim() || field is not null and not "observations")) return null;
         if (caseId is not null && (field != "submitter" || !Guid.TryParseExact(caseId, "D", out var parsedCaseId) ||
             parsedCaseId == Guid.Empty || caseId != parsedCaseId.ToString("D"))) return null;
-        if (groupBy is not null && (groupBy != "region" || field is not null || placeId is not null || caseId is not null)) return null;
+        if (groupBy is not null && (groupBy is not ("region" or "locality") || field is not null || placeId is not null || caseId is not null)) return null;
         var candidate = new EllaiRetainedCaseReplay(reference, request.Arguments.GetValueOrDefault("field"),
             field switch
             {
@@ -269,7 +269,7 @@ public sealed record EllaiCaseListQuery(int Limit, string? Country, string? Work
         (Country is null || Country.Length == 2 && Country.All(character => character is >= 'A' and <= 'Z')) &&
         (Workflow is null or "Reported" or "UnderReview" or "Active" or "AwaitingFollowUp" or "Resolved") &&
         (Sort is null or "latest-reported" or "latest-updated") &&
-        (GroupBy is null || GroupBy == "region" && Country is not null && PlaceId is null && Sort != "latest-updated") &&
+        (GroupBy is null || (GroupBy is "region" or "locality") && Country is not null && PlaceId is null && Sort != "latest-updated") &&
         (PlaceId is null || Country is not null && Workflow is null && Sort == "latest-reported" &&
             !string.IsNullOrWhiteSpace(PlaceId) && PlaceId.Length <= 120 && PlaceId == PlaceId.Trim()) &&
         TryGetReportedRange(out _, out _);

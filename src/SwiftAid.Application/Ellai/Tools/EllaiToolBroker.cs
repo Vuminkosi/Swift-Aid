@@ -188,8 +188,8 @@ public sealed class EllaiToolBroker
     /// consent applies only to explicitly consent-scoped processing lanes.</summary>
     private static readonly string[] ToolDescriptions =
     {
-        $"{EllaiToolNames.State}(projection=[feature|queue], limit=1..20, country?, workflow?, sort?, place_id?, reported_from?, reported_before?, group_by=region?) — permitted feature or cases the actor may Search and ReadCase. country is an uppercase two-letter code (Zimbabwe=ZW, Eswatini=SZ); workflow is Reported, UnderReview, Active, AwaitingFollowUp or Resolved; sort=latest-reported or latest-updated. reported_from and reported_before are an inclusive/exclusive UTC date pair (YYYY-MM-DD), filter case creation/report time, and span at most 365 days; they are not occurrence dates. For an occurrence-place search, select an exact registry ID using ellai_locations and supply country, place_id and sort=latest-reported; workflow is not supported with place_id. To group by recorded region, supply country and optionally workflow and report-date filters. Unknown locations and incomplete scans mean the displayed counts are partial. Reported is a recorded workflow, not proof that no human reviewed a case. For retained results, use ellai_evidence with classification_filter=Classified or Unclassified to check recorded status; this does not return classifier labels or establish a diagnosis.",
-        $"{EllaiToolNames.Evidence}(ref=[case-results|case-results-original], field=[country|workflow|observations|submitter]?, classification_filter=[Classified|Unclassified]?, group_by=region?, country?, place_id?, case_id?) — re-read retained cases under current access. Use group_by=region after a case list when 'them' means those exact cases; it groups only that retained set by recorded region and gives case evidence references for each count. field=observations returns only verbatim reported observations, labeled unverified reports and not diagnoses; field=submitter returns authorized recorded attribution and distinguishes promoted guest intake from its accepting staff member. Use case_id from the retained results to answer about one selected case; it must belong to that result set. Neither projection returns narrative or coordinates. Classification and exact place filters can combine with observations. Place filtering requires a selected registry ID and matching country. Reauthorizes each case; unavailable rows are omitted and marked incomplete.",
+        $"{EllaiToolNames.State}(projection=[feature|queue], limit=1..20, country?, workflow?, sort?, place_id?, reported_from?, reported_before?, group_by=[region|locality]?) — permitted feature or cases the actor may Search and ReadCase. country is an uppercase two-letter code (Zimbabwe=ZW, Eswatini=SZ); workflow is Reported, UnderReview, Active, AwaitingFollowUp or Resolved; sort=latest-reported or latest-updated. reported_from and reported_before are an inclusive/exclusive UTC date pair (YYYY-MM-DD), filter case creation/report time, and span at most 365 days; they are not occurrence dates. For an occurrence-place search, select an exact registry ID using ellai_locations and supply country, place_id and sort=latest-reported; workflow is not supported with place_id. To group by recorded region or locality, supply country and optionally workflow and report-date filters. Unknown locations and incomplete scans mean the displayed counts are partial. Reported is a recorded workflow, not proof that no human reviewed a case. For retained results, use ellai_evidence with classification_filter=Classified or Unclassified to check recorded status; this does not return classifier labels or establish a diagnosis.",
+        $"{EllaiToolNames.Evidence}(ref=[case-results|case-results-original], field=[country|workflow|observations|submitter]?, classification_filter=[Classified|Unclassified]?, group_by=[region|locality]?, country?, place_id?, case_id?) — re-read retained cases under current access. Use group_by=region or locality after a case list when 'them' means those exact cases; it groups only that retained set by the requested recorded dimension and gives case evidence references for each count. field=observations returns only verbatim reported observations, labeled unverified reports and not diagnoses; field=submitter returns authorized recorded attribution and distinguishes promoted guest intake from its accepting staff member. Use case_id from the retained results to answer about one selected case; it must belong to that result set. Neither projection returns narrative or coordinates. Classification and exact place filters can combine with observations. Place filtering requires a selected registry ID and matching country. Reauthorizes each case; unavailable rows are omitted and marked incomplete.",
         $"{EllaiToolNames.Topic}(ref) — session topic candidates with checkpoints. Use ref=case-results for the latest retained list or case-results-original for the first retained list; never invent a remembered result set.",
         $"{EllaiToolNames.Capabilities}(feature?) — capability readiness, no credentials.",
         $"{EllaiToolNames.Receipts}(receipt?) — durable receipts, session-bound.",
@@ -535,8 +535,8 @@ public sealed class EllaiToolBroker
             return Deny(request.ToolName, "place_id requires country; place and classification filters can combine only with field=observations.",
                 EllaiToolReasonCodes.InvalidArguments);
         }
-        if (groupBy is not null && (groupBy != "region" || field is not null || placeId is not null || caseIdText is not null))
-            return Deny(request.ToolName, "group_by=region can only be used on retained cases without a field or exact-place filter.",
+        if (groupBy is not null && (groupBy is not ("region" or "locality") || field is not null || placeId is not null || caseIdText is not null))
+            return Deny(request.ToolName, "Location grouping can only be used on retained cases without a field or exact-place filter.",
                 EllaiToolReasonCodes.InvalidArguments);
 
         if (field == "observations" && _caseReports is null)
@@ -709,7 +709,7 @@ public sealed class EllaiToolBroker
         }
 
         if (request.Arguments.Keys.Any(key => key is not ("projection" or "limit" or "country" or "workflow" or "sort" or "place_id" or "reported_from" or "reported_before" or "group_by")))
-            return Deny(request.ToolName, "This queue supports country, workflow, sort, exact place, region grouping and reported-date filters only.",
+            return Deny(request.ToolName, "This queue supports country, workflow, sort, exact place, region or locality grouping and reported-date filters only.",
                 EllaiToolReasonCodes.InvalidArguments);
 
         request.Arguments.TryGetValue("country", out var country);
@@ -730,15 +730,15 @@ public sealed class EllaiToolBroker
 
         if (groupBy is not null)
         {
-            if (groupBy != "region" || country is null || placeId is not null || sort == "latest-updated")
-                return Deny(request.ToolName, "Region grouping requires a country, and cannot be combined with an exact place or latest-updated ordering.",
+            if (groupBy is not ("region" or "locality") || country is null || placeId is not null || sort == "latest-updated")
+                return Deny(request.ToolName, "Region or locality grouping requires a country, and cannot be combined with an exact place or latest-updated ordering.",
                     EllaiToolReasonCodes.InvalidArguments);
             if (_occurrenceLocations is null)
                 return Deny(request.ToolName, "Occurrence location search is unavailable.", EllaiToolReasonCodes.Unavailable);
-            var grouped = await new CaseOccurrenceGrouping(queue, _occurrenceLocations).GroupByRegionAsync(
-                context.Actor, country, limit, reportedFromUtc, reportedBeforeUtc, ct).ConfigureAwait(false);
+            var grouped = await new CaseOccurrenceGrouping(queue, _occurrenceLocations).GroupAsync(
+                context.Actor, country, groupBy, limit, reportedFromUtc, reportedBeforeUtc, ct).ConfigureAwait(false);
             if (grouped.Access != CaseQueueAccess.Allowed)
-                return Deny(request.ToolName, "Region grouping is unavailable.", EllaiToolReasonCodes.Unavailable);
+                return Deny(request.ToolName, "Location grouping is unavailable.", EllaiToolReasonCodes.Unavailable);
             var visibleCaseIds = grouped.Groups.SelectMany(group => group.CaseIds).ToHashSet();
             var groupEvidence = grouped.Cases.Where(item => visibleCaseIds.Contains(item.CaseId))
                 .Select(item => new EvidenceRef("CaseQueue", item.CaseId.ToString("D"),
@@ -748,12 +748,9 @@ public sealed class EllaiToolBroker
                 groupBy,
                 country,
                 scannedCandidates = grouped.ScannedCandidates,
-                groups = grouped.Groups.Select(group => new
-                {
-                    regionId = group.RegionId,
-                    reportedRegion = group.Label,
-                    caseCount = group.Count
-                }),
+                groups = grouped.Groups.Select(group => groupBy == "region"
+                    ? (object)new { regionId = group.LocationId, reportedRegion = group.Label, caseCount = group.Count, caseIds = group.CaseIds }
+                    : new { localityId = group.LocationId, reportedLocality = group.Label, caseCount = group.Count, caseIds = group.CaseIds }),
                 unknownLocations = grouped.UnknownLocations,
                 incomplete = grouped.Truncated
             });

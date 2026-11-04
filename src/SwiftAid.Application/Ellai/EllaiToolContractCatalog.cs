@@ -9,7 +9,7 @@ namespace SwiftAid.Application.Ellai;
 /// formats and authorization after this structural validation.</summary>
 public static class EllaiToolContractCatalog
 {
-    public const int CurrentSchemaVersion = 4;
+    public const int CurrentSchemaVersion = 5;
 
     private const int ReferenceLength = 120;
     private const int ObservationJsonLength = 16_384;
@@ -50,7 +50,7 @@ public static class EllaiToolContractCatalog
         new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal)
         {
             ["field"] = Array.AsReadOnly(new[] { "country", "workflow", "observations", "submitter" }),
-            ["group_by"] = Array.AsReadOnly(new[] { "region" })
+            ["group_by"] = Array.AsReadOnly(new[] { "region", "locality" })
         };
 
     private static readonly IReadOnlyDictionary<string, ToolContract> Contracts =

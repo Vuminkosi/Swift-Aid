@@ -89,8 +89,8 @@ public sealed class EllaiCaseResultMemory(EllaiTopicService topics, ICaseQueueQu
         if (caseId == Guid.Empty || caseId is not null && field != "submitter")
             return new(EllaiToolNames.Topic, false, "A case_id is valid only for submitter attribution on a retained case.", [], "", 0, false,
                 EllaiToolReasonCodes.InvalidArguments);
-        if (groupBy is not null && (groupBy != "region" || field is not null || placeId is not null || caseId is not null))
-            return new(EllaiToolNames.Topic, false, "group_by=region can only be used on retained cases without a field or exact-place filter.", [], "", 0, false,
+        if (groupBy is not null && (groupBy is not ("region" or "locality") || field is not null || placeId is not null || caseId is not null))
+            return new(EllaiToolNames.Topic, false, "Location grouping can only be used on retained cases without a field or exact-place filter.", [], "", 0, false,
                 EllaiToolReasonCodes.InvalidArguments);
         if (context.Actor is null) return Unavailable();
         EllaiTopicEntry? indexedTopic = null;
@@ -198,29 +198,34 @@ public sealed class EllaiCaseResultMemory(EllaiTopicService topics, ICaseQueueQu
             }
             rows = matched.ToArray();
         }
-        if (groupBy == "region")
+        if (groupBy is "region" or "locality")
         {
             if (occurrenceLocations is null) return Unavailable();
-            var groups = new Dictionary<string, (string Country, string? RegionId, string Label, List<(CaseReference Old, CaseQueueItem Row)> Cases)>(StringComparer.OrdinalIgnoreCase);
+            var groups = new Dictionary<string, (string Country, string? LocationId, string Label, List<(CaseReference Old, CaseQueueItem Row)> Cases)>(StringComparer.OrdinalIgnoreCase);
             foreach (var pair in rows)
             {
                 ct.ThrowIfCancellationRequested();
                 var location = await occurrenceLocations.GetLocationAsync(context.Actor, pair.row.CaseId, ct).ConfigureAwait(false);
                 ct.ThrowIfCancellationRequested();
                 if (location.Access == CaseOccurrenceLocationAccess.Unavailable) return Unavailable();
-                if (location.Access != CaseOccurrenceLocationAccess.Allowed || location.Location is not { } place ||
-                    string.IsNullOrWhiteSpace(place.RegionId) && string.IsNullOrWhiteSpace(place.Region))
+                if (location.Access != CaseOccurrenceLocationAccess.Allowed || location.Location is not { } place)
                 {
                     unknownLocations = true;
                     continue;
                 }
-                var label = string.IsNullOrWhiteSpace(place.Region) ? place.RegionId!.Trim() : place.Region.Trim();
-                var regionId = string.IsNullOrWhiteSpace(place.RegionId) ? null : place.RegionId.Trim();
-                var key = place.CountryCode + ":" + (regionId is null
+                var (labelValue, idValue) = groupBy == "region" ? (place.Region, place.RegionId) : (place.Locality, place.LocalityId);
+                if (string.IsNullOrWhiteSpace(labelValue) && string.IsNullOrWhiteSpace(idValue))
+                {
+                    unknownLocations = true;
+                    continue;
+                }
+                var label = string.IsNullOrWhiteSpace(labelValue) ? idValue!.Trim() : labelValue.Trim();
+                var locationId = string.IsNullOrWhiteSpace(idValue) ? null : idValue.Trim();
+                var key = place.CountryCode + ":" + (locationId is null
                     ? "reported:" + string.Join(' ', label.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)).ToUpperInvariant()
-                    : "registry:" + regionId);
+                    : "registry:" + locationId);
                 if (!groups.TryGetValue(key, out var group))
-                    group = (place.CountryCode, regionId, label, []);
+                    group = (place.CountryCode, locationId, label, []);
                 group.Cases.Add(pair);
                 groups[key] = group;
             }
@@ -228,14 +233,15 @@ public sealed class EllaiCaseResultMemory(EllaiTopicService topics, ICaseQueueQu
                 .ThenBy(group => group.Label, StringComparer.OrdinalIgnoreCase).ToArray();
             var groupEvidence = orderedGroups.SelectMany(group => group.Cases.Select(pair =>
                 new EvidenceRef("CaseQueue", pair.Row.CaseId.ToString("D"),
-                    pair.Row.AggregateVersion.ToString(CultureInfo.InvariantCulture), "region", pair.Row.CaseId.ToString("D")))).ToArray();
+                    pair.Row.AggregateVersion.ToString(CultureInfo.InvariantCulture), groupBy, pair.Row.CaseId.ToString("D")))).ToArray();
             var groupSummary = JsonSerializer.Serialize(new
             {
+                groupBy,
                 groups = orderedGroups.Select(group => new
                 {
                     country = group.Country,
-                    regionId = group.RegionId,
-                    region = group.Label,
+                    locationId = group.LocationId,
+                    location = group.Label,
                     count = group.Cases.Count,
                     cases = group.Cases.Select(pair => pair.Row.CaseId).ToArray()
                 }).ToArray(),
@@ -243,8 +249,8 @@ public sealed class EllaiCaseResultMemory(EllaiTopicService topics, ICaseQueueQu
             });
             var groupIncomplete = incomplete || unknownLocations || unavailableRows || unknownClassification;
             return new EllaiToolResult(EllaiToolNames.Topic, true, null, groupEvidence,
-                completeness + "Grouped the previously retrieved cases by their recorded region; this is not a new search. " +
-                (unknownLocations ? "Cases with unknown or unavailable regions are omitted. " : "") +
+                completeness + $"Grouped the previously retrieved cases by their recorded {groupBy}; this is not a new search. " +
+                (unknownLocations ? $"Cases with unknown or unavailable {groupBy} values are omitted. " : "") +
                 (unavailableRows ? "Cases no longer available under current access are omitted. " : "") +
                 (unknownClassification ? "Cases with unknown classification are excluded. " : "") + groupSummary,
                 groupEvidence.Length, groupIncomplete) { HistoryValidUntilUtc = snapshot.ExpiresAtUtc };
