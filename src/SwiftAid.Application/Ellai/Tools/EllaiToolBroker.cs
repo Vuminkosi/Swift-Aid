@@ -1101,8 +1101,10 @@ public sealed class EllaiToolBroker
         var lines = items.Select(DescribeReceipt);
         var refs = items.Select(receipt => new EvidenceRef(
             "Receipt", receipt.ReceiptId, receipt.Status.ToString(), null, receipt.ReceiptId)).ToList();
+        if (items.Count == 0)
+            refs.Add(new EvidenceRef("ReceiptSearch", "session-receipts", "1", "search", "session-receipts/1"));
         return new EllaiToolResult(request.ToolName, true, null, refs,
-            items.Count == 0 ? "No receipts recorded in this session." : string.Join("\n", lines),
+            items.Count == 0 ? "No receipts recorded in this session. This does not prove that an action did not happen." : string.Join("\n", lines),
             items.Count, list.Count > MaxItems, EllaiToolReasonCodes.Ok);
     }
 

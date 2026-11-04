@@ -444,7 +444,7 @@ public static class EllaiAuthorizedConversationContext
                             ct.ThrowIfCancellationRequested();
                             var allowed = current.ToolName == EllaiToolNames.Receipts && current.Allowed &&
                                 current.DenialReason is null && current.ReasonCode == EllaiToolReasonCodes.Ok &&
-                                !current.Truncated && current.ItemCount == current.Evidence.Count && current.Evidence.Count <= 20 &&
+                                !current.Truncated && EllaiObservedToolResult.IsValidReceiptResult(current, observation.ReceiptLookupId is null) &&
                                 EllaiObservedToolResult.ReceiptListFingerprint(current) == digest;
                             check = (allowed, current.Evidence.ToArray());
                             receiptListChecks[key] = check;

@@ -101,7 +101,7 @@ public sealed record EllaiObservedToolResult(
             request.ToolName == EllaiToolNames.Receipts && result.ToolName == request.ToolName &&
                 (request.Arguments.Count == 0 || receiptLookupId is not null) && result.Allowed && result.DenialReason is null &&
                 result.ReasonCode == EllaiToolReasonCodes.Ok && !result.Truncated &&
-                result.ItemCount == result.Evidence.Count && result.Evidence.Count <= 20
+                IsValidReceiptResult(result, receiptLookupId is null && request.Arguments.Count == 0)
                     ? ReceiptListFingerprint(result) : null,
             receiptLookupId,
             request.ToolName == EllaiToolNames.CaseTimeline && result.Allowed && !result.Truncated
@@ -148,6 +148,11 @@ public sealed record EllaiObservedToolResult(
         value == "rcpt-" + id.ToString("N");
 
     public static string ReceiptListFingerprint(EllaiToolResult result) => ResultFingerprint(result);
+
+    public static bool IsValidReceiptResult(EllaiToolResult result, bool isList) =>
+        result.ItemCount == result.Evidence.Count && result.Evidence.Count <= 20 ||
+        isList && result.ItemCount == 0 && result.Evidence.Count == 1 &&
+        result.Evidence[0] == new EvidenceRef("ReceiptSearch", "session-receipts", "1", "search", "session-receipts/1");
 
     public static string ResultFingerprint(EllaiToolResult result)
     {
