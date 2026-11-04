@@ -64,6 +64,7 @@
             <CaseClassificationPanel CaseId="CaseId" />
             <CaseCollaboratorsPanel CaseId="CaseId" />
             <EligibleHealthOfficersPanel CaseId="CaseId" />
+            <OfficerEscalationReviewPanel CaseId="CaseId" OnAssigned="RefreshAfterOfficerAssignmentAsync" />
             <CaseTranslationPanel CaseId="CaseId" />
             <section class="case-detail__section" aria-labelledby="correction-heading">
                 <div class="case-detail__section-heading">
@@ -542,6 +543,13 @@
         await OnWorkAction.InvokeAsync(request);
         if (_timelineView is not null) await _timelineView.RefreshAsync();
         await OnRefreshOverview.InvokeAsync();
+    }
+
+    private async Task RefreshAfterOfficerAssignmentAsync()
+    {
+        if (_timelineView is not null) await _timelineView.RefreshAsync();
+        await OnRefreshOverview.InvokeAsync();
+        await OnWorkRetry.InvokeAsync();
     }
 
     private async Task SelectTab(int index) { if (_tabs is not null) await _tabs.ActivatePanelAsync(index, ignoreDisabledState: false); }

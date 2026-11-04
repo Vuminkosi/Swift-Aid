@@ -2,6 +2,9 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.AspNetCore.Components.Authorization;
+using System.Security.Claims;
 using SwiftAid.Application.Authorization;
 using SwiftAid.Application.Cases;
 using SwiftAid.Application.Cases.Commands;
@@ -13,6 +16,8 @@ using SwiftAid.Infrastructure.Persistence.Processing;
 using SwiftAid.Infrastructure.Persistence.Protection;
 using SwiftAid.Infrastructure.Persistence.Repositories.Cases;
 using SwiftAid.Infrastructure.Persistence.Transactions;
+using SwiftAid.Gateway.Cases;
+using SwiftAid.Contracts.Cases;
 
 namespace SwiftAid.Integration.Tests;
 
@@ -75,11 +80,46 @@ public sealed partial class CaseCommandProcessingPostgresTests
         var approvals = new PostgresHealthOfficerEscalationApprovalService(db, unit, policy, officers, settings);
         var approved = new HealthOfficerEscalationApprovalRequest(Guid.NewGuid(), Guid.NewGuid(), fixture.CaseId, escalationId, 3,
             fixture.NewOwnerActorId, designationId, 1, Guid.NewGuid(), DateTimeOffset.UtcNow.AddHours(2), DateTimeOffset.UtcNow.AddDays(1));
-        Assert.Equal(HealthOfficerEscalationApprovalStatus.Recorded, (await approvals.ApproveAsync(fixture.CreateActor(), approved, default)).Status);
+        await using var gatewayServices = new ServiceCollection()
+            .AddScoped(_ => fixture.CreateDbContext())
+            .AddScoped<IHealthOfficerEscalationReviewQuery>(services =>
+            {
+                var scopedDb = services.GetRequiredService<SwiftAidDbContext>();
+                var scopedUnit = new PostgresCaseCommandUnitOfWork(scopedDb);
+                var scopedPolicy = new CaseAccessPolicy(new PostgresCurrentAccessGrantStore(scopedDb, scopedUnit), new PostgresCaseAccessDescriptorStore(scopedDb, scopedUnit));
+                return new HealthOfficerEscalationReviewQuery(scopedUnit, scopedPolicy, new PostgresHealthOfficerEscalationReviewStore(scopedDb, scopedUnit),
+                    new PostgresEligibleHealthOfficerStore(scopedDb, scopedUnit), settings);
+            })
+            .AddScoped<IHealthOfficerEscalationApprovalService>(services =>
+            {
+                var scopedDb = services.GetRequiredService<SwiftAidDbContext>();
+                var scopedUnit = new PostgresCaseCommandUnitOfWork(scopedDb);
+                var scopedPolicy = new CaseAccessPolicy(new PostgresCurrentAccessGrantStore(scopedDb, scopedUnit), new PostgresCaseAccessDescriptorStore(scopedDb, scopedUnit));
+                return new PostgresHealthOfficerEscalationApprovalService(scopedDb, scopedUnit, scopedPolicy, new PostgresEligibleHealthOfficerStore(scopedDb, scopedUnit), settings);
+            })
+            .AddScoped<IHealthOfficerEscalationAssignmentService>(services =>
+            {
+                var scopedDb = services.GetRequiredService<SwiftAidDbContext>();
+                var scopedUnit = new PostgresCaseCommandUnitOfWork(scopedDb);
+                var scopedPolicy = new CaseAccessPolicy(new PostgresCurrentAccessGrantStore(scopedDb, scopedUnit), new PostgresCaseAccessDescriptorStore(scopedDb, scopedUnit));
+                var scopedPayload = new PostgresProtectedCaseEventPayloadStore(scopedDb, scopedUnit, keyRing.CreateOptions(), provider);
+                return new PostgresHealthOfficerEscalationAssignmentService(scopedDb, scopedUnit, scopedPolicy,
+                    new PostgresCaseCommandPersistence(scopedDb, scopedUnit, scopedPayload, new CaseEventSerializer()),
+                    new PostgresEligibleHealthOfficerStore(scopedDb, scopedUnit), settings);
+            }).BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true });
+        var gateway = new OfficerEscalationReviewGatewayClient(new FixtureOfficerAuth(Principal(fixture.ActorId, fixture.AccessEpoch)), gatewayServices);
+        var gatewayContext = await gateway.GetAsync(fixture.CaseId);
+        Assert.Equal(escalationId, Assert.Single(gatewayContext!.Escalations).EscalationId);
+        var assignmentCommand = Guid.NewGuid();
+        var reviewed = new OfficerEscalationReviewedSelection(fixture.CaseId, approved.ExpectedCaseVersion, escalationId,
+            approved.OfficerActorId, designationId, 1, approved.FollowUpId, approved.AcknowledgementDueUtc, approved.FollowUpDueUtc,
+            approved.ApprovalId, approved.CommandId, assignmentCommand);
+        Assert.Equal(OfficerEscalationActionStatus.Recorded, (await gateway.ApproveAsync(reviewed)).Status);
+        Assert.Equal(HealthOfficerEscalationApprovalStatus.Replayed, (await approvals.ApproveAsync(fixture.CreateActor(), approved, default)).Status);
         var payloads = new PostgresProtectedCaseEventPayloadStore(db, unit, keyRing.CreateOptions(), provider);
         var persistence = new PostgresCaseCommandPersistence(db, unit, payloads, new CaseEventSerializer());
         var service = new PostgresHealthOfficerEscalationAssignmentService(db, unit, policy, persistence, officers, settings);
-        var request = new HealthOfficerEscalationAssignmentRequest(fixture.CaseId, approved.ApprovalId, Guid.NewGuid());
+        var request = new HealthOfficerEscalationAssignmentRequest(fixture.CaseId, approved.ApprovalId, assignmentCommand);
         var expiredApproval = Guid.NewGuid();
         var expiredFollowUp = Guid.NewGuid();
         await db.Database.ExecuteSqlInterpolatedAsync($"""
@@ -137,21 +177,23 @@ public sealed partial class CaseCommandProcessingPostgresTests
                 DROP FUNCTION swiftaid_classification.fixture_reject_officer_assignment();
                 """);
         }
-        await using var competingDb = fixture.CreateDbContext();
-        var competingUnit = new PostgresCaseCommandUnitOfWork(competingDb);
-        var competingPolicy = new CaseAccessPolicy(new PostgresCurrentAccessGrantStore(competingDb, competingUnit), new PostgresCaseAccessDescriptorStore(competingDb, competingUnit));
-        var competingPayloads = new PostgresProtectedCaseEventPayloadStore(competingDb, competingUnit, keyRing.CreateOptions(), provider);
-        var competingPersistence = new PostgresCaseCommandPersistence(competingDb, competingUnit, competingPayloads, new CaseEventSerializer());
-        var competing = new PostgresHealthOfficerEscalationAssignmentService(competingDb, competingUnit, competingPolicy, competingPersistence,
-            new PostgresEligibleHealthOfficerStore(competingDb, competingUnit), settings);
-        var outcomes = await Task.WhenAll(service.AssignAsync(fixture.CreateActor(), request, default), competing.AssignAsync(fixture.CreateActor(), request, default));
-        var recorded = Assert.Single(outcomes, item => item.Status == HealthOfficerEscalationAssignmentStatus.Recorded);
-        Assert.Single(outcomes, item => item.Status == HealthOfficerEscalationAssignmentStatus.Replayed);
+        var directTask = service.AssignAsync(fixture.CreateActor(), request, default);
+        var webTask = gateway.AssignAsync(reviewed);
+        await Task.WhenAll(directTask, webTask);
+        var direct = await directTask;
+        var web = await webTask;
+        Assert.True(direct.Status == HealthOfficerEscalationAssignmentStatus.Recorded && web.Status == OfficerEscalationActionStatus.Replayed ||
+            direct.Status == HealthOfficerEscalationAssignmentStatus.Replayed && web.Status == OfficerEscalationActionStatus.Recorded);
+        var recorded = direct.Status == HealthOfficerEscalationAssignmentStatus.Recorded ? direct :
+            new HealthOfficerEscalationAssignmentResult(HealthOfficerEscalationAssignmentStatus.Recorded, web.EventId, web.CaseVersion);
         Assert.Equal(4, recorded.CaseVersion);
         Assert.NotNull(recorded.FollowUpEventId);
         var replayed = await service.AssignAsync(fixture.CreateActor(), request, default);
         Assert.Equal(HealthOfficerEscalationAssignmentStatus.Replayed, replayed.Status);
         Assert.Equal(recorded.FollowUpEventId, replayed.FollowUpEventId);
+        var gatewayReplay = await gateway.AssignAsync(reviewed);
+        Assert.Equal(OfficerEscalationActionStatus.Replayed, gatewayReplay.Status);
+        Assert.Equal(recorded.FollowUpEventId, gatewayReplay.EventId);
         Assert.Equal(HealthOfficerEscalationAssignmentStatus.Conflict, (await service.AssignAsync(fixture.CreateActor(), request with { ApprovalId = Guid.NewGuid() }, default)).Status);
         var followUp = await db.ManagedCaseFollowUps.AsNoTracking().SingleAsync(item => item.FollowUpId == approved.FollowUpId);
         Assert.Equal(fixture.NewOwnerActorId, followUp.AssigneeActorId);
@@ -200,5 +242,10 @@ public sealed partial class CaseCommandProcessingPostgresTests
         Assert.Equal(SwiftAid.Contracts.Cases.CaseTimelineAccess.Found, redacted.Access);
         Assert.Null(Assert.Single(redacted.Timeline!.Entries, item => item.EventId == recorded.FollowUpEventId).OfficerEscalation);
         await Assert.ThrowsAsync<Npgsql.PostgresException>(() => db.GetService<IMigrator>().MigrateAsync("20261104160000_HealthOfficerEscalationApprovals"));
+    }
+
+    private sealed class FixtureOfficerAuth(ClaimsPrincipal principal) : AuthenticationStateProvider
+    {
+        public override Task<AuthenticationState> GetAuthenticationStateAsync() => Task.FromResult(new AuthenticationState(principal));
     }
 }

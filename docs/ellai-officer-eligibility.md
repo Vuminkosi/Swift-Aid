@@ -34,9 +34,7 @@ version, follow-up ID and acknowledgment/follow-up deadlines, after checking the
 approver's case permissions and the officer's eligibility under a write lease.
 It does not create the assignment or follow-up. A replay confirms only that the
 approval was recorded; execution must separately check expiry, current authority,
-case version and officer eligibility. The service has no public or model endpoint;
-any future entry point must establish explicit human review and bind the exact
-reviewed parameters before calling it.
+case version and officer eligibility. The service has no HTTP or model endpoint.
 The separately default-off `Ellai:Operational:OfficerDirectory:EscalationAssignmentsEnabled`
 gate enables internal execution. It requires the original approver's current
 authority and access epoch, an unexpired exact approval, the original case
@@ -49,13 +47,16 @@ anyone. The authorized case timeline shows the escalation-to-follow-up link to
 readers with both escalation and follow-up permissions, and distinguishes current
 work from historical assignments. Ellai's case-history tool uses the same
 permission-filtered projection and does not emit opaque officer identifiers.
-There is no public or model execution endpoint, no escalation acknowledgment
+There is no HTTP or model execution endpoint, no escalation acknowledgment
 linkage, reassignment flow, or scheduled supervisor escalation yet.
 An internal review query supplies a bounded list of raised, unassigned
 escalations, the current case version and eligible officers under one authorized
 case read lease. This is a point-in-time review context; approval and execution
-still revalidate all authority and versions under a write lease. No public review
-or assignment entry point is supplied yet.
+still revalidate all authority and versions under a write lease. When all three
+officer directory, approval and assignment gates are enabled, the authenticated
+web case view provides explicit review, approval and a separate assignment action.
+Uncertain outcomes retain their original command IDs for retry while the view is
+open. There is no mobile review client in this slice.
 Availability, workload and category-specific policy are not currently represented,
 and must not be inferred from this lookup. Controlled designation provisioning,
 operator authorization, data stewardship and production database grants remain
