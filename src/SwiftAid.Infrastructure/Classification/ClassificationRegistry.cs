@@ -123,6 +123,8 @@ public sealed class ClassificationRegistry(
         {
             // A completed abstention may acquire new translation work; persist admission before ACK.
             await db.SaveChangesAsync(ct);
+            if (backfillJobId is { } completedJob && inbox.ResultId is { } completedResult)
+                await BindBackfillResultAsync(completedJob, notice.MessageId, completedResult, ct);
             await transaction.CommitAsync(ct);
             return new(header.ReportRevision == notice.ReportRevision ? inbox.State : "Superseded", FailureCode: inbox.FailureCode, ConfigurationHash: config);
         }
@@ -184,6 +186,8 @@ public sealed class ClassificationRegistry(
             response = new("Leased", new(result.Id, result.LeaseId.Value, config, fingerprint, result.LeaseUntilUtc.Value, text, profile));
         }
         await db.SaveChangesAsync(ct);
+        if (backfillJobId is { } resultJob)
+            await BindBackfillResultAsync(resultJob, notice.MessageId, result.Id, ct);
         if (backfillJobId is { } reuseJob && associatedByThisClaim && !created && result.State != "Failed")
         {
             // The scheduled turn created this case-to-result association. Record
@@ -235,6 +239,19 @@ public sealed class ClassificationRegistry(
         await SupersedeOldFactsAsync(header.CaseId, header.ReportRevision, ct);
         await transaction.CommitAsync(ct);
         return response with { ConfigurationHash = config };
+    }
+
+    private async Task BindBackfillResultAsync(Guid jobId, Guid sourceEventId, Guid resultId, CancellationToken ct)
+    {
+        var item = await db.Set<ClassificationBackfillItemEntity>()
+            .SingleAsync(row => row.JobId == jobId && row.SourceEventId == sourceEventId, ct);
+        if (item.ResultId is { } existing && existing != resultId)
+            throw new InvalidOperationException("Bound backfill artifact changed.");
+        if (item.ResultId is null)
+        {
+            item.ResultId = resultId;
+            await db.SaveChangesAsync(ct);
+        }
     }
 
     public async Task<string> CompleteAsync(ClassificationCompletion request, CancellationToken ct)
