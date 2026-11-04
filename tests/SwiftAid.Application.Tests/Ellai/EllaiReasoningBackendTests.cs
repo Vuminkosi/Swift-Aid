@@ -149,6 +149,7 @@ public sealed class EllaiReasoningBackendTests
         {
             Assert.Equal(4096, payload.RootElement.GetProperty("max_tokens").GetInt32());
             var format = payload.RootElement.GetProperty("response_format");
+            Assert.Equal("low", payload.RootElement.GetProperty("reasoning_effort").GetString());
             Assert.Equal("json_schema", format.GetProperty("type").GetString());
             Assert.True(format.GetProperty("json_schema").GetProperty("strict").GetBoolean());
             Assert.True(format.GetProperty("json_schema").GetProperty("schema").GetProperty("properties").TryGetProperty("fields", out _));
@@ -156,6 +157,7 @@ public sealed class EllaiReasoningBackendTests
         await adapter.CompleteAsync([new("user", "ordinary Ellai")], 64, default);
         using var normal = JsonDocument.Parse(handler.RequestBody!);
         Assert.False(normal.RootElement.TryGetProperty("response_format", out _));
+        Assert.False(normal.RootElement.TryGetProperty("reasoning_effort", out _));
         Assert.Equal(64, normal.RootElement.GetProperty("max_tokens").GetInt32());
     }
 

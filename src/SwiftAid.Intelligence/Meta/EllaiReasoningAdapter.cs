@@ -56,6 +56,7 @@ public sealed class EllaiReasoningAdapter(HttpClient http, EllaiOptions options)
                 model = options.ReasoningModel,
                 messages = wireMessages,
                 max_tokens = maxTokens,
+                reasoning_effort = "low",
                 response_format = new
                 {
                     type = "json_schema",

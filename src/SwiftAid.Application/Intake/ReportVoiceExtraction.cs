@@ -20,7 +20,7 @@ public sealed record ReportVoiceExtractionResult(
 public sealed class ReportVoiceExtraction(IEllaiTurnCompletionClient completions)
 {
     public const int MaximumTranscriptLength = 6000;
-    public const int MaximumCompletionTokens = 4096;
+    public const int MaximumCompletionTokens = 8192;
     private static readonly HashSet<string> SupportedFields = new(StringComparer.Ordinal)
     {
         "subject", "age", "gender", "observation", "time", "locality", "region", "country"
