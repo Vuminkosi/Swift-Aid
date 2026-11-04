@@ -92,6 +92,11 @@ public sealed class ClassificationBackfillStore(SwiftAidDbContext db, IOptions<C
             WHERE c.workspace_id = {job.WorkspaceId} AND c.organization_id = {job.OrganizationId}
               AND report_time.received_at_utc BETWEEN {now.AddDays(-30)} AND {now}
               AND e.event_type IN ('CaseReported', 'CaseReportCorrected')
+              AND e.report_revision = c.report_revision
+              AND NOT EXISTS (SELECT 1 FROM case_events newer
+                  WHERE newer.case_id = e.case_id AND newer.report_revision = e.report_revision
+                    AND newer.event_type IN ('CaseReported', 'CaseReportCorrected')
+                    AND newer.aggregate_version > e.aggregate_version)
             """, ct);
         job.Pending = job.Eligible;
         await db.SaveChangesAsync(ct);
