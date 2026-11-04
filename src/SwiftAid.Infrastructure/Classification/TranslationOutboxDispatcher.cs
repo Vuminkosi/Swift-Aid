@@ -32,10 +32,15 @@ public sealed class TranslationOutboxDispatcher(SwiftAidDbContext db, INatsClien
                 SELECT o.* FROM swiftaid_translation.outbox o
                 JOIN case_events e ON e.event_id = o."SourceEventId"
                 JOIN managed_cases c ON c.case_id = e.case_id
+                CROSS JOIN LATERAL (SELECT COALESCE((
+                    SELECT report.received_at_utc FROM swiftaid_intake.intake_promotions promotion
+                    JOIN swiftaid_intake.intake_reports report ON report.receipt_id = promotion.receipt_id
+                    WHERE promotion.case_id = c.case_id
+                ), c.created_at_utc) AS received_at_utc) report_time
                 WHERE o."PublishedAtUtc" IS NULL AND o."Attempts" < 8
                 AND o."AvailableAtUtc" <= {now} AND (o."LeaseUntilUtc" IS NULL OR o."LeaseUntilUtc" <= {now})
                 AND EXISTS (SELECT 1 FROM swiftaid_translation.artifacts a WHERE a."Id" = o."ArtifactId" AND a."OrganizationId" = ANY({organizations}))
-                ORDER BY c.created_at_utc DESC, c.case_id, o."AvailableAtUtc", o."Id"
+                ORDER BY report_time.received_at_utc DESC, c.case_id, o."AvailableAtUtc", o."Id"
                 LIMIT 1 FOR UPDATE OF o SKIP LOCKED
                 """).SingleOrDefaultAsync(ct);
             if (row is null) return false;
