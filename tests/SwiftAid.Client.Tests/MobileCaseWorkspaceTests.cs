@@ -1,11 +1,75 @@
 using SwiftAid.Client.Presentation;
+using SwiftAid.Client.Intake;
 using SwiftAid.Contracts.Cases;
+using SwiftAid.Contracts.Intake;
 using SwiftAid.Mobile.Services.Presentation;
 
 namespace SwiftAid.Client.Tests;
 
 public sealed class MobileCaseWorkspaceTests
 {
+    [Theory]
+    [InlineData("Eswatini")]
+    [InlineData("Under review")]
+    public async Task SearchesDisplayedCountryAndWorkflowLabels(string search)
+    {
+        var row = Row("HumanHealth", "Recorded") with { Workflow = "UnderReview" };
+        var client = new MobileCaseWorkspaceClient(new Queue(CaseQueueAccess.Allowed, [row]), null, new Countries());
+        var result = await client.ListAsync(new(new PageRequest(), Search: search));
+        Assert.Equal("Eswatini", Assert.Single(result.Value!.Items).CountryLabel);
+        var options = (await client.GetFilterOptionsAsync()).Value!;
+        Assert.Contains(options.Countries, item => item.Key == "SZ" && item.Label == "Eswatini");
+        Assert.Contains(options.Workflows, item => item.Key == "UnderReview" && item.Label == "Under review");
+    }
+
+    [Fact]
+    public async Task MissingCountryCataloguePreservesTheAuthorizedCaseList()
+    {
+        var row = Row("HumanHealth", "Recorded");
+        var client = new MobileCaseWorkspaceClient(new Queue(CaseQueueAccess.Allowed, [row]), null, new Countries(fail: true));
+        var result = await client.ListAsync(new(new PageRequest()));
+        Assert.True(result.Succeeded);
+        Assert.Equal("SZ", Assert.Single(result.Value!.Items).CountryLabel);
+    }
+
+    [Fact]
+    public async Task VisibleRowsIncludeAuthorizedReportDetailsAndMapLink()
+    {
+        var row = Row("HumanHealth", "Recorded");
+        var place = new CaseReportPlace("SZ", "Example region", "Example area", null, "region", "area", null);
+        var reports = new Reports(new CaseReportDetails(row.CaseId, 1, "Synthetic narrative", ["Synthetic observation"], place));
+        var client = new MobileCaseWorkspaceClient(new Queue(CaseQueueAccess.Allowed, [row]), reports);
+
+        var result = await client.ListAsync(new(new PageRequest()));
+
+        var item = Assert.Single(result.Value!.Items);
+        Assert.Equal("Synthetic observation", item.ObservationPreview);
+        Assert.Equal("Example region | Example area", item.RegionLabel);
+        Assert.Contains("country=SZ", item.LocationHref);
+        Assert.Equal(row.CaseId, Assert.Single(reports.Requested));
+    }
+
+    [Fact]
+    public async Task RevokedCaseDetailsDoNotExposeAStaleQueue()
+    {
+        var row = Row("HumanHealth", "Recorded");
+        var client = new MobileCaseWorkspaceClient(new Queue(CaseQueueAccess.Allowed, [row]), new Reports(null, denied: true));
+        var result = await client.ListAsync(new(new PageRequest()));
+        Assert.Equal(UiCapabilityResultCode.Denied, result.Code);
+        Assert.Null(result.Value);
+    }
+
+    [Fact]
+    public async Task MismatchedReportDoesNotAppearInAnotherCaseRow()
+    {
+        var row = Row("HumanHealth", "Recorded");
+        var wrong = new CaseReportDetails(Guid.NewGuid(), 1, "Other case", [], null);
+        var client = new MobileCaseWorkspaceClient(new Queue(CaseQueueAccess.Allowed, [row]), new Reports(wrong));
+        var item = Assert.Single((await client.ListAsync(new(new PageRequest()))).Value!.Items);
+        Assert.Null(item.ObservationPreview);
+        Assert.Null(item.LocationHref);
+    }
+
     [Theory]
     [InlineData("Case abcd1234")]
     [InlineData("  ABCD1234  ")]
@@ -141,6 +205,29 @@ public sealed class MobileCaseWorkspaceTests
     {
         public Task<CaseQueueResult> GetMineAsync(int? limit, CancellationToken cancellationToken = default) =>
             Task.FromResult(new CaseQueueResult(access, items));
+    }
+
+    private sealed class Countries(bool fail = false) : IGuestIntakeTransport
+    {
+        public Task<PublicIntakeCountryCatalogue> GetCountriesAsync(CancellationToken cancellationToken) => fail
+            ? Task.FromException<PublicIntakeCountryCatalogue>(new HttpRequestException())
+            : Task.FromResult(new PublicIntakeCountryCatalogue("v1", "/countries", [new("SZ", "Eswatini"), new("ZA", "South Africa")]));
+        public Task<PublicIntakeMetadata> GetMetadataAsync(CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<IntakeSessionResponse> CreateSessionAsync(Guid sessionId, string receiptProof, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<IntakeReceipt> SubmitAsync(IntakeSubmission submission, Guid sessionId, string intakeCapability, string receiptProof, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<IntakeReceipt> GetReceiptAsync(Guid receiptId, string receiptProof, CancellationToken cancellationToken) => throw new NotSupportedException();
+    }
+
+    private sealed class Reports(CaseReportDetails? details, bool denied = false) : ICaseReportDetailsClient
+    {
+        public List<Guid> Requested { get; } = [];
+        public Task<UiCapabilityResult<CaseReportDetails>> GetAsync(Guid caseId, CancellationToken ct = default)
+        {
+            Requested.Add(caseId);
+            return Task.FromResult(new UiCapabilityResult<CaseReportDetails>(
+                denied ? UiCapabilityResultCode.Denied : UiCapabilityResultCode.Success, details,
+                new UiCapabilityMetadata("case-detail", "1", UiCapabilityProvenance.LiveService, DateTimeOffset.UtcNow, true)));
+        }
     }
 
     private sealed class PagedQueue(IReadOnlyList<CaseQueueItem> items) : ICaseQueueClient

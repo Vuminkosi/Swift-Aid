@@ -100,6 +100,16 @@ public interface ICaseWorkspaceClient
         CancellationToken cancellationToken = default);
 }
 
+/// <summary>Allows a host to render authorized rows while optional details load.</summary>
+public interface IProgressiveCaseWorkspaceClient : ICaseWorkspaceClient
+{
+    Task<UiCapabilityResult<Page<CaseWorkspaceRow>>> ListInitialAsync(
+        CaseWorkspaceQuery query, CancellationToken cancellationToken = default);
+
+    Task<UiCapabilityResult<Page<CaseWorkspaceRow>>> EnrichAsync(
+        Page<CaseWorkspaceRow> page, CancellationToken cancellationToken = default);
+}
+
 /// <summary>Internal fixture projection used only by the isolated sample case client.</summary>
 internal sealed record CaseWorkspaceSeed(
     CaseQueueItem Case,
