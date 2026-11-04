@@ -1,6 +1,16 @@
 # Ellai operational schedule configuration
 
-The quality and follow-up schedulers use `CadenceHours` (4 or 8), `PolicyVersion`, and a positive `ConfigurationRevision`. The default cadence is 4 hours and the default revision is 1. Configuration is scoped by the worker's explicitly configured workspace and organization lists.
+The enrichment, quality, follow-up, organization, and correlation schedulers use `CadenceHours` (4 or 8), `PolicyVersion`, and a positive `ConfigurationRevision`. Configuration is scoped by the worker's explicitly configured workspace and organization lists; each scheduler is disabled by default. These defaults describe source configuration, not evidence that a worker is running.
+
+| Role | Default cadence | Default batch | Work per due sweep |
+| --- | --- | --- | --- |
+| `ops.enrichment` | 4 hours | 100 | At most one classification job per eligible organization, with up to 100 recent revisions per job. |
+| `ops.quality` | 4 hours | 10 | At most 10 work turns per workspace. |
+| `ops.followup` | 4 hours | 10 | At most 10 work turns per workspace. |
+| `ops.organization` | 8 hours | 10 | At most 10 work turns per workspace. |
+| `ops.correlation` | 8 hours | 10 | At most 10 work turns per workspace. |
+
+`BatchSize` is configurable from 1 to 100. For quality, follow-up, organization, and correlation, a sweep that reaches its batch limit advances to the next cadence; remaining work waits for a later sweep. Failed or cancelled sweeps leave the due cursor unchanged for recovery. The deterministic sweeps do not invoke the reasoning model. Enrichment creates jobs but does not itself run classification inference; classification worker capacity and its separate discovery switch govern consumption. Scheduled spatial analysis is not implemented.
 
 Quality schedules fingerprint the policy version, organization scope, and quality rules version. Enrichment schedules fingerprint the policy version, organization scope, worker identity, classification profile, and batch size. Deploy fingerprint-aware workers to every replica and allow old workers to drain before increasing each affected configuration revision; existing schedules created by older versions require a higher revision. Keep these settings identical across replicas and increase the relevant revision whenever they change.
 
