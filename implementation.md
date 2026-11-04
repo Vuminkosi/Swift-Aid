@@ -4626,3 +4626,9 @@ PASS: Gateway build (dotnet build src/SwiftAid.Gateway/SwiftAid.Gateway.csproj -
 The initial create-draft utterance can now carry a whole-year age, an explicitly described patient category, a case locality introduced with "in", and one observation introduced with "with". A strict sentence parser places only those stated values into the existing report draft context while the generic guidance proposal remains free of report values. It does not infer a country, patient residence, diagnosis, or onset time. This covers the first turn of conversation scenario 2.4.
 
 PASS: Gateway build (dotnet build src/SwiftAid.Gateway/SwiftAid.Gateway.csproj --no-restore -m:1 -nr:false -p:WasmBuildNative=false --verbosity quiet, 0 warnings, 0 errors); git diff --check. Tests were not added or run, per user instruction. NOT VERIFIED: live model selection, browser capture, and the complete report save/submit conversation.
+
+### Ellai report save and submission guidance - 2026-11-04
+
+During the active report conversation, explicit requests to save the draft or submit it officially now direct Ellai to the existing report guidance plan. Save completion is claimed only from the report-save persistence signal. Submission remains a human-operated review and confirmation flow, and success is claimed only after the matching server receipt is displayed. The guidance reuses the same report draft and conversation.
+
+PASS: Gateway build (dotnet build src/SwiftAid.Gateway/SwiftAid.Gateway.csproj --no-restore -m:1 -nr:false -p:WasmBuildNative=false --verbosity quiet, 0 warnings, 0 errors); git diff --check. Tests were not added or run, per user instruction. NOT VERIFIED: live model tool selection, real browser save/submit, receipt confirmation, or full scenario 2.4.
