@@ -193,7 +193,7 @@ public partial class EllaiGuidanceHost
                 EllaiGuidanceControlProposal.ReadCommand(control.Proposal) is { } command)
             {
                 _lastGuidanceControlProposalId = control.ProposalId;
-                if (command == "stop-speech") StopResponseAudio();
+                if (command == "stop-speech") DisableResponseAudio();
                 else _ = DispatchConversationalGuidanceControlAsync(command);
             }
             return;
@@ -429,6 +429,7 @@ public partial class EllaiGuidanceHost
     private async Task CancelGeneratedGuidanceAsync()
     {
         EndGuidanceNarration();
+        EndGuidanceSpeech();
         var tour = _generatedTour;
         _generatedTour = null;
         _generatedPlan = null;
@@ -657,6 +658,7 @@ public partial class EllaiGuidanceHost
                 activated = true;
                 ShowComposer = true;
                 _generatedTour = started;
+                BeginGuidanceSpeech();
                 _generatedPlan = plan;
                 _controlGeneratedTour = PersistControl;
                 _narrateValidation = message => NarrateValidationAsync(started, progressVersion, message);
@@ -677,6 +679,7 @@ public partial class EllaiGuidanceHost
                         if (!IsCurrent() || !ReferenceEquals(started, _generatedTour)) return;
                         if (durableStatus is "Completed" or "Cancelled")
                         {
+                            EndGuidanceSpeech();
                             started.Changed -= _generatedTourChanged;
                             _generatedTourChanged = null;
                             _generatedTour = null;

@@ -243,6 +243,8 @@
     private bool _startingVoiceCapture;
     private string? _greetedLiveSessionId;
     private bool _readResponsesAloud;
+    private bool _guidanceSpeechAutoEnabled;
+    private bool _guidanceSpeechMutedByUser;
     private bool _responseAudioQueueRunning;
     private readonly HashSet<long> _progressAudioSequences = [];
     private string? _toolActivityText;
@@ -2022,6 +2024,8 @@
         if (_readResponsesAloud)
         {
             _readResponsesAloud = false;
+            _guidanceSpeechAutoEnabled = false;
+            _guidanceSpeechMutedByUser = true;
             StopResponseAudio();
             StatusText = "Speech playback stopped.";
             await InvokeAsync(StateHasChanged);
@@ -2029,8 +2033,34 @@
         }
 
         _readResponsesAloud = true;
+        _guidanceSpeechAutoEnabled = false;
+        _guidanceSpeechMutedByUser = false;
         await InvokeAsync(StateHasChanged);
         await PlayResponseAudioAsync();
+    }
+
+    private void DisableResponseAudio()
+    {
+        _readResponsesAloud = false;
+        _guidanceSpeechAutoEnabled = false;
+        _guidanceSpeechMutedByUser = true;
+        StopResponseAudio();
+        StatusText = "Speech playback stopped.";
+    }
+
+    private void BeginGuidanceSpeech()
+    {
+        if (_readResponsesAloud || _guidanceSpeechMutedByUser) return;
+        _guidanceSpeechAutoEnabled = true;
+        _readResponsesAloud = true;
+    }
+
+    private void EndGuidanceSpeech()
+    {
+        if (!_guidanceSpeechAutoEnabled) return;
+        _guidanceSpeechAutoEnabled = false;
+        _readResponsesAloud = false;
+        StopResponseAudio();
     }
 
     private async Task PlayResponseAudioAsync()
@@ -2792,6 +2822,8 @@
         _latestUserText = null;
         _latestUserUtteranceId = null;
         _readResponsesAloud = false;
+        _guidanceSpeechAutoEnabled = false;
+        _guidanceSpeechMutedByUser = false;
         _thinkingUtteranceId = null;
         _settledUtteranceId = null;
         try
