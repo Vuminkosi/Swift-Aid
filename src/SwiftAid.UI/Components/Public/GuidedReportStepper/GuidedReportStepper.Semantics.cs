@@ -59,6 +59,14 @@ public partial class GuidedReportStepper
             if (HasCountryCatalogue)
             {
                 Add("report.time-location", "report.time-precision", Draft.OccurrencePrecision == ReportedTimePrecision.Unknown ? UiInputPresence.Unknown : UiInputPresence.Entered);
+                Add("report.time-location", "report.onset-precision", Draft.OnsetPrecision == ReportedTimePrecision.Unknown ? UiInputPresence.Unknown : UiInputPresence.Entered);
+                if (Draft.OnsetPrecision != ReportedTimePrecision.Unknown)
+                    Add("report.time-location", "report.onset-date", Draft.OnsetDate.HasValue ? UiInputPresence.Entered : TextState(Draft.OnsetDateText, false));
+                if (Draft.OnsetPrecision == ReportedTimePrecision.Exact)
+                {
+                    Add("report.time-location", "report.onset-time", TextState(Draft.OnsetTime, TimeOnly.TryParse(Draft.OnsetTime, out _)));
+                    Add("report.time-location", "report.onset-utc-offset", TextState(Draft.OnsetOffset, HasValidOnsetOffset()));
+                }
                 if (Draft.OccurrencePrecision != ReportedTimePrecision.Unknown)
                     Add("report.time-location", "report.occurrence-date", Draft.OccurrenceDate.HasValue ? UiInputPresence.Entered : TextState(Draft.OccurrenceDateText, false));
                 if (Draft.OccurrencePrecision == ReportedTimePrecision.Exact)
@@ -137,6 +145,11 @@ public partial class GuidedReportStepper
             AddIfInvalid(Draft.OccurrencePrecision == ReportedTimePrecision.Exact && !HasValidOccurrenceOffset(), "report.utc-offset");
             AddIfInvalid(Draft.OccurrencePrecision == ReportedTimePrecision.Exact && Draft.OccurrenceDate.HasValue &&
                 HasValidExactTime() && !Draft.HasValidExactOccurrence(), "report.invalid-exact-occurrence");
+            AddIfInvalid(Draft.OnsetPrecision != ReportedTimePrecision.Unknown && !Draft.OnsetDate.HasValue, "report.onset-date");
+            AddIfInvalid(Draft.OnsetPrecision == ReportedTimePrecision.Exact && !TimeOnly.TryParse(Draft.OnsetTime, out _), "report.onset-time");
+            AddIfInvalid(Draft.OnsetPrecision == ReportedTimePrecision.Exact && !HasValidOnsetOffset(), "report.onset-utc-offset");
+            AddIfInvalid(Draft.OnsetPrecision == ReportedTimePrecision.Exact && Draft.OnsetDate.HasValue &&
+                TimeOnly.TryParse(Draft.OnsetTime, out _) && HasValidOnsetOffset() && !Draft.HasValidExactOnset(), "report.invalid-onset");
             return issues;
         }
         AddIfInvalid(string.IsNullOrWhiteSpace(Draft.Narrative) && observations.Count == 0, "report.original-statement");
@@ -152,6 +165,11 @@ public partial class GuidedReportStepper
         AddIfInvalid(Draft.OccurrencePrecision == ReportedTimePrecision.Exact && !HasValidOccurrenceOffset(), "report.utc-offset");
         AddIfInvalid(Draft.OccurrencePrecision == ReportedTimePrecision.Exact && Draft.OccurrenceDate.HasValue &&
             HasValidExactTime() && !Draft.HasValidExactOccurrence(), "report.invalid-exact-occurrence");
+        AddIfInvalid(Draft.OnsetPrecision != ReportedTimePrecision.Unknown && !Draft.OnsetDate.HasValue, "report.onset-date");
+        AddIfInvalid(Draft.OnsetPrecision == ReportedTimePrecision.Exact && !TimeOnly.TryParse(Draft.OnsetTime, out _), "report.onset-time");
+        AddIfInvalid(Draft.OnsetPrecision == ReportedTimePrecision.Exact && !HasValidOnsetOffset(), "report.onset-utc-offset");
+        AddIfInvalid(Draft.OnsetPrecision == ReportedTimePrecision.Exact && Draft.OnsetDate.HasValue &&
+            TimeOnly.TryParse(Draft.OnsetTime, out _) && HasValidOnsetOffset() && !Draft.HasValidExactOnset(), "report.invalid-onset");
         AddIfInvalid(!PublicReportDraft.IsValidPlaceName(Draft.RegionPresence, Draft.Region), "report.region");
         AddIfInvalid(!PublicReportDraft.IsValidPlaceName(Draft.AreaPresence, Draft.Area), "report.area");
         AddIfInvalid(!PublicReportDraft.IsValidPlaceName(Draft.LocalityPresence, Draft.Locality), "report.locality");

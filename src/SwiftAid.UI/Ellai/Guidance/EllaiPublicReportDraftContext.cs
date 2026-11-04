@@ -13,6 +13,7 @@ public sealed class EllaiPublicReportDraftContext
     private Func<string, bool>? _addObservation;
     private Func<string, bool>? _removeObservation;
     private Func<string, bool>? _setLocality;
+    private Func<DateOnly, bool>? _setOnsetDate;
     private Func<string, bool>? _appendNarrative;
     private Func<ReportedGender, bool>? _setGender;
     private Func<bool>? _revertAge;
@@ -20,8 +21,8 @@ public sealed class EllaiPublicReportDraftContext
     private DateTimeOffset _captureExpiresAt;
     private bool _captureActive;
 
-    private enum PendingEditKind { Age, AgeRevert, Gender, Observation, RemoveObservation, Locality, Narrative }
-    private sealed record PendingEdit(PendingEditKind Kind, int? Age = null, ReportedGender? Gender = null, string? Text = null);
+    private enum PendingEditKind { Age, AgeRevert, Gender, Observation, RemoveObservation, Locality, Onset, Narrative }
+    private sealed record PendingEdit(PendingEditKind Kind, int? Age = null, ReportedGender? Gender = null, string? Text = null, DateOnly? Date = null);
 
     public void BeginReportCapture()
     {
@@ -36,7 +37,7 @@ public sealed class EllaiPublicReportDraftContext
     public void Register(object owner, Func<int, bool> setAge, Func<string, bool> addObservation,
         Func<string, bool>? setLocality = null, Func<string, bool>? appendNarrative = null,
         Func<ReportedGender, bool>? setGender = null, Func<bool>? revertAge = null,
-        Func<string, bool>? removeObservation = null)
+        Func<string, bool>? removeObservation = null, Func<DateOnly, bool>? setOnsetDate = null)
     {
         lock (_gate)
         {
@@ -45,6 +46,7 @@ public sealed class EllaiPublicReportDraftContext
             _addObservation = addObservation;
             _removeObservation = removeObservation ?? (_ => false);
             _setLocality = setLocality ?? (_ => false);
+            _setOnsetDate = setOnsetDate ?? (_ => false);
             _appendNarrative = appendNarrative ?? (_ => false);
             _setGender = setGender ?? (_ => false);
             _revertAge = revertAge ?? (() => false);
@@ -84,6 +86,7 @@ public sealed class EllaiPublicReportDraftContext
                 _addObservation = null;
                 _removeObservation = null;
                 _setLocality = null;
+                _setOnsetDate = null;
                 _appendNarrative = null;
                 _setGender = null;
                 _revertAge = null;
@@ -211,6 +214,20 @@ public sealed class EllaiPublicReportDraftContext
         return Apply(new(PendingEditKind.Narrative, Text: utterance.Trim()));
     }
 
+    public bool ApplyReportedOnsetDate(string? utterance)
+    {
+        if (utterance is null || utterance.Length > 240 || utterance.Contains('\r') || utterance.Contains('\n')) return false;
+        const RegexOptions options = RegexOptions.IgnoreCase | RegexOptions.CultureInvariant;
+        var match = Regex.Match(utterance,
+            @"^\s*(?:symptoms?|signs?)\s+(?:started|began)\s+on\s+(?<date>[0-9]{4}-[0-9]{2}-[0-9]{2})[.!?]?\s*$", options);
+        if (!match.Success)
+            match = Regex.Match(utterance,
+                @"^\s*(?:the\s+)?(?:symptom|sign)\s+onset\s+(?:date\s+)?(?:is|was)\s+(?<date>[0-9]{4}-[0-9]{2}-[0-9]{2})[.!?]?\s*$", options);
+        return match.Success && DateOnly.TryParseExact(match.Groups["date"].Value, "yyyy-MM-dd",
+            System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var date) &&
+            Apply(new(PendingEditKind.Onset, Date: date));
+    }
+
     private bool Apply(PendingEdit edit)
     {
         Func<bool>? apply;
@@ -224,6 +241,7 @@ public sealed class EllaiPublicReportDraftContext
                 PendingEditKind.Observation when _addObservation is { } addObservation => () => addObservation(edit.Text!),
                 PendingEditKind.RemoveObservation when _removeObservation is { } removeObservation => () => removeObservation(edit.Text!),
                 PendingEditKind.Locality when _setLocality is { } setLocality => () => setLocality(edit.Text!),
+                PendingEditKind.Onset when _setOnsetDate is { } setOnsetDate => () => setOnsetDate(edit.Date!.Value),
                 PendingEditKind.Narrative when _appendNarrative is { } appendNarrative => () => appendNarrative(edit.Text!),
                 _ => null
             };

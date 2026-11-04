@@ -10,6 +10,7 @@ public static class EllaiReportValidationGuidance
         "report.original-statement" or "report.original-statement-too-long" or "report.other-observations" or
             "report.too-many-observations" or "report.observation-too-long" or "report.observations-total-too-long" or "report.age-years" => "report.narrative",
         "report.occurrence-date" or "report.invalid-exact-occurrence" or "report.occurrence-time" or "report.utc-offset" or
+            "report.onset-date" or "report.invalid-onset" or "report.onset-time" or "report.onset-utc-offset" or
             "report.place-search" or "report.invalid-draft-country" or "report.region" or "report.area" or "report.locality" => "report.time-location",
         "report.review-confirmed" or "report.text-limits-changed" or "report.age-review" or "report.server-validation-unknown" or "report.country-catalogue-unavailable" or
             "report.privacy-notice-unavailable" or "report.processing-policy-unavailable" or "report.country-required" or
@@ -32,6 +33,10 @@ public static class EllaiReportValidationGuidance
         "report.invalid-exact-occurrence" => new(inputId, "ellai-report-occurrence-date", "I can't capture this date, time, and UTC offset together. Check the date or choose that the time is unknown."),
         "report.occurrence-time" => new(inputId, "ellai-report-occurrence-time", "I haven't captured a valid reported local time. Enter it, or choose that the time is unknown."),
         "report.utc-offset" => new(inputId, "ellai-report-utc-offset", "I haven't captured a valid time difference from UTC. Enter one, such as plus zero two colon zero zero."),
+        "report.onset-date" => new(inputId, "ellai-report-onset-date", "I haven't captured a valid reported symptom or sign onset date. Enter it as year-month-day, or choose that onset is unknown."),
+        "report.invalid-onset" => new(inputId, "ellai-report-onset-date", "I can't combine this onset date, time and UTC offset. Check the reported values or choose a less precise onset."),
+        "report.onset-time" => new(inputId, "ellai-report-onset-time", "I haven't captured a valid reported local onset time. Enter it, or choose a less precise onset."),
+        "report.onset-utc-offset" => new(inputId, "ellai-report-onset-utc-offset", "I haven't captured a valid onset time difference from UTC. Enter the reported offset, or choose a less precise onset."),
         "report.place-search" => new(inputId, "ellai-report-place", "I haven't captured a reported place. Complete it, or leave uncertain place names unknown."),
         "report.invalid-draft-country" => new(inputId, "ellai-report-place", "I can't capture this saved country code because it is invalid. Choose a country or clear the country field before saving the draft."),
         "report.region" => new(inputId, "ellai-report-region", "I haven't captured a valid region. Enter the reported region using at most 200 characters, or leave it unknown."),

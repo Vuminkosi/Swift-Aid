@@ -33,6 +33,9 @@ public sealed class PublicReportDraft : IValidatableObject
         source.OccurrenceDateText ??= source.OccurrenceDate?.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
         if (ParseOccurrenceDate(source.OccurrenceDateText)?.Date != source.OccurrenceDate?.Date)
             throw new InvalidOperationException("The editable date is inconsistent.");
+        source.OnsetDateText ??= source.OnsetDate?.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+        if (ParseOccurrenceDate(source.OnsetDateText)?.Date != source.OnsetDate?.Date)
+            throw new InvalidOperationException("The editable onset date is inconsistent.");
         var snapshot = new GuestDraftFormSnapshot(GuestDraftFormSnapshot.CurrentSchemaVersion,
             System.Text.Json.JsonSerializer.Serialize(source));
         if (!snapshot.IsValid()) throw new InvalidOperationException("The editable draft is too large or invalid.");
@@ -56,6 +59,15 @@ public sealed class PublicReportDraft : IValidatableObject
             if (snapshot.SchemaVersion >= 2) expected.Add(nameof(OccurrenceDateText));
             if (snapshot.SchemaVersion >= 3) expected.Add(nameof(AgeYearsText));
             if (snapshot.SchemaVersion >= 4) expected.Add(nameof(Gender));
+            if (snapshot.SchemaVersion >= 5)
+            {
+                expected.Add(nameof(OnsetPrecision));
+                expected.Add(nameof(OnsetDate));
+                expected.Add(nameof(OnsetDateText));
+                expected.Add(nameof(OnsetTime));
+                expected.Add(nameof(OnsetOffset));
+                expected.Add(nameof(OnsetZoneId));
+            }
             var names = document.RootElement.EnumerateObject().Select(property => property.Name).ToArray();
             if (names.Length != expected.Count || names.Distinct(StringComparer.Ordinal).Count() != names.Length ||
                 names.Any(name => !expected.Contains(name)))
@@ -68,6 +80,8 @@ public sealed class PublicReportDraft : IValidatableObject
                 draft.OccurrenceDateText = draft.OccurrenceDate?.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
             else if (ParseOccurrenceDate(draft.OccurrenceDateText)?.Date != draft.OccurrenceDate?.Date)
                 throw new InvalidOperationException("The editable date is inconsistent.");
+            if (snapshot.SchemaVersion >= 5 && ParseOccurrenceDate(draft.OnsetDateText)?.Date != draft.OnsetDate?.Date)
+                throw new InvalidOperationException("The editable onset date is inconsistent.");
             // The local snapshot may outlive the catalogue or policy shown when
             // these acknowledgements were made. Require review against current metadata.
             draft.CountryConfirmed = false;
@@ -103,6 +117,12 @@ public sealed class PublicReportDraft : IValidatableObject
     public string? OccurrenceTime { get; set; }
     public string? OccurrenceOffset { get; set; }
     public string? TimeNote { get; set; }
+    public ReportedTimePrecision OnsetPrecision { get; set; } = ReportedTimePrecision.Unknown;
+    public DateTime? OnsetDate { get; set; }
+    public string? OnsetDateText { get; set; }
+    public string? OnsetTime { get; set; }
+    public string? OnsetOffset { get; set; }
+    public string? OnsetZoneId { get; set; }
     public DateTimeOffset? CapturedAt { get; set; }
     public bool LocationUnknown { get; set; } = true;
     public string? CountryCode { get; set; }
@@ -158,6 +178,11 @@ public sealed class PublicReportDraft : IValidatableObject
                 [nameof(OccurrenceTime), nameof(OccurrenceOffset)]);
         }
 
+        if (OnsetPrecision != ReportedTimePrecision.Unknown && !OnsetDate.HasValue)
+            yield return new ValidationResult("Add the reported symptom or sign onset date, or choose that it is unknown.", [nameof(OnsetDateText)]);
+        if (OnsetPrecision == ReportedTimePrecision.Exact && !TryGetExactOnset(out _))
+            yield return new ValidationResult("For an exact onset time, enter the time and its UTC offset, or choose a less precise value.", [nameof(OnsetTime), nameof(OnsetOffset)]);
+
         if (!IsValidPlaceName(RegionPresence, Region) ||
             !IsValidPlaceName(AreaPresence, Area) ||
             !IsValidPlaceName(LocalityPresence, Locality))
@@ -171,6 +196,8 @@ public sealed class PublicReportDraft : IValidatableObject
         ArgumentNullException.ThrowIfNull(submission);
         var occurrence = submission.Occurrence;
         var localOccurrence = ToLocalOccurrence(occurrence);
+        var onset = submission.Onset ?? new ReportedTime(null, null, null, null, null, null, ReportedTimePrecision.Unknown);
+        var localOnset = ToLocalOccurrence(onset);
         var location = submission.Location;
         var confirmations = submission.Confirmations;
 
@@ -187,6 +214,12 @@ public sealed class PublicReportDraft : IValidatableObject
             OccurrenceTime = localOccurrence.Time,
             OccurrenceOffset = localOccurrence.Offset,
             TimeNote = occurrence.ZoneId,
+            OnsetPrecision = onset.Precision,
+            OnsetDate = localOnset.Date,
+            OnsetDateText = localOnset.Date?.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture),
+            OnsetTime = localOnset.Time,
+            OnsetOffset = localOnset.Offset,
+            OnsetZoneId = onset.ZoneId,
             CapturedAt = submission.CapturedAt.Value,
             LocationUnknown = string.IsNullOrWhiteSpace(location.CountryCode) &&
                               location.Region.Presence != PresenceState.Known &&
@@ -283,6 +316,15 @@ public sealed class PublicReportDraft : IValidatableObject
                 TimeNote,
                 OccurrencePrecision)
         };
+        var onset = OnsetPrecision switch
+        {
+            ReportedTimePrecision.Unknown => new ReportedTime(null, null, null, null, null, null, ReportedTimePrecision.Unknown),
+            ReportedTimePrecision.Exact when TryGetExactOnset(out var exactOnset) => exactOnset!,
+            ReportedTimePrecision.Exact => throw new InvalidOperationException("Enter the exact onset time and its UTC offset, or choose a less precise value."),
+            _ => new ReportedTime(null,
+                OnsetDate is { } onsetDate ? DateOnly.FromDateTime(onsetDate) : null,
+                null, null, OnsetOffset, OnsetZoneId, OnsetPrecision)
+        };
 
         var hasReportedLocation =
             !string.IsNullOrWhiteSpace(CountryCode) ||
@@ -339,6 +381,7 @@ public sealed class PublicReportDraft : IValidatableObject
             location,
             confirmations)
         {
+            Onset = onset,
             AgeYears = SubjectScope == IntakeSubjectScope.Human && !string.IsNullOrWhiteSpace(AgeYearsText)
                 ? int.Parse(AgeYearsText, System.Globalization.CultureInfo.InvariantCulture) : null,
             Gender = SubjectScope == IntakeSubjectScope.Human ? Gender : null
@@ -391,6 +434,25 @@ public sealed class PublicReportDraft : IValidatableObject
         }
     }
 
+    internal bool HasValidExactOnset() => TryGetExactOnset(out _);
+
+    private bool TryGetExactOnset(out ReportedTime? onset)
+    {
+        onset = null;
+        if (OnsetPrecision != ReportedTimePrecision.Exact || !OnsetDate.HasValue ||
+            !TimeOnly.TryParse(OnsetTime, out var time) || !TryParseOffset(OnsetOffset, out var offset))
+            return false;
+
+        try
+        {
+            var local = DateOnly.FromDateTime(OnsetDate.Value).ToDateTime(time, DateTimeKind.Unspecified);
+            onset = new ReportedTime(new DateTimeOffset(local, offset).ToUniversalTime(), null, null, null,
+                FormatOffset(offset), OnsetZoneId, ReportedTimePrecision.Exact);
+            return true;
+        }
+        catch (ArgumentOutOfRangeException) { return false; }
+    }
+
     private static (DateTime? Date, string? Time, string? Offset) ToLocalOccurrence(ReportedTime occurrence)
     {
         if (occurrence.Value is { } instant)
@@ -410,7 +472,7 @@ public sealed class PublicReportDraft : IValidatableObject
         return (date?.ToDateTime(TimeOnly.MinValue), null, occurrence.OriginalOffset);
     }
 
-    /// <summary>Formats an offset exactly as the intake contract requires (signed ±HH:mm).</summary>
+    /// <summary>Formats an offset exactly as the intake contract requires (signed Â±HH:mm).</summary>
     private static string FormatOffset(TimeSpan offset)
     {
         var absolute = offset.Duration();

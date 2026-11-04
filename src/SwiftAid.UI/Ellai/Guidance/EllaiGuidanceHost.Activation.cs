@@ -111,7 +111,7 @@ public partial class EllaiGuidanceHost
         if (draftEdits.Length > 0)
         {
             if (draftEdits.Length == 1 && newlyCompleted && draftEdits[0].ProposalId != _lastReportDraftEditProposalId &&
-                draftEdits[0].Proposal is { FeatureId: "report", ResourceId: null, ControlId: "report.age-years" or "report.gender" or "report.other-observations" or "report.locality" or "report.original-statement", Arguments.Count: 0 } &&
+                draftEdits[0].Proposal is { FeatureId: "report", ResourceId: null, ControlId: "report.age-years" or "report.gender" or "report.other-observations" or "report.locality" or "report.original-statement" or "report.onset-date", Arguments.Count: 0 } &&
                 turn.UserText is { } userText)
             {
                 _lastReportDraftEditProposalId = draftEdits[0].ProposalId;
@@ -127,6 +127,8 @@ public partial class EllaiGuidanceHost
                                     : context?.ApplyReportedObservation(userText) == true
                             : controlId == "report.locality"
                                 ? context?.ApplyReportedLocality(userText) == true
+                                : controlId == "report.onset-date"
+                                    ? context?.ApplyReportedOnsetDate(userText) == true
                                 : context?.ApplyReportNarrativeStatement(userText) == true;
                 _guidanceNotice = applied
                     ? controlId == "report.age-years"
@@ -139,6 +141,8 @@ public partial class EllaiGuidanceHost
                                     : "Added your reported observation to the open report draft. Review it before submitting."
                                 : controlId == "report.locality"
                                     ? "Added the reported locality to the open report draft. Review it before submitting."
+                                    : controlId == "report.onset-date"
+                                        ? "Added the explicitly reported symptom or sign onset date to the open draft. Review it before submitting."
                                     : "Added your reported statement to the open report draft. Review it before submitting."
                     : controlId == "report.age-years"
                         ? "I could not update the age. Open the report details and enter it there."
@@ -150,6 +154,8 @@ public partial class EllaiGuidanceHost
                                 : "I could not add that statement as an observation. Enter it in the report details instead."
                                 : controlId == "report.locality"
                                     ? "I could not add that locality. Enter it in the report details instead."
+                                    : controlId == "report.onset-date"
+                                        ? "I could not capture that onset date. Enter the explicitly reported date in the onset field instead."
                                     : "I could not add that statement to the report details.";
             }
             return;

@@ -229,6 +229,39 @@
                               For="@(() => Draft.ObservationsText)" />
                 </div>
 
+                <MudSelect T="ReportedTimePrecision" Label="When did symptoms or signs start?" Variant="Variant.Outlined" @bind-Value="Draft.OnsetPrecision">
+                    <MudSelectItem Value="ReportedTimePrecision.Unknown">Unknown</MudSelectItem>
+                    <MudSelectItem Value="ReportedTimePrecision.Approximate">Approximate date</MudSelectItem>
+                    <MudSelectItem Value="ReportedTimePrecision.DateOnly">Date only</MudSelectItem>
+                    <MudSelectItem Value="ReportedTimePrecision.Exact">Exact time</MudSelectItem>
+                </MudSelect>
+                @if (Draft.OnsetPrecision != ReportedTimePrecision.Unknown)
+                {
+                    <div data-bonboarding-anchor="ellai-report-onset-date">
+                    <MudTextField T="string" Label="Reported onset date" InputType="InputType.Text" Placeholder="YYYY-MM-DD"
+                                  HelperText="Use the date the reporter says symptoms or signs began. Leave it unknown if not known."
+                                  Variant="Variant.Outlined" Immediate="true"
+                                  Value="@(Draft.OnsetDateText ?? Draft.OnsetDate?.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture))"
+                                  ValueChanged="OnsetDateChangedAsync" For="@(() => Draft.OnsetDateText)" />
+                    </div>
+                }
+                @if (Draft.OnsetPrecision == ReportedTimePrecision.Exact)
+                {
+                    <div class="guided-report__grid">
+                        <div data-bonboarding-anchor="ellai-report-onset-time">
+                        <MudTextField T="string" Label="Reported onset time" InputType="InputType.Text" Placeholder="HH:MM"
+                                      HelperText="Enter the reported 24-hour local time."
+                                      Variant="Variant.Outlined" Immediate="true"
+                                      @bind-Value="Draft.OnsetTime" For="@(() => Draft.OnsetTime)" />
+                        </div>
+                        <div data-bonboarding-anchor="ellai-report-onset-utc-offset">
+                        <MudTextField T="string" Label="Onset time difference from UTC" Placeholder="+02:00"
+                                      HelperText="Enter the reported time difference; do not guess it."
+                                      Variant="Variant.Outlined" @bind-Value="Draft.OnsetOffset" For="@(() => Draft.OnsetOffset)" />
+                        </div>
+                    </div>
+                }
+
                 <MudSelect T="ReportedTimePrecision" Label="When did this happen?" Variant="Variant.Outlined" @bind-Value="Draft.OccurrencePrecision">
                     <MudSelectItem Value="ReportedTimePrecision.Unknown">Unknown</MudSelectItem>
                     <MudSelectItem Value="ReportedTimePrecision.Approximate">Approximate date</MudSelectItem>
@@ -354,7 +387,8 @@
                     }
                     <div><dt>Original statement</dt><dd>@UnknownIfEmpty(Draft.Narrative)</dd><dd class="guided-report__provenance">Your words, shown as entered</dd></div>
                     <div><dt>Separate observations</dt><dd>@ObservationSummary</dd><dd class="guided-report__provenance">You entered these details. No others were added.</dd></div>
-                    <div><dt>Reported time</dt><dd>@TimeSummary</dd><dd class="guided-report__provenance">@(Draft.OccurrencePrecision == ReportedTimePrecision.Unknown ? "Not provided; remains unknown" : "From the time you entered")</dd></div>
+                    <div><dt>Reported symptom or sign onset</dt><dd>@OnsetSummary</dd><dd class="guided-report__provenance">@(Draft.OnsetPrecision == ReportedTimePrecision.Unknown ? "Not provided; remains unknown" : "From the onset details you entered")</dd></div>
+                    <div><dt>Event occurrence time</dt><dd>@TimeSummary</dd><dd class="guided-report__provenance">@(Draft.OccurrencePrecision == ReportedTimePrecision.Unknown ? "Not provided; remains unknown" : "From the time you entered")</dd></div>
                     <div><dt>Country</dt><dd>@CountrySummary</dd><dd class="guided-report__provenance">@(string.IsNullOrWhiteSpace(Draft.CountryCode) ? "Not provided; remains unknown" : "You selected this")</dd></div>
                     <div><dt>Location</dt><dd>@LocationSummary</dd><dd class="guided-report__provenance">@LocationProvenance</dd></div>
                     <div><dt>Animal type or group</dt><dd>Unknown</dd><dd class="guided-report__provenance">Not asked here; remains unknown.</dd></div>
@@ -846,6 +880,17 @@
                 existing.Where(value => !string.Equals(value, matches[0], StringComparison.Ordinal)));
             _editContext.NotifyFieldChanged(new FieldIdentifier(Draft, nameof(Draft.ObservationsText)));
             return true;
+        }, onsetDate =>
+        {
+            Draft.OnsetPrecision = ReportedTimePrecision.DateOnly;
+            Draft.OnsetDate = onsetDate.ToDateTime(TimeOnly.MinValue);
+            Draft.OnsetDateText = onsetDate.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+            Draft.OnsetTime = null;
+            Draft.OnsetOffset = null;
+            Draft.OnsetZoneId = null;
+            _editContext.NotifyFieldChanged(new FieldIdentifier(Draft, nameof(Draft.OnsetPrecision)));
+            _editContext.NotifyFieldChanged(new FieldIdentifier(Draft, nameof(Draft.OnsetDateText)));
+            return true;
         });
         if (!EllaiDraftContext.FlushPending(this))
             _stepError = "Some details from this Ellai report conversation could not fit the form. Review the report and add those details manually.";
@@ -895,6 +940,14 @@
         ReportedTimePrecision.Exact => $"{Draft.OccurrenceDate?.ToString("d") ?? "Unknown date"} {Draft.OccurrenceTime ?? "Unknown time"} {Draft.OccurrenceOffset ?? "Unknown offset"}",
         ReportedTimePrecision.DateOnly => Draft.OccurrenceDate?.ToString("d") ?? "Date unknown",
         _ => Draft.OccurrenceDate is { } date ? $"Approximately {date:d}" : "Approximately; date unknown"
+    };
+
+    private string OnsetSummary => Draft.OnsetPrecision switch
+    {
+        ReportedTimePrecision.Unknown => "Unknown",
+        ReportedTimePrecision.Exact => $"{Draft.OnsetDate?.ToString("d") ?? "Unknown date"} {Draft.OnsetTime ?? "Unknown time"} {Draft.OnsetOffset ?? "Unknown offset"}",
+        ReportedTimePrecision.DateOnly => Draft.OnsetDate?.ToString("d") ?? "Date unknown",
+        _ => Draft.OnsetDate is { } date ? $"Approximately {date:d}" : "Approximately; date unknown"
     };
 
     private string CountrySummary => string.IsNullOrWhiteSpace(Draft.CountryCode)
@@ -1287,6 +1340,23 @@
             isValid = false;
         }
 
+        if (Draft.OnsetPrecision != ReportedTimePrecision.Unknown && !Draft.OnsetDate.HasValue)
+        {
+            AddError(nameof(Draft.OnsetDateText), "Enter the reported symptom or sign onset date, or choose that it is unknown.");
+            isValid = false;
+        }
+        if (Draft.OnsetPrecision == ReportedTimePrecision.Exact && !HasValidExactOnsetTime())
+        {
+            AddError(nameof(Draft.OnsetTime), "For an exact onset time, enter the local time and its reported offset from UTC.");
+            isValid = false;
+        }
+        if (Draft.OnsetPrecision == ReportedTimePrecision.Exact && Draft.OnsetDate.HasValue &&
+            HasValidExactOnsetTime() && !Draft.HasValidExactOnset())
+        {
+            AddError(nameof(Draft.OnsetDateText), "Check that the onset date, time and UTC offset can be combined.");
+            isValid = false;
+        }
+
         if (!PublicReportDraft.IsValidPlaceName(Draft.RegionPresence, Draft.Region) ||
             !PublicReportDraft.IsValidPlaceName(Draft.AreaPresence, Draft.Area) ||
             !PublicReportDraft.IsValidPlaceName(Draft.LocalityPresence, Draft.Locality))
@@ -1326,6 +1396,14 @@
         return Task.CompletedTask;
     }
 
+    private Task OnsetDateChangedAsync(string? value)
+    {
+        Draft.OnsetDateText = value;
+        Draft.OnsetDate = PublicReportDraft.ParseOccurrenceDate(value);
+        _editContext.NotifyFieldChanged(new FieldIdentifier(Draft, nameof(Draft.OnsetDateText)));
+        return Task.CompletedTask;
+    }
+
     private bool HasValidExactTime()
     {
         return TimeOnly.TryParse(Draft.OccurrenceTime, out _) && HasValidOccurrenceOffset();
@@ -1335,6 +1413,10 @@
     {
         return PublicReportDraft.TryParseOffset(Draft.OccurrenceOffset, out _);
     }
+
+    private bool HasValidExactOnsetTime() => TimeOnly.TryParse(Draft.OnsetTime, out _) && HasValidOnsetOffset();
+
+    private bool HasValidOnsetOffset() => PublicReportDraft.TryParseOffset(Draft.OnsetOffset, out _);
 
     private void ClearStepValidation()
     {
@@ -1597,6 +1679,12 @@
         actual.OccurrenceTime == expected.OccurrenceTime &&
         actual.OccurrenceOffset == expected.OccurrenceOffset &&
         actual.TimeNote == expected.TimeNote &&
+        actual.OnsetPrecision == expected.OnsetPrecision &&
+        actual.OnsetDate == expected.OnsetDate &&
+        actual.OnsetDateText == expected.OnsetDateText &&
+        actual.OnsetTime == expected.OnsetTime &&
+        actual.OnsetOffset == expected.OnsetOffset &&
+        actual.OnsetZoneId == expected.OnsetZoneId &&
         actual.CapturedAt == expected.CapturedAt &&
         actual.LocationUnknown == expected.LocationUnknown &&
         actual.CountryCode == expected.CountryCode &&

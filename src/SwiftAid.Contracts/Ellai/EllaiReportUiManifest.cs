@@ -76,6 +76,10 @@ public static class EllaiReportUiManifest
         "report.time-location" =>
         [
             new("report.time-precision", "When did this happen?", "selection", true, "Details page", "Unknown, approximate date, date only or exact time; preserve uncertainty."),
+            new("report.onset-precision", "When did symptoms or signs start?", "selection", true, "Details page", "Unknown, approximate date, date only or exact time; keep reported onset distinct from occurrence and upload times."),
+            new("report.onset-date", "Reported symptom or sign onset date", "date", true, "Onset precision is not Unknown", "Enter only the reported onset date as YYYY-MM-DD."),
+            new("report.onset-time", "Reported onset time", "time", true, "Onset precision is Exact", "Enter the reported 24-hour local onset time."),
+            new("report.onset-utc-offset", "Onset time difference from UTC", "text", true, "Onset precision is Exact", "Provide the reported UTC offset; do not guess it."),
             new("report.occurrence-date", "Reported date", "date", true, "Time precision is not Unknown", "Enter the reported date as YYYY-MM-DD."),
             new("report.occurrence-time", "Reported time", "time", true, "Time precision is Exact", "Enter a 24-hour time and a valid UTC offset."),
             new("report.utc-offset", "Time difference from UTC", "text", true, "Time precision is Exact", "Provide a valid UTC offset, such as +02:00, matching the reported time."),

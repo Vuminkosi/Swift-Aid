@@ -148,6 +148,33 @@
                     <InputText id="public-time-note" class="public-report__control" maxlength="160" @bind-Value="_draft.TimeNote" />
                 }
 
+                <div class="public-report__grid">
+                    <div>
+                        <label class="public-report__label" for="public-onset-precision">When did symptoms or signs start?</label>
+                        <InputSelect TValue="ReportedTimePrecision" id="public-onset-precision" class="public-report__control" @bind-Value="_draft.OnsetPrecision">
+                            <option value="@ReportedTimePrecision.Unknown">I do not know</option>
+                            <option value="@ReportedTimePrecision.DateOnly">Date only</option>
+                            <option value="@ReportedTimePrecision.Approximate">Approximate date</option>
+                            <option value="@ReportedTimePrecision.Exact">Exact date and time</option>
+                        </InputSelect>
+                    </div>
+                    @if (_draft.OnsetPrecision != ReportedTimePrecision.Unknown)
+                    {
+                        <div>
+                            <label class="public-report__label" for="public-onset-date">Reported onset date</label>
+                            <InputDate TValue="DateTime?" id="public-onset-date" class="public-report__control" @bind-Value="_draft.OnsetDate" />
+                        </div>
+                    }
+                </div>
+                @if (_draft.OnsetPrecision == ReportedTimePrecision.Exact)
+                {
+                    <span class="public-report__hint">Enter only onset details you know. Do not guess the time difference from UTC.</span>
+                    <label class="public-report__label" for="public-onset-time">Reported local onset time</label>
+                    <InputText id="public-onset-time" type="time" class="public-report__control" @bind-Value="_draft.OnsetTime" />
+                    <label class="public-report__label" for="public-onset-offset">Onset time difference from UTC <span>(required for an exact time; for example, +02:00)</span></label>
+                    <InputText id="public-onset-offset" class="public-report__control" maxlength="9" @bind-Value="_draft.OnsetOffset" />
+                }
+
                 <label class="public-report__unknown">
                     <InputCheckbox @bind-Value="_draft.LocationUnknown" @bind-Value:after="HandleLocationUnknownChanged" />
                     <span>The event location is unknown</span>
@@ -223,6 +250,11 @@
                         <dt>Reported time</dt>
                         <dd>@TimeSummary</dd>
                         <dd class="public-report__fact-source">@TimeProvenance</dd>
+                    </div>
+                    <div>
+                        <dt>Reported symptom or sign onset</dt>
+                        <dd>@OnsetSummary</dd>
+                        <dd class="public-report__fact-source">@(_draft.OnsetPrecision == ReportedTimePrecision.Unknown ? "Not provided; remains unknown" : "From the onset details you entered")</dd>
                     </div>
                     <div>
                         <dt>Reported place</dt>
@@ -468,6 +500,14 @@
     private string TimeProvenance => _draft.OccurrencePrecision == ReportedTimePrecision.Unknown
         ? "Not provided; remains unknown"
         : "From the time you entered, not when you sent the report";
+
+    private string OnsetSummary => _draft.OnsetPrecision switch
+    {
+        ReportedTimePrecision.Unknown => "Unknown",
+        ReportedTimePrecision.Exact => $"{_draft.OnsetDate?.ToString("d") ?? "Unknown date"} {_draft.OnsetTime ?? "Unknown time"} {_draft.OnsetOffset ?? "Unknown offset"}",
+        ReportedTimePrecision.DateOnly => _draft.OnsetDate?.ToString("d") ?? "Date unknown",
+        _ => _draft.OnsetDate is { } date ? $"Approximately {date:d}" : "Approximately; date unknown"
+    };
 
     private string LocationSummary
     {
