@@ -33,7 +33,7 @@ public sealed class EllaiCaseSpecialist(IChatClient client, IEllaiFrameworkAgent
         {
             var result = await invoke(child, request, token).ConfigureAwait(false);
             if (result.Allowed) observations.Add((request, result));
-            else deniedObservation = true;
+            else if (result.ReasonCode != EllaiToolReasonCodes.InvalidArguments) deniedObservation = true;
             return result;
         }
         var revalidationFailed = false;

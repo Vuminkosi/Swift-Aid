@@ -26,7 +26,7 @@ internal sealed class EllaiMvpReadSpecialist(IChatClient client, IEllaiFramework
         {
             var result = await invoke(child, request, token).ConfigureAwait(false);
             if (result.Allowed) observations.Add((request, result));
-            else deniedObservation = true;
+            else if (result.ReasonCode != EllaiToolReasonCodes.InvalidArguments) deniedObservation = true;
             return result;
         }
         async Task<bool> RevalidateObservations(CancellationToken token)

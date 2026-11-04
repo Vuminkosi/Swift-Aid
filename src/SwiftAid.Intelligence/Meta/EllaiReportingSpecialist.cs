@@ -26,7 +26,7 @@ public sealed class EllaiReportingSpecialist(IChatClient client, IEllaiFramework
         {
             var result = await invoke(child, request, token).ConfigureAwait(false);
             if (result.Allowed) observations.Add((request, result));
-            else deniedObservation = true;
+            else if (result.ReasonCode != EllaiToolReasonCodes.InvalidArguments) deniedObservation = true;
             return result;
         }
         var agent = new EllaiFrameworkAgent(client, agentFactory);
