@@ -13,12 +13,97 @@ using SwiftAid.Infrastructure.Classification;
 using SwiftAid.Infrastructure.Persistence;
 using SwiftAid.Infrastructure.Persistence.Classification;
 using SwiftAid.Intelligence.Meta;
+using System.Diagnostics;
+using System.Text.Json;
 
 namespace SwiftAid.Integration.Tests;
 
 [Collection(IntakePostgresCollection.Name)]
 public sealed class ClassificationRegistryTests
 {
+    [CachedBartPostgresFact]
+    public async Task Real_bart_result_is_read_by_framework_without_source_or_lease_disclosure()
+    {
+        await using var fixture = await CaseImportPostgresTests.Fixture.CreateAsync();
+        var notice = await ImportAsync(fixture);
+        var settings = Settings();
+        var registry = Registry(fixture, options: settings);
+        var lease = (await registry.ClaimAsync(notice, default)).Lease!;
+        var container = "ellai-bart-fixture-" + Guid.NewGuid().ToString("N");
+        var start = new ProcessStartInfo("docker")
+        {
+            RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true,
+            UseShellExecute = false, CreateNoWindow = true
+        };
+        foreach (var argument in new[] { "run", "--rm", "-i", "--name", container, "--network", "none",
+            "--mount", "type=volume,source=swiftaid_classification-model-data,target=/models,readonly",
+            "-e", "HF_HOME=/models", "-e", "HF_HUB_OFFLINE=1", "-e", "TRANSFORMERS_OFFLINE=1",
+            "--entrypoint", "/app/.venv/bin/python", "swiftaid/classification-worker:ellai-candidate", "-c",
+            "import asyncio,json,sys; from swiftaid_workers.classification.bart import BartClassifier; " +
+            "json.dump(asyncio.run(BartClassifier().classify(json.load(sys.stdin))),sys.stdout)" })
+            start.ArgumentList.Add(argument);
+        using var process = Process.Start(start)!;
+        try
+        {
+            var output = process.StandardOutput.ReadToEndAsync();
+            var errors = process.StandardError.ReadToEndAsync();
+            await process.StandardInput.WriteAsync(JsonSerializer.Serialize(lease, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+            process.StandardInput.Close();
+            using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(4));
+            await process.WaitForExitAsync(timeout.Token);
+            var json = await output;
+            var diagnostics = await errors;
+            Assert.True(process.ExitCode == 0, $"BART fixture exited {process.ExitCode}: {diagnostics}");
+            var completion = JsonSerializer.Deserialize<ClassificationCompletion>(json, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+            Assert.NotNull(completion);
+            Assert.NotEmpty(completion.Predictions);
+            Assert.Null(completion.AbstentionReason);
+            Assert.Equal("Completed", await registry.CompleteAsync(completion, default));
+            fixture.Db.ChangeTracker.Clear();
+            var unit = new PostgresCaseCommandUnitOfWork(fixture.Db);
+            var policy = new CaseAccessPolicy(new PostgresCurrentAccessGrantStore(fixture.Db, unit), new PostgresCaseAccessDescriptorStore(fixture.Db, unit));
+            var query = new PostgresCaseClassificationQuery(fixture.Db, policy, unit, Options.Create(settings));
+            var broker = new EllaiToolBroker(new EllaiPolicyService(), new EllaiConsentService(), classification: query);
+            using var model = new ClassificationToolClient(notice.SourceId);
+            var executor = new EllaiFrameworkExecutor(model, new EllaiPromptBuilder("Synthetic policy", "fixture"),
+                broker, new EllaiUsageLedger(), new InMemoryEllaiUsageStore());
+            var work = new EllaiUtteranceWork("real-bart-session", "scope", "Read classification evidence.",
+                "public.product-help", null, EllaiMode.Ask, 1, "cycle", CaseImportPostgresTests.Actor, true, "consent/0",
+                EllaiProcessingClassification.UserProvidedNonSensitive, EllaiProcessingClassification.UserProvidedNonSensitive,
+                new HashSet<string> { EllaiToolNames.ClassificationEvidence }, EllaiConsentService.PublicProductHelpPurpose, "turn");
+            var turn = await EllaiUtteranceRunner.RunOneAsync(work,
+                new EllaiUtteranceServices(executor, null, null, new EllaiConsentService(), InvokeToolAsync: broker.InvokeAsync), 1024, default);
+            Assert.True(turn.Completed, turn.FailureCode);
+            Assert.True(model.SawToolResult);
+            Assert.Contains(lease.ResultId.ToString("D"), model.ToolResultText, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain(lease.LeaseId.ToString("D"), model.ToolResultText);
+            Assert.DoesNotContain(lease.Text, model.ToolResultText);
+        }
+        finally
+        {
+            if (!process.HasExited)
+            {
+                using var stop = Process.Start(new ProcessStartInfo("docker")
+                {
+                    ArgumentList = { "stop", container }, UseShellExecute = false, CreateNoWindow = true,
+                    RedirectStandardOutput = true, RedirectStandardError = true
+                });
+                if (stop is not null) await stop.WaitForExitAsync();
+                await process.WaitForExitAsync();
+            }
+        }
+    }
+
+    private sealed class CachedBartPostgresFactAttribute : FactAttribute
+    {
+        public CachedBartPostgresFactAttribute()
+        {
+            if (Environment.GetEnvironmentVariable("SWIFTAID_RUN_CLASSIFICATION_LIVE") != "1" ||
+                Environment.GetEnvironmentVariable("SWIFTAID_RUN_INTAKE_POSTGRES_FIXTURES") != "1")
+                Skip = "Requires opt-in disposable PostgreSQL, the local classification image and cached BART volume.";
+        }
+    }
+
     [IntakePostgresFact]
     public async Task Newer_projection_revision_emits_one_durable_supersession_without_replacing_predictions()
     {
