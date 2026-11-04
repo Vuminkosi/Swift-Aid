@@ -233,7 +233,7 @@ public static class EllaiAuthorizedConversationContext
                     if (queue is null || query is null || !query.IsValid() ||
                         observation.QueueProjectionVersion != EllaiObservedToolResult.CurrentQueueProjectionVersion)
                         return decisions[decisionKey] = false;
-                    if (query.PlaceId is not null)
+                    if (query.PlaceId is not null || query.GroupBy is not null)
                     {
                         if (toolContext is null || invokeTool is null || toolContext.SessionId != turn.SessionId ||
                             toolContext.Actor is null || toolContext.Actor.ActorId != actor.ActorId ||
@@ -243,9 +243,13 @@ public static class EllaiAuthorizedConversationContext
                         {
                             var arguments = new Dictionary<string, string>
                             {
-                                ["projection"] = "queue", ["limit"] = query.Limit.ToString(CultureInfo.InvariantCulture),
-                                ["country"] = query.Country!, ["sort"] = "latest-reported", ["place_id"] = query.PlaceId
+                                ["projection"] = "queue", ["limit"] = query.Limit.ToString(CultureInfo.InvariantCulture)
                             };
+                            if (query.Country is not null) arguments["country"] = query.Country;
+                            if (query.Workflow is not null) arguments["workflow"] = query.Workflow;
+                            if (query.Sort is not null) arguments["sort"] = query.Sort;
+                            if (query.PlaceId is not null) arguments["place_id"] = query.PlaceId;
+                            if (query.GroupBy is not null) arguments["group_by"] = query.GroupBy;
                             if (query.ReportedFrom is not null) arguments["reported_from"] = query.ReportedFrom;
                             if (query.ReportedBefore is not null) arguments["reported_before"] = query.ReportedBefore;
                             var request = new EllaiToolRequest(EllaiToolNames.State, arguments);

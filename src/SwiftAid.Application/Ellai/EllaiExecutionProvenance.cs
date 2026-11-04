@@ -35,7 +35,7 @@ public sealed record EllaiObservedToolResult(
     public const string CurrentStaticFeatureVersion = "state-feature/1";
     public const string CurrentClockVersion = "server-clock/1";
     public const string CurrentCapabilityVersion = "capability-descriptor/1";
-    public const string CurrentQueueProjectionVersion = "state-queue/2";
+    public const string CurrentQueueProjectionVersion = "state-queue/3";
     public static EllaiObservedToolResult From(EllaiToolRequest request, EllaiToolResult result)
     {
         EllaiImportListScope? scope = null;
@@ -56,7 +56,7 @@ public sealed record EllaiObservedToolResult(
             var candidate = new EllaiCaseListQuery(limit, request.Arguments.GetValueOrDefault("country"),
                 request.Arguments.GetValueOrDefault("workflow"), request.Arguments.GetValueOrDefault("sort"),
                 request.Arguments.GetValueOrDefault("place_id"), request.Arguments.GetValueOrDefault("reported_from"),
-                request.Arguments.GetValueOrDefault("reported_before"));
+                request.Arguments.GetValueOrDefault("reported_before"), request.Arguments.GetValueOrDefault("group_by"));
             if (candidate.IsValid()) caseQuery = candidate;
         }
         var staticFeature = request.ToolName == EllaiToolNames.State && result.Allowed &&
@@ -93,7 +93,7 @@ public sealed record EllaiObservedToolResult(
                 result.ItemCount == result.Evidence.Count && result.Evidence.Count <= 20
                     ? ReceiptListFingerprint(result) : null,
             receiptLookupId,
-            caseQuery?.PlaceId is not null && result.Allowed && result.DenialReason is null &&
+            (caseQuery?.PlaceId is not null || caseQuery?.GroupBy is not null) && result.Allowed && result.DenialReason is null &&
                 result.ReasonCode == EllaiToolReasonCodes.Ok && result.ItemCount == result.Evidence.Count
                     ? CaseListFingerprint(result) : null,
             request.ToolName == EllaiToolNames.Evidence && result.ToolName == request.ToolName && result.Allowed &&
@@ -257,14 +257,15 @@ public sealed record EllaiImportListScope(string WorkspaceId, string Organizatio
         CountryCode is { Length: 2 } && CountryCode.All(character => character is >= 'A' and <= 'Z');
 }
 
-/// <summary>The existing owned-case query options needed to recheck list membership.</summary>
+/// <summary>The existing authorized case-query options needed to recheck list membership.</summary>
 public sealed record EllaiCaseListQuery(int Limit, string? Country, string? Workflow, string? Sort,
-    string? PlaceId = null, string? ReportedFrom = null, string? ReportedBefore = null)
+    string? PlaceId = null, string? ReportedFrom = null, string? ReportedBefore = null, string? GroupBy = null)
 {
     public bool IsValid() => Limit is >= 1 and <= 20 &&
         (Country is null || Country.Length == 2 && Country.All(character => character is >= 'A' and <= 'Z')) &&
         (Workflow is null or "Reported" or "UnderReview" or "Active" or "AwaitingFollowUp" or "Resolved") &&
         (Sort is null or "latest-reported" or "latest-updated") &&
+        (GroupBy is null || GroupBy == "region" && Country is not null && PlaceId is null && Sort != "latest-updated") &&
         (PlaceId is null || Country is not null && Workflow is null && Sort == "latest-reported" &&
             !string.IsNullOrWhiteSpace(PlaceId) && PlaceId.Length <= 120 && PlaceId == PlaceId.Trim()) &&
         TryGetReportedRange(out _, out _);
