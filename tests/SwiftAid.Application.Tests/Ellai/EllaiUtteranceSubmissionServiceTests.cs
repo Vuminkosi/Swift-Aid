@@ -10,6 +10,36 @@ namespace SwiftAid.Application.Tests.Ellai;
 public sealed class EllaiUtteranceSubmissionServiceTests
 {
     [Theory]
+    [InlineData("typed", true, 0, true)]
+    [InlineData("live-voice", true, 0, true)]
+    [InlineData("recorded-voice", true, 0, true)]
+    [InlineData("typed", true, 31, false)]
+    [InlineData("typed", false, 0, false)]
+    public async Task OpenCaseContextIsFreshAdvisoryAndSharedWithVoice(string mode, bool workspace, int ageSeconds, bool expected)
+    {
+        var store = new InMemoryEllaiSessionStore();
+        var principal = AuthenticatedPrincipal("actor-one");
+        var session = await StartSessionAsync(store, principal);
+        if (workspace)
+        {
+            var current = await store.GetAsync(session.SessionId, default);
+            await store.TryUpdateAsync(current! with { ScopeEpoch = "access-epoch-1" }, current.SessionVersion, default);
+        }
+        var observations = new InMemoryEllaiUiObservationStore();
+        var caseId = Guid.NewGuid();
+        await observations.RecordAsync(new(session.SessionId, "view", "stamp", "web", [],
+            DateTimeOffset.UtcNow.AddSeconds(-ageSeconds), CurrentNavigationId: EllaiCaseDetailUiManifest.NavigationId,
+            CurrentCaseId: caseId), default);
+        var service = new EllaiUtteranceSubmissionService(store, new EllaiConsentService(), observations);
+        var result = await service.SubmitAsync(session.SessionId, Request(session, "explain"), principal, default, mode);
+        Assert.Equal(EllaiClientOperationStatus.Accepted, result.Status);
+        var item = await store.ClaimNextAsync(DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddMinutes(1), default);
+        var work = EllaiUtteranceWorkEnvelope.Deserialize(item!.PayloadJson).ToWork();
+        Assert.Equal(expected ? caseId.ToString("D") : null, work.ResourceId);
+        Assert.Equal(expected ? "case-details" : null, work.ActivePage);
+    }
+
+    [Theory]
     [InlineData("typed")]
     [InlineData("live-voice")]
     [InlineData("recorded-voice")]
@@ -55,7 +85,7 @@ public sealed class EllaiUtteranceSubmissionServiceTests
         Assert.NotNull(item);
         var envelope = EllaiUtteranceWorkEnvelope.Deserialize(item!.PayloadJson);
         Assert.Equal(text, envelope.Utterance);
-        Assert.Equal(new[] { EllaiToolNames.ProductFacts, EllaiToolNames.IngestionSchema, EllaiToolNames.ValidateObservations, EllaiToolNames.Locations, EllaiToolNames.UiCatalogue, EllaiToolNames.UiObserve }.Order(), envelope.AllowedTools!.Order());
+        Assert.Equal(new[] { EllaiToolNames.ProductFacts, EllaiToolNames.IngestionSchema, EllaiToolNames.ValidateObservations, EllaiToolNames.Locations, EllaiToolNames.UiCatalogue, EllaiToolNames.UiObserve, EllaiToolNames.PublicSessions, EllaiToolNames.Now, EllaiToolNames.Capabilities, EllaiToolNames.Receipts }.Order(), envelope.AllowedTools!.Order());
     }
 
     [Fact]
@@ -149,7 +179,7 @@ public sealed class EllaiUtteranceSubmissionServiceTests
             CancellationToken.None);
         Assert.NotNull(item);
         var envelope = EllaiUtteranceWorkEnvelope.Deserialize(item!.PayloadJson);
-        Assert.Equal(new[] { EllaiToolNames.ProductFacts, EllaiToolNames.IngestionSchema, EllaiToolNames.ValidateObservations, EllaiToolNames.Locations, EllaiToolNames.UiCatalogue, EllaiToolNames.UiObserve }.Order(), envelope.AllowedTools!.Order());
+        Assert.Equal(new[] { EllaiToolNames.ProductFacts, EllaiToolNames.IngestionSchema, EllaiToolNames.ValidateObservations, EllaiToolNames.Locations, EllaiToolNames.UiCatalogue, EllaiToolNames.UiObserve, EllaiToolNames.PublicSessions, EllaiToolNames.Now, EllaiToolNames.Capabilities, EllaiToolNames.Receipts }.Order(), envelope.AllowedTools!.Order());
     }
 
     [Fact]
@@ -177,7 +207,7 @@ public sealed class EllaiUtteranceSubmissionServiceTests
         var envelope = EllaiUtteranceWorkEnvelope.Deserialize(item!.PayloadJson);
         Assert.Equal(originalText, envelope.Utterance);
         Assert.Equal(EllaiConsentPurposes.PublicProductHelp, envelope.ConsentPurpose);
-        Assert.Equal(new[] { EllaiToolNames.ProductFacts, EllaiToolNames.IngestionSchema, EllaiToolNames.ValidateObservations, EllaiToolNames.Locations, EllaiToolNames.UiCatalogue, EllaiToolNames.UiObserve }.Order(), envelope.AllowedTools!.Order());
+        Assert.Equal(new[] { EllaiToolNames.ProductFacts, EllaiToolNames.IngestionSchema, EllaiToolNames.ValidateObservations, EllaiToolNames.Locations, EllaiToolNames.UiCatalogue, EllaiToolNames.UiObserve, EllaiToolNames.PublicSessions, EllaiToolNames.Now, EllaiToolNames.Capabilities, EllaiToolNames.Receipts }.Order(), envelope.AllowedTools!.Order());
         Assert.Equal(EllaiProcessingClassification.UserProvidedNonSensitive, envelope.DataClassification);
     }
 

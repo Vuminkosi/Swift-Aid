@@ -23,6 +23,11 @@
     flex: 1 1 12rem;
 }
 
+.operations-capability__list { display: grid; gap: 0.5rem; }
+.operations-capability__list ::deep .operations-capability__item { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.25rem 0.75rem; padding: 0.625rem 0.75rem; min-width: 0; overflow-wrap: anywhere; }
+.operations-capability__list ::deep .operations-capability__item .mud-typography { font-size: 0.8125rem; line-height: 1.35; }
+.operations-capability__list ::deep .operations-capability__item .mud-typography-subtitle2 { flex-basis: 100%; font-size: 0.875rem; }
+
 @media (max-width: 600px) {
     .operations-capability__header {
         align-items: flex-start;

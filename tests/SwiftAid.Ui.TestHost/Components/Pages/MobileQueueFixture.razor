@@ -1,0 +1,80 @@
+@page "/mobile-queue-fixture"
+@using SwiftAid.Contracts.Cases
+@using SwiftAid.Contracts.Intake
+@using SwiftAid.Contracts.Sessions
+@using SwiftAid.UI.Components.Cases
+@using SwiftAid.UI.Components.Coordination
+@using SwiftAid.UI.Components.Sessions
+@using SwiftAid.UI.Components.Surfaces.Operations
+@using SwiftAid.UI.Components.Theme
+
+<SwiftAidThemeProvider />
+<MudPopoverProvider />
+<main>
+    <h1>Mobile queue fixture</h1>
+    <CaseQueue Client="CaseClient" />
+    <OperationsCaseQueue Title="Fixture cases" State="OperationsSurfaceState.Populated" Items="WorkspaceRows" TotalCount="1" />
+    <MonitoringQueue Client="MonitoringClient" />
+    <OperationsCapabilitySurface Title="Fixture results" Description="Synthetic data" State="OperationsSurfaceState.Populated" Items="Results" />
+    <IntakeCoordinationQueue Client="CoordinationClient" />
+    <SessionConflictReview Proposal="Proposal" Current="Current" />
+    <OperationsMapSurface Title="Fixture map" Description="Synthetic totals" State="OperationsSurfaceState.Populated" Areas="Areas" FocusCountry="SZ" />
+</main>
+
+@code {
+    private static readonly ICaseQueueClient CaseClient = new FixtureCases();
+    private static readonly IMonitoringQueueClient MonitoringClient = new FixtureMonitoring();
+    private static readonly IIntakeCoordinationClient CoordinationClient = new FixtureCoordination();
+    private static readonly OperationsListItemView[] Results =
+    [new("1", "Fixture item", "Fixture summary", "Category A", "42", "Example area", "Active", new DateTimeOffset(2026, 1, 2, 12, 0, 0, TimeSpan.Zero))];
+    private static readonly OperationsCaseQueue.QueueViewRow[] WorkspaceRows =
+    [new(Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"), "Case aaaaaaaa", "UnderReview", "Eswatini",
+        OperationsCaseQueue.SectorKind.Human, null, "Assigned to you", "Reported category", DateTimeOffset.UtcNow,
+        null, "Synthetic observation")];
+    private static readonly OperationsMapSurface.AreaAggregateView[] Areas =
+    [new("SZ", "Eswatini", OperationsMapSurface.AggregatePrecision.Country, 12, 8, 20, false, null, DateTimeOffset.UtcNow)];
+    private static readonly DateTimeOffset Start = new(2026, 1, 2, 12, 0, 0, TimeSpan.Zero);
+    private static readonly Guid SessionId = Guid.Parse("22222222-2222-2222-2222-222222222222");
+    private static readonly SessionUpdateSubmission Proposal = new(SessionId, 1,
+        new UpdateSessionInput("Proposed title", "Proposed summary", "Community", [], "Presenter", "English", Start,
+            60, null, [], SessionVisibility.Public, SessionChannelType.None, null, []), "Correction");
+    private static readonly CommunitySessionView Current = new(SessionId, "fixture-org", 2, "Current title", "Current summary",
+        "Community", [], "SZ", "region", "education", "Presenter", "English", Start, "UTC", 60, null, [],
+        SessionVisibility.Public, SessionChannelType.None, null, [], "Draft", "fixture", null, false, 0, null);
+
+    private sealed class FixtureCases : ICaseQueueClient
+    {
+        public Task<CaseQueueResult> GetMineAsync(int? limit, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new CaseQueueResult(CaseQueueAccess.Allowed,
+                [new(Guid.Parse("11111111-1111-1111-1111-111111111111"), "Open", "SZ", "fixture", 1, new DateTimeOffset(2026, 1, 2, 12, 0, 0, TimeSpan.Zero))]));
+    }
+
+    private sealed class FixtureMonitoring : IMonitoringQueueClient
+    {
+        private static readonly MonitoringQueueResult Result = new(CaseQueueAccess.Allowed,
+            Enumerable.Range(0, 30).Select(index => new MonitoringQueueItem(
+                Guid.Parse("11111111-1111-1111-1111-111111111111"), MonitoringQueueKind.FollowUp, Guid.NewGuid(),
+                index == 0 ? "Synthetic follow-up" : $"Synthetic follow-up {index}", "private-actor-id", null,
+                "Pending", false, DateTimeOffset.UtcNow, 1)).ToArray());
+        public Task<MonitoringQueueResult> GetAssignedAsync(int? limit, CancellationToken cancellationToken = default) => Task.FromResult(Result);
+        public Task<MonitoringQueueResult> GetOpenAsync(int? limit, CancellationToken cancellationToken = default) => Task.FromResult(Result);
+    }
+
+    private sealed class FixtureCoordination : IIntakeCoordinationClient
+    {
+        private static readonly IntakeCoordinationQueueEntry Entry = new(Guid.Parse("33333333-3333-3333-3333-333333333333"),
+            IntakeStatus.ReceivedUnverified, IntakeRoutingStatus.NeedsRouting, null, "SZ", "region", "area", "1",
+            IntakeSubjectScope.Human, Start, 1, "fixture-worker", false);
+
+        public Task<(CoordinationQueueAccess Access, IReadOnlyList<IntakeCoordinationQueueEntry> Entries)> GetQueueAsync(
+            IntakeRoutingStatus? routingStatus, int limit, CancellationToken cancellationToken = default) =>
+            Task.FromResult<(CoordinationQueueAccess, IReadOnlyList<IntakeCoordinationQueueEntry>)>((CoordinationQueueAccess.Allowed, [Entry]));
+        public Task<IntakeCoordinationDetail?> GetDetailAsync(Guid receiptId, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IntakeCoordinationDetail?>(receiptId == Entry.ReceiptId ? new(Entry, []) : null);
+        public Task<IReadOnlyList<IntakeCoordinationQueueOption>> GetQueuesAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<IntakeCoordinationQueueOption>>([]);
+        public Task<CoordinationActionOutcome> ActAsync(Guid receiptId, long expectedVersion, IntakeCoordinationAction action,
+            string? targetQueueId, string reason, CancellationToken cancellationToken = default) =>
+            Task.FromResult(CoordinationActionOutcome.Unavailable);
+    }
+}

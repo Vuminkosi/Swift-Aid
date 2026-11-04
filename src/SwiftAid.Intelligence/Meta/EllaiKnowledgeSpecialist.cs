@@ -41,15 +41,18 @@ public sealed class EllaiKnowledgeSpecialist(IChatClient client, IEllaiFramework
 
         if (!EllaiSpecialistRegistry.TryGet(EllaiSpecialistRegistry.Knowledge, out var profile)) return new(EllaiSpecialistOutcome.Denied, null);
         var observations = new List<(EllaiToolRequest Request, EllaiToolResult Result)>();
+        var deniedObservation = false;
         async Task<EllaiToolResult> InvokeKnowledgeTool(EllaiToolContext child, EllaiToolRequest request, CancellationToken token)
         {
             var result = await invoke(child, request, token).ConfigureAwait(false);
             if (result.Allowed) observations.Add((request, result));
+            else if (result.ReasonCode != EllaiToolReasonCodes.InvalidArguments) deniedObservation = true;
             return result;
         }
         var revalidationFailed = false;
         async Task<bool> RevalidateObservations(CancellationToken token)
         {
+            if (deniedObservation) { revalidationFailed = true; return false; }
             foreach (var (request, original) in observations)
             {
                 if (!await isCurrent(token).ConfigureAwait(false)) { revalidationFailed = true; return false; }
@@ -59,7 +62,9 @@ public sealed class EllaiKnowledgeSpecialist(IChatClient client, IEllaiFramework
                 catch (Exception error) when (error is not OutOfMemoryException) { revalidationFailed = true; return false; }
                 if (!fresh.Allowed || fresh.ToolName != original.ToolName || fresh.Truncated != original.Truncated ||
                     fresh.ItemCount != original.ItemCount || fresh.ResultSummary != original.ResultSummary ||
-                    !fresh.Evidence.SequenceEqual(original.Evidence)) { revalidationFailed = true; return false; }
+                    !fresh.Evidence.SequenceEqual(original.Evidence) || fresh.CaseTimelineReplayScope != original.CaseTimelineReplayScope ||
+                    fresh.UiCatalogueReplayScope != original.UiCatalogueReplayScope || fresh.UiObservationReplayScope != original.UiObservationReplayScope)
+                { revalidationFailed = true; return false; }
             }
             var current = await isCurrent(token).ConfigureAwait(false);
             if (!current) revalidationFailed = true;
@@ -71,24 +76,32 @@ public sealed class EllaiKnowledgeSpecialist(IChatClient client, IEllaiFramework
         {
             decision = await agent.RunAsync(context, trustedPolicy +
                 "\nYou are the knowledge specialist, not the supervisor. Delegation is unavailable here: " +
-                "never call ellai_delegate_knowledge. Use only the supplied approved documentation tools. " +
+                "never call ellai_delegate_knowledge. Use approved documentation for documentation questions and any other admitted read tool when relevant to the user's SwiftAid question. " +
                 "Return an answer grounded in observed evidence; do not request actions or invent sources. " +
                 "Return only a JSON object with final_decision containing schemaVersion 2, kind Answer, displayText, " +
                 "spokenText, claims, questions, uiIntents, planProposal, topicRefs, resumeSuggestion and stopReason. " +
-                "Each factual claim must have claimId, text, kind Observed, and evidence copied exactly from a tool result. " +
+                "Each factual claim must have claimId, text, kind Observed, and evidence copied exactly from a tool result. For other admitted reads, each claim text must exactly match a returned source line; join claim texts with newlines for displayText and spokenText. " +
+                "When using a truncated case timeline, include its first line as a claim with the timeline evidence. " +
                 "Each evidence entry has sourceKind, resourceId, version, fieldPath and evidenceId. " +
                 "Use empty arrays for unused collections and null for unused optional values.",
-                [new ChatMessage(ChatRole.User, task)], 2048, isCurrent, InvokeKnowledgeTool, usage, ct, revalidateStreamObservations: RevalidateObservations, maxModelCalls: profile.MaxModelCalls).ConfigureAwait(false);
+                [new ChatMessage(ChatRole.User, task)], 2048, isCurrent, InvokeKnowledgeTool, usage, ct,
+                revalidateTool: revalidate ?? invoke, revalidateStreamObservations: RevalidateObservations, maxModelCalls: profile.MaxModelCalls).ConfigureAwait(false);
         }
         finally
         {
             onModelCalls?.Invoke(agent.LastModelCallCount);
         }
         if (revalidationFailed) return new(EllaiSpecialistOutcome.Stale, null);
+        if (EllaiSpecialistGrounding.IsFrameworkVerifiedDeterministic(decision, observations))
+            return new(EllaiSpecialistOutcome.Completed, decision);
         if (decision is null || decision.Kind != DecisionKind.Answer || decision.Claims.Count == 0 ||
             decision.UiIntents.Count != 0 || decision.PlanProposal is not null ||
             decision.Claims.Any(claim => claim.Kind is not (ClaimKind.Observed or ClaimKind.ProductFact) ||
-                claim.Evidence.Count == 0 || claim.Evidence.Any(reference => reference.SourceKind != "Documentation")))
+                claim.Evidence.Count == 0))
+            return new(EllaiSpecialistOutcome.Unverified, null);
+        if (!await RevalidateObservations(ct).ConfigureAwait(false)) return new(EllaiSpecialistOutcome.Stale, null);
+        if (!decision.Claims.All(claim => claim.Evidence.All(reference => reference.SourceKind == "Documentation")) &&
+            !EllaiSpecialistGrounding.IsGrounded(decision, observations))
             return new(EllaiSpecialistOutcome.Unverified, null);
 
         return new(EllaiSpecialistOutcome.Completed, decision);

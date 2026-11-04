@@ -10,7 +10,7 @@
             <MudText Typo="Typo.body2" Color="Color.Secondary">@Description</MudText>
         </div>
         <div class="operations-analytics__actions">
-            @if (State == OperationsSurfaceState.Populated && Metrics.Count > 0)
+            @if (AllowCsvExport && State == OperationsSurfaceState.Populated && Metrics.Count > 0)
             {
                 <a class="operations-analytics__download" href="@CsvDataUri" download="swiftaid-service-report.csv" aria-label="Download service report as CSV">
                     <MudIcon Icon="@Icons.Material.Filled.Download" aria-hidden="true" />
@@ -50,7 +50,7 @@
             <div class="operations-analytics__section-heading">
                 <div>
                     <MudText Typo="Typo.subtitle1" HtmlTag="h2" id="analytics-chart-title">Service activity</MudText>
-                    <MudText Typo="Typo.caption" Color="Color.Secondary">Counts and workload for @PeriodLabel. These figures do not describe health patterns or causes.</MudText>
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">Case counts for @PeriodLabel and current assigned workload. These figures do not describe health patterns or causes.</MudText>
                 </div>
                 @if (UpdatedAtUtc.HasValue)
                 {
@@ -58,7 +58,7 @@
                 }
             </div>
 
-            <div class="operations-analytics__bars" role="img" aria-label="Bar chart of service activity. A complete data table follows.">
+            <div class="operations-analytics__bars" role="img" aria-label="Bar chart of service activity. The figures follow below.">
                 @foreach (var metric in Metrics)
                 {
                     <div class="operations-analytics__bar-row" @key="metric.Id">
@@ -80,8 +80,8 @@
         </section>
 
         <section class="operations-analytics__data" aria-labelledby="analytics-data-title">
-            <MudText Typo="Typo.subtitle1" HtmlTag="h2" id="analytics-data-title">Data table</MudText>
-            <MudHidden Breakpoint="Breakpoint.SmAndDown">
+            <MudText Typo="Typo.subtitle1" HtmlTag="h2" id="analytics-data-title">Report figures</MudText>
+            <MudHidden Breakpoint="Breakpoint.MdAndDown">
                 <MudTable Items="Metrics" Dense="true" Hover="true" aria-label="Service activity report">
                     <HeaderContent>
                         <MudTh>Measure</MudTh>
@@ -104,7 +104,7 @@
                     <PagerContent><MudTablePager PageSizeOptions="new int[] { 10, 25, 50 }" /></PagerContent>
                 </MudTable>
             </MudHidden>
-            <MudHidden Breakpoint="Breakpoint.SmAndDown" Invert="true">
+            <MudHidden Breakpoint="Breakpoint.MdAndDown" Invert="true">
                 <div class="operations-analytics__mobile-table" role="list" aria-label="Service activity report">
                     @foreach (var metric in Metrics)
                     {
@@ -149,6 +149,7 @@
     [Parameter] public RenderFragment? FilterContent { get; set; }
     [Parameter] public EventCallback OnRetry { get; set; }
     [Parameter] public EventCallback OnPreviewExport { get; set; }
+    [Parameter] public bool AllowCsvExport { get; set; } = true;
 
     private string StateTitle => State switch
     {

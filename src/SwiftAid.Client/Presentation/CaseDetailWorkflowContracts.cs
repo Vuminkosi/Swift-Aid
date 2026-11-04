@@ -340,7 +340,8 @@ public enum CaseObservationCategory
 {
     Clinical,
     Environmental,
-    Community
+    Community,
+    Unknown
 }
 
 /// <summary>One attributed, descriptive observation; it does not state a diagnosis or urgency.</summary>

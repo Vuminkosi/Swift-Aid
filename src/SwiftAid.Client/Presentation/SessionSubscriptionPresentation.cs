@@ -18,6 +18,14 @@ public static class SessionSubscriptionPresentation
         !string.IsNullOrWhiteSpace(value.ConsentReference) && !string.IsNullOrWhiteSpace(value.ConsentText) &&
         value.Channels.All(Enum.IsDefined);
 
+    public static bool CanSubscribe(UiCapabilityResult<SubscriptionOptions> result, Guid sessionId,
+        string? consentReference, long expectedVersion, SubscriptionChannel? channel) =>
+        IsMatchingOptions(result, sessionId) && result.Value is { IsCurrent: true } options &&
+        expectedVersion > 0 && options.Version == expectedVersion &&
+        !string.IsNullOrWhiteSpace(consentReference) &&
+        string.Equals(options.ConsentReference, consentReference, StringComparison.Ordinal) &&
+        channel is { } selected && Enum.IsDefined(selected) && options.Channels.Contains(selected);
+
     // Subscribe carries a session version; unsubscribe carries a subscription version.
     public static bool IsConfirmedUpdate(UiCapabilityResult<SubscriptionView> result, Guid sessionId, SubscriptionStatus expectedStatus, long expectedVersion) =>
         sessionId != Guid.Empty && expectedVersion >= 0 && (expectedStatus is SubscriptionStatus.Active or SubscriptionStatus.Unsubscribed) &&

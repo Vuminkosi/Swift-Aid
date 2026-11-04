@@ -1,111 +1,601 @@
 #pragma warning disable BL0005 // Logic tests exercise component save-state transitions directly; production parameters are renderer-owned.
 using System.Reflection;
 using Microsoft.AspNetCore.Components;
-using SwiftAid.Contracts.Intake;
+using Microsoft.Extensions.DependencyInjection;
 using SwiftAid.Contracts.Geography;
+using SwiftAid.Contracts.Intake;
+using SwiftAid.Contracts.Ellai;
 using SwiftAid.UI.Components.Public;
 using SwiftAid.UI.Components.Public.GuidedReportStepper;
-using SwiftAid.UI.Ellai.Guidance;
-using Microsoft.Extensions.DependencyInjection;
+using SwiftAid.UI.Components.Geography;
 
 namespace SwiftAid.Ui.Tests;
 
 public sealed partial class GuidedReportDraftPersistenceTests
 {
     [Fact]
-    public async Task ValidationGuidanceMovesToNextInvalidFieldAfterCorrection()
+    public void ServerRejectionGuidesBackWithoutInventingAnInvalidFieldAndClearsAfterEdit()
     {
-        var component = CreateStepper(CreateDraft(string.Empty), _ => Task.CompletedTask);
-        var validation = new EllaiValidationGuidance();
-        var messages = new List<string?>();
-        validation.Changed += messages.Add;
-        using var services = new ServiceCollection().AddSingleton(validation).BuildServiceProvider();
-        typeof(GuidedReportStepper).GetProperty("Services", BindingFlags.NonPublic | BindingFlags.Instance)!
-            .SetValue(component, services);
-        component.Draft.OccurrencePrecision = ReportedTimePrecision.DateOnly;
-        await (Task)Invoke(component, "ContinueFromTypeAsync")!;
-        await (Task)Invoke(component, "ContinueToReviewAsync")!;
-        Assert.Equal(nameof(PublicReportDraft.Narrative), GetField<string>(component, "_validationField"));
-        Assert.Contains("Describe", GetField<string>(component, "_validationMessage"));
+        var draft = CreateDraft();
+        draft.CountryCode = "SZ";
+        draft.CountryConfirmed = draft.ReportReviewConfirmed = draft.ProcessingConfirmed = true;
+        var component = CreateStepper(draft, _ => Task.CompletedTask);
+        component.Countries = [new("SZ", "Eswatini")];
+        component.CountryCatalogueVersion = "test-v1";
+        component.CountryCatalogueIsCurrent = true;
+        component.PrivacyNoticeReference = "/privacy";
+        component.PrivacyNoticeIsCurrent = true;
+        component.ProcessingPolicyReference = "/policy";
+        component.ProcessingPolicyVersion = "test-v1";
+        component.ServerValidationRevision = 1;
+        SetField(component, "_step", 2);
 
-        component.Draft.Narrative = "A synthetic observation.";
+        var issue = Assert.Single(component.GetState().ValidationIssues);
+        Assert.Equal("report.server-validation-unknown", issue.InputId);
+        Assert.Equal("ellai-report-return-details", issue.Anchor);
+        Assert.Contains("did not identify a field", issue.Message);
+        Assert.True(component.GetState().HasValidationErrors);
         typeof(GuidedReportStepper).GetMethod("HandleFieldChanged", BindingFlags.NonPublic | BindingFlags.Instance)!
             .Invoke(component, [null, new Microsoft.AspNetCore.Components.Forms.FieldChangedEventArgs(
-                new Microsoft.AspNetCore.Components.Forms.FieldIdentifier(component.Draft, nameof(PublicReportDraft.Narrative)))]);
-        Assert.Equal(nameof(PublicReportDraft.OccurrenceDate), GetField<string>(component, "_validationField"));
-        Assert.Contains("date", GetField<string>(component, "_validationMessage"), StringComparison.OrdinalIgnoreCase);
-        Assert.Contains(messages, message => message?.Contains("Describe", StringComparison.Ordinal) == true);
-        Assert.Contains(messages, message => message?.Contains("date", StringComparison.OrdinalIgnoreCase) == true);
-        Assert.DoesNotContain(messages, message => message?.Contains("synthetic observation", StringComparison.OrdinalIgnoreCase) == true);
+                new Microsoft.AspNetCore.Components.Forms.FieldIdentifier(draft, nameof(PublicReportDraft.CountryConfirmed)))]);
+        Assert.Empty(component.GetState().ValidationIssues);
+        component.ServerValidationRevision = 2;
+        Assert.Equal("report.server-validation-unknown", Assert.Single(component.GetState().ValidationIssues).InputId);
+    }
+    [Fact]
+    public async Task CurrentInputStatesAreValueFreeAndIncludeInvalidPartialDates()
+    {
+        var draft = CreateDraft();
+        draft.Narrative = "SYNTHETIC PRIVATE report text";
+        draft.OccurrencePrecision = ReportedTimePrecision.Exact;
+        draft.OccurrenceDateText = "2026-1";
+        var component = CreateStepper(draft, _ => Task.CompletedTask);
+        component.Countries = [new("SZ", "Eswatini")];
+        component.CountryCatalogueVersion = "test-v1";
+        component.CountryCatalogueIsCurrent = true;
+        await (Task)Invoke(component, "ContinueFromTypeAsync")!;
+
+        var state = component.GetState();
+        Assert.Contains(state.InputStates, input => input.InputId == "report.original-statement" && input.Presence == UiInputPresence.Entered);
+        Assert.Contains(state.InputStates, input => input.InputId == "report.occurrence-date" && input.Presence == UiInputPresence.Invalid);
+        Assert.DoesNotContain("SYNTHETIC PRIVATE", System.Text.Json.JsonSerializer.Serialize(state));
+        draft.OccurrencePrecision = ReportedTimePrecision.Unknown;
+        Assert.DoesNotContain(component.GetState().InputStates, input => input.InputId == "report.occurrence-date");
     }
 
     [Fact]
-    public async Task ValidationGuidanceTargetsEachMissingPlaceSeparately()
+    public async Task ManualPlaceInputStatesPreserveUnknownAndIdentifyInvalidNames()
     {
-        var component = CreateStepper(CreateDraft(), _ => Task.CompletedTask);
-        component.Draft.RegionPresence = PresenceState.Known;
-        component.Draft.AreaPresence = PresenceState.Known;
+        var draft = CreateDraft();
+        draft.RegionPresence = PresenceState.Known;
+        draft.Region = "SYNTHETIC PRIVATE region";
+        draft.AreaPresence = PresenceState.Known;
+        draft.Area = new string('x', 201);
+        var component = CreateStepper(draft, _ => Task.CompletedTask);
+        component.Countries = [new("SZ", "Eswatini")];
+        component.CountryCatalogueVersion = "test-v1";
+        component.CountryCatalogueIsCurrent = true;
         await (Task)Invoke(component, "ContinueFromTypeAsync")!;
-        await (Task)Invoke(component, "ContinueToReviewAsync")!;
-        Assert.Equal(nameof(PublicReportDraft.Region), GetField<string>(component, "_validationField"));
 
-        component.Draft.Region = "Synthetic region";
-        typeof(GuidedReportStepper).GetMethod("HandleFieldChanged", BindingFlags.NonPublic | BindingFlags.Instance)!
-            .Invoke(component, [null, new Microsoft.AspNetCore.Components.Forms.FieldChangedEventArgs(
-                new Microsoft.AspNetCore.Components.Forms.FieldIdentifier(component.Draft, nameof(PublicReportDraft.Region)))]);
-        Assert.Equal(nameof(PublicReportDraft.Area), GetField<string>(component, "_validationField"));
-        Assert.DoesNotContain("Synthetic region", GetField<string>(component, "_validationMessage"));
+        var state = component.GetState();
+        Assert.Contains(state.InputStates, input => input.InputId == "report.region" && input.Presence == UiInputPresence.Entered);
+        Assert.Contains(state.InputStates, input => input.InputId == "report.area" && input.Presence == UiInputPresence.Invalid);
+        Assert.Contains(state.InputStates, input => input.InputId == "report.locality" && input.Presence == UiInputPresence.Unknown);
+        Assert.DoesNotContain("SYNTHETIC PRIVATE", System.Text.Json.JsonSerializer.Serialize(state));
     }
 
     [Fact]
-    public async Task ValidationGuidanceTargetsOverlongPlacesOneAtATimeBeforeReview()
+    public async Task RegistryPickerDoesNotReportHiddenManualFields()
     {
-        var component = CreateStepper(CreateDraft(), _ => Task.CompletedTask);
-        var guidance = new EllaiValidationGuidance();
-        var messages = new List<string?>();
-        guidance.Changed += messages.Add;
-        using var services = new ServiceCollection().AddSingleton(guidance).BuildServiceProvider();
-        typeof(GuidedReportStepper).GetProperty("Services", BindingFlags.NonPublic | BindingFlags.Instance)!
-            .SetValue(component, services);
-        component.Draft.RegionPresence = PresenceState.Known;
-        component.Draft.Region = new string('r', 201);
-        component.Draft.AreaPresence = PresenceState.Known;
-        component.Draft.Area = new string('a', 201);
+        var draft = CreateDraft();
+        draft.CountryCode = "SZ";
+        var component = CreateStepper(draft, _ => Task.CompletedTask);
+        component.Countries = [new("SZ", "Eswatini")];
+        component.CountryCatalogueVersion = "test-v1";
+        component.CountryCatalogueIsCurrent = true;
+        component.GeoCountries = [new GeoPlaceCountry("SZ", "Eswatini")];
+        component.PlaceSearchFunc = (_, _, _) => throw new InvalidOperationException("Search must not run when reading state.");
+        component.PlaceChildrenFunc = (_, _) => throw new InvalidOperationException("Search must not run when reading state.");
         await (Task)Invoke(component, "ContinueFromTypeAsync")!;
-        await (Task)Invoke(component, "ContinueToReviewAsync")!;
-        Assert.Equal(nameof(PublicReportDraft.Region), GetField<string>(component, "_validationField"));
-        Assert.Contains("region", messages.Last()!);
 
-        component.Draft.Region = new string('r', 200);
-        typeof(GuidedReportStepper).GetMethod("HandleFieldChanged", BindingFlags.NonPublic | BindingFlags.Instance)!
-            .Invoke(component, [null, new Microsoft.AspNetCore.Components.Forms.FieldChangedEventArgs(
-                new Microsoft.AspNetCore.Components.Forms.FieldIdentifier(component.Draft, nameof(PublicReportDraft.Region)))]);
-        Assert.Equal(nameof(PublicReportDraft.Area), GetField<string>(component, "_validationField"));
-        Assert.Contains("area or district", messages.Last()!);
-        Assert.DoesNotContain(new string('a', 201), messages.Last()!);
+        var states = component.GetState().InputStates;
+        Assert.Contains(states, input => input.InputId == "report.place-search" && input.Presence == UiInputPresence.Unknown);
+        Assert.DoesNotContain(states, input => input.InputId is "report.region" or "report.area" or "report.locality");
+    }
+    [Fact]
+    public void ReviewSummaryOmitsPlaceNamesMarkedUnknown()
+    {
+        var draft = CreateDraft();
+        draft.RegionPresence = PresenceState.Known;
+        draft.Region = "Synthetic region";
+        draft.AreaPresence = PresenceState.Unknown;
+        draft.Area = "Old area";
+        draft.LocalityPresence = PresenceState.Unknown;
+        draft.Locality = "Old locality";
+        var component = CreateStepper(draft, _ => Task.CompletedTask);
+        var property = typeof(GuidedReportStepper).GetProperty("LocationSummary", BindingFlags.Instance | BindingFlags.NonPublic)!;
+
+        Assert.Equal("Synthetic region", property.GetValue(component));
+        draft.RegionPresence = PresenceState.Unknown;
+        draft.CountryCode = "SZ";
+        Assert.Equal("Unknown", property.GetValue(component));
     }
 
     [Fact]
-    public async Task ReportedDateInputUsesHtmlDateFormatAndRejectsInvalidDates()
+    public void ReviewCountryMatchesTheAcceptedTrimmedCountryCode()
+    {
+        var draft = CreateDraft();
+        draft.CountryCode = " SZ ";
+        var component = CreateStepper(draft, _ => Task.CompletedTask);
+        component.Countries = [new("SZ", "Eswatini")];
+        component.CountryCatalogueVersion = "test-v1";
+        component.CountryCatalogueIsCurrent = true;
+        var property = typeof(GuidedReportStepper).GetProperty("CountrySummary", BindingFlags.Instance | BindingFlags.NonPublic)!;
+
+        Assert.Equal("Eswatini", property.GetValue(component));
+    }
+
+    [Fact]
+    public async Task ConfiguredTextLimitsIdentifyInvalidFieldsInOrderAndPreserveEntries()
+    {
+        var draft = CreateDraft();
+        draft.Narrative = new string('n', 101);
+        draft.ObservationsText = new string('o', 251);
+        var component = CreateStepper(draft, _ => Task.CompletedTask);
+        component.TextLimits = new(100, 2, 250);
+
+        await (Task)Invoke(component, "ContinueFromTypeAsync")!;
+        await (Task)Invoke(component, "ContinueToReviewAsync")!;
+
+        Assert.Equal(new[] { "report.original-statement-too-long", "report.observation-too-long" },
+            component.GetState().ValidationIssues.Select(issue => issue.InputId));
+        Assert.Equal(101, draft.Narrative.Length);
+        Assert.Equal(251, draft.ObservationsText.Length);
+        draft.Narrative = new string('n', 100);
+        Assert.Equal("report.observation-too-long", Assert.Single(component.GetState().ValidationIssues).InputId);
+        draft.ObservationsText = new string('o', 250);
+        Assert.Empty(component.GetState().ValidationIssues);
+        await (Task)Invoke(component, "ContinueToReviewAsync")!;
+        Assert.True(component.GetState().Controls.Single(control => control.ControlId == "report.narrative").CompletionAccepted);
+    }
+
+    [Fact]
+    public async Task ObservationValidationExplainsEachReasonInOrderWithoutExposingValues()
+    {
+        var draft = CreateDraft();
+        draft.ObservationsText = string.Join("\n", new string('x', 251), "second", "third") + new string(' ', 20000);
+        var component = CreateStepper(draft, _ => Task.CompletedTask);
+        component.TextLimits = new(6000, 2, 250);
+        await (Task)Invoke(component, "ContinueFromTypeAsync")!;
+        await (Task)Invoke(component, "ContinueToReviewAsync")!;
+
+        var issues = component.GetState().ValidationIssues;
+        Assert.Equal(new[] { "report.too-many-observations", "report.observation-too-long", "report.observations-total-too-long" },
+            issues.Select(issue => issue.InputId));
+        Assert.All(issues, issue => Assert.Equal("ellai-report-other-observations", issue.Anchor));
+        Assert.DoesNotContain("second", System.Text.Json.JsonSerializer.Serialize(issues));
+
+        draft.ObservationsText = new string('x', 251) + "\nsecond" + new string(' ', 20000);
+        Assert.Equal("report.observation-too-long", component.GetState().ValidationIssues.First().InputId);
+        draft.ObservationsText = new string('x', 250) + "\nsecond" + new string(' ', 20000);
+        Assert.Equal("report.observations-total-too-long", Assert.Single(component.GetState().ValidationIssues).InputId);
+        draft.ObservationsText = new string('x', 250) + "\nsecond";
+        Assert.Empty(component.GetState().ValidationIssues);
+    }
+
+    [Fact]
+    public void StricterLimitsOnReviewBlockSubmissionWithoutDiscardingText()
+    {
+        var draft = CreateDraft();
+        draft.ObservationsText = new string('o', 301);
+        var component = CreateStepper(draft, _ => Task.CompletedTask);
+        component.TextLimits = new(6000, 20, 500);
+        SetField(component, "_step", 2);
+        Assert.DoesNotContain(component.GetState().ValidationIssues, issue => issue.InputId == "report.text-limits-changed");
+
+        component.TextLimits = new(6000, 20, 300);
+
+        Assert.Contains(component.GetState().ValidationIssues, issue => issue.InputId == "report.text-limits-changed");
+        Assert.False((bool)typeof(GuidedReportStepper).GetProperty("CanSubmit", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(component)!);
+        Assert.Equal(301, draft.ObservationsText.Length);
+    }
+
+    [Fact]
+    public void LegacySnapshotRestoresItsDateAndMigratesToCurrentVersion()
+    {
+        var draft = CreateDraft();
+        draft.OccurrencePrecision = ReportedTimePrecision.DateOnly;
+        draft.OccurrenceDate = new DateTime(2026, 10, 1);
+        var current = draft.ToFormSnapshot();
+        var legacyJson = System.Text.Json.Nodes.JsonNode.Parse(current.Json)!.AsObject();
+        Assert.True(legacyJson.Remove(nameof(PublicReportDraft.OccurrenceDateText)));
+        Assert.True(legacyJson.Remove(nameof(PublicReportDraft.AgeYearsText)));
+        foreach (var name in new[] { nameof(PublicReportDraft.Gender), nameof(PublicReportDraft.DeathRelated),
+            nameof(PublicReportDraft.OnsetPrecision), nameof(PublicReportDraft.OnsetDate), nameof(PublicReportDraft.OnsetDateText),
+            nameof(PublicReportDraft.OnsetTime), nameof(PublicReportDraft.OnsetOffset), nameof(PublicReportDraft.OnsetZoneId),
+            nameof(PublicReportDraft.OnsetDateInterpretedFromCaptureContext) }) legacyJson.Remove(name);
+
+        var restored = PublicReportDraft.FromFormSnapshot(new GuestDraftFormSnapshot(1, legacyJson.ToJsonString()));
+
+        Assert.Equal(new DateTime(2026, 10, 1), restored.OccurrenceDate);
+        Assert.Equal("2026-10-01", restored.OccurrenceDateText);
+        Assert.Equal(GuestDraftFormSnapshot.CurrentSchemaVersion, restored.ToFormSnapshot().SchemaVersion);
+    }
+
+    [Fact]
+    public void ReportedAgeSurvivesDraftAndSubmissionWhileInvalidAgeRemainsEditable()
+    {
+        var draft = CreateDraft();
+        draft.AgeYearsText = "25";
+        var restored = PublicReportDraft.FromFormSnapshot(draft.ToFormSnapshot());
+        Assert.Equal("25", restored.AgeYearsText);
+        restored.AgeYearsText = "26";
+        var submission = restored.ToSubmission(null, null, null, [], false);
+        Assert.Equal(26, submission.AgeYears);
+        Assert.Equal("26", PublicReportDraft.FromSubmission(submission).AgeYearsText);
+
+        restored.AgeYearsText = "-1";
+        Assert.False(restored.HasValidAge());
+        Assert.Throws<InvalidOperationException>(() => restored.ToSubmission(null, null, null, [], false));
+        Assert.Equal("-1", PublicReportDraft.FromFormSnapshot(restored.ToFormSnapshot()).AgeYearsText);
+        restored.AgeYearsText = null;
+        Assert.True(restored.HasValidAge());
+        Assert.Null(restored.ToSubmission(null, null, null, [], false).AgeYears);
+    }
+
+    [Fact]
+    public void VersionTwoSnapshotRestoresWithUnknownAge()
+    {
+        var current = CreateDraft().ToFormSnapshot();
+        var json = System.Text.Json.Nodes.JsonNode.Parse(current.Json)!.AsObject();
+        Assert.True(json.Remove(nameof(PublicReportDraft.AgeYearsText)));
+        foreach (var name in new[] { nameof(PublicReportDraft.Gender), nameof(PublicReportDraft.DeathRelated),
+            nameof(PublicReportDraft.OnsetPrecision), nameof(PublicReportDraft.OnsetDate), nameof(PublicReportDraft.OnsetDateText),
+            nameof(PublicReportDraft.OnsetTime), nameof(PublicReportDraft.OnsetOffset), nameof(PublicReportDraft.OnsetZoneId),
+            nameof(PublicReportDraft.OnsetDateInterpretedFromCaptureContext) }) json.Remove(name);
+        var restored = PublicReportDraft.FromFormSnapshot(new GuestDraftFormSnapshot(2, json.ToJsonString()));
+        Assert.Null(restored.AgeYearsText);
+        Assert.Equal(GuestDraftFormSnapshot.CurrentSchemaVersion, restored.ToFormSnapshot().SchemaVersion);
+    }
+
+    [Fact]
+    public void InvalidAgeIsExposedForOneAtATimeGuidance()
+    {
+        var draft = CreateDraft();
+        draft.AgeYearsText = "twenty";
+        var component = CreateStepper(draft, _ => Task.CompletedTask);
+        SetField(component, "_step", 1);
+        SetField(component, "_detailsValidationAttempted", true);
+        var issue = Assert.Single(component.GetState().ValidationIssues, item => item.InputId == "report.age-years");
+        Assert.Equal("ellai-report-age-years", issue.Anchor);
+        Assert.Contains("whole years", issue.Message);
+        draft.AgeYearsText = "26";
+        Assert.DoesNotContain(component.GetState().ValidationIssues, item => item.InputId == "report.age-years");
+    }
+
+    [Fact]
+    public void InvalidAgeOnReviewBlocksSubmissionAndGuidesBackToDetails()
+    {
+        var draft = CreateDraft();
+        draft.AgeYearsText = "-1";
+        var component = CreateStepper(draft, _ => Task.CompletedTask);
+        SetField(component, "_step", 2);
+        var issue = Assert.Single(component.GetState().ValidationIssues, item => item.InputId == "report.age-review");
+        Assert.Equal("ellai-report-return-details", issue.Anchor);
+        Assert.False((bool)typeof(GuidedReportStepper).GetProperty("CanSubmit", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(component)!);
+        draft.AgeYearsText = "26";
+        Assert.DoesNotContain(component.GetState().ValidationIssues, item => item.InputId == "report.age-review");
+    }
+
+    [Fact]
+    public void InconsistentRawAndParsedDatesFailClosedWithoutDiscardingTheSnapshot()
+    {
+        var draft = CreateDraft();
+        draft.OccurrenceDate = new DateTime(2026, 10, 1);
+        draft.OccurrenceDateText = "2026-10-01";
+        var snapshot = draft.ToFormSnapshot();
+        var json = System.Text.Json.Nodes.JsonNode.Parse(snapshot.Json)!.AsObject();
+        json[nameof(PublicReportDraft.OccurrenceDateText)] = "2026-1";
+        json.Remove(nameof(PublicReportDraft.AgeYearsText));
+        var inconsistent = new GuestDraftFormSnapshot(2, json.ToJsonString());
+
+        Assert.Throws<InvalidOperationException>(() => PublicReportDraft.FromFormSnapshot(inconsistent));
+        Assert.Contains("2026-1", inconsistent.Json);
+        draft.OccurrenceDateText = "2026-1";
+        Assert.Throws<InvalidOperationException>(() => draft.ToFormSnapshot());
+        Assert.Equal(new DateTime(2026, 10, 1), draft.OccurrenceDate);
+    }
+
+    [Fact]
+    public async Task PartialDateAndTimeSurviveSnapshotAndNeverBecomeAValidDate()
     {
         var component = CreateStepper(CreateDraft(), _ => Task.CompletedTask);
-        var method = typeof(GuidedReportStepper).GetMethod("ReportedDateChangedAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        await (Task)method.Invoke(component, ["2026-11-01"])!;
-        Assert.Equal(new DateTime(2026, 11, 1), component.Draft.OccurrenceDate);
-        await (Task)method.Invoke(component, ["2026-02-30"])!;
+        component.Draft.OccurrencePrecision = ReportedTimePrecision.Exact;
+        component.Draft.OccurrenceDate = new DateTime(2026, 10, 1);
+        var method = typeof(GuidedReportStepper).GetMethod("OccurrenceDateChangedAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        await (Task)method.Invoke(component, ["2026-1"])!;
+        component.Draft.OccurrenceTime = "08:";
+
         Assert.Null(component.Draft.OccurrenceDate);
+        var restored = PublicReportDraft.FromFormSnapshot(component.Draft.ToFormSnapshot());
+        Assert.Equal("2026-1", restored.OccurrenceDateText);
+        Assert.Equal("08:", restored.OccurrenceTime);
+        Assert.Null(restored.OccurrenceDate);
+        Assert.Null(PublicReportDraft.ParseOccurrenceDate("2026-02-30"));
+        Assert.Equal(new DateTime(2026, 10, 1), PublicReportDraft.ParseOccurrenceDate("2026-10-01"));
     }
 
     [Fact]
-    public void DisposingUnpublishedValidationDoesNotResolveDisposedServices()
+    public async Task ValidDraftSaveRetainsOriginalWhitespaceAndHiddenInput()
     {
-        var component = CreateStepper(CreateDraft(), _ => Task.CompletedTask);
-        var services = new ServiceCollection().BuildServiceProvider();
-        typeof(GuidedReportStepper).GetProperty("Services", BindingFlags.NonPublic | BindingFlags.Instance)!
-            .SetValue(component, services);
-        services.Dispose();
-        component.Dispose();
+        var draft = CreateDraft("  Synthetic original entry  ");
+        draft.ObservationsText = "first observation\n\nsecond observation";
+        draft.OccurrencePrecision = ReportedTimePrecision.Unknown;
+        draft.OccurrenceOffset = "+02:";
+        PublicReportSaveRequest? saved = null;
+        var component = CreateStepper(draft, request =>
+        {
+            saved = request;
+            request.ConfirmPersisted(Guid.NewGuid(), formSnapshotPersisted: request.FormSnapshot is not null);
+            return Task.CompletedTask;
+        });
+        component.EditableDraftSnapshotsSupported = true;
+
+        await InvokeSaveDraftAsync(component);
+
+        Assert.Equal("Saved", GetSaveState(component));
+        Assert.NotNull(saved?.FormSnapshot);
+        var restored = PublicReportDraft.FromFormSnapshot(saved.FormSnapshot);
+        Assert.Equal("  Synthetic original entry  ", restored.Narrative);
+        Assert.Equal("first observation\n\nsecond observation", restored.ObservationsText);
+        Assert.Equal("+02:", restored.OccurrenceOffset);
+        Assert.Empty(component.GetState().ValidationIssues);
     }
+
+    [Fact]
+    public async Task LosslessValidDraftDoesNotRequireAnEditableSnapshot()
+    {
+        var draft = CreateDraft();
+        PublicReportSaveRequest? saved = null;
+        var component = CreateStepper(draft, request =>
+        {
+            saved = request;
+            request.ConfirmPersisted(Guid.NewGuid());
+            return Task.CompletedTask;
+        });
+        component.EditableDraftSnapshotsSupported = true;
+
+        await InvokeSaveDraftAsync(component);
+
+        Assert.Equal("Saved", GetSaveState(component));
+        Assert.NotNull(saved);
+        Assert.Null(saved.FormSnapshot);
+    }
+
+    [Fact]
+    public void RestoredSnapshotKeepsEvidenceButRequiresCurrentReviewAndConfirmations()
+    {
+        var draft = CreateDraft("Synthetic original entry");
+        draft.CountryCode = "SZ";
+        draft.CountryConfirmed = true;
+        draft.ReportReviewConfirmed = true;
+        draft.ProcessingConfirmed = true;
+        draft.OccurrenceOffset = "+02:";
+
+        var restored = PublicReportDraft.FromFormSnapshot(draft.ToFormSnapshot());
+
+        Assert.Equal("Synthetic original entry", restored.Narrative);
+        Assert.Equal("SZ", restored.CountryCode);
+        Assert.Equal("+02:", restored.OccurrenceOffset);
+        Assert.False(restored.CountryConfirmed);
+        Assert.False(restored.ReportReviewConfirmed);
+        Assert.False(restored.ProcessingConfirmed);
+    }
+
+    [Fact]
+    public async Task SupportedEditableDraftSavesAndRestoresIncompleteTimeWithoutQueuableCarrier()
+    {
+        var draft = CreateDraft("Synthetic private entry");
+        draft.OccurrencePrecision = ReportedTimePrecision.Exact;
+        draft.OccurrenceDate = null;
+        draft.OccurrenceTime = "unfinished";
+        draft.OccurrenceOffset = "+02:";
+        PublicReportSaveRequest? saved = null;
+        var component = CreateStepper(draft, request =>
+        {
+            saved = request;
+            request.ConfirmPersisted(Guid.NewGuid(), formSnapshotPersisted: true);
+            return Task.CompletedTask;
+        });
+        component.EditableDraftSnapshotsSupported = true;
+        await InvokeSaveDraftAsync(component);
+
+        Assert.Equal("Saved", GetSaveState(component));
+        Assert.NotNull(saved?.FormSnapshot);
+        Assert.Null(saved.Submission.Narrative);
+        Assert.False(saved.Submission.Confirmations.ReportReviewConfirmed);
+        var restored = PublicReportDraft.FromFormSnapshot(saved.FormSnapshot);
+        Assert.Equal("Synthetic private entry", restored.Narrative);
+        Assert.Equal("unfinished", restored.OccurrenceTime);
+        Assert.Equal("+02:", restored.OccurrenceOffset);
+        Assert.Null(restored.OccurrenceDate);
+        Assert.Contains(component.GetState().ValidationIssues, issue => issue.InputId == "report.occurrence-time");
+    }
+
+    [Fact]
+    public async Task SnapshotSaveRequiresExplicitSnapshotPersistenceConfirmation()
+    {
+        var draft = CreateDraft("Synthetic report");
+        draft.OccurrencePrecision = ReportedTimePrecision.Exact;
+        draft.OccurrenceTime = "unfinished";
+        var component = CreateStepper(draft, request =>
+        {
+            request.ConfirmPersisted(Guid.NewGuid());
+            return Task.CompletedTask;
+        });
+        component.EditableDraftSnapshotsSupported = true;
+        await InvokeSaveDraftAsync(component);
+        Assert.Equal("Failed", GetSaveState(component));
+        Assert.False(component.GetState().Controls.Single(control => control.ControlId == "report.save").CompletionAccepted);
+        Assert.Equal("unfinished", draft.OccurrenceTime);
+    }
+
+    [Fact]
+    public void IncompleteOrUnknownSnapshotFieldsFailClosed()
+    {
+        var snapshot = new GuestDraftFormSnapshot(1, "{\"Narrative\":\"synthetic\"}");
+        Assert.Throws<InvalidOperationException>(() => PublicReportDraft.FromFormSnapshot(snapshot));
+    }
+
+    [Fact]
+    public async Task InvalidDraftSaveIdentifiesOnlyBlockingTimeFieldsAndKeepsIncompleteReport()
+    {
+        var draft = CreateDraft(string.Empty);
+        draft.OccurrencePrecision = ReportedTimePrecision.Exact;
+        draft.OccurrenceDate = null;
+        draft.OccurrenceTime = "not a time";
+        draft.OccurrenceOffset = "not an offset";
+        var saves = 0;
+        var component = CreateStepper(draft, request =>
+        {
+            saves++;
+            request.ConfirmPersisted(Guid.NewGuid(), formSnapshotPersisted: true);
+            return Task.CompletedTask;
+        });
+
+        await InvokeSaveDraftAsync(component);
+
+        Assert.Equal(0, saves);
+        Assert.Equal("Invalid", GetSaveState(component));
+        Assert.True(component.GetState().HasValidationErrors);
+        Assert.Equal(1, GetField<int>(component, "_step"));
+        Assert.Equal(new[] { "report.occurrence-date", "report.occurrence-time", "report.utc-offset" },
+            component.GetState().ValidationIssues.Select(issue => issue.InputId));
+        Assert.Equal("not a time", draft.OccurrenceTime);
+        draft.OccurrenceDate = new DateTime(2026, 11, 4);
+        Assert.Equal("report.occurrence-time", component.GetState().ValidationIssues.First().InputId);
+        draft.OccurrenceTime = "08:15";
+        Assert.Equal("report.utc-offset", Assert.Single(component.GetState().ValidationIssues).InputId);
+        draft.OccurrenceOffset = "+02:00";
+        Assert.Empty(component.GetState().ValidationIssues);
+        component.EditableDraftSnapshotsSupported = true;
+        await InvokeSaveDraftAsync(component);
+        Assert.Equal(1, saves);
+        Assert.Equal("Saved", GetSaveState(component));
+    }
+
+    [Fact]
+    public async Task UnrepresentableExactDateIsIdentifiedBeforeReviewOrSave()
+    {
+        var draft = CreateDraft();
+        draft.OccurrencePrecision = ReportedTimePrecision.Exact;
+        draft.OccurrenceDate = DateTime.MinValue;
+        draft.OccurrenceTime = "00:00";
+        draft.OccurrenceOffset = "+14:00";
+        var component = CreateStepper(draft, _ => Task.CompletedTask);
+        await InvokeSaveDraftAsync(component);
+        Assert.Equal("report.invalid-exact-occurrence", Assert.Single(component.GetState().ValidationIssues).InputId);
+        await (Task)Invoke(component, "ContinueToReviewAsync")!;
+        Assert.Equal("report.invalid-exact-occurrence", Assert.Single(component.GetState().ValidationIssues).InputId);
+        Assert.False(component.GetState().Controls.Single(control => control.ControlId == "report.narrative").CompletionAccepted);
+    }
+
+    [Fact]
+    public async Task DraftSavePreservesCountryWhenCatalogueIsUnavailableWithoutAuthorizingSubmission()
+    {
+        var draft = CreateDraft();
+        draft.CountryCode = "SZ";
+        draft.CountryConfirmed = true;
+        PublicReportSaveRequest? saved = null;
+        var component = CreateStepper(draft, request =>
+        {
+            saved = request;
+            request.ConfirmPersisted(Guid.NewGuid(), formSnapshotPersisted: true);
+            return Task.CompletedTask;
+        });
+        component.EditableDraftSnapshotsSupported = true;
+        component.CountryCatalogueIsCurrent = false;
+        component.Countries = [];
+        await InvokeSaveDraftAsync(component);
+
+        Assert.Equal("Saved", GetSaveState(component));
+        Assert.NotNull(saved);
+        Assert.Equal("SZ", PublicReportDraft.FromFormSnapshot(saved.FormSnapshot!).CountryCode);
+        Assert.False(saved.Submission.Confirmations.OccurrenceCountryConfirmed);
+        Assert.Null(saved.Submission.Location.CatalogueVersion);
+        Assert.Equal("SZ", draft.CountryCode);
+        Assert.False((bool)typeof(GuidedReportStepper).GetProperty("CanSubmit", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(component)!);
+    }
+
+    [Fact]
+    public async Task OversizedObservationTextBlocksReviewAndIdentifiesItsField()
+    {
+        var draft = CreateDraft();
+        draft.ObservationsText = string.Join("\n", Enumerable.Repeat(new string('x', 1000), 20));
+        var component = CreateStepper(draft, _ => Task.CompletedTask);
+
+        await (Task)Invoke(component, "ContinueFromTypeAsync")!;
+        await (Task)Invoke(component, "ContinueToReviewAsync")!;
+
+        var issues = component.GetState().ValidationIssues;
+        Assert.Equal(new[] { "report.observation-too-long", "report.observations-total-too-long" }, issues.Select(issue => issue.InputId));
+        Assert.All(issues, issue => Assert.Equal("ellai-report-other-observations", issue.Anchor));
+        Assert.False(component.GetState().Controls.Single(control => control.ControlId == "report.narrative").CompletionAccepted);
+        draft.ObservationsText = new string(' ', 20000);
+        Assert.Empty(component.GetState().ValidationIssues);
+        await (Task)Invoke(component, "ContinueToReviewAsync")!;
+        Assert.True(component.GetState().Controls.Single(control => control.ControlId == "report.narrative").CompletionAccepted);
+    }
+
+    [Fact]
+    public async Task OversizedPlaceNamesBlockReviewAndAreIdentifiedInOrder()
+    {
+        var draft = CreateDraft();
+        draft.RegionPresence = draft.AreaPresence = draft.LocalityPresence = PresenceState.Known;
+        draft.Region = draft.Area = draft.Locality = new string('x', 201);
+        var component = CreateStepper(draft, _ => Task.CompletedTask);
+
+        await (Task)Invoke(component, "ContinueFromTypeAsync")!;
+        await (Task)Invoke(component, "ContinueToReviewAsync")!;
+        Assert.Equal(new[] { "report.region", "report.area", "report.locality" },
+            component.GetState().ValidationIssues.Select(issue => issue.InputId));
+        Assert.True(GetField<bool>(component, "_showManualPlaces"));
+        Assert.Contains(draft.Validate(new System.ComponentModel.DataAnnotations.ValidationContext(draft)),
+            error => error.MemberNames.Contains(nameof(PublicReportDraft.Region)));
+
+        draft.Region = new string('x', 200);
+        Assert.Equal("report.area", component.GetState().ValidationIssues.First().InputId);
+        draft.Area = "Synthetic area";
+        Assert.Equal("report.locality", component.GetState().ValidationIssues.First().InputId);
+        draft.Locality = "Synthetic locality";
+        Assert.Empty(component.GetState().ValidationIssues);
+        await (Task)Invoke(component, "ContinueToReviewAsync")!;
+        Assert.True(component.GetState().Controls.Single(control => control.ControlId == "report.narrative").CompletionAccepted);
+    }
+
+    [Theory]
+    [InlineData("+-1:00")]
+    [InlineData("+ 2:00")]
+    [InlineData("+02:-1")]
+    [InlineData("+14:01")]
+    public async Task InvalidExactOffsetBlocksReviewAndIdentifiesTheOffset(string offset)
+    {
+        var draft = CreateDraft();
+        draft.OccurrencePrecision = ReportedTimePrecision.Exact;
+        draft.OccurrenceDate = new DateTime(2026, 10, 31);
+        draft.OccurrenceTime = "08:15";
+        draft.OccurrenceOffset = offset;
+        var component = CreateStepper(draft, _ => Task.CompletedTask);
+
+        await (Task)Invoke(component, "ContinueFromTypeAsync")!;
+        await (Task)Invoke(component, "ContinueToReviewAsync")!;
+
+        Assert.Contains(component.GetState().ValidationIssues, issue => issue.InputId == "report.utc-offset");
+        Assert.False(component.GetState().Controls.Single(control => control.ControlId == "report.narrative").CompletionAccepted);
+        Assert.Contains(draft.Validate(new System.ComponentModel.DataAnnotations.ValidationContext(draft)),
+            error => error.MemberNames.Contains(nameof(PublicReportDraft.OccurrenceOffset)));
+    }
+
     [Theory]
     [InlineData(nameof(PublicReportDraft.CountryConfirmed), true)]
     [InlineData(nameof(PublicReportDraft.ProcessingConfirmed), true)]
@@ -120,6 +610,36 @@ public sealed partial class GuidedReportDraftPersistenceTests
             .Invoke(component, [null, new Microsoft.AspNetCore.Components.Forms.FieldChangedEventArgs(
                 new Microsoft.AspNetCore.Components.Forms.FieldIdentifier(component.Draft, field))]);
         Assert.Equal(remainsReviewed, component.Draft.ReportReviewConfirmed);
+    }
+
+    [Theory]
+    [InlineData("country", "report.country-catalogue-unavailable", "ellai-report-country-confirmed")]
+    [InlineData("privacy", "report.privacy-notice-unavailable", "ellai-report-privacy-unavailable")]
+    [InlineData("policy", "report.processing-policy-unavailable", "ellai-report-policy-unavailable")]
+    public void UnavailableSubmissionRequirementsHaveSpecificGuidance(string unavailable, string inputId, string anchor)
+    {
+        var draft = CreateDraft();
+        draft.CountryCode = "SZ";
+        draft.CountryConfirmed = draft.ReportReviewConfirmed = draft.ProcessingConfirmed = true;
+        var component = CreateStepper(draft, _ => Task.CompletedTask);
+        component.Countries = [new("SZ", "Eswatini")];
+        component.CountryCatalogueVersion = "test-v1";
+        component.CountryCatalogueIsCurrent = unavailable != "country";
+        component.PrivacyNoticeReference = "/privacy";
+        component.PrivacyNoticeIsCurrent = unavailable != "privacy";
+        component.ProcessingPolicyReference = "/policy";
+        component.ProcessingPolicyVersion = unavailable == "policy" ? null : "test-v1";
+        component.OnSubmit = EventCallback.Factory.Create<IntakeSubmission>(this, _ => { });
+        SetField(component, "_step", 2);
+
+        var issue = Assert.Single(component.GetState().ValidationIssues);
+        Assert.Equal(inputId, issue.InputId);
+        Assert.Equal(anchor, issue.Anchor);
+        Assert.Contains("unavailable", issue.Message);
+        Assert.Contains("cannot be sent", issue.Message);
+        Assert.False((bool)typeof(GuidedReportStepper).GetProperty("CanSubmit", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(component)!);
+        Assert.False(component.GetState().Controls.Single(control => control.ControlId == "report.submit").CompletionAccepted);
+        Assert.NotNull(draft.Narrative);
     }
 
     [Theory]
@@ -148,6 +668,21 @@ public sealed partial class GuidedReportDraftPersistenceTests
         Assert.Equal(accepted, component.GetState().Controls.Single(control => control.ControlId == "report.confirmations").CompletionAccepted);
         Assert.False(component.GetState().Controls.Single(control => control.ControlId == "report.submit").CompletionAccepted);
         Assert.False(submitted);
+    }
+
+    [Fact]
+    public async Task ANewDraftDoesNotInheritThePreviousDraftsValidationAttempt()
+    {
+        var component = CreateStepper(CreateDraft(string.Empty), _ => Task.CompletedTask);
+        await (Task)Invoke(component, "ContinueFromTypeAsync")!;
+        await (Task)Invoke(component, "ContinueToReviewAsync")!;
+        Assert.Contains(component.GetState().ValidationIssues, issue => issue.InputId == "report.original-statement");
+
+        component.Draft = CreateDraft(string.Empty);
+        component.CurrentDraftId = Guid.NewGuid();
+        InvokeOnParametersSet(component);
+        await (Task)Invoke(component, "ContinueFromTypeAsync")!;
+        Assert.Empty(component.GetState().ValidationIssues);
     }
 
     [Fact]
@@ -251,6 +786,7 @@ public sealed partial class GuidedReportDraftPersistenceTests
             request =>
             {
                 savedSubmission = request.Submission;
+                request.ConfirmPersisted(request.PreviousDraftId!.Value);
                 return Task.CompletedTask;
             },
             currentDraftId: Guid.NewGuid());
@@ -285,6 +821,8 @@ public sealed partial class GuidedReportDraftPersistenceTests
             OnSaveDraft = EventCallback.Factory.Create<PublicReportSaveRequest>(new object(), save)
         };
 
+        typeof(GuidedReportStepper).GetProperty("Services", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .SetValue(component, new ServiceCollection().BuildServiceProvider());
         InvokeOnParametersSet(component);
         return component;
     }

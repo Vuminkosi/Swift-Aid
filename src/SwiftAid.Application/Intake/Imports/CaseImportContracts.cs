@@ -21,4 +21,7 @@ public interface ICaseImportStore
     Task CompleteRowAsync(CaseImportLease lease, CaseImportRowOutcome result, CancellationToken ct);
     Task CloseAsync(CaseImportLease lease, string state, string? errorCode, CancellationToken ct);
     Task<CaseImportSummary?> GetAsync(ActorContext actor, Guid importId, CancellationToken ct);
+    /// <summary>Compares an owner-scoped job's original context without changing the import.</summary>
+    Task<bool?> MatchesContextAsync(ActorContext actor, Guid importId, CaseImportContext context, CancellationToken ct) =>
+        throw new NotSupportedException("Import context verification is unavailable.");
 }

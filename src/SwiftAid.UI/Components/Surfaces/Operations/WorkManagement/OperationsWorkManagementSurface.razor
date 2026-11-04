@@ -30,12 +30,15 @@
     @if (OnFilterChanged.HasDelegate)
     {
         <MudStack Row="true" Spacing="2" Wrap="Wrap.Wrap" Class="operations-work-management__filters" aria-label="Work filters">
+            @if (ShowKindFilter)
+            {
             <MudSelect T="OperationsWorkKind?" Value="@Filter.Kind" ValueChanged="SetKindFilterAsync" Label="Work type" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true" Disabled="@IsBusy" Class="operations-work-management__filter">
                 @foreach (var kind in Enum.GetValues<OperationsWorkKind>())
                 {
                     <MudSelectItem T="OperationsWorkKind?" Value="@((OperationsWorkKind?)kind)">@WorkTypeLabel(kind)</MudSelectItem>
                 }
             </MudSelect>
+            }
             <MudSelect T="OperationsWorkStatus?" Value="@Filter.Status" ValueChanged="SetStatusFilterAsync" Label="Status" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true" Disabled="@IsBusy" Class="operations-work-management__filter">
                 @foreach (var status in FilterableStatuses)
                 {
@@ -339,6 +342,7 @@
     [Parameter] public OperationsSurfaceState State { get; set; } = OperationsSurfaceState.Unavailable;
     [Parameter] public IReadOnlyList<OperationsWorkItem> Items { get; set; } = Array.Empty<OperationsWorkItem>();
     [Parameter] public WorkFilter Filter { get; set; } = new(null, null, null, 1, 25);
+    [Parameter] public bool ShowKindFilter { get; set; } = true;
     [Parameter] public bool HasPreviousPage { get; set; }
     [Parameter] public bool HasNextPage { get; set; }
     [Parameter] public bool IsBusy { get; set; }
@@ -441,6 +445,17 @@
         return OnFilterChanged.InvokeAsync(filter);
     }
 
+    private OperationsWorkAction? _requestedAction;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_requestedAction is { } action && SelectedItem is { } item && AvailableActions(item).Contains(action))
+        {
+            _requestedAction = null;
+            await SetActionAsync(action);
+        }
+    }
+
     protected override void OnParametersSet()
     {
         if (RequestedSelection is { } request && request.RequestId != _lastSelectionRequestId)
@@ -448,7 +463,11 @@
             _lastSelectionRequestId = request.RequestId;
             var requested = Items.FirstOrDefault(item => item.CaseId == request.CaseId &&
                 string.Equals(item.WorkKey, request.WorkKey, StringComparison.Ordinal));
-            if (requested is not null) SelectWork(requested);
+            if (requested is not null)
+            {
+                SelectWork(requested);
+                _requestedAction = request.Action;
+            }
         }
         if (Items.Count == 0)
         {
@@ -1150,7 +1169,7 @@
         FollowUpOutcome? FollowUpOutcome = null,
         EscalationReason? EscalationReason = null,
         EscalationActionKind? EscalationAction = null);
-    public sealed record WorkSelectionRequest(Guid RequestId, Guid CaseId, string WorkKey);
+    public sealed record WorkSelectionRequest(Guid RequestId, Guid CaseId, string WorkKey, OperationsWorkAction? Action = null);
     public sealed record OperationsWorkItem(
         Guid CaseId,
         string WorkKey,

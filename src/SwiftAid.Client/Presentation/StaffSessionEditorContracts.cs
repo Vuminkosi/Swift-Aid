@@ -21,6 +21,12 @@ public interface IStaffSessionEditorClient
         CancellationToken cancellationToken = default);
 }
 
+/// <summary>Reserves a server-issued draft identity before an editor constructs its create command.</summary>
+public interface IStaffSessionDraftReservationClient
+{
+    Task<UiCapabilityResult<SessionDraftReservation>> ReserveDraftAsync(string organizationId, CancellationToken cancellationToken = default);
+}
+
 /// <summary>Current, action-specific authority for creating or changing one session.</summary>
 public sealed record StaffSessionManagementCapabilities(
     bool CanCreate,

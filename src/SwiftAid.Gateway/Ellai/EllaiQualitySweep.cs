@@ -14,6 +14,8 @@ public sealed class EllaiQualityScheduleOptions
     public string PolicyVersion { get; set; } = "";
     public int BatchSize { get; set; } = 10;
     public int PollSeconds { get; set; } = 60;
+    public int CadenceHours { get; set; } = 4;
+    public long ConfigurationRevision { get; set; } = 1;
 
     public void Validate()
     {
@@ -21,7 +23,7 @@ public sealed class EllaiQualityScheduleOptions
             Workspaces.Any(x => string.IsNullOrWhiteSpace(x) || x.Length > 120 || x != x.Trim()) ||
             Workspaces.Distinct(StringComparer.Ordinal).Count() != Workspaces.Length ||
             string.IsNullOrWhiteSpace(PolicyVersion) || PolicyVersion.Length > 120 ||
-            BatchSize is < 1 or > 100 || PollSeconds is < 30 or > 3600)
+            BatchSize is < 1 or > 100 || PollSeconds is < 30 or > 3600 || CadenceHours is not (4 or 8) || ConfigurationRevision < 1)
             throw new InvalidOperationException("Quality scheduling requires bounded, explicit workspace and policy configuration.");
     }
 }
@@ -48,6 +50,13 @@ public sealed class EllaiQualitySweep(SwiftAidDbContext db, EllaiQualityWork wor
         var settings = classification.Value;
         if (!settings.Enabled) throw new InvalidOperationException("The scoped classification worker is disabled.");
         settings.Validate();
+        var policyBytes = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(new
+        {
+            options.PolicyVersion,
+            Organizations = settings.Organizations.OrderBy(id => id, StringComparer.Ordinal).ToArray(),
+            QualityVersion = SwiftAid.Application.Classification.ReportQualityRules.Version
+        });
+        var effectivePolicy = "quality-sha256:" + Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(policyBytes));
         var authorized = await db.WorkspaceOrganizations.AsNoTracking().AnyAsync(link =>
             link.WorkspaceId == workspaceId && link.Status == PersistentResourceStatus.Active &&
             settings.Organizations.Contains(link.OrganizationId) &&
@@ -58,14 +67,28 @@ public sealed class EllaiQualitySweep(SwiftAidDbContext db, EllaiQualityWork wor
         // Stable workspace jitter spreads new schedules across the first five minutes.
         var hash = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(workspaceId));
         var jitter = System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(hash) % 300;
-        await schedule.CreateAsync(workspaceId, "ops.quality", 4, options.PolicyVersion,
-            DateTimeOffset.UtcNow.AddSeconds(jitter), ct);
-        var lease = await schedule.TryClaimAsync(workspaceId, "ops.quality", TimeSpan.FromMinutes(5), ct);
+        await schedule.ReconcileConfigurationAsync(workspaceId, "ops.quality", options.CadenceHours, effectivePolicy,
+            options.ConfigurationRevision, DateTimeOffset.UtcNow.AddSeconds(jitter), ct);
+        var configured = await db.Database.SqlQuery<int>($"""
+            SELECT count(*)::int AS "Value" FROM ellai_operational_schedules
+            WHERE workspace_id = {workspaceId} AND role_id = 'ops.quality'
+                AND cadence_hours = {options.CadenceHours} AND policy_version = {effectivePolicy}
+                AND configuration_revision = {options.ConfigurationRevision}
+            """).SingleAsync(ct);
+        if (configured != 1)
+        {
+            var samePolicy = await db.Database.SqlQuery<int>($"""
+                SELECT count(*)::int AS "Value" FROM ellai_operational_schedules
+                WHERE workspace_id = {workspaceId} AND role_id = 'ops.quality' AND policy_version = {effectivePolicy}
+                """).SingleAsync(ct);
+            return samePolicy == 1 ? "configuration-mismatch" : "policy-mismatch";
+        }
+        var lease = await schedule.TryClaimAsync(workspaceId, "ops.quality", TimeSpan.FromMinutes(5), ct, options.ConfigurationRevision);
         if (lease is null) return "not-due";
         var finished = false;
         try
         {
-            if (!string.Equals(lease.PolicyVersion, options.PolicyVersion, StringComparison.Ordinal)) return "policy-mismatch";
+            if (!string.Equals(lease.PolicyVersion, effectivePolicy, StringComparison.Ordinal)) return "policy-mismatch";
             for (var index = 0; index < options.BatchSize; index++)
             {
                 progress.WorkTurns++;
@@ -92,7 +115,8 @@ public sealed class EllaiQualitySweep(SwiftAidDbContext db, EllaiQualityWork wor
                     return finished ? "complete" : "stale-lease";
                 }
             }
-            return "batch-limit";
+            finished = await schedule.CompleteAsync(lease, ct);
+            return finished ? "batch-limit" : "stale-lease";
         }
         finally
         {

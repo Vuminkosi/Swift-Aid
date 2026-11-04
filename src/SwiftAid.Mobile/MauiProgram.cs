@@ -93,37 +93,50 @@ public static class MauiProgram
 		builder.Services.AddScoped<SwiftAid.UI.Ellai.Guidance.EllaiDisplayedReceiptContext>();
 		builder.Services.AddScoped<SwiftAid.UI.Ellai.Guidance.EllaiValidationGuidance>();
 		builder.Services.AddScoped<SwiftAid.UI.Ellai.Guidance.EllaiCaseFilterContext>();
+		builder.Services.AddScoped<SwiftAid.UI.Ellai.Guidance.EllaiPublicReportDraftContext>();
 		builder.Services.AddMauiBlazorWebView();
 		builder.Services.AddSingleton<IThemeAppearanceSink, MobileThemeAppearanceSink>();
 		builder.Services.AddMudServices();
         BitBonboarding.AddBitBonboardingServices(builder.Services, _ => { });
         BitBonboarding.AddBitBonboardingInMemoryStore(builder.Services);
         Uri? gatewayBaseAddress = null;
-        builder.Services.AddSingleton<IPublicIntakeProcessingPolicyClient, UnavailablePublicIntakeProcessingPolicyClient>();
         builder.Services.AddSingleton<IEducationClient, StaticEducationClient>();
         
         
         
-        builder.Services.AddSingleton<IAiInvestigationClient, UnavailableInvestigationClient>();
+        builder.Services.AddSingleton<IAiInvestigationClient>(sp => new InvestigationHttpClient(
+            sp.GetRequiredService<IHttpClientFactory>().CreateClient("SwiftAid.NotificationApi")));
         builder.Services.AddSingleton<IMobileHomeOverviewClient, HomeOverviewHttpClient>();
+        builder.Services.AddTransient<IAnalyticsClient>(sp => new AnalyticsHttpClient(
+            sp.GetRequiredService<IHttpClientFactory>().CreateClient("SwiftAid.NotificationApi")));
         builder.Services.AddTransient<SwiftAid.Client.Presentation.IMapAggregateClient>(sp => new SwiftAid.Client.Presentation.MapAggregateHttpClient(
                 sp.GetRequiredService<IHttpClientFactory>().CreateClient("SwiftAid.NotificationApi")));
-        builder.Services.AddSingleton<IOrganizationManagementClient, UnavailableOrganizationManagementClient>();
+        builder.Services.AddTransient<ISurveillanceMapDetailsClient>(sp => new SurveillanceMapDetailsHttpClient(
+                sp.GetRequiredService<IHttpClientFactory>().CreateClient("SwiftAid.NotificationApi"), sp.GetRequiredService<IWorkspaceAccessClient>()));
+        builder.Services.AddTransient<SurveillancePlaceLookupClient>(sp => new SurveillancePlaceLookupClient(
+                sp.GetRequiredService<IHttpClientFactory>().CreateClient("SwiftAid.NotificationApi")));
+        builder.Services.AddSingleton<OrganizationManagementContext>();
+        builder.Services.AddSingleton<IOrganizationManagementClient>(sp => new OrganizationManagementHttpClient(
+            sp.GetRequiredService<IHttpClientFactory>().CreateClient("SwiftAid.NotificationApi"), sp.GetRequiredService<OrganizationManagementContext>()));
         builder.Services.AddSingleton<ICaseWorkspaceClient, MobileCaseWorkspaceClient>();
-        builder.Services.AddSingleton<ICaseDiscussionClient, UnavailableCaseDiscussionClient>();
-        builder.Services.AddSingleton<ICaseDiscussionCommandClient, UnavailableCaseDiscussionCommandClient>();
-        builder.Services.AddSingleton<ICaseEvidenceClient, UnavailableCaseEvidenceClient>();
-        builder.Services.AddSingleton<ICaseEvidenceUploadClient, UnavailableCaseEvidenceUploadClient>();
-        builder.Services.AddSingleton<ICaseEvidenceContentClient, UnavailableCaseEvidenceContentClient>();
-        builder.Services.AddSingleton<ICaseDetailSummaryClient, CaseDetailSummaryHttpClient>();
-        builder.Services.AddSingleton<ICaseReportDetailsClient, CaseReportDetailsHttpClient>();
+        builder.Services.AddSingleton(sp => new CaseDiscussionHttpClient(sp.GetRequiredService<IHttpClientFactory>().CreateClient("SwiftAid.NotificationApi")));
+        builder.Services.AddSingleton<ICaseDiscussionClient>(sp => sp.GetRequiredService<CaseDiscussionHttpClient>());
+        builder.Services.AddSingleton<ICaseDiscussionCommandClient>(sp => sp.GetRequiredService<CaseDiscussionHttpClient>());
+        builder.Services.AddSingleton(sp => new CaseEvidenceHttpClient(sp.GetRequiredService<IHttpClientFactory>().CreateClient("SwiftAid.NotificationApi")));
+        builder.Services.AddSingleton<ICaseEvidenceClient>(sp => sp.GetRequiredService<CaseEvidenceHttpClient>());
+        builder.Services.AddSingleton<ICaseEvidenceUploadClient>(sp => sp.GetRequiredService<CaseEvidenceHttpClient>());
+        builder.Services.AddSingleton<ICaseEvidenceContentClient>(sp => sp.GetRequiredService<CaseEvidenceHttpClient>());
+        builder.Services.AddSingleton<ICaseDetailSummaryClient>(sp => new CaseDetailSummaryHttpClient(
+            sp.GetRequiredService<IHttpClientFactory>().CreateClient("SwiftAid.NotificationApi")));
+        builder.Services.AddSingleton<ICaseReportDetailsClient>(sp => new CaseReportDetailsHttpClient(
+            sp.GetRequiredService<IHttpClientFactory>().CreateClient("SwiftAid.NotificationApi")));
         builder.Services.AddTransient<SwiftAid.Contracts.Cases.ICaseTranslationClient>(sp =>
             new SwiftAid.Client.Cases.CaseTranslationHttpClient(sp.GetRequiredService<IHttpClientFactory>().CreateClient("SwiftAid.NotificationApi")));
         builder.Services.AddTransient<SwiftAid.Contracts.Cases.ICaseClassificationClient>(sp =>
             new SwiftAid.Client.Cases.CaseClassificationHttpClient(sp.GetRequiredService<IHttpClientFactory>().CreateClient("SwiftAid.NotificationApi")));
         builder.Services.AddTransient<ICaseCorrectionReadClient>(sp => new CaseCorrectionReadHttpClient(
                 sp.GetRequiredService<IHttpClientFactory>().CreateClient("SwiftAid.NotificationApi")));
-        builder.Services.AddSingleton<ICaseObservationClient, UnavailableCaseObservationClient>();
+        builder.Services.AddSingleton<ICaseObservationClient>(sp => sp.GetRequiredService<CaseEvidenceHttpClient>());
         builder.Services.AddTransient<IPublicCommunitySessionClient, HttpPublicCommunitySessionClient>();
 
         var configuredGatewayAddress = builder.Configuration["SwiftAid:GatewayBaseAddress"];
@@ -153,7 +166,7 @@ public static class MauiProgram
                         gatewayBaseAddress, allowInsecureTransport: allowHttpForDevelopmentGateway).GatewayBaseAddress;
                 client.Timeout = TimeSpan.FromSeconds(30);
         });
-        notificationHttp.ConfigurePrimaryHttpMessageHandler(static () => new HttpClientHandler { AllowAutoRedirect = false });
+        notificationHttp.ConfigurePrimaryHttpMessageHandler(static () => new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false });
         builder.Services.AddSingleton<IGatewayAuthCookiePersistence, SecureGatewayAuthCookiePersistence>();
         builder.Services.AddSingleton(sp => CookieSessionHttpClient.Shared(
             gatewayBaseAddress?.ToString(),
@@ -161,7 +174,8 @@ public static class MauiProgram
             sp.GetRequiredService<TimeProvider>()));
         if (gatewayBaseAddress is not null)
         {
-                builder.Services.AddTransient<ISubscriptionClient, HttpEventSubscriptionClient>();
+                builder.Services.AddTransient<ISubscriptionClient>(sp => new HttpEventSubscriptionClient(
+                    sp.GetRequiredService<IHttpClientFactory>().CreateClient("SwiftAid.NotificationApi")));
                 builder.Services.AddSingleton(new NativeSessionHttpOptions(
                     gatewayBaseAddress, allowInsecureTransport: allowHttpForDevelopmentGateway));
                 builder.Services.AddTransient<NativeSessionBearerHandler>();
@@ -172,6 +186,9 @@ public static class MauiProgram
                     sp.GetRequiredService<TimeProvider>()));
 
                 builder.Services.AddTransient<CookieSessionRelayHandler>();
+                notificationHttp.AddHttpMessageHandler(sp => new CookieSessionRelayHandler(
+                    sp.GetRequiredService<CookieSessionHttpClient>(),
+                    sp.GetRequiredService<NativeSessionHttpOptions>(), protectCookieWrites: true));
                 builder.Services.AddHttpClient("SwiftAid.Ellai.Authenticated", client =>
                 {
                     client.BaseAddress = gatewayBaseAddress;
@@ -208,6 +225,8 @@ public static class MauiProgram
                 builder.Services.AddTransient<IGuestIntakeTransport>(services => new GuestIntakeHttpClient(
                     services.GetRequiredService<IHttpClientFactory>().CreateClient("SwiftAid.GuestIntake"),
                     allowInsecureTransport: allowHttpForDevelopmentGateway));
+                builder.Services.AddTransient<IPublicIntakeProcessingPolicyClient>(services => new HttpPublicIntakeProcessingPolicyClient(
+                    services.GetRequiredService<IHttpClientFactory>().CreateClient("SwiftAid.GuestIntake")));
                 builder.Services.AddHttpClient<IGeoLookupClient, HttpGeoLookupClient>(client =>
                 {
                     client.BaseAddress = gatewayBaseAddress;
@@ -219,6 +238,7 @@ public static class MauiProgram
         {
                 builder.Services.AddSingleton<ISubscriptionClient, UnavailableSubscriptionClient>();
                 builder.Services.AddSingleton<IGuestIntakeTransport, UnavailableGuestIntakeTransport>();
+                builder.Services.AddSingleton<IPublicIntakeProcessingPolicyClient, UnavailablePublicIntakeProcessingPolicyClient>();
                 builder.Services.AddSingleton<IGeoLookupClient, UnavailableGeoLookupClient>();
                 builder.Services.AddSingleton<IGuestSubmissionCoordinator, LocalOnlyGuestSubmissionCoordinator>();
         }
@@ -236,6 +256,10 @@ public static class MauiProgram
                 sp.GetRequiredService<IHttpClientFactory>().CreateClient("SwiftAid.NotificationApi")));
         builder.Services.AddTransient<SwiftAid.Contracts.Cases.IFollowUpRecommendationReviewClient>(sp => new SwiftAid.Client.Cases.FollowUpReviewHttpClient(
                 sp.GetRequiredService<IHttpClientFactory>().CreateClient("SwiftAid.NotificationApi")));
+        builder.Services.AddTransient<SwiftAid.Contracts.Cases.IOrganizationSuggestionDecisionClient>(sp => new SwiftAid.Client.Cases.OrganizationDecisionHttpClient(
+                sp.GetRequiredService<IHttpClientFactory>().CreateClient("SwiftAid.NotificationApi")));
+        builder.Services.AddTransient<SwiftAid.Contracts.Cases.ICaseCorrelationClient>(sp => new SwiftAid.Client.Cases.CaseCorrelationHttpClient(
+                sp.GetRequiredService<IHttpClientFactory>().CreateClient("SwiftAid.NotificationApi")));
         builder.Services.AddTransient<SwiftAid.Contracts.Cases.IEligibleHealthOfficerClient>(sp => new SwiftAid.Client.Cases.EligibleHealthOfficerHttpClient(
                 sp.GetRequiredService<IHttpClientFactory>().CreateClient("SwiftAid.NotificationApi")));
         builder.Services.AddTransient<SwiftAid.Contracts.Cases.ICaseCollaboratorCandidatesClient>(sp => new SwiftAid.Client.Cases.CaseCollaboratorCandidatesHttpClient(
@@ -244,6 +268,18 @@ public static class MauiProgram
                 sp.GetRequiredService<IHttpClientFactory>().CreateClient("SwiftAid.NotificationApi")));
         builder.Services.AddTransient<SwiftAid.Contracts.Cases.IMonitoringQueueClient>(sp => new SwiftAid.Client.Cases.MonitoringQueueHttpClient(
                 sp.GetRequiredService<IHttpClientFactory>().CreateClient("SwiftAid.NotificationApi")));
+        builder.Services.AddTransient<SwiftAid.Contracts.Cases.ICaseMonitoringPageClient>(sp =>
+            new SwiftAid.Client.Cases.CaseMonitoringPageHttpClient(sp.GetRequiredService<IHttpClientFactory>().CreateClient("SwiftAid.NotificationApi")));
+        builder.Services.AddTransient<SwiftAid.Contracts.Cases.ICaseWorkDiscoveryClient>(sp =>
+            new SwiftAid.Client.Cases.CaseWorkDiscoveryHttpClient(sp.GetRequiredService<IHttpClientFactory>().CreateClient("SwiftAid.NotificationApi")));
+        builder.Services.AddTransient<SwiftAid.Client.Intake.Imports.IWorkspaceImportClient>(sp =>
+        {
+            var client = sp.GetRequiredService<IHttpClientFactory>().CreateClient("SwiftAid.NotificationApi");
+            client.Timeout = TimeSpan.FromMinutes(2);
+            return new SwiftAid.Client.Intake.Imports.WorkspaceImportHttpClient(client);
+        });
+        builder.Services.AddTransient<IPublicIntakeMetadataClient, SwiftAid.Mobile.Services.Presentation.MobilePublicIntakeMetadataClient>();
+        builder.Services.AddTransient<SwiftAid.Mobile.Services.Presentation.MobileMonitoringQueueClient>();
         builder.Services.AddTransient<SwiftAid.Client.Presentation.IWorkManagementClient, SwiftAid.Client.Presentation.CommandBackedWorkManagementClient>();
         builder.Services.AddTransient<SwiftAid.Client.Presentation.IIntakeReviewClient>(sp => new SwiftAid.Client.Presentation.HttpIntakeReviewClient(
                 sp.GetRequiredService<IHttpClientFactory>().CreateClient("SwiftAid.NotificationApi")));
@@ -276,8 +312,15 @@ public static class MauiProgram
         builder.Services.AddSingleton<MobileLogoutService>();
         builder.Services.AddSingleton<IMobileAuthenticationSession, MobileAuthenticationSession>();
         builder.Services.AddSingleton<IAccountPresentationClient, MobileAccountPresentationClient>();
-        builder.Services.AddSingleton<IWorkspaceAccessClient, UnavailableWorkspaceAccessClient>();
-        builder.Services.AddSingleton<IStaffSessionEditorClient, MobileUnavailableStaffSessionEditorClient>();
+        builder.Services.AddSingleton<IWorkspaceAccessClient>(sp => new WorkspaceAccessHttpClient(
+            sp.GetRequiredService<IHttpClientFactory>().CreateClient("SwiftAid.NotificationApi")));
+        builder.Services.AddSingleton(sp => new StaffSessionEditorHttpClient(
+            sp.GetRequiredService<IHttpClientFactory>().CreateClient("SwiftAid.NotificationApi")));
+        builder.Services.AddSingleton<IStaffSessionEditorClient>(sp => sp.GetRequiredService<StaffSessionEditorHttpClient>());
+        builder.Services.AddSingleton<IStaffSessionDraftReservationClient>(sp => sp.GetRequiredService<StaffSessionEditorHttpClient>());
+        builder.Services.AddTransient<SwiftAid.Mobile.Services.Sessions.IMobileSessionPlatform, SwiftAid.Mobile.Services.Sessions.MobileSessionPlatform>();
+        builder.Services.AddTransient<IStaffSessionHistoryClient>(sp => new StaffSessionHistoryHttpClient(
+            sp.GetRequiredService<IHttpClientFactory>().CreateClient("SwiftAid.NotificationApi")));
         builder.Services.AddSingleton(TimeProvider.System);
         builder.Services.AddSingleton<IMobileWelcomePreferenceStore, MobileWelcomePreferenceStore>();
 #if ANDROID
@@ -335,7 +378,7 @@ public static class MauiProgram
 #endif
         builder.Services.AddSingleton<EllaiLauncher>();
         builder.Services.AddSingleton<EllaiEventPoller>();
-        builder.Services.AddSingleton<IEllaiGuidanceControl, UnavailableMobileEllaiGuidanceControl>();
+        builder.Services.AddSingleton<IEllaiGuidanceControl, SharedEllaiGuidanceControl>();
 
         var offlineDbFactory = new SwiftAidOfflineDbContextFactory(
             FileSystem.AppDataDirectory,

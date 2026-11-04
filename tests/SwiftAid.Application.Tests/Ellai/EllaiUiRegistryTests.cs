@@ -18,6 +18,30 @@ public sealed class EllaiUiRegistryTests
         new[] { "cases.read" }, "internal", false);
 
     [Fact]
+    public void DuplicateControlCannotReplaceItsOriginalPermissionRequirements()
+    {
+        var registry = new EllaiUiRegistry();
+        registry.Register(Descriptor("cases.queue"));
+        Assert.Throws<InvalidOperationException>(() => registry.Register(
+            Descriptor("cases.queue") with { RequiredCapabilities = [] }));
+        Assert.Empty(registry.GetSnapshot(new("cases", [], 20), new HashSet<string> { "cases" }, new HashSet<string>()).Descriptors);
+        Assert.Single(registry.GetSnapshot(new("cases", [], 20), new HashSet<string> { "cases" }, new HashSet<string> { "cases.read" }).Descriptors);
+    }
+
+    [Fact]
+    public void CurrentApplicationManifestsRegisterWithoutDuplicateControlIds()
+    {
+        var registry = new EllaiUiRegistry();
+        EllaiReportGuidanceDescriptors.RegisterAll(registry);
+        var manifests = EllaiNavigationManifest.Controls.Concat(EllaiDashboardUiManifest.Controls)
+            .Concat(EllaiCaseListUiManifest.Controls).Concat(EllaiCaseDetailUiManifest.Controls)
+            .Concat(EllaiCommunityUiManifest.Controls).Concat(EllaiSurveillanceUiManifest.Controls)
+            .Concat(EllaiInvestigationUiManifest.Controls).Concat(EllaiMonitoringUiManifest.Controls)
+            .Concat(EllaiOrganizationUiManifest.Controls);
+        foreach (var descriptor in manifests) registry.Register(descriptor);
+    }
+
+    [Fact]
     public void ProjectionIsBoundedAndPermissionFiltered()
     {
         var registry = new EllaiUiRegistry();

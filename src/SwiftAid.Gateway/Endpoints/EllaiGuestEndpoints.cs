@@ -53,6 +53,8 @@ public static class EllaiGuestEndpoints
     private static int ToMilliseconds(TimeSpan duration) =>
         (int)Math.Clamp(duration.TotalMilliseconds, 0, int.MaxValue);
 
+    internal static readonly object ValidatedAntiforgeryRequest = new();
+
     public static void MapEllaiGuestEndpoints(this IEndpointRouteBuilder endpoints)
     {
         ArgumentNullException.ThrowIfNull(endpoints);
@@ -68,6 +70,7 @@ public static class EllaiGuestEndpoints
                 try
                 {
                     await antiforgery.ValidateRequestAsync(http).ConfigureAwait(false);
+                    http.Items[ValidatedAntiforgeryRequest] = true;
                 }
                 catch (AntiforgeryValidationException)
                 {
@@ -115,6 +118,13 @@ public static class EllaiGuestEndpoints
 
             return await next(context).ConfigureAwait(false);
         });
+
+        group.MapPost("/sessions/{sessionId}/report-voice/consent", ReportVoiceEndpoints.ConsentAsync)
+            .WithMetadata(new RequestSizeLimitAttribute(1024));
+        group.MapPost("/sessions/{sessionId}/report-voice/extract", ReportVoiceEndpoints.ExtractAsync)
+            .WithMetadata(new RequestSizeLimitAttribute(32768));
+        group.MapPost("/sessions/{sessionId}/report-voice/saved-recording", ReportVoiceEndpoints.TranscribeSavedAsync)
+            .WithMetadata(new RequestSizeLimitAttribute(EllaiVoiceTranscriptionService.MaximumAudioBytes));
 
         group.MapGet("/sessions/{sessionId}/guidance/admission", EllaiGuidanceProposalEndpoint.ReadAsync);
         group.MapPost("/sessions/{sessionId}/guidance/plan", EllaiGuidanceProposalEndpoint.PrepareAsync);

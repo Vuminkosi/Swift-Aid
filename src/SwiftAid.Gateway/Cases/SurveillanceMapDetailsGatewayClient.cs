@@ -32,13 +32,17 @@ public sealed class SurveillanceMapDetailsGatewayClient(ICaseReportDetailsClient
                 .GetAsync(actor.ActorId, workspaceId, countryCode, since, 501, ct);
             var rows = candidates.Where(item => item.WorkspaceId == workspaceId && item.CountryCode == countryCode && item.CreatedAtUtc >= since).Take(500).ToArray();
             var places = new List<(CaseReportPlace Place, bool Animal, SurveillanceMapCase Case)>();
+            var readableCaseIds = new HashSet<Guid>();
             var unmapped = 0;
             foreach (var batch in rows.Chunk(8))
             {
                 var results = await Task.WhenAll(batch.Select(async row => (Row: row, Report: await reports.GetAsync(row.CaseId, ct))));
                 foreach (var result in results)
                 {
-                    if (result.Report.Succeeded && result.Report.Value?.Location is { } place)
+                    if (result.Report.Succeeded && result.Report.Value is { } report && report.CaseId == result.Row.CaseId)
+                        readableCaseIds.Add(result.Row.CaseId);
+                    if (result.Report.Succeeded && result.Report.Value is { } checkedReport &&
+                        checkedReport.CaseId == result.Row.CaseId && checkedReport.Location is { } place)
                         places.Add((place, result.Row.Sector == "AnimalHealth", new(result.Row.CaseId,
                             result.Row.Sector == "AnimalHealth", result.Row.Workflow, result.Row.CreatedAtUtc!.Value)));
                     else unmapped++;
@@ -78,11 +82,13 @@ public sealed class SurveillanceMapDetailsGatewayClient(ICaseReportDetailsClient
                 foreach (var id in ids)
                 {
                     var dossier = await review.GetAsync(actor, id, ct);
-                    if (dossier is null || !dossier.Assessment.Evidence.Any(evidence => rows.Any(row => row.CaseId == evidence.CaseId))) continue;
+                    if (dossier is null) continue;
                     var assessment = dossier.Assessment;
+                    var readableEvidence = assessment.Evidence.FirstOrDefault(evidence => readableCaseIds.Contains(evidence.CaseId));
+                    if (readableEvidence is null) continue;
                     signals.Add(new(id, assessment.Syndrome + " reports", assessment.Area, dossier.State,
                         assessment.Observed, assessment.WindowStartUtc, assessment.WindowEndUtc, assessment.Comparison,
-                        "/case/" + assessment.Evidence[0].CaseId.ToString("D")));
+                        "/case/" + readableEvidence.CaseId.ToString("D")));
                 }
             }
             return new(UiCapabilityResultCode.Success, new(points, signals, candidates.Count > 500, unmapped),

@@ -29,6 +29,9 @@ public sealed class EllaiFrameworkUsage(string sessionId, EllaiUsageLedger ledge
             foreach (var tool in options.Tools.OfType<AIFunctionDeclaration>())
                 bytes += Encoding.UTF8.GetByteCount(tool.Name) + Encoding.UTF8.GetByteCount(tool.Description ?? string.Empty)
                     + Encoding.UTF8.GetByteCount(tool.JsonSchema.GetRawText());
+        if (options?.ResponseFormat is ChatResponseFormatJson { Schema: { } schema } format)
+            bytes += Encoding.UTF8.GetByteCount(schema.GetRawText()) + Encoding.UTF8.GetByteCount(format.SchemaName ?? string.Empty)
+                + Encoding.UTF8.GetByteCount(format.SchemaDescription ?? string.Empty);
         var estimate = (int)Math.Min(int.MaxValue, bytes + (options?.MaxOutputTokens ?? 0));
         return estimate;
     }

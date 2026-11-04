@@ -15,9 +15,8 @@ public static class FollowUpReviewEndpoints
 {
     public static void MapFollowUpReviewEndpoints(this IEndpointRouteBuilder endpoints)
     {
-        var schemes = string.Join(",", IdentityConstants.ApplicationScheme, OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme);
         endpoints.MapPost("/api/v1/cases/{caseId:guid}/follow-up-recommendations/{recommendationId:guid}/review", ReviewAsync)
-            .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = schemes })
+            .RequireAuthorization(new AuthorizeAttribute { Policy = "SwiftAidStaffApi" })
             .WithMetadata(new RequestSizeLimitAttribute(2048));
     }
 

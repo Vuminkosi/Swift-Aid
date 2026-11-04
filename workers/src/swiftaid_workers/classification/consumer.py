@@ -14,7 +14,7 @@ import httpx
 import nats
 
 logger = logging.getLogger(__name__)
-TERMINAL = {"Completed", "Failed", "Superseded", "Quarantined"}
+TERMINAL = {"Completed", "Failed", "Superseded", "Quarantined", "Expired"}
 
 
 class GatewayClient:
@@ -134,6 +134,9 @@ async def run_consumer(settings: Any, classifier: Any) -> None:
                 if getattr(settings, "health_file", None):
                     from swiftaid_workers.classification.health import monitor
                     group.create_task(monitor(connection, client, Path(settings.health_file)))
+                if getattr(settings, "automatic_backfill_enabled", False):
+                    from swiftaid_workers.classification.backfill import run_discovered_backfills
+                    group.create_task(run_discovered_backfills(settings, gateway, classifier))
                 logger.info("Classification consumer connected; model loaded; durable=%s", settings.durable)
                 for _ in range(settings.concurrency):
                     group.create_task(lane())

@@ -1,17 +1,17 @@
 using System.Net;
+using System.Net.Http.Json;
 using System.Text.Json;
 using SwiftAid.Client.Presentation;
 using SwiftAid.Contracts.Sessions;
-using SwiftAid.Mobile.Services.Http;
 
 namespace SwiftAid.Mobile.Services.Account;
 
 /// <summary>Authenticated session-subscription requests through the Gateway cookie/bearer session.</summary>
-public sealed class HttpEventSubscriptionClient(CookieSessionHttpClient session) : ISubscriptionClient
+public sealed class HttpEventSubscriptionClient(HttpClient client) : ISubscriptionClient
 {
     private const string Capability = "session-subscriptions";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
-    private readonly CookieSessionHttpClient _session = session ?? throw new ArgumentNullException(nameof(session));
+    private readonly HttpClient _client = client ?? throw new ArgumentNullException(nameof(client));
 
     public async Task<UiCapabilityResult<IReadOnlyList<SubscriptionView>>> ListMineAsync(
         CancellationToken cancellationToken = default)
@@ -24,7 +24,7 @@ public sealed class HttpEventSubscriptionClient(CookieSessionHttpClient session)
                 Metadata(false), "Sign in to view your reminders.");
         if (!response.IsSuccessStatusCode) return Retryable<IReadOnlyList<SubscriptionView>>();
         var values = await ReadAsync<EventSubscription[]>(response, cancellationToken).ConfigureAwait(false);
-        return values is null
+        return values is null || values.Any(value => !IsValid(value))
             ? Retryable<IReadOnlyList<SubscriptionView>>()
             : Success<IReadOnlyList<SubscriptionView>>(values.Select(ToView).ToArray());
     }
@@ -40,7 +40,9 @@ public sealed class HttpEventSubscriptionClient(CookieSessionHttpClient session)
                 Metadata(false), "Sign in to manage event reminders.");
         if (!response.IsSuccessStatusCode) return Retryable<SubscriptionOptions>();
         var value = await ReadAsync<EventSubscriptionOptions>(response, cancellationToken).ConfigureAwait(false);
-        if (value is null) return Retryable<SubscriptionOptions>();
+        if (value is null || value.SessionId != sessionId || value.AvailableChannels is null || value.SessionVersion < 1 ||
+            string.IsNullOrWhiteSpace(value.ConsentReference) || string.IsNullOrWhiteSpace(value.ConsentText))
+            return Retryable<SubscriptionOptions>();
         var channels = new List<SubscriptionChannel>(value.AvailableChannels.Count);
         foreach (var channel in value.AvailableChannels)
         {
@@ -61,7 +63,7 @@ public sealed class HttpEventSubscriptionClient(CookieSessionHttpClient session)
         if (response.StatusCode == HttpStatusCode.Unauthorized) return SignedOut<SubscriptionView>();
         if (!response.IsSuccessStatusCode) return Retryable<SubscriptionView>();
         var value = await ReadAsync<EventSubscription>(response, cancellationToken).ConfigureAwait(false);
-        return value is null ? Retryable<SubscriptionView>() : Success(ToView(value));
+        return !IsValid(value) || value!.SessionId != sessionId ? Retryable<SubscriptionView>() : Success(ToView(value));
     }
 
     public async Task<UiCapabilityResult<SubscriptionView>> SubscribeAsync(
@@ -73,7 +75,7 @@ public sealed class HttpEventSubscriptionClient(CookieSessionHttpClient session)
             : null;
         using var response = await SendAsync(HttpMethod.Post, $"/api/v1/sessions/{request.SessionId:D}/subscription", body, cancellationToken)
             .ConfigureAwait(false);
-        return await ReadMutationAsync(response, cancellationToken).ConfigureAwait(false);
+        return await ReadMutationAsync(response, request.SessionId, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<UiCapabilityResult<SubscriptionView>> UnsubscribeAsync(
@@ -81,11 +83,11 @@ public sealed class HttpEventSubscriptionClient(CookieSessionHttpClient session)
     {
         using var response = await SendAsync(HttpMethod.Post, $"/api/v1/sessions/{sessionId:D}/subscription/unsubscribe",
             new UnsubscribeRequest(expectedVersion), cancellationToken).ConfigureAwait(false);
-        return await ReadMutationAsync(response, cancellationToken).ConfigureAwait(false);
+        return await ReadMutationAsync(response, sessionId, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<UiCapabilityResult<SubscriptionView>> ReadMutationAsync(
-        HttpResponseMessage? response, CancellationToken cancellationToken)
+        HttpResponseMessage? response, Guid sessionId, CancellationToken cancellationToken)
     {
         if (response is null) return Retryable<SubscriptionView>();
         if (response.StatusCode == HttpStatusCode.Unauthorized) return SignedOut<SubscriptionView>();
@@ -94,7 +96,7 @@ public sealed class HttpEventSubscriptionClient(CookieSessionHttpClient session)
                 Metadata(isAvailable: true), "The session or subscription changed. Refresh before trying again.");
         if (!response.IsSuccessStatusCode) return Retryable<SubscriptionView>();
         var value = await ReadAsync<EventSubscription>(response, cancellationToken).ConfigureAwait(false);
-        return value is null ? Retryable<SubscriptionView>() : Success(ToView(value));
+        return !IsValid(value) || value!.SessionId != sessionId ? Retryable<SubscriptionView>() : Success(ToView(value));
     }
 
     private async Task<HttpResponseMessage?> SendAsync(
@@ -103,9 +105,9 @@ public sealed class HttpEventSubscriptionClient(CookieSessionHttpClient session)
         cancellationToken.ThrowIfCancellationRequested();
         try
         {
-            if (method == HttpMethod.Get) return await _session.GetAsync(path, cancellationToken).ConfigureAwait(false);
-            var token = await _session.GetAntiforgeryTokenAsync(cancellationToken).ConfigureAwait(false);
-            return await _session.PostJsonAsync(path, body, token, cancellationToken).ConfigureAwait(false);
+            using var request = new HttpRequestMessage(method, path);
+            if (method != HttpMethod.Get) request.Content = JsonContent.Create(body, options: JsonOptions);
+            return await _client.SendAsync(request, cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception) { return null; }
@@ -129,13 +131,14 @@ public sealed class HttpEventSubscriptionClient(CookieSessionHttpClient session)
             ? channel
             : null, subscription.HasInactiveStoredConsent);
 
+    private static bool IsValid(EventSubscription? value) => value is not null && value.SessionId != Guid.Empty &&
+        Enum.IsDefined(value.Status) && value.Version >= 0 && value.Channels is not null &&
+        (value.Status != EventSubscriptionStatus.Active || value.Version > 0);
+
     private static UiCapabilityResult<T> Success<T>(T value) => new(UiCapabilityResultCode.Success, value, Metadata(true));
 
-    private static UiCapabilityResult<T> SignedOut<T>() => new(UiCapabilityResultCode.Success,
-        typeof(T) == typeof(SubscriptionView)
-            ? (T)(object)new SubscriptionView(Guid.Empty, SubscriptionStatus.RequiresAuthentication, 0, false)
-            : default,
-        Metadata(true), "Sign in to manage event reminders.");
+    private static UiCapabilityResult<T> SignedOut<T>() => new(UiCapabilityResultCode.Denied,
+        default, Metadata(false), "Sign in to manage event reminders.");
 
     private static UiCapabilityResult<T> Retryable<T>() => new(UiCapabilityResultCode.Retryable, default,
         Metadata(false), "Event reminders are temporarily unavailable. Try again.");

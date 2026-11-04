@@ -99,6 +99,18 @@ public sealed class EllaiTopicService
     public Task<EllaiTopicEntry?> GetAsync(string sessionId, string topicId, CancellationToken ct) =>
         _topicStore.GetAsync(sessionId, topicId, ct);
 
+    public Task<EllaiTopicEntry?> GetByTitleAsync(string sessionId, string title, CancellationToken ct) =>
+        _topicStore.GetAsync(sessionId, InMemoryEllaiTopicStore.StableTopicId(sessionId, title), ct);
+
+    public Task<bool> TryCreateAsync(string sessionId, string title, IReadOnlyList<string> aliases,
+        string entityRef, string entityVersion, CancellationToken ct) =>
+        _topicStore.TryCreateAsync(sessionId, title, aliases, entityRef, entityVersion, DateTimeOffset.UtcNow, ct);
+
+    public Task<bool> CompareExchangePayloadAsync(string sessionId, string topicId, string? expectedRef,
+        string? expectedVersion, string newRef, string newVersion, CancellationToken ct) =>
+        _topicStore.CompareExchangePayloadAsync(sessionId, topicId, expectedRef, expectedVersion,
+            newRef, newVersion, DateTimeOffset.UtcNow, ct);
+
     private static bool TitleOrAliasMatches(EllaiTopic topic, string reference) =>
         topic.Title.Contains(reference, StringComparison.OrdinalIgnoreCase)
         || topic.Aliases.Any(a => a.Contains(reference, StringComparison.OrdinalIgnoreCase));

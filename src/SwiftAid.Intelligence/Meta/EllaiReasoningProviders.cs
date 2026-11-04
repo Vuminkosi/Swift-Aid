@@ -12,12 +12,19 @@ namespace SwiftAid.Intelligence.Meta;
 /// receives secrets, case narratives or original audio beyond the prompt.</summary>
 public interface IEllaiReasoningProvider
 {
+    Task<EllaiReasoningResult> CompleteStructuredAsync(
+        IReadOnlyList<EllaiChatMessage> messages, int maxTokens, JsonElement schema, CancellationToken ct) =>
+        CompleteAsync(messages, maxTokens, ct);
     string Backend { get; }
 
     string Model { get; }
 
     Task<EllaiReasoningResult> CompleteAsync(
         IReadOnlyList<EllaiChatMessage> messages, int maxTokens, CancellationToken ct);
+
+    Task<EllaiReasoningResult> CompleteReportVoiceAsync(
+        IReadOnlyList<EllaiChatMessage> messages, int maxTokens, CancellationToken ct) =>
+        CompleteAsync(messages, maxTokens, ct);
 
     async Task<EllaiReasoningResult> CompleteStreamingAsync(
         IReadOnlyList<EllaiChatMessage> messages,
@@ -40,6 +47,9 @@ public interface IEllaiReasoningProvider
 public sealed class MetaEllaiReasoningProvider(
     EllaiReasoningAdapter inner, EllaiOptions options) : IEllaiReasoningProvider
 {
+    public Task<EllaiReasoningResult> CompleteStructuredAsync(
+        IReadOnlyList<EllaiChatMessage> messages, int maxTokens, JsonElement schema, CancellationToken ct) =>
+        inner.CompleteStructuredAsync(messages, maxTokens, schema, ct);
     public string Backend => "meta";
 
     public string Model => options.ReasoningModel;
@@ -47,6 +57,10 @@ public sealed class MetaEllaiReasoningProvider(
     public Task<EllaiReasoningResult> CompleteAsync(
         IReadOnlyList<EllaiChatMessage> messages, int maxTokens, CancellationToken ct) =>
         inner.CompleteAsync(messages, maxTokens, ct);
+
+    public Task<EllaiReasoningResult> CompleteReportVoiceAsync(
+        IReadOnlyList<EllaiChatMessage> messages, int maxTokens, CancellationToken ct) =>
+        inner.CompleteReportVoiceAsync(messages, maxTokens, ct);
 
     public Task<EllaiReasoningResult> CompleteStreamingAsync(
         IReadOnlyList<EllaiChatMessage> messages,
@@ -192,6 +206,8 @@ public sealed class OllamaEllaiReasoningProvider(HttpClient http, EllaiOptions o
             var model = options.OllamaModel;
             var promptTokens = 0;
             var completionTokens = 0;
+            var finishReason = string.Empty;
+            var completed = false;
             await using var stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
             using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: false,
                 bufferSize: 4096, leaveOpen: false);
@@ -235,8 +251,15 @@ public sealed class OllamaEllaiReasoningProvider(HttpClient http, EllaiOptions o
                     if (root.TryGetProperty("done", out var done)
                         && done.ValueKind == JsonValueKind.True)
                     {
+                        completed = true;
+                        if (root.TryGetProperty("done_reason", out var reason)
+                            && reason.ValueKind == JsonValueKind.String)
+                        {
+                            finishReason = reason.GetString() ?? string.Empty;
+                        }
                         promptTokens = GetInt(root, "prompt_eval_count");
                         completionTokens = GetInt(root, "eval_count");
+                        break;
                     }
                 }
                 catch (JsonException)
@@ -245,7 +268,12 @@ public sealed class OllamaEllaiReasoningProvider(HttpClient http, EllaiOptions o
                 }
             }
 
-            return new EllaiReasoningResult(text.ToString(), model, "stop",
+            if (!completed)
+            {
+                throw new InvalidOperationException("Ellai Ollama stream ended before completion.");
+            }
+
+            return new EllaiReasoningResult(text.ToString(), model, finishReason,
                 new EllaiReasoningUsage(promptTokens, completionTokens, promptTokens + completionTokens, 0));
         }
     }

@@ -3,11 +3,219 @@ using Microsoft.Extensions.DependencyInjection;
 using SwiftAid.Contracts.Geography;
 using SwiftAid.Contracts.Intake;
 using SwiftAid.Gateway.Intake;
+using SwiftAid.Gateway.Presentation;
+using SwiftAid.Client.Presentation;
+using Microsoft.AspNetCore.DataProtection;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
+using SwiftAid.Domain.Intake;
+using SwiftAid.Infrastructure.Persistence.Entities.Intake;
+using SwiftAid.Infrastructure.Persistence.Repositories.Intake;
+using System.Security.Cryptography;
+using System.Text.Json;
+using System.Reflection;
+using SwiftAid.Gateway.Components.Pages;
+using SwiftAid.UI.Components.Public;
+using SwiftAid.Application.Authorization;
+using SwiftAid.Contracts.Commands;
 
 namespace SwiftAid.Integration.Tests;
 
+[Collection(IntakePostgresCollection.Name)]
 public sealed class WebGuestIntakeServiceTests
 {
+    [IntakePostgresFact]
+    public async Task ServerReportFormReachesAuthoritativeReceiptAndRetriesOnce()
+    {
+        await using var db = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
+        var limits = IntakeLimits.Default;
+        var authority = new PostgresIntakeSessionAuthority(db, limits, Options.Create(new IntakeSessionOptions()));
+        var sessions = new IntakeSessionEndpointService(authority, new PostgresIntakeReceiptReader(db), TimeProvider.System);
+        var protection = new EphemeralDataProtectionProvider();
+        var submissions = new PostgresIntakeSubmissionStore(db, limits, protection);
+        var countries = new FixtureCountries();
+        var intake = new IntakeService(submissions, new PostgresIntakeDecisionStore(db), new UnusedPromotion(),
+            new PostgresIntakeAttachmentAuthority(db), new CoverageRouter(new NoCoverage()),
+            new IntakeSubmissionValidator(countries, new FixturePolicy()), limits, TimeProvider.System);
+        var web = new WebGuestIntakeService(sessions, intake);
+        var client = new WebPublicIntakeSubmissionClient(web);
+        var page = new Report();
+        typeof(Report).GetProperty("IntakeSubmissionClient", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .SetValue(page, client);
+        var draft = new PublicReportDraft
+        {
+            SubjectScope = IntakeSubjectScope.Human, Narrative = "Synthetic observation", AgeYearsText = "26", CountryCode = "ZA",
+            CountryConfirmed = true, ReportReviewConfirmed = true, ProcessingConfirmed = true
+        };
+        var command = draft.ToSubmission("fixture-catalogue", "https://fixture.invalid/policy", "v1",
+            [new PublicCountryOption("ZA", "Synthetic country")], true);
+        Assert.Equal(Guid.Empty, command.ClientSubmissionId);
+        var invalidId = Guid.NewGuid();
+        var invalid = await client.SubmitAsync(command with { ClientSubmissionId = invalidId,
+            Confirmations = command.Confirmations with { ReportReviewConfirmed = false } });
+        Assert.Equal(UiCapabilityResultCode.InvalidRequest, invalid.Code);
+        Assert.Null(invalid.Value);
+        Assert.Equal(0, await db.Set<IntakeReportEntity>().CountAsync(item => item.ClientSubmissionId == invalidId));
+        var unavailableId = Guid.NewGuid();
+        countries.Unavailable = true;
+        var unavailable = await client.SubmitAsync(command with { ClientSubmissionId = unavailableId });
+        Assert.Equal(UiCapabilityResultCode.Unavailable, unavailable.Code);
+        Assert.Equal(0, await db.Set<IntakeReportEntity>().CountAsync(item => item.ClientSubmissionId == unavailableId));
+        countries.Unavailable = false;
+        var send = typeof(Report).GetMethod("SendReportAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
+
+        await (Task)send.Invoke(page, [command])!;
+        var receipt = (IntakeReceipt?)typeof(Report).GetField("_receipt", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(page);
+        Assert.NotNull(receipt);
+        Assert.NotEqual(Guid.Empty, receipt.ClientSubmissionId);
+        var persisted = await web.GetReceiptAsync(receipt.ReceiptId);
+        Assert.NotNull(persisted);
+        Assert.Equal(receipt.ReceiptId, persisted.ReceiptId);
+        Assert.Equal(receipt.ClientSubmissionId, persisted.ClientSubmissionId);
+        Assert.Equal(receipt.Status, persisted.Status);
+        Assert.Equal(receipt.RoutingStatus, persisted.RoutingStatus);
+        var stored = await db.Set<IntakeReportEntity>().AsNoTracking().SingleAsync(item => item.ReceiptId == receipt.ReceiptId);
+        var reopened = await new PostgresIntakeSubmissionOpener(protection).OpenAsync(stored.ProtectedPayload, default);
+        Assert.Equal(26, reopened.AgeYears);
+        var promoted = Assert.IsType<SwiftAid.Domain.Cases.CaseReportEventData.HumanV2>(
+            IntakePromotionMapper.ToReport(receipt.ReceiptId, reopened));
+        Assert.Equal(26, promoted.Report.AgeYears.Value.Value);
+        Assert.Equal(SwiftAid.Domain.Cases.ReportSourceKind.ReporterObservation, promoted.Report.AgeYears.Provenance.Source);
+        Assert.InRange((receipt.ReceivedAtUtc - persisted.ReceivedAtUtc).Duration(), TimeSpan.Zero, TimeSpan.FromTicks(9));
+        Assert.Null(await sessions.GetReceiptAsync(receipt.ReceiptId, RandomNumberGenerator.GetBytes(32), default));
+        await (Task)send.Invoke(page, [command])!;
+        var retried = (IntakeReceipt?)typeof(Report).GetField("_receipt", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(page);
+        Assert.Equal(receipt.ReceiptId, retried!.ReceiptId);
+        Assert.Equal(1, await db.Set<IntakeReportEntity>().CountAsync(item => item.ClientSubmissionId == receipt.ClientSubmissionId));
+        Assert.Equal(1, await db.Set<IntakeOutboxEntity>().CountAsync(item => item.ReceiptId == receipt.ReceiptId));
+    }
+
+    private sealed class FixtureCountries : IIntakeCountryCatalogue
+    {
+        public bool Unavailable { get; set; }
+        public Task<bool> IsKnownCountryAsync(string countryCode, string catalogueVersion, CancellationToken ct) =>
+            Unavailable ? Task.FromException<bool>(new IOException("Synthetic catalogue outage")) :
+            Task.FromResult(countryCode == "ZA" && catalogueVersion == "fixture-catalogue");
+    }
+
+    private sealed class FixturePolicy : IIntakeConsentPolicy
+    {
+        public Task<bool> IsCurrentAsync(IntakeConfirmations confirmations, bool includesAudio, CancellationToken ct) =>
+            Task.FromResult(confirmations.ProcessingPolicyVersion == "v1" && !includesAudio);
+    }
+
+    private sealed class NoCoverage : IIntakeCoverageCatalog
+    {
+        public Task<IntakeCoverageDecision> FindAsync(LocationContext location, CaseKind kind, CancellationToken ct) =>
+            Task.FromResult(new IntakeCoverageDecision(IntakeCoverageMatch.None, null));
+    }
+
+    private sealed class UnusedPromotion : IIntakePromotionService
+    {
+        public Task<IntakeDecisionResult> PromoteAsync(IntakeDecision command, ActorContext actor, CancellationToken ct) =>
+            throw new NotSupportedException();
+    }
+
+    [IntakePostgresFact]
+    public async Task LostAcknowledgementAndExpiredCapabilityReturnOriginalPostgresReceipt()
+    {
+        await using var db = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
+        var limits = IntakeLimits.Default;
+        var authority = new PostgresIntakeSessionAuthority(db, limits, Options.Create(new IntakeSessionOptions()));
+        var sessions = new IntakeSessionEndpointService(authority, new PostgresIntakeReceiptReader(db), TimeProvider.System);
+        var submissions = new PostgresIntakeSubmissionStore(db, limits, new EphemeralDataProtectionProvider());
+        var intake = new CommitThenDropIntakeService(submissions);
+        var service = new WebGuestIntakeService(sessions, intake);
+        var submission = GuestSubmissionSamples.Human();
+
+        await Assert.ThrowsAsync<IOException>(() => service.SubmitAsync(submission));
+        var sessionId = intake.SessionId;
+        var originalReceipt = intake.FirstReceipt!;
+        db.ChangeTracker.Clear();
+        var past = DateTimeOffset.UtcNow.AddMinutes(-2);
+        await db.Set<IntakeCapabilityEntity>().Where(item => item.SessionId == sessionId)
+            .ExecuteUpdateAsync(update => update.SetProperty(item => item.CreatedAtUtc, past)
+                .SetProperty(item => item.ExpiresAtUtc, past.AddMinutes(1)));
+        db.ChangeTracker.Clear();
+
+        var retried = await service.SubmitAsync(submission);
+
+        Assert.Equal(originalReceipt.ReceiptId, retried.ReceiptId);
+        Assert.Equal(sessionId, intake.SessionId);
+        Assert.Equal(1, await db.Set<IntakeReportEntity>().CountAsync(item => item.SessionId == sessionId &&
+            item.ClientSubmissionId == submission.ClientSubmissionId));
+        Assert.Equal(1, await db.Set<IntakeOutboxEntity>().CountAsync(item => item.ReceiptId == originalReceipt.ReceiptId));
+        var conflict = await Assert.ThrowsAsync<IntakeSubmissionException>(() => service.SubmitAsync(
+            submission with { Narrative = "A different synthetic report" }));
+        Assert.Equal(IntakeErrorCode.SubmissionConflict, conflict.Code);
+        Assert.Equal(1, await db.Set<IntakeReportEntity>().CountAsync(item => item.SessionId == sessionId &&
+            item.ClientSubmissionId == submission.ClientSubmissionId));
+    }
+
+    private sealed class CommitThenDropIntakeService(PostgresIntakeSubmissionStore store) : IIntakeService
+    {
+        public Guid SessionId { get; private set; }
+        public IntakeReceipt? FirstReceipt { get; private set; }
+
+        public async Task<IntakeReceipt> SubmitAsync(IntakeSubmission submission, IntakeCapability capability, CancellationToken ct)
+        {
+            SessionId = capability.SessionId;
+            var digest = SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(submission));
+            var receipt = await store.CommitAsync(submission, capability, digest,
+                new CoverageResult(IntakeRoutingStatus.NeedsRouting, null), DateTimeOffset.UtcNow, [], ct);
+            if (FirstReceipt is null)
+            {
+                FirstReceipt = receipt;
+                throw new IOException("Synthetic lost acknowledgement after commit.");
+            }
+            return receipt;
+        }
+
+        public Task<IntakeDecisionResult> DecideAsync(IntakeDecision command,
+            SwiftAid.Application.Authorization.ActorContext actor, CancellationToken ct) => throw new NotSupportedException();
+    }
+    [Fact]
+    public async Task ConflictingSubmissionIsNotReportedAsTransientFailure()
+    {
+        var intake = new FakeIntakeService { Submit = (_, _) => throw new IntakeSubmissionException(IntakeErrorCode.SubmissionConflict) };
+        var client = new WebPublicIntakeSubmissionClient(new WebGuestIntakeService(new FakeSessionEndpointService(), intake));
+
+        var result = await client.SubmitAsync(GuestSubmissionSamples.Human());
+
+        Assert.Equal(UiCapabilityResultCode.Conflict, result.Code);
+        Assert.Null(result.Value);
+        Assert.Equal(1, intake.SubmitCalls);
+    }
+
+    [Fact]
+    public async Task UnclassifiedValidationDoesNotClaimAFieldWasHighlighted()
+    {
+        var intake = new FakeIntakeService { Submit = (_, _) => throw new IntakeSubmissionException(IntakeErrorCode.InvalidReport) };
+        var client = new WebPublicIntakeSubmissionClient(new WebGuestIntakeService(new FakeSessionEndpointService(), intake));
+
+        var result = await client.SubmitAsync(GuestSubmissionSamples.Human());
+
+        Assert.Equal(UiCapabilityResultCode.InvalidRequest, result.Code);
+        Assert.Null(result.Value);
+        Assert.Contains("did not identify a field", result.Message);
+        Assert.Equal(result.Message, result.Metadata.Notice);
+        Assert.Equal(1, intake.SubmitCalls);
+    }
+    [Fact]
+    public void WebReportIdentity_ReusesIdentityForRetryAndChangesItForEditedReport()
+    {
+        var identity = new WebReportSubmissionIdentity();
+        var report = GuestSubmissionSamples.Human() with { ClientSubmissionId = Guid.Empty };
+
+        var first = identity.Assign(report);
+        var retry = identity.Assign(report);
+        var edited = identity.Assign(report with { Narrative = "Updated report" });
+
+        Assert.NotEqual(Guid.Empty, first.ClientSubmissionId);
+        Assert.Equal(first.ClientSubmissionId, retry.ClientSubmissionId);
+        Assert.NotEqual(first.ClientSubmissionId, edited.ClientSubmissionId);
+    }
+
     private sealed class ScopedLifetime : IDisposable
     {
         public bool Disposed { get; private set; }
@@ -104,7 +312,85 @@ public sealed class WebGuestIntakeServiceTests
         var receipt = await service.SubmitAsync(submission);
 
         Assert.Equal(2, sessions.CreateCalls);
+        Assert.Equal(sessions.CreatedSessions[0].SessionId, sessions.CreatedSessions[1].SessionId);
+        Assert.Equal(sessions.CreatedSessions[0].Proof, sessions.CreatedSessions[1].Proof);
         Assert.Equal(submission.ClientSubmissionId, receipt.ClientSubmissionId);
+        Assert.Equal(2, intake.SubmitCalls);
+    }
+
+    [Fact]
+    public async Task AmbiguousSubmissionAndExpiredCapabilityRetryWithinOriginalSession()
+    {
+        var sessions = new FakeSessionEndpointService();
+        var attempts = 0;
+        var committed = new Dictionary<(Guid SessionId, Guid SubmissionId), IntakeReceipt>();
+        var intake = new FakeIntakeService
+        {
+            Submit = (submission, capability) =>
+            {
+                var key = (capability.SessionId, submission.ClientSubmissionId);
+                if (!committed.TryGetValue(key, out var receipt))
+                    committed[key] = receipt = new IntakeReceipt(Guid.NewGuid(), submission.ClientSubmissionId,
+                        IntakeStatus.ReceivedUnverified, IntakeRoutingStatus.NeedsRouting, DateTimeOffset.UtcNow);
+                if (++attempts == 1) throw new IOException("Synthetic lost acknowledgement");
+                return receipt;
+            }
+        };
+        var service = new WebGuestIntakeService(sessions, intake);
+        var submission = GuestSubmissionSamples.Human();
+        await Assert.ThrowsAsync<IOException>(() => service.SubmitAsync(submission));
+        sessions.FailNextResolveThenReturn(FakeSessionEndpointService.DefaultCapability());
+
+        var receipt = await service.SubmitAsync(submission);
+
+        Assert.Equal(submission.ClientSubmissionId, receipt.ClientSubmissionId);
+        Assert.Equal(2, intake.SubmitCalls);
+        Assert.Single(committed);
+        Assert.Equal(Assert.Single(committed).Value.ReceiptId, receipt.ReceiptId);
+        Assert.Equal(2, sessions.CreatedSessions.Count);
+        Assert.Equal(sessions.CreatedSessions[0].SessionId, sessions.CreatedSessions[1].SessionId);
+        Assert.Equal(sessions.CreatedSessions[0].Proof, sessions.CreatedSessions[1].Proof);
+    }
+
+    [Fact]
+    public async Task CapabilityRejectedDuringSubmissionIsRenewedForSameSession()
+    {
+        var sessions = new FakeSessionEndpointService();
+        var attempts = 0;
+        var intake = new FakeIntakeService
+        {
+            Submit = (submission, _) => ++attempts == 1
+                ? throw new IntakeSubmissionException(IntakeErrorCode.CapabilityInvalid)
+                : new IntakeReceipt(Guid.NewGuid(), submission.ClientSubmissionId, IntakeStatus.ReceivedUnverified,
+                    IntakeRoutingStatus.NeedsRouting, DateTimeOffset.UtcNow)
+        };
+        var service = new WebGuestIntakeService(sessions, intake);
+
+        await service.SubmitAsync(GuestSubmissionSamples.Human());
+
+        Assert.Equal(2, intake.SubmitCalls);
+        Assert.Equal(2, sessions.CreatedSessions.Count);
+        Assert.Equal(sessions.CreatedSessions[0].SessionId, sessions.CreatedSessions[1].SessionId);
+        Assert.Equal(sessions.CreatedSessions[0].Proof, sessions.CreatedSessions[1].Proof);
+    }
+
+    [Fact]
+    public async Task FailedCapabilityRenewalDoesNotDiscardOriginalSession()
+    {
+        var sessions = new FakeSessionEndpointService();
+        var intake = new FakeIntakeService();
+        var service = new WebGuestIntakeService(sessions, intake);
+        await service.SubmitAsync(GuestSubmissionSamples.Human());
+        sessions.FailNextResolveThenReturn(FakeSessionEndpointService.DefaultCapability());
+        sessions.Create = () => null;
+        await Assert.ThrowsAsync<IntakeSubmissionException>(() => service.SubmitAsync(GuestSubmissionSamples.Human()));
+        sessions.Create = () => new IntakeSessionResponse("renewed", DateTimeOffset.UtcNow.AddMinutes(15));
+
+        await service.SubmitAsync(GuestSubmissionSamples.Human());
+
+        Assert.Equal(3, sessions.CreatedSessions.Count);
+        Assert.All(sessions.CreatedSessions, item => Assert.Equal(sessions.CreatedSessions[0].SessionId, item.SessionId));
+        Assert.All(sessions.CreatedSessions, item => Assert.Equal(sessions.CreatedSessions[0].Proof, item.Proof));
         Assert.Equal(2, intake.SubmitCalls);
     }
 
@@ -223,6 +509,7 @@ public sealed class WebGuestIntakeServiceTests
     private sealed class FakeSessionEndpointService : IIntakeSessionEndpointService
     {
         public int CreateCalls { get; private set; }
+        public List<(Guid SessionId, byte[] Proof)> CreatedSessions { get; } = [];
 
         public int ResolveCalls { get; private set; }
 
@@ -252,6 +539,7 @@ public sealed class WebGuestIntakeServiceTests
         public Task<IntakeSessionResponse?> CreateAsync(Guid sessionId, ReadOnlyMemory<byte> proof, CancellationToken ct)
         {
             CreateCalls++;
+            CreatedSessions.Add((sessionId, proof.ToArray()));
             return Task.FromResult(Create());
         }
 
@@ -267,7 +555,8 @@ public sealed class WebGuestIntakeServiceTests
                 return Task.FromResult(ResolvedCapability);
             }
 
-            ResolvedCapability = _postFailCapability ?? Resolve();
+            var candidate = _postFailCapability ?? Resolve();
+            ResolvedCapability = candidate is null ? null : candidate with { SessionId = sessionId };
             return Task.FromResult(ResolvedCapability);
         }
 

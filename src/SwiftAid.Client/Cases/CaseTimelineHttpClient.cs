@@ -47,7 +47,7 @@ public sealed class CaseTimelineHttpClient(HttpClient httpClient) : ICaseTimelin
             var timeline = await response.Content
                 .ReadFromJsonAsync<CaseTimeline>(JsonOptions, cancellationToken)
                 .ConfigureAwait(false);
-            return timeline is null
+            return timeline?.Header is null || timeline.Header.CaseId != caseId || timeline.Entries is null
                 ? new CaseTimelineResult(CaseTimelineAccess.NotFoundOrNotAuthorized, null)
                 : new CaseTimelineResult(CaseTimelineAccess.Found, timeline);
         }

@@ -82,7 +82,11 @@ public sealed class CaseMonitoringQueueQuery(
             candidates = followUps.Concat(assistance).OrderBy(candidate => candidate.DueAtUtc ?? DateTimeOffset.MaxValue)
                 .ThenBy(candidate => candidate.RecordedAtUtc).Take(take).ToArray();
         }
-        catch (Exception)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception error) when (error is not OutOfMemoryException)
         {
             return new MonitoringQueueResult(CaseQueueAccess.Unavailable, []);
         }
@@ -104,7 +108,11 @@ public sealed class CaseMonitoringQueueQuery(
             escalations = await _store.GetOpenEscalationsAsync(take, ct).ConfigureAwait(false);
             assistance = await _store.GetOpenAssistanceAsync(take, ct).ConfigureAwait(false);
         }
-        catch (Exception)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception error) when (error is not OutOfMemoryException)
         {
             return new MonitoringQueueResult(CaseQueueAccess.Unavailable, []);
         }
@@ -142,6 +150,13 @@ public sealed class CaseMonitoringQueueQuery(
             }
             catch (KeyNotFoundException)
             {
+                continue;
+            }
+            catch (InvalidOperationException error) when (error.Message is
+                "The case authority scope is unavailable." or "The current case authority scope is unavailable.")
+            {
+                // Scope can be revoked between candidate discovery and the
+                // per-case lease. Treat that case like any other denied row.
                 continue;
             }
 

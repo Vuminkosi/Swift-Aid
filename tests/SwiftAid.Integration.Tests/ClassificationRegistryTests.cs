@@ -300,7 +300,7 @@ public sealed class ClassificationRegistryTests
     }
 
     [IntakePostgresFact]
-    public async Task Authorized_query_and_ellai_read_persisted_results_without_inference_or_lease_disclosure()
+    public async Task Authorized_query_reads_results_but_ellai_route_requires_source_specific_approval()
     {
         await using var fixture = await CaseImportPostgresTests.Fixture.CreateAsync();
         var notice = await ImportAsync(fixture);
@@ -324,7 +324,8 @@ public sealed class ClassificationRegistryTests
             ConsentPurpose: EllaiConsentService.PublicProductHelpPurpose);
         var request = new EllaiToolRequest(EllaiToolNames.ClassificationEvidence, new Dictionary<string, string> { ["case_id"] = notice.SourceId.ToString("D") });
         var response = await broker.InvokeAsync(context, request, default);
-        Assert.True(response.Allowed); Assert.DoesNotContain(claim.Lease.LeaseId.ToString("D"), response.ResultSummary);
+        Assert.False(response.Allowed); Assert.Equal(EllaiToolReasonCodes.Unavailable, response.ReasonCode);
+        Assert.DoesNotContain(claim.Lease.LeaseId.ToString("D"), response.ResultSummary);
         Assert.DoesNotContain("Original supplied concern", response.ResultSummary);
         using var model = new ClassificationToolClient(notice.SourceId);
         var executor = new EllaiFrameworkExecutor(model, new EllaiPromptBuilder("Synthetic policy", "fixture"),

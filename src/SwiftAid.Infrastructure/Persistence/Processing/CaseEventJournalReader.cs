@@ -51,6 +51,15 @@ internal static class CaseEventJournalReader
             var result = schemaVersion == 2
                 ? eventType switch
                 {
+                    nameof(CaseEventType.CaseObservationRecorded) => ReadV2<CaseObservationRecordedV2Payload>(serialized,
+                        ["observationId", "narrative", "source", "category", "attachment"], (payload, value) =>
+                        {
+                            ValidateObservationPayload(payload, new(value.ObservationId, value.Narrative, value.Source));
+                            if (value.Category is not (null or "Clinical" or "Environmental" or "Community")
+                                || value.Attachment is { IsValid: false }) throw InvalidJournal();
+                            if (value.Attachment is not null)
+                                RequireProperties(payload.GetProperty("attachment"), ["objectId", "fileName", "contentType", "byteLength", "sha256"]);
+                        }),
                     nameof(CaseEventType.CaseReported) => ReadV2<CaseReportedV2Payload>(serialized,
                         ["workspaceId", "report"], ValidateReportedV2Payload),
                     nameof(CaseEventType.CaseReportCorrected) => ReadV2<CaseReportCorrectedV2Payload>(serialized,
@@ -114,6 +123,8 @@ internal static class CaseEventJournalReader
                     ["reason"], ValidateReasonPayload),
                 nameof(CaseEventType.CaseReopened) => Read<CaseReopenedPayload>(serialized,
                     ["reason", "accountableOwnerId"], ValidateReopenedPayload),
+                nameof(CaseEventType.CaseDiscussionPosted) => Read<CaseDiscussionPostedPayload>(serialized,
+                    ["message", "mentionReferences", "evidenceKeys"], ValidateDiscussionPayload),
                 nameof(CaseEventType.CaseObservationRecorded) => Read<CaseObservationRecordedPayload>(serialized,
                     ["observationId", "narrative", "source"], ValidateObservationPayload),
                 nameof(CaseEventType.CaseFollowUpScheduled) => Read<CaseFollowUpScheduledPayload>(serialized,
@@ -158,7 +169,8 @@ internal static class CaseEventJournalReader
         {
             var payloadElement = document.RootElement.GetProperty("payload");
             RequireProperties(payloadElement, payloadProperties);
-            ValidateKnownReportedTimesV2(payloadElement);
+            if (typeof(TPayload) == typeof(CaseReportedV2Payload) || typeof(TPayload) == typeof(CaseReportCorrectedV2Payload))
+                ValidateKnownReportedTimesV2(payloadElement);
             var value = JsonSerializer.Deserialize<TPayload>(payloadElement, JsonOptions) ?? throw InvalidJournal();
             validatePayload(payloadElement, value);
         }
@@ -168,6 +180,10 @@ internal static class CaseEventJournalReader
         var payload = envelope.Payload ?? throw InvalidJournal();
         return (envelope.EventType, payload) switch
         {
+            (CaseEventType.CaseObservationRecorded, CaseObservationRecordedV2Payload observation) => new CaseObservationRecorded(
+                envelope.CaseId, envelope.AggregateVersion, envelope.ReportRevision, envelope.CommandId,
+                envelope.ActorId, envelope.OccurredAtUtc, envelope.RecordedAtUtc,
+                observation.ObservationId, observation.Narrative, observation.Source, observation.Category, observation.Attachment),
             (CaseEventType.CaseReported, CaseReportedV2Payload reported) => new CaseReported(
                 envelope.CaseId, envelope.AggregateVersion, envelope.ReportRevision, envelope.CommandId,
                 envelope.ActorId, envelope.OccurredAtUtc, envelope.RecordedAtUtc,
@@ -284,6 +300,14 @@ internal static class CaseEventJournalReader
                 envelope.CaseId, envelope.AggregateVersion, envelope.ReportRevision, envelope.CommandId,
                 envelope.ActorId, envelope.OccurredAtUtc, envelope.RecordedAtUtc,
                 reopened.Reason, reopened.AccountableOwnerId),
+            CaseEventType.CaseObservationRecorded when payload is CaseObservationRecordedV2Payload observationV2 => new CaseObservationRecorded(
+                envelope.CaseId, envelope.AggregateVersion, envelope.ReportRevision, envelope.CommandId,
+                envelope.ActorId, envelope.OccurredAtUtc, envelope.RecordedAtUtc,
+                observationV2.ObservationId, observationV2.Narrative, observationV2.Source, observationV2.Category),
+            CaseEventType.CaseDiscussionPosted when payload is CaseDiscussionPostedPayload discussion => new CaseDiscussionPosted(
+                envelope.CaseId, envelope.AggregateVersion, envelope.ReportRevision, envelope.CommandId,
+                envelope.ActorId, envelope.OccurredAtUtc, envelope.RecordedAtUtc,
+                discussion.Message, discussion.MentionReferences, discussion.EvidenceKeys),
             CaseEventType.CaseObservationRecorded when payload is CaseObservationRecordedPayload observation => new CaseObservationRecorded(
                 envelope.CaseId, envelope.AggregateVersion, envelope.ReportRevision, envelope.CommandId,
                 envelope.ActorId, envelope.OccurredAtUtc, envelope.RecordedAtUtc,
@@ -465,12 +489,24 @@ internal static class CaseEventJournalReader
 
     private static void ValidateContextV2(JsonElement element, ReportContextV2Payload? context)
     {
-        RequireProperties(element, ["occurrence", "capturedAtUtc", "capturedOffset", "capturedZoneId", "capturePrecision", "location"]);
+        var hasOnset = element.TryGetProperty("onset", out var onsetElement);
+        RequireProperties(element, hasOnset
+            ? ["occurrence", "capturedAtUtc", "capturedOffset", "capturedZoneId", "capturePrecision", "location", "onset"]
+            : ["occurrence", "capturedAtUtc", "capturedOffset", "capturedZoneId", "capturePrecision", "location"]);
         if (context is null || context.Occurrence is null || context.Location is null ||
             !IsExactEnumValue(element, "capturePrecision", context.CapturePrecision) ||
             !Enum.IsDefined(context.CapturePrecision) ||
             !Enum.IsDefined(context.Location.Source) || !Enum.IsDefined(context.Location.Precision)) throw InvalidJournal();
         ValidateFactV2(element.GetProperty("occurrence"), context.Occurrence);
+        if (hasOnset && onsetElement.ValueKind != JsonValueKind.Null)
+        {
+            if (context.Onset is null) throw InvalidJournal();
+            ValidateFactV2(onsetElement, context.Onset);
+        }
+        else if (context.Onset is not null)
+        {
+            throw InvalidJournal();
+        }
         var location = element.GetProperty("location");
         RequireProperties(location, ["countryCode", "region", "area", "locality", "latitude", "longitude", "accuracyMetres", "source", "precision", "catalogueVersion"]);
         if (!IsExactEnumValue(location, "source", context.Location.Source) || !IsExactEnumValue(location, "precision", context.Location.Precision)) throw InvalidJournal();
@@ -636,6 +672,14 @@ internal static class CaseEventJournalReader
         RequireIdentifier(value.AccountableOwnerId);
     }
 
+    private static void ValidateDiscussionPayload(JsonElement payload, CaseDiscussionPostedPayload value)
+    {
+        RequireText(value.Message);
+        if (value.Message.Length > 4000 || value.MentionReferences is null || value.EvidenceKeys is null ||
+            value.MentionReferences.Count > 20 || value.EvidenceKeys.Count > 10 ||
+            value.MentionReferences.Concat(value.EvidenceKeys).Any(reference => string.IsNullOrWhiteSpace(reference) || reference.Length > 160))
+            throw InvalidJournal();
+    }
     private static void ValidateObservationPayload(JsonElement payload, CaseObservationRecordedPayload value)
     {
         if (!IsCanonicalGuid(payload, "observationId") || value.ObservationId == Guid.Empty)
@@ -777,7 +821,8 @@ internal static class CaseEventJournalReader
     private static CaseReportEventData ToDomainReportV2(CaseReportV2Payload payload)
     {
         var context = new ReportContext(ToDomainFact(payload.Context.Occurrence), payload.Context.CapturedAtUtc,
-            payload.Context.CapturedOffset, payload.Context.CapturedZoneId, payload.Context.CapturePrecision, payload.Context.Location);
+            payload.Context.CapturedOffset, payload.Context.CapturedZoneId, payload.Context.CapturePrecision, payload.Context.Location,
+            payload.Context.Onset is null ? null : ToDomainFact(payload.Context.Onset));
         var evidence = new ReportEvidence(
             payload.Evidence.Narrative is null ? null : ToDomainText(payload.Evidence.Narrative),
             payload.Evidence.Observations.Select(ToDomainText),

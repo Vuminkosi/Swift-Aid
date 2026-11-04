@@ -43,17 +43,34 @@ public sealed partial class EllaiGuidanceProposalAdmission
             checkpoint.CurrentStepId != request.StepId || checkpoint.ScopeEpoch != authority.ScopeEpoch) return null;
         var step = checkpoint.Plan.Steps.SingleOrDefault(item => item.StepKey == request.StepId);
         if (step is null || !admission.Catalogue!.Descriptors.Any(item => item.ControlId == step.ControlId)) return null;
-        if (validationText is not null && step.ControlId is not ("report.narrative" or "report.time-location")) return null;
+        var narration = validationText ?? step.Explanation;
+        if (validationText is not null && step.ControlId is not ("report.subject" or "report.narrative" or "report.time-location")) return null;
+        if (request.ValidationInputId is not null || request.ObservationContextStamp is not null)
+        {
+            if (request.ValidationInputId is null || request.ObservationContextStamp is null ||
+                !admission.Catalogue.Descriptors.Any(item => item.ControlId == step.ControlId && item.FeatureId == EllaiReportUiManifest.FeatureId) ||
+                admission.Observation?.ContextStamp != request.ObservationContextStamp ||
+                admission.Observation.ValidationInputIds?.Select(EllaiReportValidationGuidance.Find)
+                    .FirstOrDefault(item => item is not null)?.InputId != request.ValidationInputId ||
+                EllaiReportValidationGuidance.Find(request.ValidationInputId) is not { } issue ||
+                EllaiReportValidationGuidance.ControlFor(request.ValidationInputId) is null) return null;
+            narration = issue.Message;
+        }
         var turn = (await outbox.ReadConversationAsync(sessionId, authority.OwnerActorId, ct).ConfigureAwait(false))
             .MaxBy(item => item.Sequence);
         if (turn is null || turn.Outcome != "Completed") return null;
         // Fence cancellation, replacement and newer accepted turns before publication.
         var current = await sessions.GetAsync(sessionId, ct).ConfigureAwait(false);
         if (current?.SessionVersion != session.SessionVersion || current.InteractionEpoch != session.InteractionEpoch) return null;
-        var existing = responses.ReadSince(sessionId, 0, EllaiSessionResponseStore.MaximumResponsesPerSession)
-            .Responses.SingleOrDefault(item => item.Progress?.EventId == (validationEventId ?? request.EventId));
-        if (existing is not null) return existing;
-        return responses.PublishProgress(sessionId, turn.ClientUtteranceId, validationText ?? step.Explanation,
+        if (request.ValidationInputId is not null)
+        {
+            var latest = await observations.LatestAsync(sessionId, ct).ConfigureAwait(false);
+            if (latest is null || latest.ContextStamp != request.ObservationContextStamp ||
+                latest.ValidationInputIds?.Select(EllaiReportValidationGuidance.Find)
+                    .FirstOrDefault(item => item is not null)?.InputId != request.ValidationInputId ||
+                EllaiReportValidationGuidance.ControlFor(request.ValidationInputId) is null) return null;
+        }
+        return responses.PublishOrGetProgress(sessionId, turn.ClientUtteranceId, narration,
             new(validationEventId ?? request.EventId, "Guidance", "Guidance", true, session.InteractionEpoch,
                 (clock ?? TimeProvider.System).GetUtcNow().AddMinutes(5)), request.EnglishVoiceId);
     }

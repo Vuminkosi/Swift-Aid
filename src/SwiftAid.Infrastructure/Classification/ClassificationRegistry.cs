@@ -23,21 +23,86 @@ public sealed class ClassificationRegistry(
     private ClassificationOptions Options => configured.Value;
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
-    public async Task<ClassificationClaim> ClaimAsync(IngestionNotice notice, CancellationToken ct)
+    public async Task<ClassificationClaim> ClaimAsync(IngestionNotice notice, CancellationToken ct, Guid? backfillJobId = null)
     {
         Options.Validate();
         if (!notice.IsValid() || notice.SourceKind != "case") throw new ArgumentException("Unsupported notice.");
         var noticeHash = ClassificationFingerprint.Hash(JsonSerializer.Serialize(notice, Json));
         var now = clock.GetUtcNow();
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        if (backfillJobId is { } admissionJobId)
+        {
+            // Share the job lock with snapshot reconciliation and control. The
+            // earlier endpoint check is outside this transaction and cannot fence
+            // a concurrent job transition on its own.
+            await LockAsync($"classification-backfill:{admissionJobId}", ct);
+            var admitted = await (from job in db.Set<ClassificationBackfillEntity>().AsNoTracking()
+                                  join item in db.Set<ClassificationBackfillItemEntity>().AsNoTracking() on job.Id equals item.JobId
+                                  where job.Id == admissionJobId && job.WorkerId == Options.WorkerId &&
+                                      job.ConfigurationHash == Options.Profile.Hash &&
+                                      Options.Organizations.Contains(job.OrganizationId) && item.SourceEventId == notice.MessageId
+                                  select job.Id).AnyAsync(ct);
+            if (!admitted) throw new UnauthorizedAccessException();
+        }
         await LockAsync($"classification-inbox:{notice.MessageId}:{Options.Profile.Hash}", ct);
         var sourceNotice = await db.CaseEvents.AsNoTracking().SingleOrDefaultAsync(e => e.EventId == notice.MessageId, ct);
         if (sourceNotice is null || sourceNotice.CaseId != notice.SourceId || sourceNotice.AggregateVersion != notice.SourceVersion ||
             sourceNotice.ReportRevision != notice.ReportRevision || sourceNotice.EventType != notice.EventType || sourceNotice.RecordedAtUtc != notice.RecordedAtUtc)
             throw new ArgumentException("Notice does not match a committed source event.");
+        if (backfillJobId is { } checkedJobId)
+        {
+            var expired = await db.Database.SqlQuery<bool>($"""
+                SELECT EXISTS (SELECT 1 FROM swiftaid_classification.backfill_items item
+                    JOIN case_events e ON e.event_id = item."SourceEventId"
+                    JOIN managed_cases c ON c.case_id = e.case_id
+                    WHERE item."JobId" = {checkedJobId} AND item."SourceEventId" = {notice.MessageId}
+                        AND (item."State" = 'Expired' OR item."State" = 'Pending' AND NOT
+                            (COALESCE((SELECT report.received_at_utc FROM swiftaid_intake.intake_promotions promotion
+                            JOIN swiftaid_intake.intake_reports report ON report.receipt_id = promotion.receipt_id
+                            WHERE promotion.case_id = c.case_id), c.created_at_utc)
+                            BETWEEN clock_timestamp() - interval '30 days' AND clock_timestamp()))) AS "Value"
+                """).SingleAsync(ct);
+            if (expired)
+            {
+                await transaction.CommitAsync(ct);
+                return new ClassificationClaim("Expired", ConfigurationHash: Options.Profile.Hash);
+            }
+        }
         var header = await db.ManagedCases.AsNoTracking().SingleAsync(c => c.CaseId == notice.SourceId, ct);
         await RequireScopeAsync(header.WorkspaceId, header.OrganizationId, ct);
+        // Use the same organization/workspace-before-case lock order as case
+        // commands. Hold the case revision stable only through admission; the
+        // transaction ends before any provider inference starts.
+        var lockedCases = await db.Database.SqlQuery<Guid>($"""
+            SELECT case_id AS "Value" FROM managed_cases
+            WHERE case_id = {header.CaseId} AND workspace_id = {header.WorkspaceId} AND organization_id = {header.OrganizationId}
+            FOR SHARE
+            """).ToArrayAsync(ct).ConfigureAwait(false);
+        if (lockedCases.Length != 1) throw new UnauthorizedAccessException();
+        header = await db.ManagedCases.AsNoTracking().SingleAsync(c => c.CaseId == notice.SourceId, ct);
         await SupersedeOldFactsAsync(header.CaseId, header.ReportRevision, ct);
+        if (notice.ReportRevision < header.ReportRevision)
+        {
+            // Retain a durable terminal inbox record before acknowledging a stale
+            // delivery. Do not decrypt source facts or admit model work for it.
+            var configuration = Options.Profile.Hash;
+            var obsolete = await db.Set<ClassificationInboxEntity>().FindAsync([notice.MessageId, configuration], ct);
+            if (obsolete is not null && obsolete.NoticeHash != noticeHash)
+                throw new ArgumentException("Changed message identity.");
+            if (obsolete is null)
+                db.Add(new ClassificationInboxEntity { MessageId = notice.MessageId, ConfigurationId = configuration,
+                    NoticeHash = noticeHash, State = "Superseded", UpdatedAtUtc = clock.GetUtcNow() });
+            else if (obsolete.State != "Superseded")
+            {
+                obsolete.State = "Superseded";
+                obsolete.UpdatedAtUtc = clock.GetUtcNow();
+            }
+            await db.SaveChangesAsync(ct);
+            await transaction.CommitAsync(ct);
+            return new ClassificationClaim("Superseded", ConfigurationHash: configuration);
+        }
+        if (notice.ReportRevision > header.ReportRevision)
+            throw new InvalidDataException("The source revision is ahead of the case projection.");
         var source = await db.CaseEvents.AsNoTracking().Where(e => e.CaseId == header.CaseId && e.ReportRevision == notice.ReportRevision &&
             (e.EventType == "CaseReported" || e.EventType == "CaseReportCorrected")).OrderByDescending(e => e.AggregateVersion).FirstAsync(ct);
         var sourceLanguage = await ReadImportedLanguageAsync(source, header, ct);
@@ -77,6 +142,8 @@ public sealed class ClassificationRegistry(
         {
             // A completed abstention may acquire new translation work; persist admission before ACK.
             await db.SaveChangesAsync(ct);
+            if (backfillJobId is { } completedJob && inbox.ResultId is { } completedResult)
+                await BindBackfillResultAsync(completedJob, notice.MessageId, completedResult, ct);
             await transaction.CommitAsync(ct);
             return new(header.ReportRevision == notice.ReportRevision ? inbox.State : "Superseded", FailureCode: inbox.FailureCode, ConfigurationHash: config);
         }
@@ -106,6 +173,7 @@ public sealed class ClassificationRegistry(
         inbox.ResultId = result.Id;
         inbox.UpdatedAtUtc = now;
         var association = await db.Set<ClassificationAssociationEntity>().FindAsync([header.CaseId, notice.ReportRevision, config], ct);
+        var associatedByThisClaim = association is null;
         if (association is null)
         {
             db.Add(new ClassificationAssociationEntity { CaseId = header.CaseId, ReportRevision = notice.ReportRevision,
@@ -137,10 +205,72 @@ public sealed class ClassificationRegistry(
             response = new("Leased", new(result.Id, result.LeaseId.Value, config, fingerprint, result.LeaseUntilUtc.Value, text, profile));
         }
         await db.SaveChangesAsync(ct);
+        if (backfillJobId is { } resultJob)
+            await BindBackfillResultAsync(resultJob, notice.MessageId, result.Id, ct);
+        if (backfillJobId is { } reuseJob && associatedByThisClaim && !created && result.State != "Failed")
+        {
+            // The scheduled turn created this case-to-result association. Record
+            // it atomically; the timeline exposes it only if the result completes.
+            var recorded = await db.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO ellai_enrichment_reuses (activity_id, job_id, source_event_id, result_id, recorded_at_utc)
+                SELECT gen_random_uuid(), j.job_id, item."SourceEventId", r."Id", {now}
+                FROM ellai_enrichment_jobs j
+                JOIN swiftaid_classification.backfills job ON job."Id" = j.job_id
+                JOIN swiftaid_classification.backfill_items item ON item."JobId" = j.job_id
+                JOIN swiftaid_classification.results r ON r."Id" = {result.Id}
+                WHERE j.job_id = {reuseJob} AND item."SourceEventId" = {source.EventId}
+                    AND item."State" = 'Pending' AND job."State" = 'Running'
+                    AND job."WorkerId" = {Options.WorkerId} AND job."WorkspaceId" = {header.WorkspaceId}
+                    AND job."OrganizationId" = {header.OrganizationId} AND job."ConfigurationHash" = {Options.Profile.Hash}
+                    AND r."State" <> 'Failed'
+                ON CONFLICT (source_event_id, result_id) DO NOTHING
+                """, ct).ConfigureAwait(false);
+            if (recorded == 0 && await db.Database.SqlQuery<int>($"""
+                SELECT count(*)::int AS "Value" FROM ellai_enrichment_jobs WHERE job_id = {reuseJob}
+                """).SingleAsync(ct).ConfigureAwait(false) != 0)
+                throw new InvalidOperationException("Scheduled enrichment reuse could not be attributed.");
+        }
+        if (backfillJobId is { } jobId && response.Lease is { } scheduledLease)
+        {
+            // Attribution is committed with the result lease, before the worker
+            // can receive it. A lost response or crash cannot create an untracked
+            // successful scheduled classification.
+            var recorded = await db.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO ellai_enrichment_claims (claim_id, job_id, source_event_id, result_id, lease_id, recorded_at_utc)
+                SELECT gen_random_uuid(), j.job_id, item."SourceEventId", r."Id", {scheduledLease.LeaseId}, {now}
+                FROM ellai_enrichment_jobs j
+                JOIN swiftaid_classification.backfills job ON job."Id" = j.job_id
+                JOIN swiftaid_classification.backfill_items item ON item."JobId" = j.job_id
+                JOIN swiftaid_classification.results r ON r."Id" = {result.Id}
+                WHERE j.job_id = {jobId} AND item."SourceEventId" = {source.EventId}
+                    AND item."State" = 'Pending' AND job."State" = 'Running'
+                    AND job."WorkerId" = {Options.WorkerId} AND job."WorkspaceId" = {header.WorkspaceId}
+                    AND job."OrganizationId" = {header.OrganizationId} AND job."ConfigurationHash" = {Options.Profile.Hash}
+                    AND r."State" = 'Leased' AND r."LeaseId" = {scheduledLease.LeaseId}
+                ON CONFLICT (job_id, source_event_id, lease_id) DO NOTHING
+                """, ct).ConfigureAwait(false);
+            if (recorded == 0 && await db.Database.SqlQuery<int>($"""
+                SELECT count(*)::int AS "Value" FROM ellai_enrichment_jobs WHERE job_id = {jobId}
+                """).SingleAsync(ct).ConfigureAwait(false) != 0)
+                throw new InvalidOperationException("Scheduled enrichment claim could not be attributed.");
+        }
         // A historical backfill can create an old association after the initial sweep.
         await SupersedeOldFactsAsync(header.CaseId, header.ReportRevision, ct);
         await transaction.CommitAsync(ct);
         return response with { ConfigurationHash = config };
+    }
+
+    private async Task BindBackfillResultAsync(Guid jobId, Guid sourceEventId, Guid resultId, CancellationToken ct)
+    {
+        var item = await db.Set<ClassificationBackfillItemEntity>()
+            .SingleAsync(row => row.JobId == jobId && row.SourceEventId == sourceEventId, ct);
+        if (item.ResultId is { } existing && existing != resultId)
+            throw new InvalidOperationException("Bound backfill artifact changed.");
+        if (item.ResultId is null)
+        {
+            item.ResultId = resultId;
+            await db.SaveChangesAsync(ct);
+        }
     }
 
     public async Task<string> CompleteAsync(ClassificationCompletion request, CancellationToken ct)

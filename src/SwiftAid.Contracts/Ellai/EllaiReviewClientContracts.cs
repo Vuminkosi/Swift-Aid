@@ -1,3 +1,5 @@
+using SwiftAid.Contracts.Intake;
+
 namespace SwiftAid.Contracts.Ellai;
 
 public static class EllaiConsentPurposes
@@ -233,6 +235,10 @@ public interface IEllaiReviewClient
         string sessionId, string proposalId, CancellationToken cancellationToken) =>
         Task.FromResult<EllaiGuidancePlanDto?>(null);
 
+    Task<EllaiGuidancePlanDto?> RevalidateGuidancePlanAsync(
+        string sessionId, string proposalId, string planId, string stepId, CancellationToken cancellationToken) =>
+        Task.FromResult<EllaiGuidancePlanDto?>(null);
+
     Task<EllaiGuidanceAdmissionDto?> ReadGuidanceAdmissionAsync(
         string sessionId, string proposalId, CancellationToken cancellationToken) =>
         Task.FromResult<EllaiGuidanceAdmissionDto?>(null);
@@ -243,6 +249,12 @@ public interface IEllaiReviewClient
     {
         var uri = new Uri(baseUri, $"api/v1/ellai/sessions/{Uri.EscapeDataString(sessionId)}/voice/live-stream?voiceCaptureId={Uri.EscapeDataString(voiceCaptureId)}&serverSubmission=true&voiceCaptureOffsetSamples={voiceCaptureOffsetSamples}");
         return new UriBuilder(uri) { Scheme = uri.Scheme == "https" ? "wss" : "ws" }.Uri;
+    }
+
+    Uri CreateReportVoiceWebSocketUri(Uri baseUri, string sessionId, string voiceCaptureId, long voiceCaptureOffsetSamples = 0)
+    {
+        var uri = CreateLiveVoiceWebSocketUri(baseUri, sessionId, voiceCaptureId, voiceCaptureOffsetSamples);
+        return new Uri(uri.AbsoluteUri.Replace("serverSubmission=true", "serverSubmission=false", StringComparison.Ordinal));
     }
 
     /// <summary>Starts a durable session for the requested mode. A missing
@@ -270,6 +282,18 @@ public interface IEllaiReviewClient
     Task<bool> GrantVoiceCaptureConsentAsync(string sessionId, CancellationToken cancellationToken) =>
         Task.FromResult(false);
 
+    /// <summary>Grant report extraction only after the user explicitly agrees to that processing.</summary>
+    Task<bool> GrantReportVoiceConsentAsync(string sessionId, CancellationToken cancellationToken) =>
+        Task.FromResult(false);
+
+    Task<EllaiVoiceTranscriptionResult?> TranscribeSavedReportVoiceAsync(
+        string sessionId, byte[] audio, CancellationToken cancellationToken) =>
+        Task.FromResult<EllaiVoiceTranscriptionResult?>(null);
+
+    Task<ReportVoiceExtractionResponse?> ExtractReportVoiceAsync(
+        string sessionId, string transcript, CancellationToken cancellationToken) =>
+        Task.FromResult<ReportVoiceExtractionResponse?>(null);
+
     Task<EllaiVoiceTranscriptionResult?> TranscribeVoiceAsync(
         string sessionId, byte[] audio, EllaiVoiceCaptureMode mode, CancellationToken cancellationToken,
         string? voiceCaptureId = null, long voiceCaptureOffsetSamples = 0) =>
@@ -279,6 +303,16 @@ public interface IEllaiReviewClient
         string sessionId, Stream audio, CancellationToken cancellationToken, string? voiceCaptureId = null,
         long voiceCaptureOffsetSamples = 0) =>
         Task.FromResult<EllaiVoiceTranscriptionResult?>(null);
+
+    /// <summary>Report capture uses the same voice transport without submitting a conversational turn.</summary>
+    Task<EllaiVoiceTranscriptionResult?> TranscribeReportVoiceAsync(
+        string sessionId, byte[] audio, EllaiVoiceCaptureMode mode, CancellationToken cancellationToken,
+        string? voiceCaptureId = null, long voiceCaptureOffsetSamples = 0) =>
+        Task.FromResult<EllaiVoiceTranscriptionResult?>(null);
+
+    Task<EllaiVoiceTranscriptionResult?> TranscribeReportLiveVoiceStreamAsync(
+        string sessionId, Stream audio, CancellationToken cancellationToken, string? voiceCaptureId = null,
+        long voiceCaptureOffsetSamples = 0) => Task.FromResult<EllaiVoiceTranscriptionResult?>(null);
 
     Task<EllaiVoiceTurnStatusDto?> GetVoiceTurnStatusAsync(
         string sessionId, CancellationToken cancellationToken, long afterSequence = 0) =>
@@ -354,11 +388,22 @@ public interface IEllaiReviewClient
 /// <summary>Readiness for a persisted proposal; never permission to execute an application action.</summary>
 public sealed record EllaiGuidanceAdmissionDto(string Status, string? Objective, long InteractionEpoch);
 
-public sealed record EllaiGuidancePlanRequest(string ProposalId);
+public sealed record EllaiGuidancePlanRequest(string ProposalId)
+{
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? ExistingPlanId { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? CurrentStepId { get; init; }
+}
 public sealed record EllaiGuidanceNarrationRequest(string ProposalId, string PlanId, string StepId,
     long ExpectedVersion, string EnglishVoiceId = "af_heart")
 {
-    public string EventId => $"guidance:{PlanId}:{StepId}:{ExpectedVersion}";
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? ValidationInputId { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? ObservationContextStamp { get; init; }
+    public string EventId => ValidationInputId is null ? $"guidance:{PlanId}:{StepId}:{ExpectedVersion}" :
+        $"guidance:{PlanId}:{StepId}:{ExpectedVersion}:{ValidationInputId}:{ObservationContextStamp}";
 }
 public sealed record EllaiValidationNarrationRequest(string ProposalId, string PlanId, string StepId,
     long ExpectedVersion, string ValidationCode, long TimeWindow, string EnglishVoiceId = "af_heart")

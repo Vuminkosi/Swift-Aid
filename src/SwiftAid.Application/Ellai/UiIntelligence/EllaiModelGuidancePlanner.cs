@@ -10,7 +10,7 @@ namespace SwiftAid.Application.Ellai;
 /// be charged by the admitting session; drafts never authorize UI or domain actions.</summary>
 public sealed class EllaiModelGuidancePlanner(IEllaiTurnCompletionClient completions)
 {
-    public const int MaxCompletionTokens = 8192;
+    public const int MaxCompletionTokens = 16384;
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web)
     {
         UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
@@ -29,7 +29,7 @@ public sealed class EllaiModelGuidancePlanner(IEllaiTurnCompletionClient complet
         ArgumentNullException.ThrowIfNull(observations);
         if (objective.Length > 2000 || snapshot.Descriptors.Count > 20 || observations.Count > 20 || !Enum.IsDefined(mode))
             throw new ArgumentException("Guidance context exceeds its bounded contract.");
-        var completion = await completions.CompleteAsync([
+        var completion = await completions.CompleteStructuredAsync([
             new("system", "Produce only an EllaiGuidancePlanDraft JSON object: schemaVersion=1, status=Ready|NeedsInput|Blocked, " +
                 "objective, mode, steps, questions, stopReason. At most 8 steps. Each step has stepKey, controlId, objectiveId, " +
                 "behavior, uiIntentBindingId, resourceBindingKey=null, factIds, evidenceIds, explanation, nextStepKey. " +
@@ -46,6 +46,8 @@ public sealed class EllaiModelGuidancePlanner(IEllaiTurnCompletionClient complet
                 "Explain the applicable fields within their existing section steps; do not invent one step per field or change validation. " +
                 "A conditional field is only requested when applicableWhen holds. Required applies within that condition. " +
                 "For a complete submission include subject, narrative/observations, time/location and all review confirmations. " +
+                "For a request only to save a report draft, guide the user through the subject and save controls and their declared prerequisites. " +
+                "A draft can be saved without a narrative, location, review or confirmations; do not add those steps or submission unless the user also requested them. " +
                 "Start on a Ready control. Later public report wizard steps may be Unmounted only when their registered prerequisites " +
                 "appear earlier in the sequence. A later GuideHuman step with allowDeferredEnablement=true may currently be Disabled " +
                 "only when all its registered prerequisites appear earlier; it must wait for actual enablement before interaction. " +
@@ -65,7 +67,7 @@ public sealed class EllaiModelGuidancePlanner(IEllaiTurnCompletionClient complet
                 controls = snapshot.Descriptors.Select(d => new { d.ControlId, d.DescriptorVersion, d.ElementKind,
                     d.Semantics, d.ProofPolicyId, d.HumanConfirmationRequired, d.AllowDeferredEnablement, d.AllowedIntentBindings, d.NavigationId, d.GoalTags, d.ProductFactIds, d.ObjectiveId, d.RiskClass, d.SupportedModes, d.PrerequisiteIds, d.SuccessorIds }),
                 observations = observations.Select(o => new { o.ControlId, o.DescriptorVersion, o.State, o.ViewInstanceId, o.ContextStamp, o.ObservedAtUtc }) }, Json))
-        ], MaxCompletionTokens, ct).ConfigureAwait(false);
+        ], MaxCompletionTokens, JsonSerializer.Deserialize<JsonElement>(PlanSchema), ct).ConfigureAwait(false);
         if (string.Equals(completion.FinishReason, "length", StringComparison.OrdinalIgnoreCase))
             return (null, completion, ["The guidance response reached its output limit."]);
         try

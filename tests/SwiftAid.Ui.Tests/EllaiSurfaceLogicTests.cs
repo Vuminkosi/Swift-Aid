@@ -40,6 +40,130 @@ public sealed partial class EllaiSurfaceLogicTests
     }
 
     [Theory]
+    [InlineData("report")]
+    [InlineData("Report?draft=fixture")]
+    public async Task CurrentReportRemainsObservableWhenAnotherFeatureHasGuidance(string route)
+    {
+        var client = new FakeReviewClient { ObservationHandler = () => Task.FromResult(true) };
+        using var host = await CreateHost(client, CreateSession(1), string.Empty);
+        SetProperty(host, "Navigation", new TabNavigationManager(route));
+        SetField(host, "_guidanceFeatureId", EllaiNavigationManifest.FeatureId);
+        var tour = DispatchProxy.Create<IBonboardingTourSession, NoOpBonboardingServiceProxy>();
+        var proxy = (NoOpBonboardingServiceProxy)(object)tour;
+        proxy.TourStatus = BonboardingTourStatus.Running;
+        proxy.CurrentStep = new BonboardingStepDefinition { Id = "step" };
+        var step = new GuidancePlanStep("step", "navigation.escalations", "open-escalations", PlanStepBehavior.GuideHuman,
+            null, null, [], [], "Open escalations.", null);
+        SetField(host, "_generatedTour", tour);
+        SetField(host, "_generatedPlan", new ValidatedGuidancePlan("plan", 1, null, "Initial", ["step"], [], [], [step], [], "catalogue", "contract"));
+        var module = new ObservationJsModule();
+        SetField(host, "_uiObservationModule", module);
+
+        await InvokeAsync(host, "ReportCurrentUiAsync", CancellationToken.None);
+
+        Assert.NotNull(module.RequestedControls);
+        Assert.Contains("report.narrative", module.RequestedControls);
+        Assert.Contains("report.time-location", module.RequestedControls);
+        Assert.Contains("navigation.escalations", module.RequestedControls);
+        Assert.True(module.RequestedControls.Length <= 20);
+        Assert.Equal(EllaiReportUiManifest.NavigationId, GetField<UiObservationReport>(host, "_latestGuidanceObservation").CurrentNavigationId);
+    }
+
+    [Theory]
+    [InlineData("dashboard", "nav-dashboard")]
+    [InlineData("Dashboard?filter=fixture", "nav-dashboard")]
+    public async Task NavigationObservationNormalizesRouteCasing(string route, string navigationId)
+    {
+        using var host = await CreateHost(new FakeReviewClient { ObservationHandler = () => Task.FromResult(true) }, CreateSession(1), string.Empty);
+        SetProperty(host, "Navigation", new TabNavigationManager(route));
+        SetField(host, "_uiObservationModule", new ObservationJsModule());
+        await InvokeAsync(host, "ReportCurrentUiAsync", CancellationToken.None);
+        Assert.Equal(navigationId, GetField<UiObservationReport>(host, "_latestGuidanceObservation").CurrentNavigationId);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task NavigationDuringObservationAcknowledgementCannotPublishOldEvidence(bool returnToOriginal)
+    {
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var client = new FakeReviewClient { ObservationHandler = () => { started.TrySetResult(); return release.Task; } };
+        using var host = await CreateHost(client, CreateSession(1), string.Empty);
+        var navigation = new TabNavigationManager("report");
+        SetProperty(host, "Navigation", navigation);
+        SetField(host, "_uiObservationModule", new ObservationJsModule());
+        var pending = InvokeTask(host, "ReportCurrentUiAsync", CancellationToken.None);
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        navigation.NavigateTo("dashboard");
+        await InvokeAsync(host, "TrackNavigation", null, new Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs(navigation.Uri, false));
+        if (returnToOriginal)
+        {
+            navigation.NavigateTo("report");
+            await InvokeAsync(host, "TrackNavigation", null, new Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs(navigation.Uri, false));
+        }
+        release.SetResult(true);
+        await pending;
+        Assert.Null(GetField<UiObservationReport?>(host, "_latestGuidanceObservation"));
+        await InvokeAsync(host, "ReportCurrentUiAsync", CancellationToken.None);
+        Assert.NotNull(GetField<UiObservationReport?>(host, "_latestGuidanceObservation"));
+    }
+
+    [Fact]
+    public async Task NavigationDuringObservationCollectionDoesNotPostOldEvidence()
+    {
+        var posts = 0;
+        var client = new FakeReviewClient { ObservationHandler = () => { posts++; return Task.FromResult(true); } };
+        using var host = await CreateHost(client, CreateSession(1), string.Empty);
+        var navigation = new TabNavigationManager("report");
+        SetProperty(host, "Navigation", navigation);
+        var module = new BlockingObservationJsModule();
+        SetField(host, "_uiObservationModule", module);
+        var pending = InvokeTask(host, "ReportCurrentUiAsync", CancellationToken.None);
+        await module.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        navigation.NavigateTo("dashboard");
+        await InvokeAsync(host, "TrackNavigation", null, new Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs(navigation.Uri, false));
+        module.Release.TrySetResult();
+        await pending;
+        Assert.Equal(0, posts);
+        Assert.Null(GetField<UiObservationReport?>(host, "_latestGuidanceObservation"));
+    }
+
+    [Fact]
+    public async Task NavigationImmediatelyInvalidatesPreviouslyAcceptedEvidence()
+    {
+        var client = new FakeReviewClient { ObservationHandler = () => Task.FromResult(true) };
+        using var host = await CreateHost(client, CreateSession(1), string.Empty);
+        var navigation = new TabNavigationManager("report");
+        SetProperty(host, "Navigation", navigation);
+        SetField(host, "_uiObservationModule", new ObservationJsModule());
+        await InvokeAsync(host, "ReportCurrentUiAsync", CancellationToken.None);
+        Assert.NotNull(GetField<UiObservationReport?>(host, "_latestGuidanceObservation"));
+        navigation.NavigateTo("dashboard");
+        await InvokeAsync(host, "TrackNavigation", null, new Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs(navigation.Uri, false));
+        Assert.Null(GetField<UiObservationReport?>(host, "_latestGuidanceObservation"));
+    }
+
+    [Fact]
+    public async Task CaseNavigationSendsOnlyTheNewReferentUntilControlsRender()
+    {
+        var client = new FakeReviewClient { ObservationHandler = () => Task.FromResult(true) };
+        using var host = await CreateHost(client, CreateSession(1), string.Empty);
+        var id = Guid.NewGuid();
+        var navigation = new TabNavigationManager($"case/{id:D}");
+        SetProperty(host, "Navigation", navigation);
+        await InvokeAsync(host, "TrackNavigation", null, new Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs(navigation.Uri, false));
+        Assert.Equal(id, client.LastObservation!.CurrentCaseId);
+        Assert.Empty(client.LastObservation.MountedControlIds);
+        Assert.Null(GetField<UiObservationReport?>(host, "_latestGuidanceObservation"));
+        SetField(host, "_latestGuidanceObservation", client.LastObservation);
+        navigation.NavigateTo("dashboard");
+        await InvokeAsync(host, "TrackNavigation", null, new Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs(navigation.Uri, false));
+        Assert.Null(client.LastObservation.CurrentCaseId);
+        Assert.Empty(client.LastObservation.MountedControlIds);
+    }
+
+    [Theory]
     [InlineData(false)]
     [InlineData(true)]
     public async Task GuidanceObserverRecoversAfterTransportFailureOrTimeout(bool timeout)
@@ -234,6 +358,37 @@ public sealed partial class EllaiSurfaceLogicTests
     }
 
     [Fact]
+    public async Task UiObservationsContinueWhileGuidancePlanningIsPending()
+    {
+        var pending = new TaskCompletionSource<EllaiGuidancePlanDto?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var observed = 0;
+        var client = new FakeReviewClient
+        {
+            GuidancePlanHandler = () => pending.Task,
+            ObservationHandler = () => { observed++; return Task.FromResult(true); }
+        };
+        using var host = await CreateHost(client, CreateSession(1), string.Empty);
+        SetField(host, "_uiObservationModule", new ObservationJsModule());
+        try
+        {
+            await InvokeAsync(host, "ObserveGuidanceProposal", GuidanceTurn(), true);
+            Assert.Equal(1, client.GuidancePlanCalls);
+            var before = observed;
+            await InvokeAsync(host, "ObserveGuidanceIterationAsync", CancellationToken.None);
+            await InvokeAsync(host, "ObserveGuidanceIterationAsync", CancellationToken.None);
+
+            Assert.Equal(before + 2, observed);
+            Assert.False(pending.Task.IsCompleted);
+            Assert.Equal("context", GetField<UiObservationReport>(host, "_latestGuidanceObservation").ContextStamp);
+        }
+        finally
+        {
+            pending.TrySetResult(new("NeedsObservation"));
+            await host.Dispatcher.InvokeAsync(() => Task.CompletedTask);
+        }
+    }
+
+    [Fact]
     public async Task ObservedPendingTurnStartsGuidanceEvenAfterResponseTextSettlesThinking()
     {
         var client = new FakeReviewClient();
@@ -329,6 +484,46 @@ public sealed partial class EllaiSurfaceLogicTests
         else Assert.Equal(expectedMethod, Assert.Single(proxy.Calls));
         Assert.Equal(fresh && command is "pause" or "resume" or "cancel" or "back" or "skip" ? 1 : 0, commands.Count);
         Assert.Same(tour, GetField<IBonboardingTourSession?>(host, "_generatedTour"));
+    }
+
+    [Fact]
+    public async Task StopSpeakingDisablesLaterNarrationWithoutCancellingGuidance()
+    {
+        using var host = await CreateHost(new FakeReviewClient(), CreateSession(1), string.Empty);
+        var tour = DispatchProxy.Create<IBonboardingTourSession, NoOpBonboardingServiceProxy>();
+        var proxy = (NoOpBonboardingServiceProxy)(object)tour;
+        proxy.TourStatus = BonboardingTourStatus.Running;
+        SetField(host, "_generatedTour", tour);
+        SetField(host, "_readResponsesAloud", true);
+        var turn = new EllaiConversationTurnDto("stop", 2, "Stop speaking", "Requested", "Completed", 1, DateTimeOffset.UtcNow)
+        {
+            UiProposals = [new("stop-proposal", new(UiIntentKind.ControlGuidance, "ellai.guidance", null, null,
+                new Dictionary<string, string> { ["command"] = "stop-speech" }))],
+        };
+
+        await InvokeAsync(host, "ObserveGuidanceProposal", turn, true);
+
+        Assert.False(GetField<bool>(host, "_readResponsesAloud"));
+        Assert.Same(tour, GetField<IBonboardingTourSession?>(host, "_generatedTour"));
+        Assert.Empty(proxy.Calls);
+        await InvokeAsync(host, "BeginGuidanceSpeech");
+        Assert.False(GetField<bool>(host, "_readResponsesAloud"));
+    }
+
+    [Fact]
+    public async Task SpeechDefaultsOnAndGuidancePreservesAnExplicitMute()
+    {
+        using var host = await CreateHost(new FakeReviewClient(), CreateSession(1), string.Empty);
+        Assert.True(GetField<bool>(host, "_readResponsesAloud"));
+        await InvokeAsync(host, "BeginGuidanceSpeech");
+        Assert.True(GetField<bool>(host, "_readResponsesAloud"));
+        await InvokeAsync(host, "EndGuidanceSpeech");
+        Assert.True(GetField<bool>(host, "_readResponsesAloud"));
+
+        await InvokeAsync(host, "ToggleResponseAudioAsync");
+        await InvokeAsync(host, "BeginGuidanceSpeech");
+        await InvokeAsync(host, "EndGuidanceSpeech");
+        Assert.False(GetField<bool>(host, "_readResponsesAloud"));
     }
 
     [Theory]
@@ -541,15 +736,13 @@ public sealed partial class EllaiSurfaceLogicTests
     }
 
     [Fact]
-    public async Task ListenToggleReadsNewTypedRepliesUntilDisabledWithoutReplayingFinalReconciliation()
+    public async Task VoiceDefaultsToReadingTypedRepliesUntilDisabledWithoutReplayingFinalReconciliation()
     {
         using var host = await CreateHost(new FakeReviewClient(), CreateSession(version: 1), string.Empty);
         var speech = new RecordingJsModule();
         SetField(host, "_speechModule", speech);
         await InvokeAsync(host, "OnResponseReceived",
             new EllaiSessionResponseDto(1, "session-1", "First answer.", DateTimeOffset.UtcNow, "first"));
-        Assert.DoesNotContain("playResponse", speech.Invocations);
-        await InvokeAsync(host, "ToggleResponseAudioAsync");
         Assert.Single(speech.Invocations, call => call == "playResponse");
         await InvokeAsync(host, "OnResponseReceived",
             new EllaiSessionResponseDto(2, "session-1", "Next answer.", DateTimeOffset.UtcNow, "next", IsFinal: false));
@@ -598,6 +791,27 @@ public sealed partial class EllaiSurfaceLogicTests
         Assert.Equal("Select the subject of your report.", GetField<string?>(host, "_latestResponseText"));
     }
 
+    [Fact]
+    public async Task RetriedGuidanceCanConsumeItsAlreadyPolledEventOnce()
+    {
+        using var host = await CreateHost(new FakeReviewClient(), CreateSession(1), string.Empty);
+        SetField(host, "_generatedTour", DispatchProxy.Create<IBonboardingTourSession, NoOpBonboardingServiceProxy>());
+        var response = new EllaiSessionResponseDto(3, "session-1", "Enter the reported date.", DateTimeOffset.UtcNow,
+            "turn", IsFinal: false, Progress: new("validation-event", "Guidance", "Guidance", true, 1, DateTimeOffset.UtcNow.AddMinutes(1)));
+
+        await InvokeAsync(host, "OnResponseReceived", response);
+        Assert.Null(GetField<string?>(host, "_latestResponseText"));
+        SetField(host, "_guidanceNarrationEventId", "validation-event");
+        await InvokeAsync(host, "OnResponseReceived", response);
+        Assert.Equal(response.Text, GetField<string?>(host, "_latestResponseText"));
+        Assert.Equal(3, GetField<long>(host, "_latestResponseSequence"));
+        await InvokeAsync(host, "OnResponseReceived", response);
+        Assert.Single(GetField<List<long>>(host, "_latestResponseAudioSequences"));
+        await InvokeAsync(host, "OnResponseReceived", new EllaiSessionResponseDto(4, "session-1", "Newer answer", DateTimeOffset.UtcNow, "turn"));
+        await InvokeAsync(host, "OnResponseReceived", response);
+        Assert.Equal("Newer answer", GetField<string?>(host, "_latestResponseText"));
+    }
+
     [Theory]
     [InlineData(true, true, 1)]
     [InlineData(false, true, 0)]
@@ -637,6 +851,62 @@ public sealed partial class EllaiSurfaceLogicTests
         SetField(host, "_startingVoiceCapture", false);
         SetField(host, "_isRecordingAudio", true);
         Assert.False(GetProperty<bool>(host, "CanStartVoiceCapture"));
+    }
+
+    [Fact]
+    public async Task VoicePermissionFailureLeavesTextAvailableAndAllowsRetry()
+    {
+        using var host = await CreateHost(new FakeReviewClient(), CreateSession(1), string.Empty);
+        var services = new ServiceCollection().AddSingleton<IEllaiMicrophonePermission>(new ThrowingMicrophonePermission()).BuildServiceProvider();
+        SetProperty(host, "Services", services);
+        SetField(host, "_captureModule", new RecordingJsModule());
+        SetField(host, "_microphoneCaptureAvailable", true);
+
+        await InvokeAsync(host, "StartLiveCaptureAsync");
+
+        Assert.False(GetField<bool>(host, "_startingVoiceCapture"));
+        Assert.False(GetField<bool>(host, "_isRecordingAudio"));
+        Assert.Contains("type to Ellai", GetField<string>(host, "StatusText"));
+        Assert.True(GetProperty<bool>(host, "CanStartVoiceCapture"));
+    }
+
+    [Fact]
+    public async Task VoiceConsentFailureLeavesCaptureStoppedAndAllowsRetry()
+    {
+        var client = new FakeReviewClient { VoiceConsentHandler = () => Task.FromException<bool>(new HttpRequestException()) };
+        using var host = await CreateHost(client, CreateSession(1), string.Empty);
+        SetField(host, "_captureModule", new RecordingJsModule());
+        SetField(host, "_microphoneCaptureAvailable", true);
+
+        await InvokeAsync(host, "StartLiveCaptureAsync");
+
+        Assert.False(GetField<bool>(host, "_startingVoiceCapture"));
+        Assert.False(GetField<bool>(host, "_isRecordingAudio"));
+        Assert.False(GetField<bool>(host, "_voiceCaptureConsentGranted"));
+        Assert.True(GetProperty<bool>(host, "CanStartVoiceCapture"));
+    }
+
+    [Fact]
+    public async Task VoiceConsentForPreviousSessionDoesNotAuthorizeNewSession()
+    {
+        var consent = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var client = new FakeReviewClient { VoiceConsentHandler = () => consent.Task };
+        using var host = await CreateHost(client, CreateSession(1), string.Empty);
+        SetField(host, "_captureModule", new RecordingJsModule());
+        SetField(host, "_microphoneCaptureAvailable", true);
+        var start = InvokeTask(host, "StartLiveCaptureAsync");
+        SetField(host, "_sessionView", CreateSession(1) with { SessionId = "session-2" });
+        consent.SetResult(true);
+        await start;
+
+        Assert.False(GetField<bool>(host, "_voiceCaptureConsentGranted"));
+        Assert.False(GetField<bool>(host, "_startingVoiceCapture"));
+        Assert.False(GetField<bool>(host, "_isRecordingAudio"));
+    }
+
+    private sealed class ThrowingMicrophonePermission : IEllaiMicrophonePermission
+    {
+        public Task<bool> RequestAsync(CancellationToken cancellationToken) => throw new InvalidOperationException();
     }
 
     [Fact]
@@ -2168,11 +2438,29 @@ public sealed partial class EllaiSurfaceLogicTests
     private sealed class ObservationJsModule : IJSObjectReference
     {
         public string ControlId { get; init; } = "report.entry";
+        public string[]? RequestedControls { get; private set; }
         public ValueTask<TValue> InvokeAsync<TValue>(string identifier, object?[]? args) =>
             InvokeAsync<TValue>(identifier, CancellationToken.None, args);
-        public ValueTask<TValue> InvokeAsync<TValue>(string identifier, CancellationToken cancellationToken, object?[]? args) =>
-            ValueTask.FromResult((TValue)(object)new UiObservationReport("view", "context", "web", [ControlId],
+        public ValueTask<TValue> InvokeAsync<TValue>(string identifier, CancellationToken cancellationToken, object?[]? args)
+        {
+            RequestedControls = args?.FirstOrDefault() as string[];
+            return ValueTask.FromResult((TValue)(object)new UiObservationReport("view", "context", "web", [ControlId],
                 [new(ControlId, UiObservationState.Ready)]));
+        }
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    private sealed class BlockingObservationJsModule : IJSObjectReference
+    {
+        public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public ValueTask<TValue> InvokeAsync<TValue>(string identifier, object?[]? args) => InvokeAsync<TValue>(identifier, CancellationToken.None, args);
+        public async ValueTask<TValue> InvokeAsync<TValue>(string identifier, CancellationToken cancellationToken, object?[]? args)
+        {
+            Started.TrySetResult();
+            await Release.Task.WaitAsync(cancellationToken);
+            return (TValue)(object)new UiObservationReport("view", "context", "web", ["report.entry"], [new("report.entry", UiObservationState.Ready)]);
+        }
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
@@ -2328,6 +2616,13 @@ public sealed partial class EllaiSurfaceLogicTests
         }
 
         public Func<Task<EllaiGuidancePlanDto?>>? GuidancePlanHandler { get; init; }
+        public int GuidanceNarrationCalls { get; private set; }
+        public Task<EllaiSessionResponseDto?> PrepareGuidanceNarrationAsync(
+            string sessionId, EllaiGuidanceNarrationRequest request, CancellationToken cancellationToken)
+        {
+            GuidanceNarrationCalls++;
+            return Task.FromResult<EllaiSessionResponseDto?>(null);
+        }
         public Task<EllaiGuidancePlanDto?> PrepareGuidancePlanAsync(string sessionId, string proposalId, CancellationToken cancellationToken)
         {
             GuidancePlanCalls++;
@@ -2350,6 +2645,19 @@ public sealed partial class EllaiSurfaceLogicTests
             string? VoiceCaptureId, long VoiceCaptureOffsetSamples)> VoiceTranscriptions { get; } = [];
 
         public int LiveTranscriptionCalls { get; private set; }
+
+        public Func<string, byte[], EllaiVoiceCaptureMode, CancellationToken, Task<EllaiVoiceTranscriptionResult?>>? ReportVoiceHandler { get; init; }
+        public Func<string, string, CancellationToken, Task<SwiftAid.Contracts.Intake.ReportVoiceExtractionResponse?>>? ReportExtractionHandler { get; init; }
+
+        public Task<EllaiVoiceTranscriptionResult?> TranscribeReportVoiceAsync(string sessionId, byte[] audio,
+            EllaiVoiceCaptureMode mode, CancellationToken cancellationToken, string? voiceCaptureId = null,
+            long voiceCaptureOffsetSamples = 0) => ReportVoiceHandler?.Invoke(sessionId, audio, mode, cancellationToken)
+                ?? Task.FromResult<EllaiVoiceTranscriptionResult?>(null);
+
+        public Task<SwiftAid.Contracts.Intake.ReportVoiceExtractionResponse?> ExtractReportVoiceAsync(
+            string sessionId, string transcript, CancellationToken cancellationToken) =>
+            ReportExtractionHandler?.Invoke(sessionId, transcript, cancellationToken)
+                ?? Task.FromResult<SwiftAid.Contracts.Intake.ReportVoiceExtractionResponse?>(null);
 
         public Func<string, byte[], EllaiVoiceCaptureMode, CancellationToken,
             Task<EllaiVoiceTranscriptionResult?>>? VoiceTranscriptionHandler { get; init; }
@@ -2396,8 +2704,13 @@ public sealed partial class EllaiSurfaceLogicTests
 
         public Exception? RejectionException { get; init; }
 
+        public Func<CancellationToken, Task<bool>>? ReportConsentHandler { get; init; }
+        public Task<bool> GrantReportVoiceConsentAsync(string sessionId, CancellationToken cancellationToken) =>
+            ReportConsentHandler?.Invoke(cancellationToken) ?? Task.FromResult(true);
+
+        public Func<Task<bool>>? VoiceConsentHandler { get; init; }
         public Task<bool> GrantVoiceCaptureConsentAsync(string sessionId, CancellationToken cancellationToken) =>
-            Task.FromResult(true);
+            VoiceConsentHandler?.Invoke() ?? Task.FromResult(true);
 
         public Task<EllaiVoiceTranscriptionResult?> TranscribeVoiceAsync(
             string sessionId,
@@ -2476,10 +2789,15 @@ public sealed partial class EllaiSurfaceLogicTests
         }
 
         public Func<Task<bool>>? ObservationHandler { get; init; }
+        public UiObservationReport? LastObservation { get; private set; }
         public Task<bool> ReportUiObservationAsync(
             string sessionId,
             UiObservationReport report,
-            CancellationToken cancellationToken) => ObservationHandler?.Invoke() ?? Task.FromResult(false);
+            CancellationToken cancellationToken)
+        {
+            LastObservation = report;
+            return ObservationHandler?.Invoke() ?? Task.FromResult(false);
+        }
 
         public Task<IReadOnlyList<EllaiApprovedReceiptDto>?> ListReceiptsAsync(
             string sessionId,
@@ -2592,6 +2910,294 @@ public sealed partial class EllaiSurfaceLogicTests
         else Assert.Equal(draft, GetField<string?>(host, "InputText"));
     }
 
+    [Fact]
+    public async Task ValidationGuidanceHighlightsOneTrustedFieldAtATimeAndRestoresTheStep()
+    {
+        using var host = await CreateHost(new FakeReviewClient(), CreateSession(1), "");
+        var tour = DispatchProxy.Create<IBonboardingTourSession, NoOpBonboardingServiceProxy>();
+        var proxy = (NoOpBonboardingServiceProxy)(object)tour;
+        proxy.TourStatus = BonboardingTourStatus.Running;
+        proxy.CurrentStep = new BonboardingStepDefinition { Id = "step" };
+        var step = new GuidancePlanStep("step", "report.narrative", "record-observations", PlanStepBehavior.GuideHuman,
+            null, null, [], [], "Complete the report.", null);
+        var anchors = new Dictionary<string, string> { ["report.narrative"] = EllaiReportUiManifest.AnchorFor("report.narrative") };
+        SetField(host, "_generatedTour", tour);
+        SetField(host, "_generatedPlan", new ValidatedGuidancePlan("plan", 1, null, "Initial", ["step"], [], [], [step], [], "catalogue", "contract"));
+        SetField(host, "_guidanceFeatureId", EllaiReportUiManifest.FeatureId);
+        SetField(host, "_guidanceAnchors", anchors);
+        UiObservationReport Observation(params string[] ids) => new("view", "context", "web", [], []) { ValidationInputIds = ids };
+
+        SetField(host, "_latestGuidanceObservation", Observation("untrusted.input", "report.original-statement", "report.occurrence-date"));
+        SetField(host, "_guidanceNotice", "Previous field correction");
+        await InvokeAsync(host, "UpdateValidationGuidanceAsync", CancellationToken.None);
+        Assert.Null(GetField<string?>(host, "_guidanceNotice"));
+        Assert.Equal("ellai-report-original-statement", anchors["report.narrative"]);
+        Assert.Equal(EllaiReportValidationGuidance.Find("report.original-statement")!.Message, GetField<string>(host, "_validationGuidanceText"));
+        Assert.Contains("GoToAsync", proxy.Calls);
+        var retries = 0;
+        SetField(host, "_narrateValidation", (Func<string?, string?, CancellationToken, Task>)((inputId, context, _) =>
+        {
+            Assert.Equal("report.original-statement", inputId);
+            Assert.Equal("context", context);
+            retries++;
+            return Task.CompletedTask;
+        }));
+        SetField(host, "_guidanceNarrationRetryPending", true);
+        SetField(host, "_guidanceNarrationRetryAtUtc", DateTimeOffset.UtcNow.AddSeconds(10));
+        await InvokeAsync(host, "RetryGuidanceNarrationAsync", CancellationToken.None);
+        Assert.Equal(0, retries);
+        SetField(host, "_guidanceNarrationRetryAtUtc", DateTimeOffset.UtcNow.AddSeconds(-1));
+        await InvokeAsync(host, "RetryGuidanceNarrationAsync", CancellationToken.None);
+        Assert.Equal(1, retries);
+        SetField(host, "_latestGuidanceObservation", Observation("report.occurrence-date"));
+        await InvokeAsync(host, "RetryGuidanceNarrationAsync", CancellationToken.None);
+        Assert.Equal(1, retries);
+        SetField(host, "_narrateValidation", null);
+        await InvokeAsync(host, "UpdateValidationGuidanceAsync", CancellationToken.None);
+        Assert.Equal("ellai-report-occurrence-date", anchors["report.narrative"]);
+        Assert.Contains("reported date", GetField<string>(host, "_validationGuidanceText"));
+
+        SetField(host, "_latestGuidanceObservation", Observation());
+        await InvokeAsync(host, "UpdateValidationGuidanceAsync", CancellationToken.None);
+        Assert.Equal(EllaiReportUiManifest.AnchorFor("report.narrative"), anchors["report.narrative"]);
+        Assert.Null(GetField<string?>(host, "_validationGuidanceText"));
+    }
+
+    [Fact]
+    public async Task OrdinaryGuidanceNarrationRetriesAfterFailureAndStopsWhenCancelled()
+    {
+        using var host = await CreateHost(new FakeReviewClient(), CreateSession(1), "");
+        var tour = DispatchProxy.Create<IBonboardingTourSession, NoOpBonboardingServiceProxy>();
+        var proxy = (NoOpBonboardingServiceProxy)(object)tour;
+        proxy.TourStatus = BonboardingTourStatus.Running;
+        proxy.CurrentStep = new BonboardingStepDefinition { Id = "step" };
+        var step = new GuidancePlanStep("step", "report.narrative", "record-observations", PlanStepBehavior.GuideHuman,
+            null, null, [], [], "Complete the report.", null);
+        SetField(host, "_generatedTour", tour);
+        SetField(host, "_generatedPlan", new ValidatedGuidancePlan("plan", 1, null, "Initial", ["step"], [], [], [step], [], "catalogue", "contract"));
+        SetField(host, "_guidanceFeatureId", EllaiReportUiManifest.FeatureId);
+        SetField(host, "_latestGuidanceObservation", new UiObservationReport("view", "context", "web", [], []));
+        var retries = 0;
+        SetField(host, "_narrateValidation", (Func<string?, string?, CancellationToken, Task>)((inputId, stamp, _) =>
+        {
+            Assert.Null(inputId);
+            Assert.Null(stamp);
+            retries++;
+            return Task.CompletedTask;
+        }));
+        SetField(host, "_guidanceNarrationRetryPending", true);
+        SetField(host, "_guidanceNarrationRetryAtUtc", DateTimeOffset.UtcNow.AddSeconds(-1));
+        await InvokeAsync(host, "RetryGuidanceNarrationAsync", CancellationToken.None);
+        Assert.Equal(1, retries);
+        await InvokeAsync(host, "EndGuidanceNarration");
+        await InvokeAsync(host, "RetryGuidanceNarrationAsync", CancellationToken.None);
+        Assert.Equal(1, retries);
+    }
+
+    [Theory]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    public async Task MissingGuidanceTargetOffersRecoveryUnlessInputWasAlreadyValidated(bool completed, bool recovery)
+    {
+        using var host = await CreateHost(new FakeReviewClient(), CreateSession(1), "");
+        var tour = DispatchProxy.Create<IBonboardingTourSession, NoOpBonboardingServiceProxy>();
+        var proxy = (NoOpBonboardingServiceProxy)(object)tour;
+        proxy.TourStatus = BonboardingTourStatus.Waiting;
+        proxy.CurrentStep = new BonboardingStepDefinition { Id = "step" };
+        var step = new GuidancePlanStep("step", "report.subject", "choose-report-subject", PlanStepBehavior.GuideHuman,
+            null, null, [], [], "Choose the subject.", null);
+        SetField(host, "_generatedTour", tour);
+        SetField(host, "_generatedPlan", new ValidatedGuidancePlan("plan", 1, null, "Initial", ["step"], [], [], [step], [], "catalogue", "contract"));
+        SetField(host, "_latestGuidanceObservation", new UiObservationReport("view", "context", "web", [], [],
+            CompletedControlIds: completed ? ["report.subject"] : []));
+
+        await InvokeAsync(host, "UpdateUnavailableGuidanceTarget");
+
+        Assert.Equal(recovery, GetField<bool>(host, "_guidanceReplanRequired"));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task GuidanceRecoversWhenObservedTargetReturnsOrCompletes(bool completed)
+    {
+        using var host = await CreateHost(new FakeReviewClient(), CreateSession(1), "");
+        var tour = DispatchProxy.Create<IBonboardingTourSession, NoOpBonboardingServiceProxy>();
+        var proxy = (NoOpBonboardingServiceProxy)(object)tour;
+        proxy.TourStatus = BonboardingTourStatus.Waiting;
+        proxy.CurrentStep = new BonboardingStepDefinition { Id = "step" };
+        var step = new GuidancePlanStep("step", "report.subject", "choose-report-subject", PlanStepBehavior.GuideHuman,
+            null, null, [], [], "Choose the subject.", null);
+        SetField(host, "_generatedTour", tour);
+        SetField(host, "_generatedPlan", new ValidatedGuidancePlan("plan", 1, null, "Initial", ["step"], [], [], [step], [], "catalogue", "contract"));
+        SetField(host, "_latestGuidanceObservation", new UiObservationReport("view", "context", "web", [], []));
+        await InvokeAsync(host, "UpdateUnavailableGuidanceTarget");
+        Assert.True(GetField<bool>(host, "_guidanceReplanRequired"));
+
+        SetField(host, "_latestGuidanceObservation", completed
+            ? new UiObservationReport("view", "context", "web", [], [], CompletedControlIds: ["report.subject"])
+            : new UiObservationReport("view", "context", "web", ["report.subject"], [new("report.subject", UiObservationState.Ready)]));
+        await InvokeAsync(host, "UpdateUnavailableGuidanceTarget");
+        Assert.False(GetField<bool>(host, "_guidanceReplanRequired"));
+        Assert.Null(GetField<string?>(host, "_guidanceNotice"));
+    }
+
+    [Fact]
+    public async Task MissingTargetWarningMovesWithTheCurrentStepAndClearsForValidation()
+    {
+        using var host = await CreateHost(new FakeReviewClient(), CreateSession(1), "");
+        var tour = DispatchProxy.Create<IBonboardingTourSession, NoOpBonboardingServiceProxy>();
+        var proxy = (NoOpBonboardingServiceProxy)(object)tour;
+        proxy.TourStatus = BonboardingTourStatus.Waiting;
+        proxy.CurrentStep = new BonboardingStepDefinition { Id = "first" };
+        var first = new GuidancePlanStep("first", "report.subject", "choose-report-subject", PlanStepBehavior.GuideHuman,
+            null, null, [], [], "Choose the subject.", null);
+        var second = new GuidancePlanStep("second", "report.narrative", "record-observations", PlanStepBehavior.GuideHuman,
+            null, null, [], [], "Describe the report.", null);
+        SetField(host, "_generatedTour", tour);
+        SetField(host, "_generatedPlan", new ValidatedGuidancePlan("plan", 1, null, "Initial", ["first", "second"], [], [], [first, second], [], "catalogue", "contract"));
+        SetField(host, "_latestGuidanceObservation", new UiObservationReport("view", "context", "web", [], []));
+        await InvokeAsync(host, "UpdateUnavailableGuidanceTarget");
+        Assert.Equal("first", GetField<string?>(host, "_unavailableObservedStepId"));
+
+        proxy.CurrentStep = new BonboardingStepDefinition { Id = "second" };
+        await InvokeAsync(host, "UpdateUnavailableGuidanceTarget");
+        Assert.True(GetField<bool>(host, "_guidanceReplanRequired"));
+        Assert.Equal("second", GetField<string?>(host, "_unavailableObservedStepId"));
+
+        SetField(host, "_validationGuidanceText", "Describe what happened.");
+        await InvokeAsync(host, "UpdateUnavailableGuidanceTarget");
+        Assert.False(GetField<bool>(host, "_guidanceReplanRequired"));
+        Assert.Null(GetField<string?>(host, "_guidanceNotice"));
+        Assert.Null(GetField<string?>(host, "_unavailableObservedStepId"));
+    }
+
+    [Fact]
+    public async Task MissingTargetWarningClearsWhenTheNextStepIsReady()
+    {
+        using var host = await CreateHost(new FakeReviewClient(), CreateSession(1), "");
+        var tour = DispatchProxy.Create<IBonboardingTourSession, NoOpBonboardingServiceProxy>();
+        var proxy = (NoOpBonboardingServiceProxy)(object)tour;
+        proxy.TourStatus = BonboardingTourStatus.Running;
+        proxy.CurrentStep = new BonboardingStepDefinition { Id = "first" };
+        var first = new GuidancePlanStep("first", "report.subject", "choose-report-subject", PlanStepBehavior.GuideHuman,
+            null, null, [], [], "Choose the subject.", null);
+        var second = new GuidancePlanStep("second", "report.narrative", "record-observations", PlanStepBehavior.GuideHuman,
+            null, null, [], [], "Describe the report.", null);
+        SetField(host, "_generatedTour", tour);
+        SetField(host, "_generatedPlan", new ValidatedGuidancePlan("plan", 1, null, "Initial", ["first", "second"], [], [], [first, second], [], "catalogue", "contract"));
+        SetField(host, "_latestGuidanceObservation", new UiObservationReport("view", "context", "web", [], []));
+        await InvokeAsync(host, "UpdateUnavailableGuidanceTarget");
+        proxy.CurrentStep = new BonboardingStepDefinition { Id = "second" };
+        SetField(host, "_latestGuidanceObservation", new UiObservationReport("view", "next", "web", ["report.narrative"], [new("report.narrative", UiObservationState.Ready)]));
+
+        await InvokeAsync(host, "UpdateUnavailableGuidanceTarget");
+
+        Assert.False(GetField<bool>(host, "_guidanceReplanRequired"));
+        Assert.Null(GetField<string?>(host, "_guidanceNotice"));
+    }
+
+    [Fact]
+    public async Task TargetRecoveryDoesNotClearAnIndependentReplanNotice()
+    {
+        using var host = await CreateHost(new FakeReviewClient(), CreateSession(1), "");
+        var tour = DispatchProxy.Create<IBonboardingTourSession, NoOpBonboardingServiceProxy>();
+        var proxy = (NoOpBonboardingServiceProxy)(object)tour;
+        proxy.TourStatus = BonboardingTourStatus.Waiting;
+        proxy.CurrentStep = new BonboardingStepDefinition { Id = "step" };
+        var step = new GuidancePlanStep("step", "report.subject", "choose-report-subject", PlanStepBehavior.GuideHuman,
+            null, null, [], [], "Choose the subject.", null);
+        SetField(host, "_generatedTour", tour);
+        SetField(host, "_generatedPlan", new ValidatedGuidancePlan("plan", 1, null, "Initial", ["step"], [], [], [step], [], "catalogue", "contract"));
+        SetField(host, "_latestGuidanceObservation", new UiObservationReport("view", "context", "web", [], []));
+        await InvokeAsync(host, "UpdateUnavailableGuidanceTarget");
+        SetField(host, "_guidanceNotice", "Permissions changed; replan required.");
+        SetField(host, "_latestGuidanceObservation", new UiObservationReport("view", "next", "web", ["report.subject"], [new("report.subject", UiObservationState.Ready)]));
+
+        await InvokeAsync(host, "UpdateUnavailableGuidanceTarget");
+
+        Assert.True(GetField<bool>(host, "_guidanceReplanRequired"));
+        Assert.Equal("Permissions changed; replan required.", GetField<string?>(host, "_guidanceNotice"));
+        Assert.Null(GetField<string?>(host, "_unavailableObservedStepId"));
+    }
+
+    [Fact]
+    public async Task DisplayedReceiptClearsPreviousMissingSubmitControlWarning()
+    {
+        var context = new EllaiDisplayedReceiptContext();
+        using var host = await CreateHost(new FakeReviewClient(), CreateSession(1), "", context);
+        var tour = DispatchProxy.Create<IBonboardingTourSession, NoOpBonboardingServiceProxy>();
+        var proxy = (NoOpBonboardingServiceProxy)(object)tour;
+        proxy.TourStatus = BonboardingTourStatus.Waiting;
+        proxy.CurrentStep = new BonboardingStepDefinition { Id = "submit" };
+        var step = new GuidancePlanStep("submit", "report.submit", "submit-report", PlanStepBehavior.GuideHuman,
+            null, null, [], [], "Submit using the report form.", null);
+        SetField(host, "_generatedTour", tour);
+        SetField(host, "_generatedPlan", new ValidatedGuidancePlan("plan", 1, null, "Initial", ["submit"], [], [], [step], [], "catalogue", "contract"));
+        SetField(host, "_latestGuidanceObservation", new UiObservationReport("view", "context", "web", [], []));
+        await InvokeAsync(host, "UpdateUnavailableGuidanceTarget");
+        Assert.True(GetField<bool>(host, "_guidanceReplanRequired"));
+
+        context.Update(this, new SwiftAid.Contracts.Intake.IntakeReceipt(Guid.NewGuid(), Guid.NewGuid(),
+            SwiftAid.Contracts.Intake.IntakeStatus.ReceivedUnverified, SwiftAid.Contracts.Intake.IntakeRoutingStatus.NeedsRouting, DateTimeOffset.UtcNow));
+        await InvokeAsync(host, "UpdateUnavailableGuidanceTarget");
+
+        Assert.False(GetField<bool>(host, "_guidanceReplanRequired"));
+        Assert.Null(GetField<string?>(host, "_guidanceNotice"));
+        Assert.Empty(proxy.Calls);
+    }
+
+    [Fact]
+    public async Task FindingAnotherWayReplansSameConversationWithoutCancellingItsCheckpointOrDraft()
+    {
+        var client = new FakeReviewClient();
+        using var host = await CreateHost(client, CreateSession(1), "unsent draft");
+        var tour = DispatchProxy.Create<IBonboardingTourSession, NoOpBonboardingServiceProxy>();
+        var proxy = (NoOpBonboardingServiceProxy)(object)tour;
+        proxy.TourStatus = BonboardingTourStatus.Running;
+        SetField(host, "_generatedTour", tour);
+        SetField(host, "_guidanceProposalId", "proposal");
+        SetField(host, "_guidanceFeatureId", "report");
+        SetField(host, "_guidanceProposalIsAccepted", true);
+        SetField(host, "_guidanceReplanRequired", true);
+
+        await InvokeAsync(host, "ReplanGeneratedGuidanceAsync");
+
+        Assert.Contains("CancelAsync", proxy.Calls);
+        Assert.Equal(1, client.GuidancePlanCalls);
+        Assert.Empty(client.GuidanceControls);
+        Assert.Equal("unsent draft", GetField<string>(host, "InputText"));
+        Assert.Equal("proposal", GetField<string>(host, "_guidanceProposalId"));
+    }
+
+    [Fact]
+    public async Task FailedValidationNarrationCanRetryButExplicitStopDoesNotRestartIt()
+    {
+        var client = new FakeReviewClient();
+        using var host = await CreateHost(client, CreateSession(1), "");
+        var tour = DispatchProxy.Create<IBonboardingTourSession, NoOpBonboardingServiceProxy>();
+        var proxy = (NoOpBonboardingServiceProxy)(object)tour;
+        proxy.TourStatus = BonboardingTourStatus.Running;
+        proxy.CurrentStep = new BonboardingStepDefinition { Id = "step" };
+        var step = new GuidancePlanStep("step", "report.narrative", "record-observations", PlanStepBehavior.GuideHuman,
+            null, null, [], [], "Complete the report.", null);
+        SetField(host, "_generatedTour", tour);
+        SetField(host, "_generatedPlan", new ValidatedGuidancePlan("plan", 1, null, "Initial", ["step"], [], [], [step], [], "catalogue", "contract"));
+        SetField(host, "_guidanceProposalId", "proposal");
+        SetField(host, "_validationInputId", "report.original-statement");
+        SetField(host, "_validationGuidanceText", "Describe what happened.");
+
+        await InvokeAsync(host, "NarrateGuidanceStepAsync", tour, 1L, "report.original-statement", "context");
+        Assert.Equal(1, client.GuidanceNarrationCalls);
+        Assert.True(GetField<bool>(host, "_guidanceNarrationRetryPending"));
+        Assert.Null(GetField<string?>(host, "_guidanceNarrationEventId"));
+
+        await InvokeAsync(host, "NarrateGuidanceStepAsync", tour, 1L, "report.original-statement", "context");
+        Assert.Equal(2, client.GuidanceNarrationCalls);
+        await InvokeAsync(host, "EndGuidanceNarration");
+        Assert.False(GetField<bool>(host, "_guidanceNarrationRetryPending"));
+    }
+
     public class NoOpBonboardingServiceProxy : DispatchProxy
     {
         public List<string> Calls { get; } = [];
@@ -2602,7 +3208,7 @@ public sealed partial class EllaiSurfaceLogicTests
         {
             if (targetMethod?.Name == "get_Status" && TourStatus.HasValue) return TourStatus.Value;
             if (targetMethod?.Name == "get_CurrentStep") return CurrentStep;
-            if (targetMethod?.Name is "PauseAsync" or "ResumeAsync" or "CancelAsync" or "NextAsync") Calls.Add(targetMethod.Name);
+            if (targetMethod?.Name is "PauseAsync" or "ResumeAsync" or "CancelAsync" or "NextAsync" or "GoToAsync") Calls.Add(targetMethod.Name);
             if (targetMethod?.Name == "NextAsync" && NextHandler is not null) return NextHandler();
             return targetMethod?.ReturnType == typeof(void)
                 ? null

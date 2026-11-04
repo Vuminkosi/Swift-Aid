@@ -1,0 +1,53 @@
+@page "/session-editor-working-copy-fixture"
+@using SwiftAid.UI.Components.Sessions
+@using SwiftAid.UI.Components.Theme
+
+<SwiftAidThemeProvider />
+<MudPopoverProvider />
+<main data-fixture-ready="@_ready.ToString().ToLowerInvariant()">
+    <h1>Session editor working-copy fixture</h1>
+    <button @onclick="Suspend" disabled="@(!_visible)">Suspend editor</button>
+    <button @onclick="Restore" disabled="@_visible">Restore editor</button>
+    <button @onclick="RestoreWrongVersion" disabled="@_visible">Restore wrong version</button>
+    <button @onclick="RestoreWrongActor" disabled="@_visible">Restore wrong actor</button>
+    <button @onclick="RestoreWrongSession" disabled="@_visible">Restore wrong session</button>
+    @if (_visible)
+    {
+        <SessionEditor @ref="_editor" CurrentActorId="@_actor" ManagementCapabilities="_capabilities" InitialWorkingCopy="_copy" />
+    }
+</main>
+
+@code {
+    private bool _ready;
+    private bool _visible = true;
+    private string _actor = "fixture-owner";
+    private SessionEditor? _editor;
+    private SessionEditorWorkingCopy? _copy;
+    private readonly SessionManagementPresentation _capabilities = new(true, true, null, null, null,
+        true, false, false, false, false, false, OwnerOrganizationIds: ["fixture-org"]);
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (firstRender) { _ready = true; StateHasChanged(); }
+    }
+    private void Suspend()
+    {
+        _copy = _editor?.CaptureWorkingCopy();
+        _visible = false;
+    }
+    private void Restore() => _visible = true;
+    private void RestoreWrongVersion()
+    {
+        if (_copy is not null) _copy = _copy with { ExpectedVersion = 1 };
+        _visible = true;
+    }
+    private void RestoreWrongActor()
+    {
+        _actor = "different-owner";
+        _visible = true;
+    }
+    private void RestoreWrongSession()
+    {
+        if (_copy is not null) _copy = _copy with { SessionId = Guid.NewGuid() };
+        _visible = true;
+    }
+}

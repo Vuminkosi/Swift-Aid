@@ -15,6 +15,31 @@ namespace SwiftAid.Integration.Tests;
 public sealed class EllaiPreparedResponseAudioTests
 {
     [Fact]
+    public async Task ReconciliationReusesStreamedWorkUntilRecoveryAudioIsRequested()
+    {
+        var speech = new HeldSpeech();
+        using var prepared = Create(speech);
+        await prepared.StartAsync(default);
+        try
+        {
+            var responses = new EllaiSessionResponseStore(audioPreparation: prepared);
+            var chunk = responses.PublishChunk("session", "turn", 1, "A sentence.")!;
+            await speech.Started.Task.WaitAsync(TimeSpan.FromSeconds(3));
+            var final = responses.Reconcile("session", "turn", EllaiUtteranceResolution.Completed("A sentence.", 1));
+            speech.Release.TrySetResult();
+            using (var first = await prepared.OpenAsync("session", chunk.Sequence, default))
+                Assert.Equal(new byte[] { 1, 2, 3, 4 }, await first.Content.ReadAsByteArrayAsync());
+            Assert.Single(speech.Requests);
+            using (var recovered = await prepared.OpenAsync("session", final.Sequence, default))
+                Assert.Equal(new byte[] { 1, 2, 3, 4 }, await recovered.Content.ReadAsByteArrayAsync());
+            Assert.Equal(2, speech.Requests.Count);
+            using var repeated = await prepared.OpenAsync("session", final.Sequence, default);
+            Assert.Equal(2, speech.Requests.Count);
+        }
+        finally { await prepared.StopAsync(default); }
+    }
+
+    [Fact]
     public async Task PublicationStartsSynthesisBeforeFinalResponseOrAnyAudioFetchAndReconnectReusesIt()
     {
         var speech = new HeldSpeech();

@@ -22,4 +22,12 @@ public static class EllaiPageContext
     }
 
     public static string? DisplayName(string? page) => page is not null && Pages.TryGetValue(page, out var name) ? name : null;
+
+    /// <summary>An advisory route identifier, never proof of permission to read the case.</summary>
+    public static Guid? CaseIdFromRelativeUri(string uri)
+    {
+        var parts = uri.Split('?', '#')[0].Trim('/').Split('/');
+        return parts.Length == 2 && parts[0].Equals("case", StringComparison.OrdinalIgnoreCase) &&
+            Guid.TryParseExact(parts[1], "D", out var id) && id != Guid.Empty ? id : null;
+    }
 }

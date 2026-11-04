@@ -18,8 +18,17 @@ public sealed record EllaiTurnCompletion(string Text, int PromptTokens, int Comp
 /// <summary>Completion client used by existing non-agent guidance planning.</summary>
 public interface IEllaiTurnCompletionClient
 {
+    Task<EllaiTurnCompletion> CompleteStructuredAsync(
+        IReadOnlyList<EllaiChatMessage> messages, int maxTokens, System.Text.Json.JsonElement schema, CancellationToken ct) =>
+        CompleteAsync(messages, maxTokens, ct);
+
     Task<EllaiTurnCompletion> CompleteAsync(
         IReadOnlyList<EllaiChatMessage> messages, int maxTokens, CancellationToken ct);
+
+    /// <summary>Report extraction may use a provider-specific structured response contract.</summary>
+    Task<EllaiTurnCompletion> CompleteReportVoiceAsync(
+        IReadOnlyList<EllaiChatMessage> messages, int maxTokens, CancellationToken ct) =>
+        CompleteAsync(messages, maxTokens, ct);
 
     async Task<EllaiTurnCompletion> CompleteStreamingAsync(
         IReadOnlyList<EllaiChatMessage> messages, int maxTokens,

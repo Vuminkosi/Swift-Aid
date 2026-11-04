@@ -89,6 +89,8 @@ public sealed class MetaAsrRealtimeAdapter(EllaiOptions options)
         async Task SendAudioAsync()
         {
             var buffer = new byte[7680];
+            var audioClock = System.Diagnostics.Stopwatch.StartNew();
+            long sentBytes = 0;
             try
             {
                 int read;
@@ -100,6 +102,12 @@ public sealed class MetaAsrRealtimeAdapter(EllaiOptions options)
                     }
                     await socket.SendAsync(new ArraySegment<byte>(buffer, 0, read),
                         WebSocketMessageType.Binary, true, linked.Token).ConfigureAwait(false);
+                    // Buffered microphone frames and prerecorded streams must not burst
+                    // faster than realtime into the provider's bounded streaming input.
+                    sentBytes += read;
+                    var remaining = TimeSpan.FromSeconds(sentBytes / 48000d) - audioClock.Elapsed;
+                    if (remaining > TimeSpan.Zero)
+                        await Task.Delay(remaining, linked.Token).ConfigureAwait(false);
                 }
                 inputCompleted = true;
                 await SendTextAsync(socket, """{"type":"endStream"}""", linked.Token).ConfigureAwait(false);

@@ -8,5 +8,35 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\SwiftAid.UI\SwiftAid.UI.csproj" />
     <ProjectReference Include="..\..\src\SwiftAid.Contracts\SwiftAid.Contracts.csproj" />
+    <ProjectReference Include="..\..\src\SwiftAid.Client\SwiftAid.Client.csproj" />
+    <ProjectReference Include="..\..\src\SwiftAid.GuestIntake\SwiftAid.GuestIntake.csproj" />
+    <Compile Include="..\..\src\SwiftAid.Mobile\Services\Authentication\IMobileAuthenticationSession.cs" Link="Mobile\IMobileAuthenticationSession.cs" />
+    <Compile Include="..\..\src\SwiftAid.Mobile\Services\Welcome\IMobileWelcomePreferenceStore.cs" Link="Mobile\IMobileWelcomePreferenceStore.cs" />
+    <Compile Include="..\..\src\SwiftAid.Mobile\Services\Sessions\IMobileSessionPlatform.cs" Link="Mobile\IMobileSessionPlatform.cs" />
+    <Compile Include="..\..\src\SwiftAid.Mobile\Services\Presentation\MobileAssignedCaseQueueReader.cs" Link="Mobile\MobileAssignedCaseQueueReader.cs" />
+    <Compile Include="..\..\src\SwiftAid.Mobile\Services\Presentation\MobileCaseWorkReader.cs" Link="Mobile\MobileCaseWorkReader.cs" />
+    <Compile Include="..\..\src\SwiftAid.Mobile\Services\Presentation\MobileCaseWorkDiscoveryReader.cs" Link="Mobile\MobileCaseWorkDiscoveryReader.cs" />
+    <Compile Include="..\..\src\SwiftAid.Mobile\Services\Presentation\MobileMonitoringQueueClient.cs" Link="Mobile\MobileMonitoringQueueClient.cs" />
+    <RazorComponent Include="..\..\src\SwiftAid.Mobile\Components\Sessions\MobileSessionHistory.razor" Link="Components\Sessions\MobileSessionHistory.razor" />
+    <RazorComponent Include="..\..\src\SwiftAid.Mobile\Components\Sessions\MobileSessionManagementLink.razor" Link="Components\Sessions\MobileSessionManagementLink.razor" />
+    <RazorComponent Include="..\..\src\SwiftAid.Mobile\Components\Pages\StaffSessions.razor" Link="Components\Pages\StaffSessions.razor" />
+    <RazorComponent Include="..\..\src\SwiftAid.Mobile\Components\Pages\MyCases.razor" Link="Components\Pages\MyCases.razor" />
+    <RazorComponent Include="..\..\src\SwiftAid.Mobile\Components\Pages\CaseDetail.razor" Link="Components\Pages\CaseDetail.razor" />
+    <RazorComponent Include="..\..\src\SwiftAid.Mobile\Components\Pages\Surveillance.razor" Link="Components\Pages\Surveillance.razor" />
+    <RazorComponent Include="..\..\src\SwiftAid.Mobile\Components\Pages\Terms.razor" Link="Components\Pages\Terms.razor" />
+    <RazorComponent Include="..\..\src\SwiftAid.Mobile\Components\Pages\Assignments.razor" Link="Components\Pages\Assignments.razor" />
+    <RazorComponent Include="..\..\src\SwiftAid.Mobile\Components\Pages\Assistance.razor" Link="Components\Pages\Assistance.razor" />
+    <RazorComponent Include="..\..\src\SwiftAid.Mobile\Components\Pages\FollowUps.razor" Link="Components\Pages\FollowUps.razor" />
+    <RazorComponent Include="..\..\src\SwiftAid.Mobile\Components\Pages\Escalations.razor" Link="Components\Pages\Escalations.razor" />
+    <RazorComponent Include="..\..\src\SwiftAid.Mobile\Components\Pages\CaseImports.razor" Link="Components\Pages\CaseImports.razor" />
+    <RazorComponent Include="..\..\src\SwiftAid.Gateway\Components\Pages\Investigations.razor" Link="Components\Pages\Investigations.razor" />
+    <RazorComponent Include="..\..\src\SwiftAid.Mobile\Components\Pages\Monitoring.razor" Link="Components\Pages\Monitoring.razor" />
+    <RazorComponent Include="..\..\src\SwiftAid.Mobile\Components\Pages\Reports.razor" Link="Components\Pages\Reports.razor" />
+    <RazorComponent Include="..\..\src\SwiftAid.Mobile\Components\Pages\Security.razor" Link="Components\Pages\Security.razor" />
+    <RazorComponent Include="..\..\src\SwiftAid.Mobile\Components\Pages\Sessions.razor" Link="Components\Pages\Sessions.razor" />
+    <RazorComponent Include="..\..\src\SwiftAid.Mobile\Components\Pages\Welcome.razor" Link="Components\Pages\Welcome.razor" />
+    <None Include="..\..\src\SwiftAid.Mobile\Components\Pages\Welcome.razor.css" Link="Components\Pages\Welcome.razor.css" />
+    <RazorComponent Include="..\..\src\SwiftAid.Mobile\Components\Public\GuestReport.razor" Link="Components\Public\GuestReport.razor" />
+    <Compile Include="..\..\src\SwiftAid.Mobile\Services\Audio\UnsupportedMobileAudioCaptureService.cs" Link="Mobile\UnsupportedMobileAudioCaptureService.cs" />
   </ItemGroup>
 </Project>

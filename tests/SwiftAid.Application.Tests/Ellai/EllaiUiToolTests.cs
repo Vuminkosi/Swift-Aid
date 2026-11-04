@@ -220,6 +220,63 @@ public sealed class EllaiUiToolTests
     }
 
     [Fact]
+    public async Task ObserveFiltersInputStatesByDescriptorVisibilityAndFreshness()
+    {
+        var registry = SeededRegistry();
+        EllaiReportGuidanceDescriptors.RegisterAll(registry);
+        var store = new InMemoryEllaiUiObservationStore();
+        await store.RecordAsync(new StoredUiObservationReport("session-1", "view-9", "ctx-9", "web",
+            ["report.narrative", "report.time-location"], DateTimeOffset.UtcNow,
+            [new("report.narrative", UiObservationState.Ready), new("report.time-location", UiObservationState.Hidden)],
+            InputStates: [new("report.narrative", "report.original-statement", UiInputPresence.Entered),
+                new("report.narrative", "report.forged", UiInputPresence.Entered),
+                new("report.time-location", "report.occurrence-date", UiInputPresence.Invalid)]), default);
+        var broker = GrantedBroker(registry, store);
+        var context = Context with { FeatureId = "public.product-help", ResourceId = null };
+        var result = await broker.InvokeAsync(context, new(EllaiToolNames.UiObserve,
+            Args(("controls", "report.narrative,report.time-location"), ("view", "view-9"))), default);
+
+        Assert.Contains("input report.original-statement (Describe what happened): Entered", result.ResultSummary);
+        Assert.Contains("does not prove a draft was saved or submitted", result.ResultSummary);
+        Assert.Contains("omitted inputs have unknown status", result.ResultSummary);
+        Assert.DoesNotContain("report.forged", result.ResultSummary);
+        Assert.DoesNotContain("input report.occurrence-date", result.ResultSummary);
+        var stale = await broker.InvokeAsync(context, new(EllaiToolNames.UiObserve,
+            Args(("controls", "report.narrative"), ("view", "different-view"))), default);
+        Assert.DoesNotContain("input report.original-statement", stale.ResultSummary);
+    }
+
+    [Fact]
+    public async Task ObserveExplainsOnlyFirstVisibleRequestedValidationIssue()
+    {
+        var registry = SeededRegistry();
+        EllaiReportGuidanceDescriptors.RegisterAll(registry);
+        var store = new InMemoryEllaiUiObservationStore();
+        var report = new StoredUiObservationReport("session-1", "view", "context", "web",
+            ["report.narrative", "report.time-location"], DateTimeOffset.UtcNow,
+            [new("report.narrative", UiObservationState.Ready), new("report.time-location", UiObservationState.Ready)],
+            ValidationInputIds: ["report.original-statement", "report.occurrence-date"]);
+        await store.RecordAsync(report, default);
+        var broker = GrantedBroker(registry, store);
+        var context = Context with { FeatureId = "public.product-help", ResourceId = null };
+        async Task<EllaiToolResult> Observe(string controls, string view = "view") => await broker.InvokeAsync(context,
+            new(EllaiToolNames.UiObserve, Args(("feature", "report"), ("controls", controls), ("view", view))), default);
+
+        var current = await Observe("report.narrative,report.time-location");
+        Assert.Contains("First client-reported validation issue (report.original-statement): Describe what happened or add an observation.", current.ResultSummary);
+        Assert.DoesNotContain("Enter the reported date", current.ResultSummary);
+        Assert.DoesNotContain("validation issue", (await Observe("report.time-location")).ResultSummary);
+        Assert.DoesNotContain("validation issue", (await Observe("report.narrative", "other-view")).ResultSummary);
+
+        await store.RecordAsync(report with { ContextStamp = "next", ReceivedAtUtc = DateTimeOffset.UtcNow,
+            ValidationInputIds = ["report.occurrence-date"] }, default);
+        Assert.Contains("validation issue (report.occurrence-date): Enter the reported date", (await Observe("report.time-location")).ResultSummary);
+        await store.RecordAsync(report with { ContextStamp = "hidden", ReceivedAtUtc = DateTimeOffset.UtcNow,
+            ControlStates = [new("report.narrative", UiObservationState.Hidden), new("report.time-location", UiObservationState.Ready)] }, default);
+        Assert.DoesNotContain("validation issue", (await Observe("report.narrative,report.time-location")).ResultSummary);
+    }
+
+    [Fact]
     public async Task ObserveNotesViewMismatchHonestly()
     {
         var store = new InMemoryEllaiUiObservationStore();
@@ -303,6 +360,21 @@ public sealed class EllaiUiToolTests
 
         Assert.False(result.Allowed);
         Assert.Equal(EllaiToolReasonCodes.Unavailable, result.ReasonCode);
+    }
+
+    [Fact]
+    public async Task OlderConcurrentObservationCannotReplaceNewerValidationState()
+    {
+        var store = new InMemoryEllaiUiObservationStore();
+        var now = DateTimeOffset.UtcNow;
+        Assert.True(await store.RecordAsync(new("session", "view", "corrected", "web", ["report.entry"], now,
+            [new("report.entry", UiObservationState.Ready)], ValidationInputIds: []), default));
+        Assert.False(await store.RecordAsync(new("session", "view", "old", "web", ["report.entry"], now.AddSeconds(-1),
+            [new("report.entry", UiObservationState.Ready)], ValidationInputIds: ["report.original-statement"]), default));
+
+        var latest = await store.LatestAsync("session", default);
+        Assert.Equal("corrected", latest!.ContextStamp);
+        Assert.Empty(latest.ValidationInputIds!);
     }
 
     [Fact]

@@ -26,7 +26,8 @@ public sealed record ReportContextV2Payload(
     string? CapturedOffset,
     string? CapturedZoneId,
     ReportedTimePrecision CapturePrecision,
-    LocationContext Location);
+    LocationContext Location,
+    ReportedFactV2Payload<ReportedTime>? Onset = null);
 
 public sealed record ReportedFactV2Payload<T>(
     ReportedValueV2State State,

@@ -2,8 +2,13 @@
     display: flex;
     gap: 0.75rem;
     align-items: flex-end;
+    flex-wrap: wrap;
     margin-bottom: 0.75rem;
 }
+
+.intake-coordination__list { display: grid; gap: 0.5rem; }
+.intake-coordination__list ::deep .intake-coordination__item { display: flex; flex-wrap: wrap; align-items: center; gap: 0.25rem 0.75rem; padding: 0.625rem 0.75rem; min-width: 0; overflow-wrap: anywhere; }
+.intake-coordination__list ::deep .intake-coordination__item .mud-typography { font-size: 0.8125rem; line-height: 1.35; }
 
 .intake-coordination__filter {
     max-width: 16rem;

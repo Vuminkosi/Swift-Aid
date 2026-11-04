@@ -11,7 +11,8 @@ public sealed class EllaiUiAuthorityResolver(IScopeService? scopes = null, TimeP
     {
         ct.ThrowIfCancellationRequested();
         HashSet<string> features = [EllaiReportUiManifest.FeatureId, EllaiCommunityUiManifest.FeatureId];
-        HashSet<string> capabilities = [];
+        HashSet<string> capabilities = [EllaiNavigationManifest.PublicCapability];
+        features.Add(EllaiNavigationManifest.FeatureId);
         if (actor is not null && (identityAuthority is not null || scopes is not null))
         {
             try

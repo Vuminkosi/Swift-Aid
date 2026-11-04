@@ -48,7 +48,8 @@ public enum UiIntentKind
     PrepareDemoDraft,
     YieldControl,
     StartGuidance,
-    ControlGuidance
+    ControlGuidance,
+    UpdatePublicReportDraft
 }
 
 /// <summary>Allowed administrative effect kinds. All other writes are human-owned (R3) or excluded (R5).</summary>

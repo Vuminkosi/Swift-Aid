@@ -48,6 +48,215 @@ public sealed class EllaiLiveQueueReadTests
         public int? LastLimit { get; private set; }
     }
 
+    private sealed class OccurrenceLocation : ICaseOccurrenceLocationQuery
+    {
+        public string RegionId { get; set; } = "region-1";
+        public Guid? UnavailableCaseId { get; set; }
+        public Guid? DeniedCaseId { get; set; }
+        public Task<CaseOccurrenceLocationResult> GetLocationAsync(ActorContext actor, Guid caseId, CancellationToken ct) =>
+            Task.FromResult(caseId == UnavailableCaseId
+                ? new CaseOccurrenceLocationResult(CaseOccurrenceLocationAccess.Unavailable, null, null)
+                : caseId == DeniedCaseId
+                ? new CaseOccurrenceLocationResult(CaseOccurrenceLocationAccess.NotFoundOrNotAuthorized, null, null)
+                : new CaseOccurrenceLocationResult(CaseOccurrenceLocationAccess.Allowed, 1,
+                    new("US", "Synthetic", "Area", "Locality", RegionId, "area-1", "locality-1")));
+    }
+
+    [Fact]
+    public async Task LostLocationAccessRemainsIncompleteWhenSearchIsRecalled()
+    {
+        var first = Row("01", 7); var denied = Row("02", 8);
+        var queue = new FakeQueue { Result = new(CaseQueueAccess.Allowed, [first, denied]) };
+        var consent = new EllaiConsentService();
+        consent.Grant("session-1", EllaiConsentDimension.ReasoningText, EllaiToolBroker.ToolReadPurpose,
+            EllaiProcessingClassification.SyntheticDemo, TimeSpan.FromHours(1));
+        var broker = new EllaiToolBroker(new EllaiPolicyService(), consent, queue: queue, topics: new EllaiTopicService(),
+            occurrenceLocations: new OccurrenceLocation { DeniedCaseId = denied.CaseId });
+        var context = Context with { Actor = TestActor() };
+        var search = await broker.InvokeAsync(context, new(EllaiToolNames.State,
+            Args(("projection", "queue"), ("country", "US"), ("sort", "latest-reported"), ("place_id", "region-1"))), default);
+        var recalled = await broker.InvokeAsync(context, new(EllaiToolNames.Evidence, Args(("ref", "case-results"))), default);
+
+        Assert.True(search.Allowed);
+        Assert.True(search.Truncated);
+        Assert.True(recalled.Truncated);
+        Assert.Equal(first.CaseId.ToString("D"), Assert.Single(recalled.Evidence).ResourceId);
+        Assert.DoesNotContain(denied.CaseId.ToString("D"), search.ResultSummary);
+        Assert.DoesNotContain(denied.CaseId.ToString("D"), recalled.ResultSummary);
+    }
+
+    [Fact]
+    public async Task PlaceSearchReportsAStoppedScanAlongsideVerifiedMatches()
+    {
+        var first = Row("01", 7); var second = Row("02", 8);
+        var queue = new FakeQueue { Result = new(CaseQueueAccess.Allowed, [first, second]) };
+        var consent = new EllaiConsentService();
+        consent.Grant("session-1", EllaiConsentDimension.ReasoningText, EllaiToolBroker.ToolReadPurpose,
+            EllaiProcessingClassification.SyntheticDemo, TimeSpan.FromHours(1));
+        var broker = new EllaiToolBroker(new EllaiPolicyService(), consent, queue: queue,
+            occurrenceLocations: new OccurrenceLocation { UnavailableCaseId = second.CaseId });
+        var result = await broker.InvokeAsync(Context with { Actor = TestActor() }, new(EllaiToolNames.State,
+            Args(("projection", "queue"), ("country", "US"), ("sort", "latest-reported"), ("place_id", "region-1"))), default);
+        Assert.True(result.Allowed);
+        Assert.True(result.Truncated);
+        Assert.Equal(first.CaseId.ToString("D"), Assert.Single(result.Evidence).ResourceId);
+        Assert.Contains("remaining cases were not searched", result.ResultSummary);
+        Assert.DoesNotContain(second.CaseId.ToString("D"), result.ResultSummary);
+    }
+
+    private sealed class CountingClassificationQuery : SwiftAid.Application.Classification.ICaseClassificationQuery
+    {
+        public int Calls { get; private set; }
+        public Task<IReadOnlyList<SwiftAid.Application.Classification.CaseClassificationEvidence>?> GetAsync(
+            ActorContext actor, Guid caseId, CancellationToken ct)
+        {
+            Calls++;
+            throw new InvalidOperationException("Case evidence must not be read for this route.");
+        }
+    }
+
+    [Theory]
+    [InlineData(EllaiProcessingClassification.SyntheticDemo)]
+    [InlineData(EllaiProcessingClassification.UserProvidedNonSensitive)]
+    public async Task MessageClassificationDoesNotAuthorizeSendingCaseClassification(string messageClassification)
+    {
+        var source = new CountingClassificationQuery();
+        var consent = new EllaiConsentService();
+        consent.Grant("session-1", EllaiConsentDimension.ReasoningText, EllaiToolBroker.ToolReadPurpose,
+            messageClassification, TimeSpan.FromHours(1));
+        var broker = new EllaiToolBroker(new EllaiPolicyService(), consent, classification: source);
+        var context = Context with { Actor = TestActor(), DataClassification = messageClassification };
+        var result = await broker.InvokeAsync(context, new(EllaiToolNames.ClassificationEvidence,
+            Args(("case_id", Row("01", 7).CaseId.ToString("D")))), default);
+        Assert.False(result.Allowed);
+        Assert.Equal(EllaiToolReasonCodes.Unavailable, result.ReasonCode);
+        Assert.Empty(result.Evidence);
+        Assert.Equal(0, source.Calls);
+    }
+
+    [Fact]
+    public async Task PlaceSearchUsesOccurrenceLocationAndRevalidatesTheSameScope()
+    {
+        var queue = new FakeQueue { Result = new(CaseQueueAccess.Allowed, [Row("01", 7)]) };
+        var locations = new OccurrenceLocation();
+        var consent = new EllaiConsentService();
+        consent.Grant("session-1", EllaiConsentDimension.ReasoningText, EllaiToolBroker.ToolReadPurpose,
+            EllaiProcessingClassification.SyntheticDemo, TimeSpan.FromHours(1));
+        var broker = new EllaiToolBroker(new EllaiPolicyService(), consent, queue: queue, occurrenceLocations: locations);
+        var context = Context with { Actor = TestActor() };
+        var request = new EllaiToolRequest(EllaiToolNames.State, Args(("projection", "queue"), ("limit", "5"),
+            ("country", "US"), ("sort", "latest-reported"), ("place_id", "region-1")));
+        var result = await broker.InvokeAsync(context, request, default);
+        Assert.True(result.Allowed);
+        Assert.False(result.Truncated);
+        Assert.Equal(Row("01", 7).CaseId.ToString("D"), Assert.Single(result.Evidence).ResourceId);
+        var observed = EllaiObservedToolResult.From(request, result);
+        Assert.Equal("region-1", observed.CaseListQuery?.PlaceId);
+        var trace = EllaiToolTrace.SerializeFlattened([observed], false, []);
+        var turns = new[]
+        {
+            new EllaiConversationTurn("session-1", "previous", 1, "list", "one case", "Completed", 1, DateTimeOffset.UtcNow) { ToolTraceJson = trace },
+            new EllaiConversationTurn("session-1", "current", 2, "next", null, "Queued", 1, null)
+        };
+        var valid = await EllaiAuthorizedConversationContext.BuildAsync(turns, "current", context.Actor!, queue, default,
+            toolContext: context, invokeTool: broker.InvokeAsync);
+        Assert.Contains(valid.Messages, message => message.Content == "one case");
+        locations.RegionId = "other";
+        var moved = await EllaiAuthorizedConversationContext.BuildAsync(turns, "current", context.Actor!, queue, default,
+            toolContext: context, invokeTool: broker.InvokeAsync);
+        Assert.DoesNotContain(moved.Messages, message => message.Content == "one case");
+    }
+
+    [Fact]
+    public async Task CappedPlaceSearchReplaysOnlyWhileTheSameBoundedResultRemainsValid()
+    {
+        var queue = new FakeQueue { Result = new(CaseQueueAccess.Allowed, [Row("01", 7), Row("02", 8)]) };
+        var locations = new OccurrenceLocation();
+        var consent = new EllaiConsentService();
+        consent.Grant("session-1", EllaiConsentDimension.ReasoningText, EllaiToolBroker.ToolReadPurpose,
+            EllaiProcessingClassification.SyntheticDemo, TimeSpan.FromHours(1));
+        var broker = new EllaiToolBroker(new EllaiPolicyService(), consent, queue: queue, occurrenceLocations: locations);
+        var context = Context with { Actor = TestActor() };
+        var request = new EllaiToolRequest(EllaiToolNames.State, Args(("projection", "queue"), ("limit", "1"),
+            ("country", "US"), ("sort", "latest-reported"), ("place_id", "region-1")));
+        var result = await broker.InvokeAsync(context, request, default);
+        Assert.True(result.Truncated);
+        var observation = EllaiObservedToolResult.From(request, result);
+        Assert.NotNull(observation.CaseListDigest);
+        var trace = EllaiToolTrace.SerializeFlattened([observation], false, []);
+        var turns = new[]
+        {
+            new EllaiConversationTurn("session-1", "previous", 1, "list", "first case", "Completed", 1, DateTimeOffset.UtcNow) { ToolTraceJson = trace },
+            new EllaiConversationTurn("session-1", "current", 2, "next", null, "Queued", 1, null)
+        };
+        async Task<EllaiAuthorizedConversationContext.Result> Read() =>
+            await EllaiAuthorizedConversationContext.BuildAsync(turns, "current", context.Actor!, queue, default,
+                toolContext: context, invokeTool: broker.InvokeAsync);
+        Assert.Contains((await Read()).Messages, item => item.Content == "first case");
+        queue.Result = new(CaseQueueAccess.Allowed, [Row("01", 7)]);
+        Assert.DoesNotContain((await Read()).Messages, item => item.Content == "first case");
+        queue.Result = new(CaseQueueAccess.Allowed, [Row("02", 8), Row("01", 7)]);
+        Assert.DoesNotContain((await Read()).Messages, item => item.Content == "first case");
+        turns[0] = turns[0] with { ToolTraceJson = EllaiToolTrace.SerializeFlattened([observation with { CaseListDigest = null }], false, []) };
+        Assert.DoesNotContain((await Read()).Messages, item => item.Content == "first case");
+    }
+
+    [Fact]
+    public async Task PlaceSearchRetainsItsRowsAndReplayDoesNotOverwriteNewerResults()
+    {
+        var queue = new FakeQueue { Result = new(CaseQueueAccess.Allowed,
+            [Row("01", 7) with { Classification = "Unclassified" }, Row("02", 8) with { Classification = "Confirmed" }]) };
+        var locations = new OccurrenceLocation();
+        var consent = new EllaiConsentService();
+        consent.Grant("session-1", EllaiConsentDimension.ReasoningText, EllaiToolBroker.ToolReadPurpose,
+            EllaiProcessingClassification.SyntheticDemo, TimeSpan.FromHours(1));
+        var broker = new EllaiToolBroker(new EllaiPolicyService(), consent, queue: queue,
+            occurrenceLocations: locations, topics: new EllaiTopicService());
+        var context = Context with { Actor = TestActor() };
+        var request = new EllaiToolRequest(EllaiToolNames.State, Args(("projection", "queue"), ("limit", "1"),
+            ("country", "US"), ("sort", "latest-reported"), ("place_id", "region-1")));
+        var first = await broker.InvokeAsync(context, request, default);
+        Assert.DoesNotContain("Unclassified", first.ResultSummary);
+        var recalled = await broker.InvokeAsync(context, new(EllaiToolNames.Evidence,
+            Args(("ref", "case-results"), ("field", "workflow"))), default);
+        Assert.Equal("workflow", Assert.Single(recalled.Evidence).FieldPath);
+
+        await broker.InvokeAsync(context, new(EllaiToolNames.State, Args(("projection", "queue"))), default);
+        var observation = EllaiObservedToolResult.From(request, first);
+        var trace = EllaiToolTrace.SerializeFlattened([observation], false, []);
+        var turns = new[]
+        {
+            new EllaiConversationTurn("session-1", "previous", 1, "list", "first case", "Completed", 1, DateTimeOffset.UtcNow) { ToolTraceJson = trace },
+            new EllaiConversationTurn("session-1", "current", 2, "next", null, "Queued", 1, null)
+        };
+        var history = await EllaiAuthorizedConversationContext.BuildAsync(turns, "current", context.Actor!, queue, default,
+            toolContext: context, invokeTool: broker.InvokeAsync);
+        Assert.Contains(history.Messages, item => item.Content == "first case");
+        var latest = await broker.InvokeAsync(context, new(EllaiToolNames.Evidence,
+            Args(("ref", "case-results"), ("field", "workflow"))), default);
+        Assert.Equal(2, latest.ItemCount);
+        Assert.DoesNotContain("Confirmed", latest.ResultSummary);
+    }
+
+    [Theory]
+    [InlineData("field", "classification")]
+    [InlineData("classification_filter", "Unclassified")]
+    public async Task ClinicalCaseDataIsUnavailableWithoutSourceSpecificProcessingApproval(string key, string value)
+    {
+        var row = Row("01", 7) with { Classification = "Confirmed" };
+        var queue = new FakeQueue { Result = new(CaseQueueAccess.Allowed, [row]) };
+        var broker = GrantedBroker(queue, new EllaiTopicService());
+        var context = Context with { Actor = TestActor() };
+        var initial = await broker.InvokeAsync(context, new(EllaiToolNames.State, Args(("projection", "queue"))), default);
+        Assert.DoesNotContain("Confirmed", initial.ResultSummary);
+        var result = await broker.InvokeAsync(context, new(EllaiToolNames.Evidence,
+            Args(("ref", "case-results"), (key, value))), default);
+        Assert.False(result.Allowed);
+        Assert.Equal(EllaiToolReasonCodes.Unavailable, result.ReasonCode);
+        Assert.Empty(result.Evidence);
+        Assert.DoesNotContain("Confirmed", result.ResultSummary);
+    }
+
     private sealed class FakeIndex(EllaiExactMemoryReference? hit, bool fail = false) : IEllaiExactReferenceIndex
     {
         public int Reads { get; private set; }
@@ -73,6 +282,11 @@ public sealed class EllaiLiveQueueReadTests
     {
         private readonly InMemoryEllaiTopicStore _inner = new();
         public int DirectReads { get; private set; }
+        public Task<bool> TryCreateAsync(string sessionId, string title, IReadOnlyList<string> aliases, string entityRef,
+            string entityVersion, DateTimeOffset now, CancellationToken ct) => _inner.TryCreateAsync(sessionId, title, aliases, entityRef, entityVersion, now, ct);
+        public Task<bool> CompareExchangePayloadAsync(string sessionId, string topicId, string? expectedRef, string? expectedVersion,
+            string newRef, string newVersion, DateTimeOffset now, CancellationToken ct) =>
+            _inner.CompareExchangePayloadAsync(sessionId, topicId, expectedRef, expectedVersion, newRef, newVersion, now, ct);
         public Task<EllaiTopicEntry> RecordAsync(string sessionId, string title, IReadOnlyList<string> aliases,
             string? entityRef, string? entityVersion, string? checkpointId, DateTimeOffset now, CancellationToken ct) =>
             _inner.RecordAsync(sessionId, title, aliases, entityRef, entityVersion, checkpointId, now, ct);
@@ -89,6 +303,12 @@ public sealed class EllaiLiveQueueReadTests
         private readonly InMemoryEllaiTopicStore _inner = new();
         public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public Task<bool> TryCreateAsync(string sessionId, string title, IReadOnlyList<string> aliases, string entityRef,
+            string entityVersion, DateTimeOffset now, CancellationToken ct) => _inner.TryCreateAsync(sessionId, title, aliases, entityRef, entityVersion, now, ct);
+        public Task<bool> CompareExchangePayloadAsync(string sessionId, string topicId, string? expectedRef, string? expectedVersion,
+            string newRef, string newVersion, DateTimeOffset now, CancellationToken ct) =>
+            _inner.CompareExchangePayloadAsync(sessionId, topicId, expectedRef, expectedVersion, newRef, newVersion, now, ct);
+        public Task<EllaiTopicEntry?> GetAsync(string sessionId, string topicId, CancellationToken ct) => ((IEllaiTopicStore)_inner).GetAsync(sessionId, topicId, ct);
         public Task<EllaiTopicEntry> RecordAsync(string sessionId, string title, IReadOnlyList<string> aliases,
             string? entityRef, string? entityVersion, string? checkpointId, DateTimeOffset now, CancellationToken ct) =>
             _inner.RecordAsync(sessionId, title, aliases, entityRef, entityVersion, checkpointId, now, ct);
@@ -98,6 +318,31 @@ public sealed class EllaiLiveQueueReadTests
             await Release.Task;
             return await _inner.ListAsync(sessionId, ct);
         }
+    }
+
+    private sealed class CompetingTopicStore : IEllaiTopicStore
+    {
+        public Task<EllaiTopicEntry> RecordAsync(string sessionId, string title, IReadOnlyList<string> aliases,
+            string? entityRef, string? entityVersion, string? checkpointId, DateTimeOffset now, CancellationToken ct) =>
+            Task.FromResult(new EllaiTopicEntry("topic-winner", sessionId, title, aliases, "another snapshot",
+                entityVersion, "Partial", checkpointId, now, now));
+
+        public Task<IReadOnlyList<EllaiTopicEntry>> ListAsync(string sessionId, CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<EllaiTopicEntry>>([]);
+    }
+
+    [Fact]
+    public async Task CompetingTopicWriteDoesNotClaimTheCurrentResultsWereRemembered()
+    {
+        var queue = new FakeQueue { Result = new(CaseQueueAccess.Allowed, [Row("01", 7)]) };
+        var broker = GrantedBroker(queue, new EllaiTopicService(new CompetingTopicStore()));
+        var result = await broker.InvokeAsync(Context with { Actor = TestActor() },
+            new(EllaiToolNames.State, Args(("projection", "queue"))), CancellationToken.None);
+
+        Assert.True(result.Allowed);
+        Assert.Single(result.Evidence);
+        Assert.Contains("could not be retained", result.ResultSummary, StringComparison.Ordinal);
+        Assert.DoesNotContain("Result references retained", result.ResultSummary, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -335,6 +580,44 @@ public sealed class EllaiLiveQueueReadTests
     }
 
     [Fact]
+    public async Task DuplicateQueueRowsAreNotReportedAsDistinctCases()
+    {
+        var queue = new FakeQueue { Result = new(CaseQueueAccess.Allowed, [Row("01", 7), Row("01", 7)]) };
+        var result = await GrantedBroker(queue, new EllaiTopicService()).InvokeAsync(Context with { Actor = TestActor() },
+            new(EllaiToolNames.State, Args(("projection", "queue"))), CancellationToken.None);
+        Assert.False(result.Allowed);
+        Assert.Equal(EllaiToolReasonCodes.Unavailable, result.ReasonCode);
+        Assert.Empty(result.Evidence);
+    }
+
+    [Fact]
+    public async Task DuplicateStoredOrReauthorizedReferencesCannotInflateRecall()
+    {
+        var topics = new EllaiTopicService();
+        var queue = new FakeQueue { Result = new(CaseQueueAccess.Allowed, [Row("01", 7)]) };
+        var context = Context with { Actor = TestActor() };
+        var row = Row("01", 7);
+        var snapshot = System.Text.Json.JsonSerializer.Serialize(new
+        {
+            ActorId = context.Actor!.ActorId, context.ScopeEpoch, ExpiresAtUtc = DateTimeOffset.UtcNow.AddHours(1),
+            Cases = new[] { new { Id = row.CaseId, Version = 7L }, new { Id = row.CaseId, Version = 7L } }
+        });
+        await topics.TrackAsync(context.SessionId, EllaiCaseResultMemory.TopicTitle, ["case-results"], snapshot, "case-results/1");
+        var memory = new EllaiCaseResultMemory(topics, queue);
+        Assert.False((await memory.RecallAsync(context, default)).Allowed);
+        Assert.Null(queue.LastActor);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => memory.RememberAsync(context, [row], default));
+        memory = new EllaiCaseResultMemory(new EllaiTopicService(), queue);
+        await memory.RememberAsync(context, [row], default);
+        queue.Result = new(CaseQueueAccess.Allowed, [row, row]);
+        var recalled = await memory.RecallAsync(context, default);
+        Assert.False(recalled.Allowed);
+        Assert.Equal(EllaiToolReasonCodes.Unavailable, recalled.ReasonCode);
+        Assert.Empty(recalled.Evidence);
+    }
+
+    [Fact]
     public async Task ResultRecallReauthorizesIdsAndUsesCurrentVersions()
     {
         var topics = new EllaiTopicService();
@@ -352,11 +635,94 @@ public sealed class EllaiLiveQueueReadTests
         var observed = EllaiObservedToolResult.From(new EllaiToolRequest(EllaiToolNames.Topic, Args(("ref", "case-results"))), recalled);
         Assert.Equal(recalled.HistoryValidUntilUtc, observed.CaseSnapshotExpiresAtUtc);
         Assert.Equal(1, recalled.ItemCount);
+        Assert.True(recalled.Truncated);
         Assert.Equal("9", Assert.Single(recalled.Evidence).Version);
         Assert.Contains("changed since retrieval", recalled.ResultSummary);
         Assert.DoesNotContain(Row("02", 8).CaseId.ToString(), recalled.ResultSummary);
         Assert.DoesNotContain(Row("03", 1).CaseId.ToString(), recalled.ResultSummary);
         Assert.Equal(new[] { Row("01", 7).CaseId, Row("02", 8).CaseId }, queue.LastFilter!.CaseIds);
+    }
+
+    [Fact]
+    public async Task OriginalAndLatestResultsRemainDistinctAndAreReauthorized()
+    {
+        var first = Row("01", 7); var second = Row("02", 8);
+        var queue = new FakeQueue { Result = new(CaseQueueAccess.Allowed, [first]) };
+        var store = new InMemoryEllaiTopicStore();
+        var topics = new EllaiTopicService(store);
+        var context = Context with { Actor = TestActor() };
+        var broker = GrantedBroker(queue, topics);
+        await broker.InvokeAsync(context, new(EllaiToolNames.State, Args(("projection", "queue"))), default);
+        queue.Result = new(CaseQueueAccess.Allowed, [second]);
+        await broker.InvokeAsync(context, new(EllaiToolNames.State, Args(("projection", "queue"))), default);
+        queue.Result = new(CaseQueueAccess.Allowed, [first, second]);
+        broker = GrantedBroker(queue, new EllaiTopicService(store));
+        var original = await broker.InvokeAsync(context, new(EllaiToolNames.Evidence,
+            Args(("ref", "case-results-original"))), default);
+        var latest = await broker.InvokeAsync(context, new(EllaiToolNames.Evidence,
+            Args(("ref", "case-results"))), default);
+        Assert.Equal(first.CaseId.ToString("D"), Assert.Single(original.Evidence).ResourceId);
+        Assert.Equal(second.CaseId.ToString("D"), Assert.Single(latest.Evidence).ResourceId);
+        queue.Result = new(CaseQueueAccess.Allowed, [second]);
+        var revoked = await broker.InvokeAsync(context, new(EllaiToolNames.Evidence,
+            Args(("ref", "case-results-original"))), default);
+        Assert.True(revoked.Allowed);
+        Assert.True(revoked.Truncated);
+        Assert.Empty(revoked.Evidence);
+        Assert.DoesNotContain(first.CaseId.ToString("D"), revoked.ResultSummary);
+    }
+
+    [Fact]
+    public async Task EvictedOrLegacyOriginalIsNeverReplacedByAnotherSet()
+    {
+        var topics = new EllaiTopicService();
+        var queue = new FakeQueue();
+        var context = Context with { Actor = TestActor() };
+        var memory = new EllaiCaseResultMemory(topics, queue);
+        for (var i = 1; i <= 9; i++) await memory.RememberAsync(context, [Row(i.ToString("D2"), i)], default);
+        var evicted = await memory.RecallAsync(context, default, original: true);
+        Assert.False(evicted.Allowed);
+        Assert.Equal(EllaiToolReasonCodes.Unavailable, evicted.ReasonCode);
+
+        var legacyTopics = new EllaiTopicService();
+        var legacy = System.Text.Json.JsonSerializer.Serialize(new
+        {
+            ActorId = context.Actor!.ActorId, context.ScopeEpoch, ExpiresAtUtc = DateTimeOffset.UtcNow.AddHours(1),
+            Cases = new[] { new { Id = Row("01", 1).CaseId, Version = 1L } }
+        });
+        await legacyTopics.TrackAsync(context.SessionId, EllaiCaseResultMemory.TopicTitle, ["case-results"], legacy, "case-results/1");
+        var legacyMemory = new EllaiCaseResultMemory(legacyTopics, queue);
+        await legacyMemory.RememberAsync(context, [Row("02", 2)], default);
+        Assert.False((await legacyMemory.RecallAsync(context, default, original: true)).Allowed);
+    }
+
+    [Fact]
+    public async Task ConcurrentCaseResultWritesPreserveEveryBoundedSet()
+    {
+        var store = new InMemoryEllaiTopicStore();
+        var topics = new EllaiTopicService(store);
+        var context = Context with { Actor = TestActor() };
+        var writes = Enumerable.Range(1, 6).Select(i => Task.Run(() =>
+            new EllaiCaseResultMemory(topics, new FakeQueue()).RememberAsync(context, [Row(i.ToString("D2"), i)], default)));
+        await Task.WhenAll(writes);
+        var entry = Assert.Single(await store.ListAsync(context.SessionId, default));
+        using var json = System.Text.Json.JsonDocument.Parse(entry.EntityRef!);
+        Assert.Equal(5, json.RootElement.GetProperty("Previous").GetArrayLength());
+        Assert.False(json.RootElement.GetProperty("HistoryTruncated").GetBoolean());
+    }
+
+    [Fact]
+    public async Task FullSizedBoundedHistoryFitsTheAuthoritativeSnapshotLimit()
+    {
+        var store = new InMemoryEllaiTopicStore();
+        var context = Context with { Actor = TestActor() };
+        var memory = new EllaiCaseResultMemory(new EllaiTopicService(store), new FakeQueue());
+        for (var version = 1; version <= 8; version++)
+            await memory.RememberAsync(context, Enumerable.Range(1, 20).Select(i => Row(i.ToString("D2"), version)).ToArray(), default);
+        var entry = Assert.Single(await store.ListAsync(context.SessionId, default));
+        Assert.True(entry.EntityRef!.Length <= 16000);
+        using var json = System.Text.Json.JsonDocument.Parse(entry.EntityRef);
+        Assert.Equal(7, json.RootElement.GetProperty("Previous").GetArrayLength());
     }
 
     [Fact]
@@ -453,6 +819,80 @@ public sealed class EllaiLiveQueueReadTests
         Assert.Empty(recalled.Evidence);
     }
 
+    [Fact]
+    public async Task EmptyRetainedSearchPreservesIncompleteAndUnknownLocationStatus()
+    {
+        var topics = new EllaiTopicService();
+        var memory = new EllaiCaseResultMemory(topics, new FakeQueue());
+        var context = Context with { Actor = TestActor() };
+        await memory.RememberAsync(context, [], default, searchIncomplete: true, unknownLocations: true);
+
+        var recalled = await memory.RecallAsync(context, default);
+        Assert.True(recalled.Allowed);
+        Assert.True(recalled.Truncated);
+        Assert.Contains("original search or result was incomplete", recalled.ResultSummary);
+        Assert.Contains("unknown or incomplete locations", recalled.ResultSummary);
+        Assert.Contains("result set was empty", recalled.ResultSummary);
+    }
+
+    [Theory]
+    [InlineData("case-results/1", true)]
+    [InlineData("case-results/2", false)]
+    public async Task MissingCompletenessMetadataIsUnknownForLegacyAndRejectedForNewSnapshots(string version, bool allowed)
+    {
+        var topics = new EllaiTopicService();
+        var context = Context with { Actor = TestActor() };
+        var snapshot = System.Text.Json.JsonSerializer.Serialize(new
+        {
+            ActorId = context.Actor!.ActorId, context.ScopeEpoch,
+            ExpiresAtUtc = DateTimeOffset.UtcNow.AddHours(1), Cases = Array.Empty<object>()
+        });
+        await topics.TrackAsync(context.SessionId, EllaiCaseResultMemory.TopicTitle, ["case-results"], snapshot, version);
+        var result = await new EllaiCaseResultMemory(topics, new FakeQueue()).RecallAsync(context, default);
+        Assert.Equal(allowed, result.Allowed);
+        if (allowed)
+        {
+            Assert.True(result.Truncated);
+            Assert.Contains("completeness was not recorded", result.ResultSummary);
+        }
+    }
+
+    [Theory]
+    [InlineData(false, false, false)]
+    [InlineData(true, false, true)]
+    [InlineData(false, true, true)]
+    public async Task RecalledNonemptyResultsPreserveSearchCompleteness(bool searchIncomplete, bool unknownLocations, bool expectedIncomplete)
+    {
+        var row = Row("01", 7);
+        var queue = new FakeQueue { Result = new(CaseQueueAccess.Allowed, [row]) };
+        var context = Context with { Actor = TestActor() };
+        var memory = new EllaiCaseResultMemory(new EllaiTopicService(), queue);
+        await memory.RememberAsync(context, [row], default, searchIncomplete, unknownLocations);
+
+        var recalled = await memory.RecallAsync(context, default);
+
+        Assert.True(recalled.Allowed);
+        Assert.Equal(expectedIncomplete, recalled.Truncated);
+        Assert.Single(recalled.Evidence);
+    }
+
+    [Fact]
+    public async Task ResultRecallRejectsAnIncompleteAuthorizationPage()
+    {
+        var topics = new EllaiTopicService();
+        var queue = new FakeQueue { Result = new(CaseQueueAccess.Allowed, [Row("01", 7), Row("02", 8)]) };
+        var context = Context with { Actor = TestActor() };
+        var memory = new EllaiCaseResultMemory(topics, queue);
+        await memory.RememberAsync(context, queue.Result.Items, CancellationToken.None);
+
+        queue.Result = new(CaseQueueAccess.Allowed, [Row("01", 7)], "next-page");
+        var recalled = await memory.RecallAsync(context, CancellationToken.None);
+
+        Assert.False(recalled.Allowed);
+        Assert.Equal(EllaiToolReasonCodes.Unavailable, recalled.ReasonCode);
+        Assert.Empty(recalled.Evidence);
+    }
+
     [Theory]
     [InlineData(false, false)]
     [InlineData(true, false)]
@@ -486,10 +926,11 @@ public sealed class EllaiLiveQueueReadTests
         var hit = new EllaiExactMemoryReference("case-results", context.SessionId, context.ScopeEpoch,
             entry.TopicId, EllaiCaseResultMemory.SourceVersion(entry.EntityRef!), DateTimeOffset.UtcNow.AddHours(1));
 
+        var readsBeforeRecall = store.DirectReads;
         var recalled = await new EllaiCaseResultMemory(topics, queue, new LateIndex(hit)).RecallAsync(context, default);
 
         Assert.True(recalled.Allowed);
-        Assert.Equal(0, store.DirectReads);
+        Assert.Equal(readsBeforeRecall, store.DirectReads);
         Assert.Equal(Row("01", 7).CaseId.ToString("D"), Assert.Single(recalled.Evidence).ResourceId);
     }
 
@@ -654,5 +1095,20 @@ public sealed class EllaiLiveQueueReadTests
         var omitted = await EllaiAuthorizedConversationContext.BuildAsync([history[0] with { ToolTraceJson = oldTrace }, history[1]],
             "current", TestActor(), null, CancellationToken.None);
         Assert.DoesNotContain(omitted.Messages, item => item.Content == "The feature projection was checked.");
+    }
+
+    [Theory]
+    [InlineData(null, false)]
+    [InlineData("next-page", true)]
+    public async Task QueueProjectionUsesContinuationToIdentifyAnIncompleteFullPage(string? cursor, bool truncated)
+    {
+        var rows = Enumerable.Range(1, 5).Select(i => Row(i.ToString("D2"), i)).ToArray();
+        var queue = new FakeQueue { Result = new(CaseQueueAccess.Allowed, rows, cursor) };
+        var result = await GrantedBroker(queue).InvokeAsync(Context with { Actor = TestActor() },
+            new(EllaiToolNames.State, Args(("projection", "queue"), ("limit", "5"))), CancellationToken.None);
+
+        Assert.True(result.Allowed);
+        Assert.Equal(5, result.ItemCount);
+        Assert.Equal(truncated, result.Truncated);
     }
 }

@@ -17,6 +17,8 @@ public sealed class ClassificationBackfillEntity
     public long Reused { get; set; }
     public long Abstained { get; set; }
     public long Failed { get; set; }
+    public long Superseded { get; set; }
+    public long Expired { get; set; }
     public DateTimeOffset CreatedAtUtc { get; set; }
     public DateTimeOffset UpdatedAtUtc { get; set; }
 }
@@ -39,7 +41,7 @@ public static class ClassificationBackfillModel
             b.ToTable("backfills", "swiftaid_classification", t =>
             {
                 t.HasCheckConstraint("ck_backfill_state", "\"State\" IN ('Running','Paused','Completed')");
-                t.HasCheckConstraint("ck_backfill_counts", "\"Eligible\" = \"Pending\" + \"NewlyClassified\" + \"Reused\" + \"Abstained\" + \"Failed\" AND LEAST(\"Pending\", \"NewlyClassified\", \"Reused\", \"Abstained\", \"Failed\") >= 0");
+                t.HasCheckConstraint("ck_backfill_counts", "\"Eligible\" = \"Pending\" + \"NewlyClassified\" + \"Reused\" + \"Abstained\" + \"Failed\" + \"Superseded\" + \"Expired\" AND LEAST(\"Pending\", \"NewlyClassified\", \"Reused\", \"Abstained\", \"Failed\", \"Superseded\", \"Expired\") >= 0");
             });
             b.HasKey(x => x.Id);
             b.Property(x => x.ProfileJson).HasColumnType("jsonb");
@@ -49,7 +51,7 @@ public static class ClassificationBackfillModel
         builder.Entity<ClassificationBackfillItemEntity>(b =>
         {
             b.ToTable("backfill_items", "swiftaid_classification", t =>
-                t.HasCheckConstraint("ck_backfill_item_state", "\"State\" IN ('Pending','NewlyClassified','Reused','Abstained','Failed')"));
+                t.HasCheckConstraint("ck_backfill_item_state", "\"State\" IN ('Pending','NewlyClassified','Reused','Abstained','Failed','Superseded','Expired')"));
             b.HasKey(x => new { x.JobId, x.SourceEventId });
             b.HasIndex(x => new { x.JobId, x.Ordinal }).IsUnique();
             b.HasIndex(x => new { x.JobId, x.Ordinal }, "ix_backfill_pending")

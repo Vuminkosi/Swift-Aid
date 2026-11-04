@@ -134,7 +134,7 @@
             }
             else
             {
-            <MudHidden Breakpoint="Breakpoint.SmAndDown">
+            <MudHidden Breakpoint="Breakpoint.MdAndDown">
                 <MudTable Class="operations-map__totals-table" Items="Areas" Dense="true" Hover="true" aria-label="Area totals by location">
                     <HeaderContent>
                         <MudTh>Area</MudTh><MudTh>Area level</MudTh><MudTh>Human reports</MudTh><MudTh>Animal reports</MudTh><MudTh>Total reports</MudTh><MudTh>As of</MudTh>
@@ -150,7 +150,7 @@
                     <PagerContent><MudTablePager PageSizeOptions="new int[] { 10, 25, 50 }" /></PagerContent>
                 </MudTable>
             </MudHidden>
-            <MudHidden Breakpoint="Breakpoint.SmAndDown" Invert="true">
+            <MudHidden Breakpoint="Breakpoint.MdAndDown" Invert="true">
                 <div class="operations-map__mobile-table" role="list" aria-label="Area totals by location">
                     @foreach (var area in Areas)
                     {

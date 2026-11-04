@@ -50,6 +50,64 @@ public sealed class CaseMonitoringQueueTests
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     [IntakePostgresFact]
+    public async Task CaseScopedPagesCrossKindsAndRejectStaleContinuation()
+    {
+        await using var db = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
+        var grantGroupId = await SeedQueueScopeAsync(db,
+            [CaseOperation.ReadCase, CaseOperation.ManageFollowUp, CaseOperation.ManageEscalation, CaseOperation.ManageAssistance]);
+        using var keyRing = SyntheticQueueKeyRing.Create();
+        using var provider = ProtectedPayloadDataProtectionProviderFactory.Create(keyRing.CreateOptions(), new TestHostEnvironment(Environments.Production));
+        var caseId = await SeedQueueCaseAsync(db, keyRing.CreateOptions(), provider);
+        await using var cleanup = new QueueCleanup(caseId, grantGroupId);
+        var actor = CreateOfficer("officer-1");
+        for (var version = 2; version <= 4; version++)
+            Assert.Equal(CaseCommandProcessingStatus.Accepted, (await ProcessCommandAsync(db, actor, caseId,
+                new ScheduleFollowUpCommand(Guid.NewGuid(), version, Guid.NewGuid(), $"Visit {version}", "officer-1",
+                    FutureDueAtUtc, "routine check", null, DateTimeOffset.UtcNow), keyRing.CreateOptions(), provider)).Status);
+        Assert.Equal(CaseCommandProcessingStatus.Accepted, (await ProcessCommandAsync(db, actor, caseId,
+            new RaiseEscalationCommand(Guid.NewGuid(), 5, Guid.NewGuid(), "Supervisor needed", [], "duty-officer", null,
+                DateTimeOffset.UtcNow), keyRing.CreateOptions(), provider)).Status);
+        Assert.Equal(CaseCommandProcessingStatus.Accepted, (await ProcessCommandAsync(db, actor, caseId,
+            new RequestAssistanceCommand(Guid.NewGuid(), 6, Guid.NewGuid(), "Transport", "officer-1", FutureDueAtUtc,
+                null, DateTimeOffset.UtcNow), keyRing.CreateOptions(), provider)).Status);
+
+        var unit = new PostgresCaseCommandUnitOfWork(db);
+        var payload = new PostgresProtectedCaseEventPayloadStore(db, unit, keyRing.CreateOptions(), provider);
+        var queue = new PostgresCaseMonitoringQueueStore(db, payload);
+        var policy = new CaseAccessPolicy(new PostgresCurrentAccessGrantStore(db, unit), new PostgresCaseAccessDescriptorStore(db, unit));
+        var query = new CaseMonitoringPageQuery(new PostgresCaseMonitoringPageStore(db, queue),
+            new PostgresCaseTimelineStore(db), policy, unit, TimeProvider.System);
+        var first = await query.GetAsync(actor, caseId, 0, 2, 7, default);
+        var second = await query.GetAsync(actor, caseId, 2, 2, 7, default);
+        var third = await query.GetAsync(actor, caseId, 4, 2, 7, default);
+        Assert.Equal(CaseMonitoringPageAccess.Found, first.Access);
+        Assert.Equal(2, first.Page!.NextOffset);
+        Assert.Equal(4, second.Page!.NextOffset);
+        Assert.Null(third.Page!.NextOffset);
+        var rows = first.Page.Items.Concat(second.Page.Items).Concat(third.Page.Items).ToArray();
+        Assert.Equal(5, rows.Length);
+        Assert.Equal(5, rows.Select(row => row.Work.WorkItemId).Distinct().Count());
+        Assert.Equal(3, rows.Count(row => row.Work.Kind == MonitoringQueueKind.FollowUp));
+        Assert.Single(rows, row => row.Work.Kind == MonitoringQueueKind.Escalation);
+        Assert.Single(rows, row => row.Work.Kind == MonitoringQueueKind.Assistance);
+        Assert.Equal(CaseMonitoringPageAccess.Stale, (await query.GetAsync(actor, caseId, 2, 2, 6, default)).Access);
+        var discovery = new PostgresCaseWorkDiscoveryStore(db);
+        Assert.Contains(caseId, await discovery.GetCasesAfterAsync(CaseWorkDiscoveryKind.FollowUp, "officer-1", null, 200, default));
+        Assert.DoesNotContain(caseId, await discovery.GetCasesAfterAsync(CaseWorkDiscoveryKind.FollowUp, "other-actor", null, 200, default));
+        Assert.DoesNotContain(caseId, await discovery.GetCasesAfterAsync(CaseWorkDiscoveryKind.FollowUp, "officer-1", caseId, 200, default));
+        Assert.Contains(caseId, await discovery.GetCasesAfterAsync(CaseWorkDiscoveryKind.Escalation, null, null, 200, default));
+        Assert.Contains(caseId, await discovery.GetCasesAfterAsync(CaseWorkDiscoveryKind.Assistance, null, null, 200, default));
+        var secondCaseId = await SeedQueueCaseAsync(db, keyRing.CreateOptions(), provider);
+        await using var secondCleanup = new QueueCleanup(secondCaseId, grantGroupId);
+        Assert.Equal(CaseCommandProcessingStatus.Accepted, (await ProcessCommandAsync(db, actor, secondCaseId,
+            new ScheduleFollowUpCommand(Guid.NewGuid(), 2, Guid.NewGuid(), "Second case visit", "officer-1", FutureDueAtUtc,
+                "routine check", null, DateTimeOffset.UtcNow), keyRing.CreateOptions(), provider)).Status);
+        var firstDiscovery = await discovery.GetCasesAfterAsync(CaseWorkDiscoveryKind.FollowUp, "officer-1", null, 1, default);
+        var secondDiscovery = await discovery.GetCasesAfterAsync(CaseWorkDiscoveryKind.FollowUp, "officer-1", Assert.Single(firstDiscovery), 1, default);
+        Assert.Equal(new[] { caseId, secondCaseId }.Order(), firstDiscovery.Concat(secondDiscovery).Order());
+    }
+
+    [IntakePostgresFact]
     public async Task AssignedFollowUps_ListedDueFirst_WithOverdueFlag()
     {
         await using var db = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();

@@ -32,7 +32,8 @@ public sealed class MonitoringQueueGatewayClient(
             return new MonitoringQueueResult(CaseQueueAccess.Denied, []);
         }
 
-        var queue = _serviceProvider.GetService<ICaseMonitoringQueueQuery>();
+        await using var scope = _serviceProvider.CreateAsyncScope();
+        var queue = scope.ServiceProvider.GetService<ICaseMonitoringQueueQuery>();
         if (queue is null)
         {
             return new MonitoringQueueResult(CaseQueueAccess.Unavailable, []);
@@ -58,7 +59,8 @@ public sealed class MonitoringQueueGatewayClient(
             return new MonitoringQueueResult(CaseQueueAccess.Denied, []);
         }
 
-        var queue = _serviceProvider.GetService<ICaseMonitoringQueueQuery>();
+        await using var scope = _serviceProvider.CreateAsyncScope();
+        var queue = scope.ServiceProvider.GetService<ICaseMonitoringQueueQuery>();
         if (queue is null)
         {
             return new MonitoringQueueResult(CaseQueueAccess.Unavailable, []);

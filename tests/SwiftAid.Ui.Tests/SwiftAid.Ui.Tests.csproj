@@ -18,6 +18,8 @@
 
   <ItemGroup>
     <Using Include="Xunit" />
+    <Compile Include="..\..\src\SwiftAid.Mobile\Services\Authentication\IMobileAuthenticationSession.cs" Link="Mobile\IMobileAuthenticationSession.cs" />
+    <Compile Include="..\..\src\SwiftAid.Mobile\Services\Ellai\MobileEllaiReviewClient.cs" Link="Mobile\MobileEllaiReviewClient.cs" />
   </ItemGroup>
 
 </Project>

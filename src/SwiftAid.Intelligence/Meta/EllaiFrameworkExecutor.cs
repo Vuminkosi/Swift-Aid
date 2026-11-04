@@ -8,7 +8,9 @@ public sealed class EllaiFrameworkExecutor(
     IChatClient client, EllaiPromptBuilder prompts, EllaiToolBroker broker,
     EllaiUsageLedger ledger, IEllaiUsageStore usageStore, TimeSpan? toolTimeout = null,
     IEllaiFrameworkAgentFactory? agentFactory = null, bool enableKnowledgeSpecialist = false,
-    bool enableCaseSpecialist = false, bool enableAnalyticsSpecialist = false, bool enableUiSpecialist = false) : IEllaiReasoningExecutor, IEllaiHistoryAuthorizationRequired
+    bool enableCaseSpecialist = false, bool enableAnalyticsSpecialist = false, bool enableUiSpecialist = false,
+    bool enableGeospatialSpecialist = false, bool enableWorkflowSpecialist = false, bool enableCommunitySessionsSpecialist = false, bool enableSurveillanceSpecialist = false, bool enableReportingSpecialist = false, bool enableSpatialSpecialist = false, bool enableHealthResearchSpecialist = false,
+    bool enableOperationalReadSpecialists = false) : IEllaiReasoningExecutor, IEllaiHistoryAuthorizationRequired
 {
     private static readonly System.Text.Json.JsonSerializerOptions CompactTraceJson = new()
     {
@@ -182,7 +184,11 @@ public sealed class EllaiFrameworkExecutor(
                             await request.RevalidateStreamObservations(observations.ToArray(), token).ConfigureAwait(false),
                     request.FrameworkSessionJson, enableKnowledgeSpecialist: enableKnowledgeSpecialist,
                     enableCaseSpecialist: enableCaseSpecialist, enableAnalyticsSpecialist: enableAnalyticsSpecialist,
-                    enableUiSpecialist: enableUiSpecialist).ConfigureAwait(false);
+                    enableUiSpecialist: enableUiSpecialist, enableGeospatialSpecialist: enableGeospatialSpecialist,
+                    enableWorkflowSpecialist: enableWorkflowSpecialist, enableCommunitySessionsSpecialist: enableCommunitySessionsSpecialist,
+                    enableSurveillanceSpecialist: enableSurveillanceSpecialist, enableReportingSpecialist: enableReportingSpecialist,
+                    enableSpatialSpecialist: enableSpatialSpecialist, enableHealthResearchSpecialist: enableHealthResearchSpecialist,
+                    enableOperationalReadSpecialists: enableOperationalReadSpecialists).ConfigureAwait(false);
             }
             catch (EllaiFrameworkFailureException failure) when (failure.Code is not ("ProviderUnavailable" or "UsageUnavailable"))
             {

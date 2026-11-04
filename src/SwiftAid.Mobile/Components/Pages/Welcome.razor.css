@@ -10,8 +10,9 @@
     min-height: 100%;
 }
 
-.mobile-welcome__carousel {
-    border-radius: 1.25rem;
+.mobile-welcome ::deep .mobile-welcome__carousel {
+    height: clamp(14rem, 45dvh, 21rem);
+    border-radius: var(--sa-radius-card, 0.75rem);
 }
 
 .mobile-welcome__slide {
@@ -22,12 +23,13 @@
     text-align: center;
     gap: 0.75rem;
     height: 100%;
-    padding: 1.5rem 2.5rem 3rem;
+    overflow-y: auto;
+    padding: 1rem 2.5rem 2.5rem;
     background-color: var(--sa-surface-subtle);
 }
 
-.mobile-welcome__slide .swiftaid-page-heading__title {
-    font-size: clamp(1.5rem, 6vw, 2.125rem);
+.mobile-welcome__slide ::deep .swiftaid-page-heading__title {
+    font-size: clamp(1.35rem, 5vw, 1.75rem);
 }
 
 .mobile-welcome__brand-mark {

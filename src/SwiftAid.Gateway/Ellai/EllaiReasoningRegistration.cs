@@ -51,13 +51,24 @@ public static class EllaiReasoningRegistration
             throw new MetaConfigurationException("The Ellai framework path requires a configured Meta reasoning route.");
         else
             services.AddKeyedSingleton<IChatClient>(FrameworkClientKey, (_, _) => EllaiMuseChatClientFactory.Create(options));
-        services.AddSingleton<IEllaiFrameworkAgentFactory, EllaiFrameworkAgentFactory>();
+        if (options.UsesOllamaBackend || options.UsesServerlessBackend)
+            services.AddSingleton<IEllaiFrameworkAgentFactory, EllaiFrameworkAgentFactory>();
+        else
+            services.AddSingleton<IEllaiFrameworkAgentFactory, EllaiStructuredFrameworkAgentFactory>();
         services.AddScoped<IEllaiReasoningExecutor>(sp => new EllaiFrameworkExecutor(
             sp.GetRequiredKeyedService<IChatClient>(FrameworkClientKey), sp.GetRequiredService<EllaiPromptBuilder>(),
             sp.GetRequiredService<EllaiToolBroker>(), sp.GetRequiredService<EllaiUsageLedger>(),
             sp.GetRequiredService<IEllaiUsageStore>(), agentFactory: sp.GetRequiredService<IEllaiFrameworkAgentFactory>(),
             enableKnowledgeSpecialist: enableKnowledgeSpecialist, enableCaseSpecialist: enableCaseSpecialist,
-            enableAnalyticsSpecialist: enableAnalyticsSpecialist, enableUiSpecialist: enableUiSpecialist));
+            enableAnalyticsSpecialist: enableAnalyticsSpecialist, enableUiSpecialist: enableUiSpecialist,
+            enableGeospatialSpecialist: sp.GetService<IConfiguration>()?.GetValue<bool>("Ellai:Specialists:Geospatial:Enabled") == true,
+            enableWorkflowSpecialist: sp.GetService<IConfiguration>()?.GetValue<bool>("Ellai:Specialists:Workflow:Enabled") == true,
+            enableCommunitySessionsSpecialist: sp.GetService<IConfiguration>()?.GetValue<bool>("Ellai:Specialists:CommunitySessions:Enabled") == true,
+            enableSurveillanceSpecialist: sp.GetService<IConfiguration>()?.GetValue<bool>("Ellai:Specialists:Surveillance:Enabled") == true,
+            enableReportingSpecialist: sp.GetService<IConfiguration>()?.GetValue<bool>("Ellai:Specialists:Reporting:Enabled") == true,
+            enableSpatialSpecialist: sp.GetService<IConfiguration>()?.GetValue<bool>("Ellai:Specialists:Spatial:Enabled") == true,
+            enableHealthResearchSpecialist: sp.GetService<IConfiguration>()?.GetValue<bool>("Ellai:Specialists:HealthResearch:Enabled") == true,
+            enableOperationalReadSpecialists: sp.GetService<IConfiguration>()?.GetValue<bool>("Ellai:Specialists:OperationalReads:Enabled") == true));
         return services;
     }
 }

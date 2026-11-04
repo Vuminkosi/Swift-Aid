@@ -4,49 +4,124 @@
 @using SwiftAid.UI.Components.Public
 @using SwiftAid.UI.Components.Public.GuidedReportStepper
 @using SwiftAid.UI.Components.Theme
+@using Bit.Bonboarding
+@using SwiftAid.Contracts.Ellai
+@using SwiftAid.UI.Ellai.Guidance
 @inject IJSRuntime JS
+@inject IBonboardingService Bonboarding
 
 <SwiftAidThemeProvider />
 <MudPopoverProvider />
+<BonboardingRoot />
 <main data-fixture-ready="@_ready.ToString().ToLowerInvariant()">
     <h1>Report semantics synthetic fixture</h1>
-    <GuidedReportStepper Draft="_draft" Countries="_countries" CountryCatalogueVersion="fixture-v1"
-        CountryCatalogueIsCurrent="true" PrivacyNoticeReference="/privacy" PrivacyNoticeIsCurrent="true"
-        ProcessingPolicyReference="/policy" ProcessingPolicyVersion="fixture-v1"
+    <button @onclick="StartSubjectGuidance">Guide subject selection</button>
+    <button @onclick="AdvanceSubjectGuidance">Advance observed guidance</button>
+    <button @onclick="StartDetailsGuidance">Guide report details</button>
+    <button @onclick="RefreshValidationGuidance">Refresh validation target</button>
+    <button @onclick="() => _serverValidationRevision++">Simulate server rejection</button>
+    <button @onclick="() => _countryAvailable = !_countryAvailable">Toggle country availability</button>
+    <button @onclick="() => _privacyAvailable = !_privacyAvailable">Toggle privacy availability</button>
+    <button @onclick="() => _policyAvailable = !_policyAvailable">Toggle policy availability</button>
+    <button @onclick="() => _snapshotsSupported = !_snapshotsSupported">Toggle editable snapshots</button>
+    <button @onclick="OpenFixtureSnapshot">Open fixture snapshot</button>
+    <GuidedReportStepper @ref="_stepper" Draft="_draft" Countries="_countries" CountryCatalogueVersion="fixture-v1"
+        CountryCatalogueIsCurrent="_countryAvailable" PrivacyNoticeReference="/privacy" PrivacyNoticeIsCurrent="_privacyAvailable"
+        ProcessingPolicyReference="/policy" ProcessingPolicyVersion="@(_policyAvailable ? "fixture-v1" : null)"
         ProcessingPolicyAcknowledgementLabel="I reviewed the report-handling information."
-        OnSubmit="Receive" SubmitButtonLabel="Send report" CurrentDraftId="_draftId" OnSaveDraft="SaveAsync" />
+        OnSubmit="Receive" SubmitButtonLabel="Send report" CurrentDraftId="_draftId" OnSaveDraft="SaveAsync"
+        EditableDraftSnapshotsSupported="_snapshotsSupported" ServerValidationRevision="_serverValidationRevision" />
     @if (_pendingSave is not null)
     {
         <button @onclick="CompleteSave">Finish fixture storage</button>
+        <button @onclick="CompleteSaveWithoutConfirmation">Finish without storage confirmation</button>
         <button @onclick="FailSave">Fail fixture storage</button>
     }
     @if (_receipt is not null) { <PublicReportReceipt Receipt="_receipt" /> }
     <output id="submission-count">@_submissions</output>
+    <output id="fixture-tour-status">@_tour?.Status</output>
 </main>
 @code {
     private bool _ready;
+    private bool _countryAvailable = true;
+    private bool _privacyAvailable = true;
+    private bool _policyAvailable = true;
+    private bool _snapshotsSupported;
+    private long _serverValidationRevision;
+    private GuidedReportStepper? _stepper;
+    private IBonboardingTourSession? _tour;
+    private readonly Dictionary<string, string> _detailsAnchors = new()
+    {
+        ["report.narrative"] = EllaiReportUiManifest.AnchorFor("report.narrative")
+    };
     private Guid? _draftId;
-    private TaskCompletionSource? _pendingSave;
+    private TaskCompletionSource<bool>? _pendingSave;
     private int _submissions;
     private IntakeReceipt? _receipt;
-    private readonly PublicReportDraft _draft = new() { SubjectScope = IntakeSubjectScope.Human,
+    private PublicReportDraft _draft = new() { SubjectScope = IntakeSubjectScope.Human,
         CountryCode = "SZ", LocationUnknown = true, OccurrencePrecision = ReportedTimePrecision.Unknown };
     private readonly PublicCountryOption[] _countries = [new("SZ", "Eswatini")];
+    private async Task StartSubjectGuidance()
+    {
+        var step = new GuidancePlanStep("subject", "report.subject", "choose-report-subject",
+            PlanStepBehavior.GuideHuman, null, null, [], [], "Choose a subject and continue.", null);
+        var plan = new ValidatedGuidancePlan("report-fixture", 1, null, "Synthetic fixture", ["subject"], [], [],
+            [step], [], "fixture", "fixture");
+        var definition = new EllaiBonboardingCompiler().Compile(plan,
+            new Dictionary<string, string> { ["report.subject"] = EllaiReportUiManifest.AnchorFor("report.subject") },
+            (_, _) => ValueTask.FromResult(_stepper?.GetState().Controls.Any(control =>
+                control.ControlId == "report.subject" && control.CompletionAccepted) == true));
+        _tour = await Bonboarding.StartAsync(definition, new BonboardingStartOptions { Resume = false });
+    }
+    private async Task AdvanceSubjectGuidance()
+    {
+        if (_tour is not null) await _tour.NextAsync();
+    }
+    private async Task StartDetailsGuidance()
+    {
+        var step = new GuidancePlanStep("details", "report.narrative", "record-observations",
+            PlanStepBehavior.GuideHuman, null, null, [], [], "Complete the report details.", null);
+        var plan = new ValidatedGuidancePlan("details-fixture", 1, null, "Synthetic fixture", ["details"], [], [],
+            [step], [], "fixture", "fixture");
+        var definition = new EllaiBonboardingCompiler().Compile(plan, _detailsAnchors,
+            (_, _) => ValueTask.FromResult(_stepper?.GetState().Controls.Any(control =>
+                control.ControlId == "report.narrative" && control.CompletionAccepted) == true));
+        _tour = await Bonboarding.StartAsync(definition, new BonboardingStartOptions { Resume = false });
+    }
+    private async Task RefreshValidationGuidance()
+    {
+        var issue = _stepper?.GetState().ValidationIssues.FirstOrDefault();
+        _detailsAnchors["report.narrative"] = issue?.Anchor ?? EllaiReportUiManifest.AnchorFor("report.narrative");
+        if (_tour is not null) await _tour.GoToAsync("details");
+    }
     private async Task SaveAsync(PublicReportSaveRequest request)
     {
         _pendingSave = new(TaskCreationOptions.RunContinuationsAsynchronously);
         try
         {
-            await _pendingSave.Task;
+            if (!await _pendingSave.Task) return;
             var id = Guid.NewGuid();
             await JS.InvokeVoidAsync("localStorage.setItem", "swiftaid.synthetic-draft-fixture",
                 System.Text.Json.JsonSerializer.Serialize(request.Submission));
-            request.ConfirmPersisted(id);
+            if (request.FormSnapshot is { } snapshot)
+                await JS.InvokeVoidAsync("localStorage.setItem", "swiftaid.synthetic-form-snapshot", System.Text.Json.JsonSerializer.Serialize(snapshot));
+            else
+                await JS.InvokeVoidAsync("localStorage.removeItem", "swiftaid.synthetic-form-snapshot");
+            request.ConfirmPersisted(id, request.FormSnapshot is not null);
             _draftId = id;
         }
         finally { _pendingSave = null; }
     }
-    private void CompleteSave() => _pendingSave?.TrySetResult();
+    private void CompleteSave() => _pendingSave?.TrySetResult(true);
+    private void CompleteSaveWithoutConfirmation() => _pendingSave?.TrySetResult(false);
+    private async Task OpenFixtureSnapshot()
+    {
+        var json = await JS.InvokeAsync<string?>("localStorage.getItem", "swiftaid.synthetic-form-snapshot");
+        if (json is null) return;
+        var snapshot = System.Text.Json.JsonSerializer.Deserialize<GuestDraftFormSnapshot>(json);
+        _draft = PublicReportDraft.FromFormSnapshot(snapshot!);
+        _draftId = Guid.NewGuid();
+    }
     private void FailSave() => _pendingSave?.TrySetException(new IOException("Synthetic storage failure."));
     protected override void OnAfterRender(bool firstRender)
     {

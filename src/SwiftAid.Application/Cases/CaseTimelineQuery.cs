@@ -49,6 +49,12 @@ public interface ICaseTimelineStore
 
     Task<IReadOnlyList<CaseOfficerEscalationRow>> GetOfficerEscalationsAsync(ICaseCommandLease lease, Guid caseId, IReadOnlyList<Guid> eventIds,
         CancellationToken ct) => Task.FromResult<IReadOnlyList<CaseOfficerEscalationRow>>([]);
+
+    Task<IReadOnlyList<CaseOfficerEscalationRow>> GetCurrentOfficerEscalationsAsync(ICaseCommandLease lease, Guid caseId,
+        CancellationToken ct) => Task.FromResult<IReadOnlyList<CaseOfficerEscalationRow>>([]);
+    /// <summary>Minimum attribution metadata for the original report event; no actor ID or report content.</summary>
+    Task<CaseReportAttributionRow?> GetReportAttributionAsync(Guid caseId, CancellationToken ct) =>
+        Task.FromResult<CaseReportAttributionRow?>(null);
 }
 
 public interface ICaseTimelineQuery
@@ -112,6 +118,11 @@ public sealed class CaseTimelineQuery(
                 actor, caseId, ImmutableArray<string>.Empty, CaseLeaseMode.Read, ct).ConfigureAwait(false);
         }
         catch (KeyNotFoundException)
+        {
+            return new CaseTimelineResult(CaseTimelineAccess.NotFoundOrNotAuthorized, null);
+        }
+        catch (InvalidOperationException error) when (error.Message is
+            "The case authority scope is unavailable." or "The current case authority scope is unavailable.")
         {
             return new CaseTimelineResult(CaseTimelineAccess.NotFoundOrNotAuthorized, null);
         }
@@ -189,7 +200,18 @@ public sealed class CaseTimelineQuery(
                 };
             }).ToList();
 
-            var workSummary = await _store.GetWorkSummaryAsync(caseId, ct).ConfigureAwait(false);
+            // The combined summary includes escalation counts and follow-up deadlines.
+            // Do not expose either through a case-read-only timeline grant.
+            var workSummary = officerDecision.IsAllowed
+                ? await _store.GetWorkSummaryAsync(caseId, ct).ConfigureAwait(false)
+                : null;
+            var currentOfficerRows = officerDecision.IsAllowed
+                ? await _store.GetCurrentOfficerEscalationsAsync(lease, caseId, ct).ConfigureAwait(false)
+                : [];
+            var currentOfficerEscalations = currentOfficerRows.Take(10).Select(officer =>
+                new CaseOfficerEscalationAssignment(officer.EscalationId, officer.FollowUpId, officer.OfficerActorId,
+                    officer.OfficerDisplayLabel is { Length: > 0 and <= 120 } label && !label.Any(char.IsControl) ? label : null,
+                    officer.AcknowledgementDueUtc, officer.FollowUpDueUtc, officer.IsCurrent, officer.FollowUpAcknowledged)).ToArray();
             var receiptId = await _store.GetPromotingReceiptAsync(caseId, ct).ConfigureAwait(false);
             if (receiptId.HasValue && !hasOlderEntries)
             {
@@ -213,7 +235,12 @@ public sealed class CaseTimelineQuery(
                 : null;
             return new CaseTimelineResult(
                 CaseTimelineAccess.Found,
-                new CaseTimeline(header, entries, hasOlderEntries, olderCursor, collaboration) { WorkSummary = workSummary });
+                new CaseTimeline(header, entries, hasOlderEntries, olderCursor, collaboration)
+                {
+                    WorkSummary = workSummary,
+                    CurrentOfficerEscalations = currentOfficerEscalations,
+                    CurrentOfficerEscalationsTruncated = currentOfficerRows.Count > 10
+                });
         }
     }
 
@@ -242,6 +269,7 @@ public sealed class CaseTimelineQuery(
         "CaseActionRequestReviewed" => "Protected action reviewed",
         "CaseResolved" => "Case resolved",
         "CaseReopened" => "Case reopened",
+        "CaseDiscussionPosted" => "Discussion posted",
         "CaseObservationRecorded" => "Observation recorded",
         "CaseFollowUpScheduled" => "Follow-up scheduled",
         "CaseFollowUpAcknowledged" => "Follow-up acknowledged",

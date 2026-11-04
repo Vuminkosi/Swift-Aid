@@ -1,6 +1,7 @@
 using System.Net.Http.Json;
 using System.Text.Json;
 using SwiftAid.Contracts.Ellai;
+using SwiftAid.Contracts.Intake;
 
 namespace SwiftAid.UI.Ellai;
 
@@ -253,9 +254,103 @@ public sealed class EllaiReviewHttpClient(HttpClient http, bool useGuestRoutes =
         return true;
     }
 
-    public async Task<EllaiVoiceTranscriptionResult?> TranscribeVoiceAsync(
+    public async Task<bool> GrantReportVoiceConsentAsync(string sessionId, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(sessionId)) return false;
+        try
+        {
+            using var response = await PostReportVoiceAsync($"{SessionRoute(sessionId)}/report-voice/consent",
+                new ReportVoiceConsentRequest(true), cancellationToken).ConfigureAwait(false);
+            return response.IsSuccessStatusCode;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch (Exception) { return false; }
+    }
+
+    public async Task<ReportVoiceExtractionResponse?> ExtractReportVoiceAsync(
+        string sessionId, string transcript, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(sessionId) || string.IsNullOrWhiteSpace(transcript) || transcript.Length > 6000)
+            return null;
+        try
+        {
+            using var response = await PostReportVoiceAsync($"{SessionRoute(sessionId)}/report-voice/extract",
+                new ReportVoiceExtractionRequest(transcript), cancellationToken).ConfigureAwait(false);
+            return response.IsSuccessStatusCode
+                ? await response.Content.ReadFromJsonAsync<ReportVoiceExtractionResponse>(Json, cancellationToken).ConfigureAwait(false)
+                : null;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch (Exception) { return null; }
+    }
+
+    public async Task<EllaiVoiceTranscriptionResult?> TranscribeSavedReportVoiceAsync(
+        string sessionId, byte[] audio, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(sessionId) || audio is null || audio.Length == 0 || audio.Length > 32 * 1024 * 1024)
+            return null;
+        try
+        {
+            var route = $"{SessionRoute(sessionId)}/report-voice/saved-recording";
+            HttpResponseMessage response;
+            if (_useGuestRoutes)
+                response = await PostBytesAsync(route, audio, "audio/wav", cancellationToken).ConfigureAwait(false);
+            else
+            {
+                string? token = null;
+                using var tokenResponse = await _http.GetAsync("auth/antiforgery", cancellationToken).ConfigureAwait(false);
+                if (tokenResponse.IsSuccessStatusCode)
+                {
+                    using var document = JsonDocument.Parse(await tokenResponse.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false));
+                    if (document.RootElement.TryGetProperty("requestToken", out var property)) token = property.GetString();
+                }
+                using var request = new HttpRequestMessage(HttpMethod.Post, route) { Content = new ByteArrayContent(audio) };
+                request.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("audio/wav");
+                if (!string.IsNullOrWhiteSpace(token)) request.Headers.TryAddWithoutValidation("X-CSRF-TOKEN", token);
+                response = await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            }
+            using (response)
+                return response.IsSuccessStatusCode
+                    ? await response.Content.ReadFromJsonAsync<EllaiVoiceTranscriptionResult>(Json, cancellationToken).ConfigureAwait(false)
+                    : null;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch (Exception) { return null; }
+    }
+
+    private async Task<HttpResponseMessage> PostReportVoiceAsync<T>(string route, T value, CancellationToken ct)
+    {
+        if (_useGuestRoutes) return await PostAsJsonAsync(route, value, ct).ConfigureAwait(false);
+        string? token = null;
+        try
+        {
+            using var response = await _http.GetAsync("auth/antiforgery", ct).ConfigureAwait(false);
+            if (response.IsSuccessStatusCode)
+            {
+                using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false));
+                if (document.RootElement.TryGetProperty("requestToken", out var property)) token = property.GetString();
+            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        catch (Exception) { }
+        using var request = new HttpRequestMessage(HttpMethod.Post, route) { Content = JsonContent.Create(value, options: Json) };
+        if (!string.IsNullOrWhiteSpace(token)) request.Headers.TryAddWithoutValidation("X-CSRF-TOKEN", token);
+        return await _http.SendAsync(request, ct).ConfigureAwait(false);
+    }
+
+    public Task<EllaiVoiceTranscriptionResult?> TranscribeVoiceAsync(
         string sessionId, byte[] audio, EllaiVoiceCaptureMode mode, CancellationToken cancellationToken,
-        string? voiceCaptureId = null, long voiceCaptureOffsetSamples = 0)
+        string? voiceCaptureId = null, long voiceCaptureOffsetSamples = 0) =>
+        TranscribeVoiceCoreAsync(sessionId, audio, mode, cancellationToken, voiceCaptureId, voiceCaptureOffsetSamples, true);
+
+    public Task<EllaiVoiceTranscriptionResult?> TranscribeReportVoiceAsync(
+        string sessionId, byte[] audio, EllaiVoiceCaptureMode mode, CancellationToken cancellationToken,
+        string? voiceCaptureId = null, long voiceCaptureOffsetSamples = 0) =>
+        TranscribeVoiceCoreAsync(sessionId, audio, mode, cancellationToken, voiceCaptureId, voiceCaptureOffsetSamples, false);
+
+    private async Task<EllaiVoiceTranscriptionResult?> TranscribeVoiceCoreAsync(
+        string sessionId, byte[] audio, EllaiVoiceCaptureMode mode, CancellationToken cancellationToken,
+        string? voiceCaptureId, long voiceCaptureOffsetSamples, bool submitConversation)
     {
         if (string.IsNullOrWhiteSpace(sessionId) || audio is null || audio.Length == 0
             || audio.Length > 32 * 1024 * 1024)
@@ -263,7 +358,7 @@ public sealed class EllaiReviewHttpClient(HttpClient http, bool useGuestRoutes =
             return null;
         }
 
-        var route = $"{SessionRoute(sessionId)}/voice/{(mode == EllaiVoiceCaptureMode.Live ? "recover" : "recorded")}?serverSubmission=true";
+        var route = $"{SessionRoute(sessionId)}/voice/{(mode == EllaiVoiceCaptureMode.Live ? "recover" : "recorded")}?serverSubmission={submitConversation.ToString().ToLowerInvariant()}";
         if (!string.IsNullOrWhiteSpace(voiceCaptureId) || voiceCaptureOffsetSamples > 0)
         {
             var query = new List<string>();
@@ -298,9 +393,19 @@ public sealed class EllaiReviewHttpClient(HttpClient http, bool useGuestRoutes =
         }
     }
 
-    public async Task<EllaiVoiceTranscriptionResult?> TranscribeLiveVoiceStreamAsync(
+    public Task<EllaiVoiceTranscriptionResult?> TranscribeLiveVoiceStreamAsync(
         string sessionId, Stream audio, CancellationToken cancellationToken, string? voiceCaptureId = null,
-        long voiceCaptureOffsetSamples = 0)
+        long voiceCaptureOffsetSamples = 0) =>
+        TranscribeLiveVoiceStreamCoreAsync(sessionId, audio, cancellationToken, voiceCaptureId, voiceCaptureOffsetSamples, true);
+
+    public Task<EllaiVoiceTranscriptionResult?> TranscribeReportLiveVoiceStreamAsync(
+        string sessionId, Stream audio, CancellationToken cancellationToken, string? voiceCaptureId = null,
+        long voiceCaptureOffsetSamples = 0) =>
+        TranscribeLiveVoiceStreamCoreAsync(sessionId, audio, cancellationToken, voiceCaptureId, voiceCaptureOffsetSamples, false);
+
+    private async Task<EllaiVoiceTranscriptionResult?> TranscribeLiveVoiceStreamCoreAsync(
+        string sessionId, Stream audio, CancellationToken cancellationToken, string? voiceCaptureId,
+        long voiceCaptureOffsetSamples, bool submitConversation)
     {
         if (string.IsNullOrWhiteSpace(sessionId) || audio is null || !audio.CanRead)
         {
@@ -309,8 +414,10 @@ public sealed class EllaiReviewHttpClient(HttpClient http, bool useGuestRoutes =
 
         if (_http.BaseAddress is null || string.IsNullOrWhiteSpace(voiceCaptureId)) return null;
         var uri = CreateLiveVoiceWebSocketUri(_http.BaseAddress, sessionId, voiceCaptureId, voiceCaptureOffsetSamples);
+        if (!submitConversation)
+            uri = new Uri(uri.AbsoluteUri.Replace("serverSubmission=true", "serverSubmission=false", StringComparison.Ordinal));
         await EllaiLiveVoiceWebSocketClient.SendAsync(_http, uri, audio, cancellationToken, speechDetectorFactory, voiceCaptureId, voiceCaptureOffsetSamples).ConfigureAwait(false);
-        return new EllaiVoiceTranscriptionResult(string.Empty, ServerSubmission: true);
+        return new EllaiVoiceTranscriptionResult(string.Empty, ServerSubmission: submitConversation);
     }
 
     public async Task<EllaiVoiceTurnStatusDto?> GetVoiceTurnStatusAsync(
@@ -837,13 +944,24 @@ public sealed class EllaiReviewHttpClient(HttpClient http, bool useGuestRoutes =
 
     public async Task<EllaiGuidancePlanDto?> PrepareGuidancePlanAsync(
         string sessionId, string proposalId, CancellationToken cancellationToken)
+        => await SendGuidancePlanRequestAsync(sessionId, new(proposalId), cancellationToken).ConfigureAwait(false);
+
+    public async Task<EllaiGuidancePlanDto?> RevalidateGuidancePlanAsync(
+        string sessionId, string proposalId, string planId, string stepId, CancellationToken cancellationToken)
+        => await SendGuidancePlanRequestAsync(sessionId, new(proposalId)
+        {
+            ExistingPlanId = planId, CurrentStepId = stepId
+        }, cancellationToken).ConfigureAwait(false);
+
+    private async Task<EllaiGuidancePlanDto?> SendGuidancePlanRequestAsync(
+        string sessionId, EllaiGuidancePlanRequest request, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
-        ArgumentException.ThrowIfNullOrWhiteSpace(proposalId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.ProposalId);
         try
         {
             using var response = await PostAsJsonAsync($"{SessionRoute(sessionId)}/guidance/plan",
-                new EllaiGuidancePlanRequest(proposalId), cancellationToken).ConfigureAwait(false);
+                request, cancellationToken).ConfigureAwait(false);
             return response.IsSuccessStatusCode
                 ? await response.Content.ReadFromJsonAsync<EllaiGuidancePlanDto>(Json, cancellationToken).ConfigureAwait(false)
                 : null;
@@ -881,7 +999,7 @@ public sealed class EllaiReviewHttpClient(HttpClient http, bool useGuestRoutes =
         {
             using var response = await PostAsJsonAsync(
                 $"{SessionRoute(sessionId)}/ui-observations",
-                new { sessionId, report.ViewInstanceId, report.ContextStamp, report.Platform, report.MountedControlIds, report.ControlStates, report.CurrentNavigationId, report.CompletedControlIds },
+                new { sessionId, report.ViewInstanceId, report.ContextStamp, report.Platform, report.MountedControlIds, report.ControlStates, report.CurrentNavigationId, report.CompletedControlIds, report.ValidationInputIds, report.InputStates, report.CurrentCaseId },
                 cancellationToken).ConfigureAwait(false);
             return response.IsSuccessStatusCode;
         }

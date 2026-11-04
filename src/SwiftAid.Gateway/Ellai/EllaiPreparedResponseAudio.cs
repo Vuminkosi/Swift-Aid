@@ -51,8 +51,13 @@ public sealed class EllaiPreparedResponseAudio(
                 return;
             }
             var audio = new PreparedAudio(response, DateTimeOffset.UtcNow + Retention);
+            // A final reconciliation repeats already published chunks. Keep its
+            // recovery audio available on demand without synthesizing it twice.
+            var recoveryOnly = response.IsReconciliation && _entries.Values.Any(item =>
+                item.Response.SessionId == response.SessionId && item.Response.ClientUtteranceId == response.ClientUtteranceId &&
+                item.Response.Progress is null && !item.Response.IsReconciliation && !item.IsFailed);
             _entries.Add(key, audio);
-            if (!_queue.Writer.TryWrite(audio))
+            if (!recoveryOnly && !(audio.Queued = _queue.Writer.TryWrite(audio)))
             {
                 _entries.Remove(key);
                 audio.Cancel();
@@ -87,6 +92,8 @@ public sealed class EllaiPreparedResponseAudio(
         {
             if (!_entries.TryGetValue((sessionId, sequence), out audio!) || audio.Expires <= DateTimeOffset.UtcNow)
                 throw new InvalidOperationException("Prepared speech is unavailable.");
+            if (!audio.Queued && !audio.IsFailed && !(audio.Queued = _queue.Writer.TryWrite(audio)))
+                audio.Fail();
         }
         var headers = await audio.Headers.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
         if (audio.IsFailed) throw new InvalidOperationException("Prepared speech is unavailable.");
@@ -193,6 +200,7 @@ public sealed class EllaiPreparedResponseAudio(
     private sealed class PreparedAudio(EllaiSessionResponseDto response, DateTimeOffset expires)
     {
         public EllaiSessionResponseDto Response { get; } = response;
+        public bool Queued { get; set; }
         public DateTimeOffset Expires { get; } = expires;
         public CancellationTokenSource Cancellation { get; } = new();
         public TaskCompletionSource<Dictionary<string, string[]>> Headers { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);

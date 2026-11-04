@@ -69,6 +69,12 @@ public static class EllaiEndpoints
             return await next(context);
         });
         group.MapGet("/sessions", EllaiConversationFeed.ListSessionsAsync);
+        group.MapPost("/sessions/{sessionId}/report-voice/consent", ReportVoiceEndpoints.ConsentAsync)
+            .WithMetadata(new RequestSizeLimitAttribute(1024));
+        group.MapPost("/sessions/{sessionId}/report-voice/extract", ReportVoiceEndpoints.ExtractAsync)
+            .WithMetadata(new RequestSizeLimitAttribute(32768));
+        group.MapPost("/sessions/{sessionId}/report-voice/saved-recording", ReportVoiceEndpoints.TranscribeSavedAsync)
+            .WithMetadata(new RequestSizeLimitAttribute(EllaiVoiceTranscriptionService.MaximumAudioBytes));
         group.MapPost("/sessions", StartAsync)
             .WithMetadata(new RequestSizeLimitAttribute(MaximumRequestBodyBytes))
             .WithName("StartEllaiSession")
@@ -638,8 +644,9 @@ public static class EllaiEndpoints
     {
         if (request is null
             || !string.Equals(request.SessionId, sessionId, StringComparison.Ordinal)
-            || !new UiObservationReport(request.ViewInstanceId, request.ContextStamp,
-                request.Platform, request.MountedControlIds, request.ControlStates, request.CurrentNavigationId, request.CompletedControlIds).IsValid())
+            || !(new UiObservationReport(request.ViewInstanceId, request.ContextStamp,
+                request.Platform, request.MountedControlIds, request.ControlStates, request.CurrentNavigationId, request.CompletedControlIds)
+                { ValidationInputIds = request.ValidationInputIds, InputStates = request.InputStates, CurrentCaseId = request.CurrentCaseId }).IsValid())
         {
             return Task.FromResult(Results.Problem(
                 statusCode: StatusCodes.Status400BadRequest,
@@ -653,14 +660,16 @@ public static class EllaiEndpoints
         string sessionId, ReportUiObservationApiRequest request,
         IEllaiUiObservationStore observations, CancellationToken cancellationToken)
     {
-        await observations.RecordAsync(new StoredUiObservationReport(
+        var accepted = await observations.RecordAsync(new StoredUiObservationReport(
             sessionId, request.ViewInstanceId.Trim(), request.ContextStamp.Trim(),
             request.Platform.Trim(), request.MountedControlIds
                 .Where(id => !string.IsNullOrWhiteSpace(id))
                 .Select(id => id.Trim())
                 .ToList(),
-            DateTimeOffset.UtcNow, request.ControlStates, request.CurrentNavigationId, request.CompletedControlIds), cancellationToken);
-        return Results.Json(true, statusCode: StatusCodes.Status200OK);
+            DateTimeOffset.UtcNow, request.ControlStates, request.CurrentNavigationId, request.CompletedControlIds, request.ValidationInputIds, request.InputStates, request.CurrentCaseId), cancellationToken);
+        return accepted
+            ? Results.Json(true, statusCode: StatusCodes.Status200OK)
+            : Results.Conflict();
     }
 
     private static async Task<IResult> GrantConsentAsync(
@@ -850,7 +859,10 @@ public sealed record ReportUiObservationApiRequest(
     IReadOnlyList<string> MountedControlIds,
     IReadOnlyList<UiControlState>? ControlStates = null,
     string? CurrentNavigationId = null,
-    IReadOnlyList<string>? CompletedControlIds = null);
+    IReadOnlyList<string>? CompletedControlIds = null,
+    IReadOnlyList<string>? ValidationInputIds = null,
+    IReadOnlyList<UiInputState>? InputStates = null,
+    Guid? CurrentCaseId = null);
 
 /// <summary>Review registration for a validated pending plan: binds the
 /// dialog instance to one server-tracked review (duplicate ids focus it).

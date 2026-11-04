@@ -8,7 +8,7 @@
 <PageTitle>Reports and analytics | SwiftAid</PageTitle>
 <OperationsAnalyticsSurface Title="Reports and analytics"
                             Eyebrow="Operations"
-                            Description="Work summaries for selected dates. These totals describe reported work only; they do not indicate health patterns or causes."
+                            Description="Case counts follow the selected period, region, and sector. Follow-up counts cover all assigned work. These figures do not indicate health patterns or causes."
                             State="_state" Metrics="_metrics"
                             UpdatedAtUtc="_updatedAtUtc" ContractVersion="_contractVersion"
                             PeriodLabel="@PeriodDescription" StatusMessage="@_message" PreviewMessage="@_previewMessage"
@@ -20,11 +20,10 @@
         </MudSelect>
         <MudTextField T="string" Label="Region" Value="@_region" ValueChanged="RegionChangedAsync"
                       Placeholder="All regions" Clearable="true" />
-        <MudSelect T="string" Label="Measure group" Value="@_workType" ValueChanged="WorkTypeChangedAsync" Dense="true">
-            <MudSelectItem Value="@AllMeasures">All measures</MudSelectItem>
-            <MudSelectItem Value="@ReportMeasures">Reported activity</MudSelectItem>
-            <MudSelectItem Value="@WorkMeasures">Operational work</MudSelectItem>
-            <MudSelectItem Value="@SyncMeasures">Synchronization</MudSelectItem>
+        <MudSelect T="string" Label="Sector" Value="@_workType" ValueChanged="WorkTypeChangedAsync" Dense="true">
+            <MudSelectItem Value="@AllMeasures">All sectors</MudSelectItem>
+            <MudSelectItem Value="@HumanMeasures">Human</MudSelectItem>
+            <MudSelectItem Value="@AnimalMeasures">Animal</MudSelectItem>
         </MudSelect>
     </FilterContent>
 </OperationsAnalyticsSurface>
@@ -33,9 +32,8 @@
     private const string ThirtyDays = "30";
     private const string NinetyDays = "90";
     private const string AllMeasures = "";
-    private const string ReportMeasures = "reports";
-    private const string WorkMeasures = "work";
-    private const string SyncMeasures = "sync";
+    private const string HumanMeasures = "human";
+    private const string AnimalMeasures = "animal";
 
     private string _period = ThirtyDays;
     private string _region = string.Empty;
@@ -57,9 +55,8 @@
     {
         _workType = WorkTypeQuery switch
         {
-            ReportMeasures => ReportMeasures,
-            WorkMeasures => WorkMeasures,
-            SyncMeasures => SyncMeasures,
+            HumanMeasures => HumanMeasures,
+            AnimalMeasures => AnimalMeasures,
             _ => AllMeasures
         };
 

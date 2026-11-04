@@ -92,6 +92,7 @@
     private Task SubmitAsync(IntakeSubmission submission)
     {
         _reportCallbackStatus = $"Synthetic submit callback: {submission.Narrative}";
+        _reportCallbackStatus += $" | date: {submission.Occurrence.LocalDate:yyyy-MM-dd} | gender: {submission.Gender} | death related: {submission.DeathRelated}";
         return Task.CompletedTask;
     }
 }

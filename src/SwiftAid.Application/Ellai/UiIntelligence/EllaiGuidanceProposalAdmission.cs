@@ -23,7 +23,8 @@ public sealed partial class EllaiGuidanceProposalAdmission(
     public async Task<EllaiGuidancePlanningResult> PlanAsync(string sessionId, string proposalId,
         EllaiUiEntitlements authority, EllaiModelGuidancePlanner planner,
         IEllaiUiDiscoveryService discovery, EllaiGuidancePlanValidator validator,
-        EllaiUsageLedger ledger, IEllaiUsageStore usage, CancellationToken ct)
+        EllaiUsageLedger ledger, IEllaiUsageStore usage, CancellationToken ct,
+        string? existingPlanId = null, string? currentStepId = null)
     {
         var admitted = await AdmitAsync(sessionId, proposalId, authority, ct).ConfigureAwait(false);
         if (admitted.Status != "Ready" || admitted.Observation is null || admitted.Catalogue is null)
@@ -33,6 +34,12 @@ public sealed partial class EllaiGuidanceProposalAdmission(
             || session.ScopeEpoch != authority.ScopeEpoch || session.InteractionEpoch != admitted.InteractionEpoch)
             return new("Stale");
         var previous = EllaiGuidanceCheckpoint.Deserialize(session.GuidanceJson);
+        var revalidateOnly = existingPlanId is not null || currentStepId is not null;
+        if (revalidateOnly && (string.IsNullOrWhiteSpace(existingPlanId) || existingPlanId.Length > 120 ||
+            string.IsNullOrWhiteSpace(currentStepId) || currentStepId.Length > 120 ||
+            previous?.Plan?.PlanId != existingPlanId || previous.CurrentStepId != currentStepId ||
+            previous.Status != "Ready" || previous.ProposalId != proposalId))
+            return new("Stale");
         var sameProposal = previous?.ProposalId == proposalId && previous.ScopeEpoch == authority.ScopeEpoch
             && previous.InteractionEpoch <= admitted.InteractionEpoch;
         var sameContext = sameProposal && previous!.ContextStamp == admitted.Observation.ContextStamp
@@ -76,6 +83,7 @@ public sealed partial class EllaiGuidanceProposalAdmission(
                 return new(previous.Status, normalized);
             }
         }
+        if (revalidateOnly) return new("ReplanRequired");
         var attempt = sameProposal ? previous!.GenerationAttempt + 1 : 1;
         if (attempt > EllaiGuidancePlanValidator.MaxReplanDispatches) return new("ReplanLimit");
         var checkpoint = new EllaiGuidanceCheckpoint(proposalId, admitted.Observation.ContextStamp,
@@ -173,6 +181,31 @@ public sealed partial class EllaiGuidanceProposalAdmission(
                     freshObserved, refreshed.Observation.ViewInstanceId, refreshed.Observation.ContextStamp,
                     (clock ?? TimeProvider.System).GetUtcNow(), planId);
                 if (cachedValidation.Plan is not null) return new("Ready", cachedValidation.Plan);
+            }
+        }
+        var preplanned = feature == EllaiNavigationManifest.FeatureId
+            ? EllaiPreplannedNavigation.Create(admitted.Objective!)
+            : feature == EllaiReportUiManifest.FeatureId && !authority.Features.Contains(EllaiNavigationManifest.FeatureId) && !reportAlreadyReceived
+                ? EllaiPreplannedReport.Create(admitted.Objective!, admitted.Catalogue)
+                : feature == EllaiReportUiManifest.FeatureId ? null
+                    : EllaiPreplannedControl.Create(admitted.Objective!, admitted.Catalogue, observed);
+        if (preplanned is not null)
+        {
+            var refreshed = await AdmitAsync(sessionId, proposalId, authority, ct).ConfigureAwait(false);
+            if (refreshed.Status != "Ready" || refreshed.InteractionEpoch != admitted.InteractionEpoch ||
+                refreshed.Observation?.ViewInstanceId != admitted.Observation.ViewInstanceId ||
+                refreshed.Observation?.ContextStamp != admitted.Observation.ContextStamp) return new("Stale");
+            var freshObserved = discovery.Observe(refreshed.Catalogue!, refreshed.Observation.MountedControlIds.ToHashSet(StringComparer.Ordinal),
+                refreshed.Observation.ViewInstanceId, refreshed.Observation.ContextStamp, refreshed.Observation.Platform,
+                refreshed.Observation.ReceivedAtUtc, refreshed.Observation.ControlStates);
+            var validated = validator.ValidateObserved(preplanned, new(feature, [], 20), authority.Features, authority.Capabilities,
+                freshObserved, refreshed.Observation.ViewInstanceId, refreshed.Observation.ContextStamp,
+                (clock ?? TimeProvider.System).GetUtcNow(), planId);
+            if (validated.Plan is not null)
+            {
+                if (cacheKey is not null)
+                    await EllaiSharedGuidanceTemplates.WriteAsync(templateCache, cacheKey, preplanned, refreshed.Catalogue!, ct).ConfigureAwait(false);
+                return new("Ready", validated.Plan);
             }
         }
         await ledger.HydrateAsync(sessionId, usage, ct).ConfigureAwait(false);

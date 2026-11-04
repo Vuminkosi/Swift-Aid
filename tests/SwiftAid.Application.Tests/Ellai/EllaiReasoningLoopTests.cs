@@ -79,6 +79,9 @@ public sealed class EllaiReasoningLoopTests
         Assert.Contains("Claims must cite exact evidence", prompt);
         Assert.Contains("Never infer a case count from a partial list", prompt);
         Assert.Contains("ellai_owned_case_count", prompt);
+        Assert.Contains("controls=report.subject,report.narrative,report.time-location,report.review,report.confirmations", prompt);
+        Assert.Contains("NotProvided alone does not mean a field is required", prompt);
+        Assert.Contains("omitted, hidden, stale or unavailable input has unknown status", prompt);
     }
 
     [Fact]
@@ -109,6 +112,38 @@ public sealed class EllaiReasoningLoopTests
         Assert.Equal(UiIntentKind.StartGuidance, Assert.Single(result.Decision!.UiIntents).Kind);
         Assert.Contains(completions.Threads[1], message => message.Role == "tool" && message.Content.Contains("report.entry"));
         Assert.Contains("resourceId=null, controlId=null", completions.Threads[0][0].Content);
+    }
+
+    [Fact]
+    public async Task ReportStatusQuestionSuppliesObservedInputStatesToReasoningLoop()
+    {
+        var registry = new EllaiUiRegistry();
+        EllaiReportGuidanceDescriptors.RegisterAll(registry);
+        var observations = new InMemoryEllaiUiObservationStore();
+        await observations.RecordAsync(new("session-1", "view", "context", "web", ["report.narrative"],
+            DateTimeOffset.UtcNow, [new("report.narrative", UiObservationState.Ready)],
+            ValidationInputIds: ["report.original-statement-too-long"],
+            InputStates: [new("report.narrative", "report.original-statement", UiInputPresence.Invalid),
+                new("report.narrative", "report.other-observations", UiInputPresence.NotProvided)]), default);
+        var broker = new EllaiToolBroker(new EllaiPolicyService(), new EllaiConsentService(),
+            uiRegistry: registry, uiDiscovery: new EllaiUiDiscoveryService(), uiObservations: observations);
+        var completions = new ScriptedCompletions(
+            """{"tool_calls":[{"id":"observe","name":"ellai_ui_observe","args":{"feature":"report","controls":"report.subject,report.narrative,report.time-location,report.confirmations","view":"current"}}]}""",
+            DecisionTurn);
+        var context = Context with { FeatureId = "public.product-help", ResourceId = null,
+            ConsentPurpose = EllaiConsentService.PublicProductHelpPurpose,
+            DataClassification = EllaiProcessingClassification.UserProvidedNonSensitive,
+            AllowedTools = new HashSet<string> { EllaiToolNames.UiCatalogue, EllaiToolNames.UiObserve } };
+        var loop = new EllaiReasoningLoop(new EllaiCycleRunner(broker), new EllaiPromptBuilder("Policy text.", "v-test"), completions);
+
+        var result = await loop.RunAsync(Request(context) with { Utterance = "What have I entered?" }, default);
+
+        Assert.True(result.Completed);
+        var tool = Assert.Single(completions.Threads[1], message => message.Role == "tool");
+        Assert.Contains("report.original-statement (Describe what happened): Invalid", tool.Content);
+        Assert.Contains("report.other-observations (Add other observations): NotProvided", tool.Content);
+        Assert.Contains("The description is too long. Shorten it to the limit shown on the form.", tool.Content);
+        Assert.Contains("omitted inputs have unknown status", tool.Content);
     }
 
     [Theory]

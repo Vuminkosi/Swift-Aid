@@ -9,6 +9,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Include="..\..\src\SwiftAid.Mobile\Services\MobileShellAccessPolicy.cs" Link="Linked\Mobile\MobileShellAccessPolicy.cs" />
     <PackageReference Include="coverlet.collector" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
     <PackageReference Include="xunit" />
@@ -22,11 +23,21 @@
 
   <ItemGroup>
     <Compile Include="..\..\src\SwiftAid.Mobile\Services\Presentation\MobileCaseWorkspaceClient.cs" Link="Linked\Mobile\MobileCaseWorkspaceClient.cs" />
+    <Compile Include="..\..\src\SwiftAid.Mobile\Services\Presentation\MobileAssignedCaseQueueReader.cs" Link="Linked\Mobile\MobileAssignedCaseQueueReader.cs" />
+    <Compile Include="..\..\src\SwiftAid.Mobile\Services\Presentation\MobileCaseWorkReader.cs" Link="Linked\Mobile\MobileCaseWorkReader.cs" />
+    <Compile Include="..\..\src\SwiftAid.Mobile\Services\Presentation\MobileCaseWorkDiscoveryReader.cs" Link="Linked\Mobile\MobileCaseWorkDiscoveryReader.cs" />
+    <Compile Include="..\..\src\SwiftAid.Mobile\Services\Presentation\MobilePublicIntakeMetadataClient.cs" Link="Linked\Mobile\MobilePublicIntakeMetadataClient.cs" />
+    <Compile Include="..\..\src\SwiftAid.Mobile\Services\Presentation\MobileMonitoringQueueClient.cs" Link="Linked\Mobile\MobileMonitoringQueueClient.cs" />
     <Compile Include="..\..\src\SwiftAid.Mobile\Services\Intake\IGuestInstallKeyStore.cs" Link="Linked\Mobile\IGuestInstallKeyStore.cs" />
     <Compile Include="..\..\src\SwiftAid.Mobile\Services\Intake\EncryptedGuestSubmissionStore.cs" Link="Linked\Mobile\EncryptedGuestSubmissionStore.cs" />
     <Compile Include="..\..\src\SwiftAid.Mobile\Services\Intake\EncryptedGuestAudioStore.cs" Link="Linked\Mobile\EncryptedGuestAudioStore.cs" />
     <Compile Include="..\..\src\SwiftAid.Mobile\Services\Intake\EncryptedGuestAudioCleanupJournal.cs" Link="Linked\Mobile\EncryptedGuestAudioCleanupJournal.cs" />
     <Compile Include="..\..\src\SwiftAid.Mobile\Services\Presentation\CaseCorrectionReadHttpClient.cs" Link="Linked\Mobile\CaseCorrectionReadHttpClient.cs" />
+    <Compile Include="..\..\src\SwiftAid.Mobile\Services\Presentation\CaseDetailSummaryHttpClient.cs" Link="Linked\Mobile\CaseDetailSummaryHttpClient.cs" />
+    <Compile Include="..\..\src\SwiftAid.Mobile\Services\Presentation\CaseReportDetailsHttpClient.cs" Link="Linked\Mobile\CaseReportDetailsHttpClient.cs" />
+    <Compile Include="..\..\src\SwiftAid.Mobile\Services\Http\CookieSessionHttpClient.cs" Link="Linked\Mobile\CookieSessionHttpClient.cs" />
+    <Compile Include="..\..\src\SwiftAid.Mobile\Services\Http\CookieSessionRelayHandler.cs" Link="Linked\Mobile\CookieSessionRelayHandler.cs" />
+    <Compile Include="..\..\src\SwiftAid.Mobile\Services\Account\HttpEventSubscriptionClient.cs" Link="Linked\Mobile\HttpEventSubscriptionClient.cs" />
   </ItemGroup>
 
 </Project>

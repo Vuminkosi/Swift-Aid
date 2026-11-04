@@ -43,6 +43,18 @@ public sealed class IntakeSchemaContractTests : IDisposable
     }
 
     [Fact]
+    public void SubmissionSchema_AllowsOptionalNonnegativeHumanAge()
+    {
+        var age = _submission.RootElement.GetProperty("properties").GetProperty("ageYears");
+        Assert.Equal("integer", age.GetProperty("type").GetString());
+        Assert.Equal(0, age.GetProperty("minimum").GetInt32());
+        Assert.DoesNotContain(_submission.RootElement.GetProperty("required").EnumerateArray(), value => value.GetString() == "ageYears");
+        var rule = _submission.RootElement.GetProperty("allOf")[2];
+        Assert.Equal("ageYears", rule.GetProperty("if").GetProperty("required")[0].GetString());
+        Assert.Equal("human", rule.GetProperty("then").GetProperty("properties").GetProperty("subjectScope").GetProperty("const").GetString());
+    }
+
+    [Fact]
     public void SubmissionSchema_RejectsNilSubmissionAndAudioIds()
     {
         var pattern = Pattern(_submission, "nonNilUuid");

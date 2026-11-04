@@ -13,7 +13,9 @@ public static class IntakeSubmissionRules
         limits ??= IntakeLimits.Default;
         limits.Validate();
         if (submission.SchemaVersion != 1 || submission.ClientSubmissionId == Guid.Empty ||
-            !Enum.IsDefined(submission.SubjectScope))
+            !Enum.IsDefined(submission.SubjectScope) || submission.AgeYears < 0 ||
+            (submission.AgeYears.HasValue && submission.SubjectScope != IntakeSubjectScope.Human) ||
+            (submission.Gender is { } gender && (!Enum.IsDefined(gender) || submission.SubjectScope != IntakeSubjectScope.Human)))
         {
             throw new ArgumentException("The intake report is invalid.", nameof(submission));
         }
@@ -45,6 +47,7 @@ public static class IntakeSubmissionRules
 
         ValidateTime(submission.CapturedAt);
         ValidateTime(submission.Occurrence);
+        if (submission.Onset is not null) ValidateTime(submission.Onset);
         ValidateLocation(submission.Location);
         ValidateConfirmations(submission.Confirmations, submission.Location.CountryCode, submission.Location.CatalogueVersion!,
             submission.OriginalAudioAttachmentIds.Count > 0);

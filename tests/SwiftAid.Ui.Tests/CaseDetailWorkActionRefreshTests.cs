@@ -19,6 +19,23 @@ namespace SwiftAid.Ui.Tests;
 public sealed class CaseDetailWorkActionRefreshTests
 {
     [Fact]
+    public void AddFollowUp_opens_creation_dialog_even_without_existing_followups()
+    {
+        var detail = new OperationsCaseDetailSurface();
+        var caseId = Guid.NewGuid();
+        SetParameter(detail, nameof(OperationsCaseDetailSurface.CaseId), caseId);
+        SetParameter(detail, nameof(OperationsCaseDetailSurface.WorkVersion), 2L);
+        SetParameter(detail, nameof(OperationsCaseDetailSurface.OnWorkAction),
+            EventCallback.Factory.Create<OperationsWorkManagementSurface.OperationsWorkActionRequest>(new object(), _ => Task.CompletedTask));
+        typeof(OperationsCaseDetailSurface).GetMethod("OpenFollowUp", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(detail, null);
+        Assert.True((bool)GetPrivateField(detail, "_showFollowUpDialog")!);
+        var selection = Assert.IsType<OperationsWorkManagementSurface.WorkSelectionRequest>(GetPrivateField(detail, "_newFollowUpSelection"));
+        Assert.Equal(caseId, selection.CaseId);
+        Assert.Equal(OperationsWorkManagementSurface.OperationsWorkAction.ScheduleFollowUp, selection.Action);
+        Assert.StartsWith("follow-up:new:", selection.WorkKey, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task RecommendedFollowUpSelectsOnlyTheMatchingCurrentCaseWork()
     {
         var caseId = Guid.NewGuid();

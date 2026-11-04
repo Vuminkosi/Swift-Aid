@@ -54,8 +54,9 @@ public sealed class AnalyticsGatewayClient(
             return Denied<Page<AnalyticsMetric>>();
         }
 
-        var aggregateQuery = _serviceProvider.GetService<IDashboardAggregateQuery>();
-        var monitoringQuery = _serviceProvider.GetService<ICaseMonitoringQueueQuery>();
+        await using var serviceScope = _serviceProvider.CreateAsyncScope();
+        var aggregateQuery = serviceScope.ServiceProvider.GetService<IDashboardAggregateQuery>();
+        var monitoringQuery = serviceScope.ServiceProvider.GetService<ICaseMonitoringQueueQuery>();
         if (aggregateQuery is null || monitoringQuery is null)
         {
             return Unavailable<Page<AnalyticsMetric>>("Analytics are not available right now.");
@@ -110,12 +111,12 @@ public sealed class AnalyticsGatewayClient(
             {
                 metrics.Add(new AnalyticsMetric(
                     "due-follow-ups",
-                    "Due follow-ups assigned to you",
+                    "Due follow-ups assigned to you (all regions and sectors)",
                     followUps.Count,
                     "follow-ups"));
                 metrics.Add(new AnalyticsMetric(
                     "overdue-follow-ups",
-                    "Overdue follow-ups assigned to you",
+                    "Overdue follow-ups assigned to you (all regions and sectors)",
                     followUps.Count(item => item.IsOverdue),
                     "follow-ups"));
             }

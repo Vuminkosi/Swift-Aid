@@ -1,4 +1,5 @@
 using SwiftAid.Application.Authorization;
+using SwiftAid.Application.Cases;
 using SwiftAid.Application.Cases.Registration;
 using SwiftAid.Contracts.Commands;
 using SwiftAid.Contracts.Intake;
@@ -25,7 +26,8 @@ public sealed class IntakePromotionProcessor(
     IIntakePromotionWorkspaceResolver workspaces,
     IManagedCaseRegistrationProcessor registration,
     IIntakeDecisionStore promotions,
-    TimeProvider timeProvider) : IIntakePromotionService
+    TimeProvider timeProvider,
+    ICaseSummaryQuery? caseSummary = null) : IIntakePromotionService
 {
     private readonly IIntakePromotionSource _source = source ?? throw new ArgumentNullException(nameof(source));
     private readonly IIntakeSubmissionOpener _opener = opener ?? throw new ArgumentNullException(nameof(opener));
@@ -33,6 +35,7 @@ public sealed class IntakePromotionProcessor(
     private readonly IManagedCaseRegistrationProcessor _registration = registration ?? throw new ArgumentNullException(nameof(registration));
     private readonly IIntakeDecisionStore _promotions = promotions ?? throw new ArgumentNullException(nameof(promotions));
     private readonly TimeProvider _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
+    private readonly ICaseSummaryQuery? _caseSummary = caseSummary;
 
     public async Task<IntakeDecisionResult> PromoteAsync(
         IntakeDecision command,
@@ -68,7 +71,7 @@ public sealed class IntakePromotionProcessor(
 
         if (next == data.Status)
         {
-            return await ReplayAsync(command, data, ct).ConfigureAwait(false);
+            return await ReplayAsync(command, data, actor, ct).ConfigureAwait(false);
         }
 
         var scope = OpenPromotionScope(
@@ -133,7 +136,7 @@ public sealed class IntakePromotionProcessor(
 
         if (applied.Status == IntakeDecisionStatus.Conflict)
         {
-            return await ReplayAsync(command, data, ct).ConfigureAwait(false);
+            return await ReplayAsync(command, data, actor, ct).ConfigureAwait(false);
         }
 
         return applied;
@@ -142,12 +145,22 @@ public sealed class IntakePromotionProcessor(
     private async Task<IntakeDecisionResult> ReplayAsync(
         IntakeDecision command,
         IntakePromotionSource data,
+        ActorContext actor,
         CancellationToken ct)
     {
         var promoted = await _source.FindPromotedCaseIdAsync(command.ReceiptId, ct).ConfigureAwait(false);
         if (promoted is not { } caseId || caseId == Guid.Empty)
         {
             return new IntakeDecisionResult(IntakeDecisionStatus.Conflict, null);
+        }
+
+        // A review grant does not grant access to the managed case created by
+        // another officer. The summary query rechecks ReadCase under a case lease.
+        if (_caseSummary is null ||
+            (await _caseSummary.GetAsync(actor, caseId, ct).ConfigureAwait(false)) is not
+                { Access: CaseSummaryAccess.Allowed, Data.CaseId: var authorizedCaseId } || authorizedCaseId != caseId)
+        {
+            return new IntakeDecisionResult(IntakeDecisionStatus.NotFoundOrNotAuthorized, null);
         }
 
         return new IntakeDecisionResult(

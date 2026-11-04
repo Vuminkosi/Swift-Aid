@@ -9,7 +9,7 @@ namespace SwiftAid.Application.Intake;
 
 /// <summary>Pure mapping from a sealed intake submission to a managed-case registration report.</summary>
 /// <remarks>
-/// Guest intake collects no structured clinical facts: human subject reference, age, and
+/// Guest intake collects no structured clinical facts: human subject reference and
 /// concern, animal species, holding, and head counts stay explicitly unknown with reporter
 /// provenance, while the reporter narrative and observations are preserved verbatim as
 /// evidence. The first original-audio attachment, when present, is linked by its stable
@@ -38,13 +38,18 @@ public static class IntakePromotionMapper
         ArgumentNullException.ThrowIfNull(submission);
         if (reportId == Guid.Empty || string.IsNullOrWhiteSpace(sourcePrefix) || sourcePrefix.Length > 400)
             throw new ArgumentException("A stable report and source reference are required.");
+        if (submission.AgeYears < 0 ||
+            (submission.AgeYears.HasValue && submission.SubjectScope != IntakeSubjectScope.Human) ||
+            (submission.Gender is { } gender && (!Enum.IsDefined(gender) || submission.SubjectScope != IntakeSubjectScope.Human)))
+            throw new ArgumentException("A reported demographic detail is invalid for this subject.", nameof(submission));
         var context = new ReportContext(
             ToOccurrenceFact(sourcePrefix, submission.Occurrence),
             submission.CapturedAt.Value?.ToUniversalTime(),
             submission.CapturedAt.OriginalOffset,
             submission.CapturedAt.ZoneId,
             submission.CapturedAt.Precision,
-            submission.Location);
+            submission.Location,
+            submission.Onset is null ? null : ToReportedTimeFact(sourcePrefix, "onset", submission.Onset));
         var evidence = ToEvidence(sourcePrefix, submission);
         var confirmations = new ReportConfirmations(
             submission.Confirmations.ReportReviewConfirmed,
@@ -64,7 +69,9 @@ public static class IntakePromotionMapper
                     reportId,
                     context,
                     ReportedFact<string>.Unknown(ReporterProvenance(sourcePrefix, "subject-reference")),
-                    ReportedFact<int>.Unknown(ReporterProvenance(sourcePrefix, "age")),
+                    submission.AgeYears is { } age
+                        ? ReportedFact<int>.Known(age, ReporterProvenance(sourcePrefix, "age"))
+                        : ReportedFact<int>.Unknown(ReporterProvenance(sourcePrefix, "age")),
                     ReportedFact<string>.Unknown(ReporterProvenance(sourcePrefix, "concern")),
                     evidence),
                 confirmations)
@@ -98,10 +105,15 @@ public static class IntakePromotionMapper
 
     private static ReportedFact<ReportedTime> ToOccurrenceFact(string sourcePrefix, ReportedTime occurrence)
     {
-        var provenance = new ReportProvenance(ReportSourceKind.ReporterObservation, $"{sourcePrefix}:occurrence");
-        return occurrence is { Value: null, Precision: ReportedTimePrecision.Unknown }
+        return ToReportedTimeFact(sourcePrefix, "occurrence", occurrence);
+    }
+
+    private static ReportedFact<ReportedTime> ToReportedTimeFact(string sourcePrefix, string factName, ReportedTime time)
+    {
+        var provenance = new ReportProvenance(ReportSourceKind.ReporterObservation, $"{sourcePrefix}:{factName}");
+        return time is { Value: null, LocalDate: null, RangeStart: null, RangeEnd: null, Precision: ReportedTimePrecision.Unknown }
             ? ReportedFact<ReportedTime>.Unknown(provenance)
-            : ReportedFact<ReportedTime>.Known(occurrence, provenance);
+            : ReportedFact<ReportedTime>.Known(time, provenance);
     }
 
     private static ReportEvidence ToEvidence(string sourcePrefix, IntakeSubmission submission)
@@ -115,7 +127,11 @@ public static class IntakePromotionMapper
             .Select((text, index) => new ReportedText(
                 text,
                 new ReportProvenance(ReportSourceKind.ReporterObservation, $"{sourcePrefix}:observation:{index}")))
-            .ToArray();
+            .ToList();
+        if (submission.Gender is { } gender)
+            observations.Add(new ReportedText($"Reported gender: {gender}", ReporterProvenance(sourcePrefix, "gender")));
+        if (submission.DeathRelated is { } deathRelated)
+            observations.Add(new ReportedText($"Death related: {(deathRelated ? "Yes" : "No")}", ReporterProvenance(sourcePrefix, "death-related")));
         ReportEvidenceReference? originalAudio = submission.OriginalAudioAttachmentIds.Count == 0
             ? null
             : new ReportEvidenceReference(

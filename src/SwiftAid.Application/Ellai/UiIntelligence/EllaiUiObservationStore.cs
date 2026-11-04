@@ -13,11 +13,15 @@ public sealed record StoredUiObservationReport(
     DateTimeOffset ReceivedAtUtc,
     IReadOnlyList<UiControlState>? ControlStates = null,
     string? CurrentNavigationId = null,
-    IReadOnlyList<string>? CompletedControlIds = null);
+    IReadOnlyList<string>? CompletedControlIds = null,
+    IReadOnlyList<string>? ValidationInputIds = null,
+    IReadOnlyList<UiInputState>? InputStates = null,
+    Guid? CurrentCaseId = null);
 
 public interface IEllaiUiObservationStore
 {
-    Task RecordAsync(StoredUiObservationReport report, CancellationToken ct);
+    /// <summary>Returns false if a newer server-stamped report was already stored.</summary>
+    Task<bool> RecordAsync(StoredUiObservationReport report, CancellationToken ct);
 
     /// <summary>Latest report for the session, or null when the client has
     /// not posted one. Sessions never see each other's reports.</summary>
@@ -34,13 +38,14 @@ public sealed class InMemoryEllaiUiObservationStore : IEllaiUiObservationStore
     private readonly object _gate = new();
     private readonly Dictionary<string, StoredUiObservationReport> _latest = new(StringComparer.Ordinal);
 
-    public Task RecordAsync(StoredUiObservationReport report, CancellationToken ct)
+    public Task<bool> RecordAsync(StoredUiObservationReport report, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(report);
         ArgumentException.ThrowIfNullOrWhiteSpace(report.SessionId);
         ct.ThrowIfCancellationRequested();
-        if (!new UiObservationReport(report.ViewInstanceId, report.ContextStamp, report.Platform,
-                report.MountedControlIds, report.ControlStates, report.CurrentNavigationId, report.CompletedControlIds).IsValid())
+        if (!(new UiObservationReport(report.ViewInstanceId, report.ContextStamp, report.Platform,
+                report.MountedControlIds, report.ControlStates, report.CurrentNavigationId, report.CompletedControlIds)
+                { ValidationInputIds = report.ValidationInputIds, InputStates = report.InputStates, CurrentCaseId = report.CurrentCaseId }).IsValid())
             throw new ArgumentException("Invalid UI observation report.", nameof(report));
         var cleaned = report.MountedControlIds
             .Where(id => !string.IsNullOrWhiteSpace(id))
@@ -50,17 +55,23 @@ public sealed class InMemoryEllaiUiObservationStore : IEllaiUiObservationStore
             .ToList();
         lock (_gate)
         {
+            // Concurrent requests can reach this lock out of order. An older
+            // server-stamped observation must not replace newer UI evidence.
+            if (_latest.TryGetValue(report.SessionId, out var current) && current.ReceivedAtUtc > report.ReceivedAtUtc)
+                return Task.FromResult(false);
             if (!_latest.ContainsKey(report.SessionId) && _latest.Count >= 4096)
                 _latest.Remove(_latest.MinBy(entry => entry.Value.ReceivedAtUtc).Key);
             _latest[report.SessionId] = report with
             {
                 MountedControlIds = cleaned.AsReadOnly(),
                 ControlStates = report.ControlStates?.ToList().AsReadOnly(),
-                CompletedControlIds = report.CompletedControlIds?.ToList().AsReadOnly()
+                CompletedControlIds = report.CompletedControlIds?.ToList().AsReadOnly(),
+                ValidationInputIds = report.ValidationInputIds?.ToList().AsReadOnly(),
+                InputStates = report.InputStates?.ToList().AsReadOnly()
             };
         }
 
-        return Task.CompletedTask;
+        return Task.FromResult(true);
     }
 
     public Task<StoredUiObservationReport?> LatestAsync(string sessionId, CancellationToken ct)

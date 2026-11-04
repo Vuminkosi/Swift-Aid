@@ -75,13 +75,326 @@ public sealed class FrameworkPostgresLiveMuseFactAttribute : FactAttribute
 public sealed class EllaiPostgresTests : IAsyncLifetime
 {
     [FrameworkPostgresFact]
-    public async Task ConcurrentFrameworkFixtureMigrationsCompleteWithoutRacing()
+    public Task FrameworkWorkerPersistsGuidanceAfterUnmatchedCatalogueGoal() => VerifyReportGuidanceAsync(false);
+
+    [FrameworkPostgresLiveMuseFact]
+    public Task LiveMusePersistsReportGuidance() => VerifyReportGuidanceAsync(true);
+
+    [FrameworkPostgresLiveMuseFact]
+    public Task LiveMusePlansPersistedReportGuidance() => VerifyReportGuidanceAsync(true, planGuidance: true);
+
+    private async Task VerifyReportGuidanceAsync(bool liveModel, bool planGuidance = false)
     {
-        await using var first = CreateFrameworkDbContext();
-        await using var second = CreateFrameworkDbContext();
-        await Task.WhenAll(CaseAuthorityPostgresFixture.MigrateFrameworkDatabaseAsync(first),
-            CaseAuthorityPostgresFixture.MigrateFrameworkDatabaseAsync(second));
-        Assert.Empty(await first.Database.GetPendingMigrationsAsync());
+        var id = $"framework-fallback-guidance-{Guid.NewGuid():N}";
+        _frameworkSessionIds.Add(id);
+        var now = DateTimeOffset.UtcNow;
+        var work = new EllaiUtteranceWork(id, "scope-test", "Show me how to save a report draft.", "public.product-help", null,
+            EllaiMode.Ask, 1, "cycle-current", Actor, true, "consent/0", EllaiProcessingClassification.UserProvidedNonSensitive,
+            EllaiProcessingClassification.UserProvidedNonSensitive, new HashSet<string> { EllaiToolNames.UiCatalogue },
+            EllaiConsentPurposes.PublicProductHelp, "current");
+        await using (var db = CreateFrameworkDbContext())
+        {
+            await db.Database.MigrateAsync();
+            await new PostgresEllaiSessionStore(db).CreateAsync(new(id, EllaiMode.Ask, "Active", 1, 1, 1, 1, 0, 12,
+                Actor.ActorId, "scope-test", null, null, now), default);
+            db.Set<EllaiUtteranceEntity>().Add(new()
+            {
+                SessionId = id, ClientUtteranceId = "current", Sequence = 1, UserText = work.Utterance,
+                Outcome = "Queued", AcceptedAtUtc = now, WorkPayloadJson = EllaiUtteranceWorkEnvelope.Serialize(work, "current")
+            });
+            await db.SaveChangesAsync();
+        }
+        var registry = new EllaiUiRegistry();
+        EllaiReportGuidanceDescriptors.RegisterAll(registry);
+        using var model = new FallbackGuidanceClient();
+        using var live = liveModel ? EllaiMuseChatClientFactory.Create(EllaiOptions.Bind(Environment.GetEnvironmentVariable)) : null;
+        await RunFrameworkWorkerAsync(id, "current", live ?? model, null,
+            executionTimeout: liveModel ? TimeSpan.FromMinutes(2) : null, registry: registry);
+        await using var verifyDb = CreateFrameworkDbContext();
+        var completed = (await new PostgresEllaiSessionStore(verifyDb).ReadConversationForExecutionAsync(id, Actor.ActorId, "current", default)).Single();
+        Assert.Equal("Completed", completed.Outcome);
+        Assert.NotNull(completed.UiProposalsJson);
+        var proposal = Assert.Single(EllaiUiProposalPayload.Deserialize(completed.UiProposalsJson));
+        Assert.Equal(UiIntentKind.StartGuidance, proposal.Kind);
+        Assert.Equal("report", proposal.Arguments["feature"]);
+        Assert.True(EllaiToolTrace.TryRead(completed.ToolTraceJson!, out var trace));
+        Assert.Contains(trace!.Observations, observation => observation.ToolName == EllaiToolNames.UiCatalogue &&
+            observation.UiCatalogueReplayScope is not null);
+        Assert.DoesNotContain("synthetic unfamiliar goal", completed.ToolTraceJson!);
+        if (planGuidance)
+        {
+            var projected = EllaiConversationProjection.ToClient(completed);
+            var proposalId = Assert.Single(projected.UiProposals).ProposalId;
+            var observations = new InMemoryEllaiUiObservationStore();
+            Task ObserveAsync(CancellationToken ct) => observations.RecordAsync(new(id, "view", "context", "web",
+                ["report.entry"], DateTimeOffset.UtcNow, [new("report.entry", UiObservationState.Ready)]), ct);
+            await ObserveAsync(default);
+            var store = new PostgresEllaiSessionStore(verifyDb);
+            var admission = new EllaiGuidanceProposalAdmission(store, store, registry, observations);
+            var options = EllaiOptions.Bind(Environment.GetEnvironmentVariable);
+            using var http = new HttpClient { Timeout = TimeSpan.FromMinutes(2) };
+            var router = new EllaiReasoningRouter(options, new EllaiReasoningAdapter(http, options),
+                new OllamaEllaiReasoningProvider(http, options), new ServerlessEllaiReasoningProvider(http, options));
+            var planner = new EllaiModelGuidancePlanner(new EllaiProviderTurnClient(router));
+            var authority = new EllaiUiEntitlements(Actor.ActorId, "scope-test", new HashSet<string> { "report" }, new HashSet<string>());
+            using var heartbeatCancellation = new CancellationTokenSource();
+            async Task RefreshObservationAsync()
+            {
+                try
+                {
+                    using var timer = new PeriodicTimer(TimeSpan.FromSeconds(10));
+                    while (await timer.WaitForNextTickAsync(heartbeatCancellation.Token))
+                        await ObserveAsync(heartbeatCancellation.Token);
+                }
+                catch (OperationCanceledException) when (heartbeatCancellation.IsCancellationRequested) { }
+            }
+            var heartbeat = RefreshObservationAsync();
+            try
+            {
+                var plan = await admission.PlanAsync(id, proposalId, authority, planner, new EllaiUiDiscoveryService(),
+                    new EllaiGuidancePlanValidator(registry), new EllaiUsageLedger(), new InMemoryEllaiUsageStore(), default);
+                Assert.True(plan.Status == "Ready", $"Guidance planning returned {plan.Status} ({plan.DiagnosticCode ?? "no diagnostic"}).");
+                Assert.NotEmpty(plan.Plan!.Steps);
+                Assert.Contains(plan.Plan.Steps, step => step.ControlId == "report.save");
+                Assert.DoesNotContain(plan.Plan.Steps, step => step.ControlId is "report.narrative" or "report.time-location" or
+                    "report.review" or "report.confirmations" or "report.submit");
+                Assert.NotNull(EllaiGuidanceCheckpoint.Deserialize((await store.GetAsync(id, default))!.GuidanceJson)?.Plan);
+            }
+            finally
+            {
+                heartbeatCancellation.Cancel();
+                await heartbeat;
+            }
+        }
+    }
+
+    private sealed class FallbackGuidanceClient : IChatClient
+    {
+        private int _calls;
+        public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            await Task.Yield();
+            if (++_calls == 1)
+                yield return new ChatResponseUpdate(ChatRole.Assistant,
+                    [new FunctionCallContent("discover", EllaiToolNames.UiCatalogue,
+                        new Dictionary<string, object?> { ["feature"] = "report", ["goal"] = "synthetic unfamiliar goal" })]);
+            else
+                yield return new ChatResponseUpdate(ChatRole.Assistant,
+                    """{"final_decision":{"schemaVersion":2,"kind":"Answer","displayText":"Let me show you the report form.","spokenText":"Let me show you the report form.","claims":[],"questions":[],"uiIntents":[{"kind":"StartGuidance","featureId":"ellai.guidance","resourceId":null,"controlId":null,"arguments":{"feature":"report","objective":"Open the report form"}}],"planProposal":null,"topicRefs":[],"resumeSuggestion":null,"stopReason":null}}""");
+            yield return new ChatResponseUpdate(ChatRole.Assistant,
+                [new UsageContent(new UsageDetails { InputTokenCount = 5, OutputTokenCount = 4 })]);
+        }
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+        public void Dispose() { }
+    }
+
+    [FrameworkPostgresFact]
+    public async Task PartialCaseConversationRevalidatesAfterPostgresTopicIsReopened()
+    {
+        var sessionId = $"partial-history-{Guid.NewGuid():N}";
+        await using var initDb = CreateFrameworkDbContext();
+        await initDb.Database.MigrateAsync();
+        var caseId = Guid.NewGuid();
+        var queue = new MutableHistoryQueue { Rows = [caseId] };
+        var consent = new EllaiConsentService();
+        consent.Grant(sessionId, EllaiConsentDimension.ReasoningText, EllaiToolBroker.ToolReadPurpose,
+            EllaiProcessingClassification.SyntheticDemo, TimeSpan.FromHours(1));
+        var context = new EllaiToolContext(sessionId, "scope-test", "cases", null, 4, true,
+            Actor: Actor, DataClassification: EllaiProcessingClassification.SyntheticDemo,
+            AllowedTools: new HashSet<string> { EllaiToolNames.Evidence });
+        var request = new EllaiToolRequest(EllaiToolNames.Evidence,
+            new Dictionary<string, string> { ["ref"] = "case-results" });
+        try
+        {
+            string? trace;
+            await using (var db = CreateFrameworkDbContext())
+            {
+                var topics = new EllaiTopicService(new PostgresEllaiTopicStore(db));
+                var row = new SwiftAid.Contracts.Cases.CaseQueueItem(caseId, "Reported", "SZ", Actor.ActorId, 1, DateTimeOffset.UtcNow);
+                await new EllaiCaseResultMemory(topics, queue).RememberAsync(context, [row], default, searchIncomplete: true);
+                var broker = new EllaiToolBroker(new EllaiPolicyService(), consent, queue: queue, topics: topics);
+                var result = await broker.InvokeAsync(context, request, default);
+                Assert.True(result.Truncated);
+                trace = EllaiToolTrace.SerializeFlattened([EllaiObservedToolResult.From(request, result)], false, []);
+                Assert.NotNull(trace);
+            }
+            var turns = new[]
+            {
+                new EllaiConversationTurn(sessionId, "prior", 1, "cases?", "partial result", "Completed", 1, DateTimeOffset.UtcNow) { ToolTraceJson = trace },
+                new EllaiConversationTurn(sessionId, "current", 2, "continue", null, "Queued", 1, null)
+            };
+            await using (var db = CreateFrameworkDbContext())
+            {
+                var broker = new EllaiToolBroker(new EllaiPolicyService(), consent, queue: queue,
+                    topics: new EllaiTopicService(new PostgresEllaiTopicStore(db)));
+                async Task<bool> Retained() => (await EllaiAuthorizedConversationContext.BuildAsync(turns, "current", Actor,
+                    queue, default, toolContext: context, invokeTool: broker.InvokeAsync)).Messages.Any(message => message.Content == "partial result");
+                Assert.True(await Retained());
+                queue.Rows = [];
+                Assert.False(await Retained());
+            }
+        }
+        finally
+        {
+            await using var cleanupDb = CreateFrameworkDbContext();
+            await cleanupDb.Set<EllaiTopicEntity>().Where(topic => topic.SessionId == sessionId).ExecuteDeleteAsync();
+        }
+    }
+
+    [FrameworkPostgresFact]
+    public async Task CaseResultToolsRestoreOriginalAfterNewSearchAndRecheckAccess()
+    {
+        var sessionId = $"case-history-tools-{Guid.NewGuid():N}";
+        await using var initDb = CreateFrameworkDbContext();
+        await initDb.Database.MigrateAsync();
+        var firstId = Guid.NewGuid();
+        var secondId = Guid.NewGuid();
+        var queue = new MutableHistoryQueue();
+        var consent = new EllaiConsentService();
+        consent.Grant(sessionId, EllaiConsentDimension.ReasoningText, EllaiToolBroker.ToolReadPurpose,
+            EllaiProcessingClassification.SyntheticDemo, TimeSpan.FromHours(1));
+        var context = new EllaiToolContext(sessionId, "scope-test", "cases", null, 4, true,
+            Actor: Actor, DataClassification: EllaiProcessingClassification.SyntheticDemo);
+        var state = new EllaiToolRequest(EllaiToolNames.State, new Dictionary<string, string> { ["projection"] = "queue" });
+        var originalRequest = new EllaiToolRequest(EllaiToolNames.Evidence, new Dictionary<string, string> { ["ref"] = "case-results-original" });
+        var latestRequest = new EllaiToolRequest(EllaiToolNames.Evidence, new Dictionary<string, string> { ["ref"] = "case-results" });
+        try
+        {
+            queue.Rows = [firstId];
+            await using (var db = CreateFrameworkDbContext())
+            {
+                var broker = new EllaiToolBroker(new EllaiPolicyService(), consent, queue: queue,
+                    topics: new EllaiTopicService(new PostgresEllaiTopicStore(db)));
+                Assert.True((await broker.InvokeAsync(context, state, default)).Allowed);
+            }
+            queue.Rows = [secondId];
+            await using (var db = CreateFrameworkDbContext())
+            {
+                var broker = new EllaiToolBroker(new EllaiPolicyService(), consent, queue: queue,
+                    topics: new EllaiTopicService(new PostgresEllaiTopicStore(db)));
+                Assert.True((await broker.InvokeAsync(context, state, default)).Allowed);
+            }
+            queue.Rows = [firstId, secondId];
+            await using (var db = CreateFrameworkDbContext())
+            {
+                var broker = new EllaiToolBroker(new EllaiPolicyService(), consent, queue: queue,
+                    topics: new EllaiTopicService(new PostgresEllaiTopicStore(db)));
+                var original = await broker.InvokeAsync(context, originalRequest, default);
+                var latest = await broker.InvokeAsync(context, latestRequest, default);
+                Assert.Equal(firstId.ToString("D"), Assert.Single(original.Evidence).ResourceId);
+                Assert.Equal(secondId.ToString("D"), Assert.Single(latest.Evidence).ResourceId);
+                queue.Rows = [secondId];
+                var revoked = await broker.InvokeAsync(context, originalRequest, default);
+                Assert.True(revoked.Allowed);
+                Assert.Empty(revoked.Evidence);
+                Assert.DoesNotContain(firstId.ToString("D"), revoked.ResultSummary);
+            }
+        }
+        finally
+        {
+            await using var cleanupDb = CreateFrameworkDbContext();
+            await cleanupDb.Set<EllaiTopicEntity>().Where(topic => topic.SessionId == sessionId).ExecuteDeleteAsync();
+        }
+    }
+
+    private sealed class MutableHistoryQueue : SwiftAid.Application.Cases.ICaseQueueQuery
+    {
+        public IReadOnlyList<Guid> Rows { get; set; } = [];
+        public Task<SwiftAid.Contracts.Cases.CaseQueueResult> GetMineAsync(ActorContext actor, int? limit, CancellationToken ct) =>
+            Result(actor, null);
+        public Task<SwiftAid.Contracts.Cases.CaseQueueResult> GetMineAsync(ActorContext actor, int? limit,
+            SwiftAid.Application.Cases.CaseQueueFilter filter, CancellationToken ct) => Result(actor, filter.CaseIds);
+        private Task<SwiftAid.Contracts.Cases.CaseQueueResult> Result(ActorContext actor, IReadOnlyList<Guid>? ids) =>
+            Task.FromResult(new SwiftAid.Contracts.Cases.CaseQueueResult(SwiftAid.Contracts.Cases.CaseQueueAccess.Allowed,
+                Rows.Where(id => ids is null || ids.Contains(id)).Select(id =>
+                    new SwiftAid.Contracts.Cases.CaseQueueItem(id, "Reported", "SZ", actor.ActorId, 1, DateTimeOffset.UtcNow)).ToArray()));
+    }
+
+    [FrameworkPostgresFact]
+    public async Task ConcurrentCaseHistoryWritesKeepEachResultInPostgres()
+    {
+        var sessionId = $"case-history-{Guid.NewGuid():N}";
+        await using var initDb = CreateFrameworkDbContext();
+        await initDb.Database.MigrateAsync();
+        var context = new EllaiToolContext(sessionId, "scope-test", "cases", null, 4, true,
+            Actor: Actor, DataClassification: EllaiProcessingClassification.SyntheticDemo);
+        var ids = Enumerable.Range(1, 6).Select(_ => Guid.NewGuid()).ToArray();
+        try
+        {
+            var writes = ids.Select(async id =>
+            {
+                await using var db = CreateFrameworkDbContext();
+                var topics = new EllaiTopicService(new PostgresEllaiTopicStore(db));
+                var memory = new EllaiCaseResultMemory(topics, new HistoryQueue());
+                var row = new SwiftAid.Contracts.Cases.CaseQueueItem(id, "Reported", "SZ", Actor.ActorId, 1, DateTimeOffset.UtcNow);
+                await memory.RememberAsync(context, [row], default);
+            });
+            await Task.WhenAll(writes);
+            await using var verifyDb = CreateFrameworkDbContext();
+            var verifyTopics = new EllaiTopicService(new PostgresEllaiTopicStore(verifyDb));
+            var topic = await verifyTopics.GetByTitleAsync(sessionId, EllaiCaseResultMemory.TopicTitle, default);
+            using var json = System.Text.Json.JsonDocument.Parse(topic!.EntityRef!);
+            Assert.Equal(5, json.RootElement.GetProperty("Previous").GetArrayLength());
+            Assert.False(json.RootElement.GetProperty("HistoryTruncated").GetBoolean());
+            var original = await new EllaiCaseResultMemory(verifyTopics, new HistoryQueue()).RecallAsync(context, default, original: true);
+            var latest = await new EllaiCaseResultMemory(verifyTopics, new HistoryQueue()).RecallAsync(context, default);
+            Assert.True(original.Allowed);
+            Assert.True(latest.Allowed);
+            var originalId = Guid.Parse(Assert.Single(original.Evidence).ResourceId);
+            var latestId = Guid.Parse(Assert.Single(latest.Evidence).ResourceId);
+            Assert.Contains(originalId, ids);
+            Assert.Contains(latestId, ids);
+            Assert.NotEqual(originalId, latestId);
+        }
+        finally
+        {
+            await using var cleanupDb = CreateFrameworkDbContext();
+            await cleanupDb.Set<EllaiTopicEntity>().Where(topic => topic.SessionId == sessionId).ExecuteDeleteAsync();
+        }
+    }
+
+    private sealed class HistoryQueue : SwiftAid.Application.Cases.ICaseQueueQuery
+    {
+        public Task<SwiftAid.Contracts.Cases.CaseQueueResult> GetMineAsync(ActorContext actor, int? limit, CancellationToken ct) =>
+            throw new NotSupportedException();
+        public Task<SwiftAid.Contracts.Cases.CaseQueueResult> GetMineAsync(ActorContext actor, int? limit,
+            SwiftAid.Application.Cases.CaseQueueFilter filter, CancellationToken ct) =>
+            Task.FromResult(new SwiftAid.Contracts.Cases.CaseQueueResult(SwiftAid.Contracts.Cases.CaseQueueAccess.Allowed,
+                (filter.CaseIds ?? []).Select(id => new SwiftAid.Contracts.Cases.CaseQueueItem(id, "Reported", "SZ", actor.ActorId, 1, DateTimeOffset.UtcNow)).ToArray()));
+    }
+
+    [FrameworkPostgresFact]
+    public async Task AtomicTopicPayloadUpdateFencesConcurrentWritersAcrossContexts()
+    {
+        var sessionId = $"topic-cas-{Guid.NewGuid():N}";
+        await using var initialDb = CreateFrameworkDbContext();
+        await initialDb.Database.MigrateAsync();
+        var initial = await new PostgresEllaiTopicStore(initialDb).RecordAsync(sessionId, "History", [],
+            "before", "v1", null, DateTimeOffset.UtcNow, default);
+        try
+        {
+            await using var firstDb = CreateFrameworkDbContext();
+            await using var secondDb = CreateFrameworkDbContext();
+            var first = new PostgresEllaiTopicStore(firstDb);
+            var second = new PostgresEllaiTopicStore(secondDb);
+            var writes = await Task.WhenAll(
+                first.CompareExchangePayloadAsync(sessionId, initial.TopicId, "before", "v1", "first", "v2", DateTimeOffset.UtcNow, default),
+                second.CompareExchangePayloadAsync(sessionId, initial.TopicId, "before", "v1", "second", "v2", DateTimeOffset.UtcNow, default));
+            Assert.Single(writes, result => result);
+            await using var verifyDb = CreateFrameworkDbContext();
+            var stored = await new PostgresEllaiTopicStore(verifyDb).GetAsync(sessionId, initial.TopicId, default);
+            Assert.Contains(stored!.EntityRef, new[] { "first", "second" });
+            Assert.Equal("v2", stored.EntityVersion);
+            Assert.False(await first.CompareExchangePayloadAsync("another-session", initial.TopicId, stored.EntityRef, "v2", "foreign", "v3", DateTimeOffset.UtcNow, default));
+        }
+        finally
+        {
+            await using var cleanupDb = CreateFrameworkDbContext();
+            await cleanupDb.Set<EllaiTopicEntity>().Where(topic => topic.SessionId == sessionId && topic.TopicId == initial.TopicId).ExecuteDeleteAsync();
+        }
     }
 
     [FrameworkPostgresFact]
@@ -1279,8 +1592,8 @@ public sealed class EllaiPostgresTests : IAsyncLifetime
     }
 
     private static async Task RunFrameworkWorkerAsync(string sessionId, string turnId, IChatClient model, ICacheStore? cache,
-        TimeSpan? executionTimeout = null, bool stateQueue = false, DbCommandInterceptor? interceptor = null,
-        TimeSpan? toolTimeout = null, TimeSpan? snapshotTransactionLimit = null)
+        TimeSpan? executionTimeout = null, EllaiUiRegistry? registry = null, bool stateQueue = false,
+        DbCommandInterceptor? interceptor = null, TimeSpan? snapshotTransactionLimit = null, TimeSpan? toolTimeout = null)
     {
         var consent = new EllaiConsentService();
         var services = new ServiceCollection();
@@ -1294,16 +1607,10 @@ public sealed class EllaiPostgresTests : IAsyncLifetime
         services.AddEllaiUsageAccounting(new EllaiOptions { SpendingCapDollars = 70m,
             PricingInputPer1KTokens = 0.001m, PricingOutputPer1KTokens = 0.002m });
         services.AddSingleton(new EllaiSessionResponseStore());
-        if (stateQueue)
-        {
-            services.AddScoped<ICaseQueueQuery>(_ => new EmptyStateQueue());
-            services.AddScoped<IEllaiTopicStore, PostgresEllaiTopicStore>();
-            services.AddScoped<EllaiTopicService>();
-            services.AddScoped(sp => new EllaiToolBroker(new EllaiPolicyService(), consent,
-                queue: sp.GetRequiredService<ICaseQueueQuery>(), topics: sp.GetRequiredService<EllaiTopicService>()));
-        }
-        else
-            services.AddScoped(_ => new EllaiToolBroker(new EllaiPolicyService(), consent));
+        services.AddScoped(sp => new EllaiToolBroker(new EllaiPolicyService(), consent,
+            queue: stateQueue ? new EmptyStateQueue() : null,
+            topics: stateQueue ? new EllaiTopicService(new PostgresEllaiTopicStore(sp.GetRequiredService<SwiftAidDbContext>())) : null,
+            uiRegistry: registry));
         services.AddScoped(_ => new EllaiPromptBuilder("Synthetic test policy", "fixture"));
         services.AddEllaiReasoningExecutor(new EllaiOptions
         {

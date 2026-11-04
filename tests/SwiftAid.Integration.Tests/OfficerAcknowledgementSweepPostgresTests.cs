@@ -109,7 +109,7 @@ public sealed partial class CaseCommandProcessingPostgresTests
                 "synthetic", DateTimeOffset.UtcNow.AddDays(2), "synthetic", null, DateTimeOffset.UtcNow), keyRing.CreateOptions(), provider)).Status);
         var rescheduled = await query.GetAsync(fixture.CreateActor(), fixture.CaseId, 20, default);
         var assignment = Assert.Single(rescheduled.Timeline!.Entries, entry => entry.OfficerEscalation is not null).OfficerEscalation!;
-        Assert.Null(assignment.FollowUpAcknowledged);
+        Assert.True(assignment.FollowUpAcknowledged);
         Assert.False(Assert.Single(rescheduled.Timeline.Entries.SelectMany(entry => entry.AgentActivities)).FollowUpIsCurrent);
         Assert.Equal(EllaiFencedWorkOutcome.NoChange, await worker.RunOneAsync(lease, Guid.NewGuid(), Guid.NewGuid(), default));
     }

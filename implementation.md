@@ -4503,3 +4503,171 @@ PASS: 20 focused GuidedReportDraftPersistenceTests and EllaiReportAnchorTests; c
 Live signed-in Chromium reproduced Send report remaining disabled when the three confirmations were checked in display order. HandleFieldChanged cleared report review on country/processing acknowledgement. These acknowledgements now preserve review; edits to narrative or country still invalidate it. Report.razor now passes actual catalogue/privacy string values rather than literal field names. No policy or server validation bypass.
 
 Regression before fix: 2 failed, 3 passed. After fix: 25 focused UI tests passed (GuidedReportDraftPersistenceTests and EllaiReportAnchorTests). Evidence: .codex/ellai-confirmation-before.log and .codex/ellai-confirmation-after.log. Live retest pending deployment.
+
+
+### Ellai guided report capture and sequential validation (2026-11-04)
+
+The report UI accepts a value-free `UpdatePublicReportDraft` intent only for registered report inputs. A scoped, short-lived context buffers at most ten bounded edits while the report route mounts, then applies only supported parses of the user's own utterance to the unsaved draft. It supports explicit age, observations, locality, unknown age/location, onset and reported statements. It does not save or submit. Invalid or unsupported utterances receive a truthful capture failure notice; unknown values remain unknown.
+
+Report validation focuses and highlights one invalid field at a time. It announces the first issue; after the user corrects that field, the form revalidates and focuses the next issue. Approved value-free narration names the missing or invalid item and its repair action, including invalid age, so spoken guidance does not imply unsubmitted data was saved. User-entered report values are not included in narration requests.
+
+PASS: `git diff --check`; Gateway build `dotnet build src\SwiftAid.Gateway\SwiftAid.Gateway.csproj --no-restore -m:1 -nr:false -p:WasmBuildNative=false` (0 warnings, 0 errors); Android build `dotnet build src\SwiftAid.Mobile\SwiftAid.Mobile.csproj --no-restore -f net10.0-android -m:1 -nr:false` (0 warnings, 0 errors). No tests were added or run at the user's direction. Browser interaction, audible speech, and physical Android behavior remain NOT VERIFIED.
+
+
+### Semantic registry collision and responsive target resolution (2026-11-04)
+
+The trusted UI registry now rejects duplicate control IDs instead of silently replacing an earlier descriptor. Live DOM discovery classifies targets after checking visibility: hidden responsive copies do not make one visible target ambiguous, hidden-only targets remain Hidden, and multiple visible matches remain Ambiguous. This keeps responsive presentation from blocking guidance while preserving fail-closed behavior for genuinely ambiguous controls.
+
+PASS: Gateway build `dotnet build src\SwiftAid.Gateway\SwiftAid.Gateway.csproj --no-restore -m:1 -nr:false -p:WasmBuildNative=false` (0 warnings, 0 errors); ES module syntax check `Get-Content src\SwiftAid.UI\wwwroot\js\ellai-ui-observations.js -Raw | node --input-type=module --check`; `git diff --check`. No tests were added or run. Actual responsive browser target selection remains NOT VERIFIED.
+### Ellai retained case classification-status filtering (2026-11-04)
+
+`ellai_evidence` can filter the latest or original retained case-result set by the persisted `Classified` or `Unclassified` status. It re-reads those bounded case IDs through the current actor-scoped queue, which reauthorizes each row. The response includes matching case IDs and aggregate versions, not classifier labels or scores. Unknown values are excluded from either result and called out; no classification is inferred and this filter is not a diagnosis. The separate detailed classification-evidence tool remains unavailable under the current reasoning route.
+
+PASS: `dotnet build src/SwiftAid.Application/SwiftAid.Application.csproj --no-restore -m:1 -nr:false` (0 warnings, 0 errors). No tests were added or run. NOT VERIFIED: conversation scenario 1.2 with a live authorized case set, provider tool selection, browser/session restoration, or deployment. No schema change.
+
+### Ellai retained occurrence-place filtering (2026-11-04)
+
+ellai_evidence accepts an exact geographic-registry place_id and matching country to narrow the latest or original retained case set. Each retained case is first re-read through the actor-scoped queue and its protected location is then read through ICaseOccurrenceLocationQuery, which independently enforces current ReadCase authorization. The filter cannot be combined with field or classification filtering. It returns no coordinates; unknown or inaccessible locations are omitted and mark the result incomplete. Filter arguments and result fingerprint are included in retained-result replay validation so history restoration repeats the authorized query.
+
+PASS: Application build and Gateway build (prebuilt project references), zero warnings and errors. No tests added or run. NOT VERIFIED: live case data, Muse tool selection, browser refresh/replay, or deployed behavior. No schema or database changes.
+
+### Ellai retained reported-observation projection (2026-11-04)
+
+ellai_evidence(field=observations) now reads verbatim observation strings for each currently authorized retained case through ICaseReportReadQuery, which repeats the protected case lease and ReadCase authorization. It can combine with a retained classification filter and/or selected exact place. The output identifies observations as unverified reports, excludes narrative and coordinates, omits inaccessible rows with incomplete status, and trims the projection to the existing 32,768-byte tool-result ceiling. Durable replay provenance fingerprints only case evidence references, report revisions, count, and truncation state; it does not fingerprint or store observation text. Replays repeat the query and compare the safe fingerprint.
+
+PASS: Application build and git diff --check. No tests added or run. NOT VERIFIED: live authorized case observations, Muse tool selection, provider conversation replay, browser/session restoration, or deployed behavior. No schema or database changes.
+
+### Ellai retained-case submitter attribution (2026-11-04)
+
+ellai_evidence(field=submitter, case_id=...) reads the authoritative CaseReported timeline entry for one case in the selected retained result set. case_id must be canonical and belong to that retained set; ICaseTimelineQuery rechecks current ReadCase authorization. The timeline store supplies a safe profile display label only for the CaseReported event. Opaque actor IDs are not returned. Promoted guest-intake cases are identified separately: the staff account recorded as accepting the managed case is not presented as the original guest submitter, whose identity is unavailable in the managed-case timeline. Replay provenance hashes the attribution summary and evidence metadata without storing names in the trace digest.
+
+PASS: Application, Infrastructure, and Gateway builds; zero warnings and errors. PASS: git diff --check. No tests added or run. NOT VERIFIED: live authorized attribution, promoted-intake data, provider tool selection, browser/session replay, or deployed behavior. No schema change.
+
+### Ellai selected-case submitter attribution (2026-11-04)
+
+The retained evidence tool accepts field=submitter and a canonical case_id to answer attribution for one case from the retained result set. The broker rejects case IDs outside the supported field contract, and the retained query verifies set membership before reauthorizing the case through ICaseTimelineQuery. The timeline store joins the CaseReported actor to a safe profile display label; the tool never uses the opaque actor ID as a name. For promoted guest intake, the output identifies the accepting staff member separately and states that the original guest submitter identity is unavailable. The reasoning prompt directs Ellai to use this exact case-scoped read and avoid equating the accepting officer with the source submitter. Replay hashes include the safe attribution projection but do not persist the display label in the provenance digest.
+
+PASS: Application, Infrastructure, and Gateway builds; zero warnings and errors. PASS: git diff --check. No tests added or run. NOT VERIFIED: live authorized case attribution, provider selection, browser/session replay, or deployed behavior.
+
+### Retained attribution query minimization (2026-11-04)
+
+The submitter projection now uses ICaseReportAttributionQuery instead of loading a full 500-entry timeline per case. One focused store query returns the CaseReported event ID/version, an allowed display name, and an EXISTS result for intake promotion; the query is wrapped in a current ReadCase lease. Actor IDs and report content are excluded. This reduces unnecessary event reads and keeps attribution-specific data inside the authorized projection.
+
+PASS: Application, Infrastructure, and Gateway builds; zero warnings and errors. PASS: git diff --check. No tests added or run. NOT VERIFIED: live PostgreSQL query plan, live attribution data, browser/provider behavior, or deployment.
+
+### Ellai owned-case reported-date filters (2026-11-04)
+
+`ellai_state(projection=queue)` accepts `reported_from` inclusive and `reported_before` exclusive UTC dates (`YYYY-MM-DD`) spanning at most 365 days. The authorized queue pushes these bounds into PostgreSQL before ordering and paging; exact occurrence-place searches carry the same bounds through their candidate scan. Model instructions anchor relative dates with `ellai_now` and distinguish managed-case creation/report time from event occurrence or symptom-onset time. Results remain limited to the current actor's owned, readable cases; filters do not expose classifier labels or establish disease incidence. The tool input schema version is now 2.
+
+PASS: Gateway build with Application and Infrastructure project references, zero warnings and errors. PASS: `git diff --check`. No tests added or run, per user instruction. NOT VERIFIED: live query results, provider interpretation/tool selection, browser/session replay, or deployed behavior. No migration.
+### Ellai report-date query replay (2026-11-04)
+
+Durable owned-case query provenance now retains the validated inclusive/exclusive UTC report-date pair. Historical tool-result revalidation repeats the same dates for both ordinary queue reads and exact occurrence-place scans, using current actor authorization and the established incomplete-result checks. Old traces without date bounds remain valid and revalidate as unbounded queries; malformed or overlong date ranges are rejected from provenance.
+
+PASS: Gateway build with Application and Infrastructure project references, zero warnings and errors. PASS: `git diff --check`. No tests added or run, per user instruction. NOT VERIFIED: persisted live traces, provider/browser replay, or deployment. No migration.
+
+### Ellai grouping of retained case results by region (2026-11-04)
+
+`ellai_evidence(ref=case-results, group_by=region)` groups only the exact retained result set after reauthorizing its cases under current Search and ReadCase access. The response gives region counts and the case IDs supporting each group; unknown regions and records no longer accessible are omitted and mark the result incomplete. Country is part of the grouping key so same-named regions in different countries remain distinct. The new argument and its safe result fingerprint are included in durable history revalidation, and the prompt directs contextual requests such as "group them" to this retained-set operation rather than a fresh search.
+
+PASS: `dotnet build src/SwiftAid.Gateway/SwiftAid.Gateway.csproj --no-restore -m:1 -nr:false -p:WasmBuildNative=false --verbosity quiet` (zero warnings, zero errors), run before and after commit. PASS: `git diff --check`. No tests added or run, per user instruction. NOT VERIFIED: live authorized case data, model tool selection, PostgreSQL runtime query behavior, browser/session replay, or deployment. No migration.
+
+### Ellai grouping of retained and current case sets by locality (2026-11-04)
+
+Case grouping now supports both recorded region and locality dimensions. `ellai_state(projection=queue, group_by=locality)` uses the existing bounded, actor-authorized candidate scan; `ellai_evidence(ref=case-results, group_by=locality)` preserves the exact retained set and reauthorizes every case. Registry identifiers and country keep groups distinct, missing locations are omitted with incomplete status, and region response fields remain compatible. The model-visible argument schema is version 5 and durable replay reissues the same dimension.
+
+PASS: `dotnet build src/SwiftAid.Gateway/SwiftAid.Gateway.csproj --no-restore -m:1 -nr:false -p:WasmBuildNative=false --verbosity quiet` (zero warnings, zero errors). PASS: `git diff --check`. No tests added or run, per user instruction. NOT VERIFIED: live case data, provider selection, PostgreSQL query behavior, browser/session replay, or deployment. No migration.
+
+Location aggregation emits the supporting case IDs within each group and scans at most 80 candidates in 40-row pages to stay within the existing 32 KiB tool-result bound. Remaining candidates make the result incomplete.
+
+### Ellai review-stage validation guidance targeting (2026-11-04)
+
+Review-stage age and text-limit errors now tell the user to select Return to details before promising a field highlight. The current review target is the navigation control; after the detail form is active, existing guidance advances to the first invalid input and updates the spotlight one issue at a time.
+
+PASS: `dotnet build src/SwiftAid.Gateway/SwiftAid.Gateway.csproj --no-restore -m:1 -nr:false -p:WasmBuildNative=false --verbosity quiet` (zero warnings, zero errors). PASS: `git diff --check`. No tests added or run, per user instruction. NOT VERIFIED: live browser or device rendering of the review-to-detail focus transition.
+
+When the server rejection does not identify a field, the message now says that explicitly and guides the person back to review visible entries one at a time without implying a specific input was identified.
+
+### Retain bounded references for grouped Ellai searches (2026-11-04)
+
+Fresh region/locality aggregates now retain up to 20 supporting case references, selected round-robin across the displayed groups. The aggregate still reports its complete bounded scan and group evidence; retained follow-up is marked incomplete when more than 20 cases, unknown locations, or a partial scan prevent full recall. Durable revalidation repeats the aggregate without rewriting memory, and its fingerprint ignores only the non-authoritative retention notice.
+
+PASS: `dotnet build src/SwiftAid.Gateway/SwiftAid.Gateway.csproj --no-restore -m:1 -nr:false -p:WasmBuildNative=false --verbosity quiet` (zero warnings, zero errors). PASS: `git diff --check`. No tests added or run, per user instruction. NOT VERIFIED: live session-memory persistence, authorized case data, model follow-up selection, or browser/session replay.
+
+### Ellai guest navigation to public Home (2026-11-04)
+
+Guest UI authority now includes the registered navigation feature and a public-only capability. The navigation manifest requires that capability only for the Home control; Settings and all workspace destinations continue to require current authenticated authority. The guidance host permits an unauthenticated navigation only to the allowlisted `/` route and does not require a signed-in menu observation for that public route. This enables the existing conversation to return a guest to Home without granting access to account or case surfaces.
+
+PASS: Gateway build after source commit (`dotnet build src/SwiftAid.Gateway/SwiftAid.Gateway.csproj --no-restore -m:1 -nr:false -p:WasmBuildNative=false --verbosity quiet`, 0 warnings, 0 errors). PASS: `git diff --check`. No tests added or run, per user instruction. NOT VERIFIED: live browser guest navigation, authenticated Settings navigation, or deployed behavior. No migration.
+
+### Ellai surveillance evidence boundaries (2026-11-04)
+
+The reasoning prompt now distinguishes authorized case retrieval and administrative grouping from surveillance analysis. It explicitly says the current tool path cannot calculate radii, validate spatial clusters, provide a historical baseline or denominator, or confirm an outbreak. It directs Ellai to state missing evidence and prevents treating reported counts or a synthetic detector candidate as incidence or laboratory confirmation. No gated detector or signal-review action was exposed.
+
+PASS: Gateway build (`dotnet build src/SwiftAid.Gateway/SwiftAid.Gateway.csproj --no-restore -m:1 -nr:false -p:WasmBuildNative=false --verbosity quiet`, 0 warnings, 0 errors). PASS: `git diff --check`. No tests added or run, per user instruction. NOT VERIFIED: live provider behavior, seeded surveillance conversations, or browser rendering.
+
+### Interactive Ellai server-validation recovery - 2026-11-04
+
+When submission is rejected without a field identifier, returning from Review to Details now runs the existing trusted detail validator. Its ordered value-free validation issues feed Ellai's existing first-issue narration and dynamic highlight; each correction recomputes the remaining issues. This does not claim to identify server-only constraints that the server does not return as field errors.
+
+PASS: `dotnet build src/SwiftAid.Gateway/SwiftAid.Gateway.csproj --no-restore -m:1 -nr:false -p:WasmBuildNative=false --verbosity quiet` completed with 0 warnings and 0 errors; `git diff --check` passed. Tests were not added or run, per user instruction. Live provider and browser narration/highlight behavior remain NOT VERIFIED.
+
+### Interactive Ellai Gateway report drafts and submission - 2026-11-04
+
+The Gateway report page now uses the existing encrypted browser submission persistence and guest draft store. Saved editable and completed drafts can be explicitly resumed; saving updates the local versioned record, while sending creates or completes a draft, queues it and submits through a Gateway adapter over the authoritative intake session and submission services. The UI displays a receipt only after the local record reaches Received with a matching server receipt. Unconfirmed and needs-attention states keep the local entry available and are described without claiming server receipt.
+
+PASS: Gateway build (`dotnet build src/SwiftAid.Gateway/SwiftAid.Gateway.csproj --no-restore -m:1 -nr:false -p:WasmBuildNative=false --verbosity quiet`, 0 warnings, 0 errors); `git diff --check`. The generated Gateway static web assets endpoint manifest includes `js/guest-storage.js`, matching the persistence module import. Tests were not added or run, per user instruction. NOT VERIFIED: interactive browser IndexedDB encryption/reload, real Gateway submission and receipt, and rendered accessibility/viewport behavior.
+
+### Interactive Ellai public website navigation controls - 2026-11-04
+
+The signed-in Gateway Home and account pages use PublicWebsiteShell rather than AuthorizedLayout, so SwiftAidNavMenu's navigation controls were not mounted there. Ellai's route executor requires a fresh observed navigation control; the shared manifest and authenticated entitlement alone could not satisfy that check. PublicWebsiteShell now exposes its real Home brand link, Workspace link, and authenticated Settings link with the shared navigation control IDs, anchors and a component-owned semantic state provider. Settings remains an accessible named icon target on narrow screens.
+
+PASS: Gateway build (`dotnet build src/SwiftAid.Gateway/SwiftAid.Gateway.csproj --no-restore -m:1 -nr:false -p:WasmBuildNative=false --verbosity quiet`, 0 warnings, 0 errors); `git diff --check`. Tests were not added or run, per user instruction. NOT VERIFIED: signed-in browser navigation from Home and account settings, keyboard/screen-reader behavior, and mobile rendering.
+
+### Ellai explicit report-observation correction - 2026-11-04
+
+During an active public report workflow, Ellai can now honor a narrowly phrased request to remove one observation recorded incorrectly. The application accepts only an explicit remove/delete statement from the same user turn and removes only one exact matching observation line from the active draft. Partial matches, narrative text, and inferred values remain untouched; the UI reports when the exact observation cannot be identified. This supports report correction in conversation scenarios 2.4 and 7.1 while preserving the existing draft and submission boundary.
+
+PASS: Gateway build (dotnet build src/SwiftAid.Gateway/SwiftAid.Gateway.csproj --no-restore -m:1 -nr:false -p:WasmBuildNative=false --verbosity quiet, 0 warnings, 0 errors); git diff --check. Tests were not added or run, per user instruction. NOT VERIFIED: live model proposal selection, browser draft correction, or end-to-end conversation behavior.
+
+### Ellai explicit report-observation addition - 2026-11-04
+
+The active public report workflow now accepts a direct add/include observation request such as "Add headache." through the existing same-turn, empty-argument draft-edit proposal. The captured observation is the user's exact text after the command; no symptom is inferred, and existing duplicate and length limits still apply. This closes the explicit add step in conversation scenario 2.4.
+
+PASS: Gateway build (dotnet build src/SwiftAid.Gateway/SwiftAid.Gateway.csproj --no-restore -m:1 -nr:false -p:WasmBuildNative=false --verbosity quiet, 0 warnings, 0 errors); git diff --check. Tests were not added or run, per user instruction. NOT VERIFIED: live model proposal selection, browser draft mutation, or end-to-end conversation behavior.
+
+### Ellai initial report details in a create request - 2026-11-04
+
+The initial create-draft utterance can now carry a whole-year age, an explicitly described patient category, a case locality introduced with "in", and one observation introduced with "with". A strict sentence parser places only those stated values into the existing report draft context while the generic guidance proposal remains free of report values. It does not infer a country, patient residence, diagnosis, or onset time. This covers the first turn of conversation scenario 2.4.
+
+PASS: Gateway build (dotnet build src/SwiftAid.Gateway/SwiftAid.Gateway.csproj --no-restore -m:1 -nr:false -p:WasmBuildNative=false --verbosity quiet, 0 warnings, 0 errors); git diff --check. Tests were not added or run, per user instruction. NOT VERIFIED: live model selection, browser capture, and the complete report save/submit conversation.
+
+### Ellai report save and submission guidance - 2026-11-04
+
+During the active report conversation, explicit requests to save the draft or submit it officially now direct Ellai to the existing report guidance plan. Save completion is claimed only from the report-save persistence signal. Submission remains a human-operated review and confirmation flow, and success is claimed only after the matching server receipt is displayed. The guidance reuses the same report draft and conversation.
+
+PASS: Gateway build (dotnet build src/SwiftAid.Gateway/SwiftAid.Gateway.csproj --no-restore -m:1 -nr:false -p:WasmBuildNative=false --verbosity quiet, 0 warnings, 0 errors); git diff --check. Tests were not added or run, per user instruction. NOT VERIFIED: live model tool selection, real browser save/submit, receipt confirmation, or full scenario 2.4.
+
+### Ellai invalid tool-argument recovery - 2026-11-04
+
+The case-query instructions now distinguish an InvalidArguments rejection from a successful empty result. On a user correction, Ellai retries the same query with only the corrected argument, preserves prior filters and references, validates actual calendar dates, and maps Eswatini to the registered ISO code SZ. It reports outcomes only from the corrected tool result, supporting conversation scenario 2.2.
+
+PASS: Gateway build (dotnet build src/SwiftAid.Gateway/SwiftAid.Gateway.csproj --no-restore -m:1 -nr:false -p:WasmBuildNative=false --verbosity quiet, 0 warnings, 0 errors); git diff --check. Tests were not added or run, per user instruction. NOT VERIFIED: live model tool selection and the multi-turn corrected query against authorized case data.
+
+### Ellai missing-target replan turn fencing - 2026-11-04
+
+The Find another way action now binds replanning to the latest completed durable conversation turn. If a user turn is still queued or processing, it waits instead of starting a plan fenced against an older turn. The existing proposal and conversation are retained, allowing a changed UI observation to be replanned without highlighting an absent target.
+
+PASS: Gateway build (dotnet build src/SwiftAid.Gateway/SwiftAid.Gateway.csproj --no-restore -m:1 -nr:false -p:WasmBuildNative=false --verbosity quiet, 0 warnings, 0 errors); git diff --check. Tests were not added or run, per user instruction. NOT VERIFIED: live Bit.Bonboarding replan after a missing target, or cross-page recovery in a browser.
+
+### Ellai retained-case symptom-onset grouping - 2026-11-04
+
+Retained, currently authorized cases can now be grouped by reporter-supplied symptom/sign onset day through `ellai_evidence(group_by=onset-day)`. The protected case-report read projects onset separately from submission/capture time and supplies the aggregate version used by the evidence reference. Exact instants group by UTC calendar date; date-only values retain their reported local date. Unknown, missing, approximate, or inaccessible onset dates are omitted and mark the result incomplete. The prompt now selects this grouping for onset-date recalculation and continues to disclose that separately submitted duplicate identity is unavailable.
+
+PASS: Gateway build (`dotnet build src/SwiftAid.Gateway/SwiftAid.Gateway.csproj --no-restore -m:1 -nr:false -p:WasmBuildNative=false --verbosity quiet`, 0 warnings, 0 errors); `git diff --check`. Tests were not added or run, per user instruction. NOT VERIFIED: live model tool selection, onset grouping against authorized case records, duplicate-submission detection, and end-to-end conversation scenario 3.3.
+
+### Ellai capture-relative onset interpretation - 2026-11-04
+
+During an active report flow, the bounded onset parser now accepts the explicit phrases `It started today` and `It started yesterday` alongside absolute onset dates. It resolves the day from the draft's captured local timestamp and offset, preserves the original sentence in the unsaved report narrative, and marks the onset interpretation for review. The confirmation checkbox is invalidated when the interpreted fact is added; the review surface explains the date basis and allows correction. Draft snapshot schema 6 preserves the review marker and remains backward-compatible with versions 1-5.
+
+PASS: Gateway build and `git diff --check` after implementation. Tests were not added or run, per user instruction. NOT VERIFIED: live model selection, capture-time behavior across browser refresh/time-zone changes, and the scenario 1.1 end-to-end report conversation.

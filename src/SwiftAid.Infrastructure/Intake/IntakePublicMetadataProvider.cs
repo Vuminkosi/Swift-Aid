@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using SwiftAid.Application.Intake;
 using SwiftAid.Contracts.Intake;
+using SwiftAid.Domain.Intake;
 
 namespace SwiftAid.Infrastructure.Intake;
 
@@ -11,12 +12,15 @@ public sealed class IntakePublicMetadataProvider : IIntakePublicMetadataProvider
     private const string CatalogueResourceName =
         "SwiftAid.Infrastructure.Resources.Catalogues.country-areas.m49.2026-10-27.1.json";
     private readonly IntakeMetadataOptions _options;
+    private readonly IntakeLimits _limits;
     private readonly Lazy<Task<PublicIntakeCountryCatalogue>> _countries;
 
-    public IntakePublicMetadataProvider(IntakeMetadataOptions options)
+    public IntakePublicMetadataProvider(IntakeMetadataOptions options, IntakeLimits? limits = null)
     {
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _options.Validate();
+        _limits = limits ?? IntakeLimits.Default;
+        _limits.Validate();
         _countries = new Lazy<Task<PublicIntakeCountryCatalogue>>(
             LoadCountriesAsync,
             LazyThreadSafetyMode.ExecutionAndPublication);
@@ -27,7 +31,10 @@ public sealed class IntakePublicMetadataProvider : IIntakePublicMetadataProvider
         _options.CatalogueVersion,
         _options.CatalogueReference,
         _options.PrivacyNoticeVersion,
-        _options.PrivacyNoticeReference);
+        _options.PrivacyNoticeReference)
+    {
+        TextLimits = new(_limits.MaximumNarrativeCharacters, _limits.MaximumObservations, _limits.MaximumObservationCharacters)
+    };
 
     public Task<PublicIntakeCountryCatalogue> GetCountriesAsync(CancellationToken ct) =>
         _countries.Value.WaitAsync(ct);

@@ -38,23 +38,57 @@ public sealed class PostgresEllaiOperationalScheduleStore(SwiftAidDbContext db)
         }, ct).ConfigureAwait(false);
     }
 
+    /// <summary>Installs a newer trusted configuration only after any active lease expires.
+    /// Revisions are monotonic so an older replica cannot restore an earlier policy.</summary>
+    public async Task<bool> ReconcileConfigurationAsync(string workspaceId, string roleId, int cadenceHours,
+        string policyVersion, long configurationRevision, DateTimeOffset firstDueUtc, CancellationToken ct)
+    {
+        ValidateScope(workspaceId, roleId);
+        if (cadenceHours is not (4 or 8) || string.IsNullOrWhiteSpace(policyVersion) ||
+            policyVersion.Length > 120 || configurationRevision < 1 || firstDueUtc.Offset != TimeSpan.Zero)
+            throw new ArgumentException("A bounded policy, positive revision, UTC due time, and 4- or 8-hour cadence are required.");
+        return await ExecuteAsync(async connection =>
+        {
+            await using var cmd = Command(connection, """
+                INSERT INTO ellai_operational_schedules
+                    (workspace_id, role_id, cadence_hours, policy_version, configuration_revision, next_due_utc)
+                VALUES (@workspace, @role, @cadence, @policy, @revision, @due)
+                ON CONFLICT (workspace_id, role_id) DO UPDATE
+                SET cadence_hours = EXCLUDED.cadence_hours, policy_version = EXCLUDED.policy_version,
+                    configuration_revision = EXCLUDED.configuration_revision,
+                    next_due_utc = LEAST(ellai_operational_schedules.next_due_utc, clock_timestamp()),
+                    lease_id = NULL, lease_started_utc = NULL, lease_until_utc = NULL,
+                    fencing_token = ellai_operational_schedules.fencing_token + 1
+                WHERE ellai_operational_schedules.configuration_revision < EXCLUDED.configuration_revision
+                    AND (ellai_operational_schedules.lease_until_utc IS NULL OR
+                         ellai_operational_schedules.lease_until_utc <= clock_timestamp())
+                """, ("workspace", workspaceId), ("role", roleId), ("cadence", cadenceHours),
+                ("policy", policyVersion), ("revision", configurationRevision), ("due", firstDueUtc));
+            return await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false) == 1;
+        }, ct).ConfigureAwait(false);
+    }
+
     public async Task<EllaiOperationalLease?> TryClaimAsync(string workspaceId, string roleId,
-        TimeSpan duration, CancellationToken ct)
+        TimeSpan duration, CancellationToken ct, long? expectedConfigurationRevision = null)
     {
         ValidateScope(workspaceId, roleId);
         if (duration < TimeSpan.FromSeconds(10) || duration > TimeSpan.FromMinutes(10))
             throw new ArgumentOutOfRangeException(nameof(duration));
+        if (expectedConfigurationRevision is < 1) throw new ArgumentOutOfRangeException(nameof(expectedConfigurationRevision));
         var leaseId = Guid.NewGuid();
+        var revisionPredicate = expectedConfigurationRevision.HasValue ? "AND configuration_revision = @revision" : "";
         return await ExecuteAsync(async connection =>
         {
-            await using var cmd = Command(connection, """
+            await using var cmd = Command(connection, $"""
                 UPDATE ellai_operational_schedules
                 SET lease_id = @lease, lease_started_utc = clock_timestamp(), lease_until_utc = clock_timestamp() + @duration,
                     fencing_token = fencing_token + 1
                 WHERE workspace_id = @workspace AND role_id = @role AND next_due_utc <= clock_timestamp()
+                    {revisionPredicate}
                     AND (lease_until_utc IS NULL OR lease_until_utc <= clock_timestamp())
                 RETURNING fencing_token, next_due_utc, lease_until_utc, policy_version
-                """, ("lease", leaseId), ("duration", duration), ("workspace", workspaceId), ("role", roleId));
+                """, ("lease", leaseId), ("duration", duration), ("workspace", workspaceId), ("role", roleId),
+                ("revision", expectedConfigurationRevision ?? 0));
             await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
             if (!await reader.ReadAsync(ct).ConfigureAwait(false)) return null;
             return new EllaiOperationalLease(workspaceId, roleId, leaseId, reader.GetInt64(0),

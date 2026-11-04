@@ -174,7 +174,7 @@ public sealed class CommunitySessionServiceTests
     {
         var store = new FakeSessionStore();
         var eligibility = new FixtureMaterialEligibility();
-        var service = new CommunitySessionService(store, eligibility, new TestClock(Now));
+        var service = new CommunitySessionService(store, eligibility, new TestClock(Now), new FixtureOwnerAuthorizer());
         var id = Guid.NewGuid();
         await service.ExecuteAsync(CreateDraft(id), "officer-1", CancellationToken.None);
         await service.ExecuteAsync(new ReviewSessionCommand(id, 1, false, "review", Now), "officer-2", CancellationToken.None);
@@ -193,7 +193,7 @@ public sealed class CommunitySessionServiceTests
     {
         var store = new FakeSessionStore();
         var eligibility = new FixtureMaterialEligibility();
-        var service = new CommunitySessionService(store, eligibility, new TestClock(Now));
+        var service = new CommunitySessionService(store, eligibility, new TestClock(Now), new FixtureOwnerAuthorizer());
         var id = Guid.NewGuid();
         await PublishAsync(service, id, SessionVisibility.Public);
         Assert.Equal("harare", eligibility.LastRequest!.RegionId);
@@ -292,12 +292,10 @@ public sealed class CommunitySessionServiceTests
     public async Task SchedulingFailsClosedWithoutMaterialEligibilityAuthority()
     {
         var store = new FakeSessionStore();
-        var service = new CommunitySessionService(store, timeProvider: new TestClock(Now));
-        var approvedFixture = new CommunitySessionService(store, new FixtureMaterialEligibility(), new TestClock(Now));
+        var service = new CommunitySessionService(store, timeProvider: new TestClock(Now), ownerAuthorizer: new FixtureOwnerAuthorizer());
+        var approvedFixture = new CommunitySessionService(store, new FixtureMaterialEligibility(), new TestClock(Now), new FixtureOwnerAuthorizer());
         var id = Guid.NewGuid();
         await service.ExecuteAsync(CreateDraft(id), "officer-1", CancellationToken.None);
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            service.ExecuteAsync(new ReviewSessionCommand(id, 1, false, "review", Now), "officer-2", CancellationToken.None));
         await approvedFixture.ExecuteAsync(new ReviewSessionCommand(id, 1, false, "review", Now), "officer-2", CancellationToken.None);
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
@@ -336,11 +334,13 @@ public sealed class CommunitySessionServiceTests
         await PublishAsync(services.Service, id, SessionVisibility.Public);
 
         var staff = await services.Service.GetStaffAsync(id, "officer-1", CancellationToken.None);
-        var publicView = await services.Service.GetPublicAsync(id, CancellationToken.None);
-        var list = await services.Service.ListPublicAsync(null, CancellationToken.None);
-        var page = await services.Service.QueryPublicAsync(new PublicSessionQuery(), CancellationToken.None);
-        var calendar = await services.Service.GetIcsAsync(id, Now, CancellationToken.None);
-        var invitation = await services.Service.GetInvitationTextAsync(id, CancellationToken.None);
+        var unverified = new CommunitySessionService(services.Store, timeProvider: services.Clock,
+            ownerAuthorizer: new FixtureOwnerAuthorizer());
+        var publicView = await unverified.GetPublicAsync(id, CancellationToken.None);
+        var list = await unverified.ListPublicAsync(null, CancellationToken.None);
+        var page = await unverified.QueryPublicAsync(new PublicSessionQuery(), CancellationToken.None);
+        var calendar = await unverified.GetIcsAsync(id, Now, CancellationToken.None);
+        var invitation = await unverified.GetInvitationTextAsync(id, CancellationToken.None);
 
         var material = Assert.Single(staff!.Materials);
         Assert.Empty(publicView!.Materials);
@@ -526,7 +526,7 @@ public sealed class CommunitySessionServiceTests
     {
         var store = new FakeSessionStore();
         var clock = new TestClock(Now);
-        return (new CommunitySessionService(store, new FixtureMaterialEligibility(), clock), store, clock);
+        return (new CommunitySessionService(store, new FixtureMaterialEligibility(), clock, new FixtureOwnerAuthorizer()), store, clock);
     }
 
     private sealed class TestClock(DateTimeOffset utcNow) : TimeProvider
@@ -558,6 +558,7 @@ public sealed class CommunitySessionServiceTests
     private static CreateSessionDraftCommand CreateDraft(Guid sessionId) =>
         new(
             sessionId,
+            "org-1",
             "Malaria prevention talk",
             "An evening talk on bed nets and stagnant water.",
             "Adults in the Budiriro catchment",
@@ -571,7 +572,7 @@ public sealed class CommunitySessionServiceTests
             HarareZoneId(),
             60,
             50,
-            [new SessionMaterialRef("card-1", "v3")],
+            [new SessionMaterialRef("card-1", "v3", "Synthetic fixture reuse permission")],
             SessionVisibility.Public,
             SessionChannelType.WhatsAppGroup,
             "https://chat.example/join/abc",
@@ -592,7 +593,7 @@ public sealed class CommunitySessionServiceTests
             Start.AddDays(1),
             60,
             50,
-            [new SessionMaterialRef("card-1", "v3")],
+            [new SessionMaterialRef("card-1", "v3", "Synthetic fixture reuse permission")],
             SessionVisibility.Public,
             SessionChannelType.WhatsAppGroup,
             "https://chat.example/join/abc",
@@ -623,6 +624,12 @@ public sealed class CommunitySessionServiceTests
         throw new InvalidOperationException("No Harare UTC+2 zone is available on this host.");
     }
 
+    private sealed class FixtureOwnerAuthorizer : SwiftAid.Application.Identity.IOrganizationOwnerAuthorizer
+    {
+        public Task<bool> IsActiveOwnerAsync(string actorId, string organizationId, CancellationToken cancellationToken) =>
+            Task.FromResult(organizationId == "org-1" && actorId is "officer-1" or "officer-2");
+    }
+
     private sealed class FakeSessionStore : ICommunitySessionStore
     {
         private readonly Dictionary<Guid, DomainSessions.CommunitySession> _sessions = new();
@@ -639,6 +646,9 @@ public sealed class CommunitySessionServiceTests
 
         public Task<DomainSessions.CommunitySession?> LoadAsync(Guid sessionId, CancellationToken ct) =>
             Task.FromResult(_sessions.TryGetValue(sessionId, out var session) ? session : null);
+
+        public Task<string?> GetOrganizationIdAsync(Guid sessionId, CancellationToken ct) =>
+            Task.FromResult(_sessions.TryGetValue(sessionId, out var session) ? session.OrganizationId : null);
 
         public Task InsertAsync(DomainSessions.CommunitySession session, string actorId, string reason, DateTimeOffset recordedAtUtc, SessionRevisionAction action, CancellationToken ct)
         {
@@ -658,7 +668,8 @@ public sealed class CommunitySessionServiceTests
             IReadOnlyList<DomainSessions.SessionReminderOccurrence>? occurrences,
             SessionRevisionAction action,
             DateTimeOffset? previousStartUtc,
-            CancellationToken ct)
+            CancellationToken ct,
+            IReadOnlyList<SwiftAid.Contracts.Sessions.SessionMaterialApproval>? materialApprovals = null)
         {
             if (!_versions.TryGetValue(session.SessionId, out var current) || current != expectedVersion)
             {

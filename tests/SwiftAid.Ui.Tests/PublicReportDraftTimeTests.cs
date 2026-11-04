@@ -6,6 +6,23 @@ namespace SwiftAid.Ui.Tests;
 
 public sealed class PublicReportDraftTimeTests
 {
+    [Fact]
+    public void CaptureChoices_RoundTripAndDoNotApplyHumanGenderToAnimals()
+    {
+        var draft = Draft();
+        draft.Gender = ReportedGender.Female;
+        draft.DeathRelated = true;
+        var saved = Submit(draft);
+        var restored = PublicReportDraft.FromSubmission(saved);
+        Assert.Equal(ReportedGender.Female, restored.Gender);
+        Assert.True(restored.DeathRelated);
+
+        restored.SubjectScope = IntakeSubjectScope.Herd;
+        var animal = Submit(restored);
+        Assert.Null(animal.Gender);
+        Assert.True(animal.DeathRelated);
+    }
+
     private static PublicReportDraft Draft() => new()
     {
         SubjectScope = IntakeSubjectScope.Human,
@@ -63,5 +80,44 @@ public sealed class PublicReportDraftTimeTests
         Assert.NotNull(submission.Occurrence.Value);
         Assert.Null(submission.Occurrence.LocalDate);
         Assert.Equal("+02:00", submission.Occurrence.OriginalOffset);
+    }
+
+    [Theory]
+    [InlineData("+-1:00")]
+    [InlineData("+ 2:00")]
+    [InlineData("+02:-1")]
+    [InlineData("+14:01")]
+    public void ToSubmission_RejectsMalformedExactOffset(string offset)
+    {
+        var draft = Draft();
+        draft.OccurrencePrecision = ReportedTimePrecision.Exact;
+        draft.OccurrenceDate = new DateTime(2026, 10, 31);
+        draft.OccurrenceTime = "08:15";
+        draft.OccurrenceOffset = offset;
+
+        Assert.Throws<InvalidOperationException>(() => Submit(draft));
+    }
+
+    [Fact]
+    public void ToSubmission_RejectsOversizedKnownPlaceAndAcceptsBoundary()
+    {
+        var draft = Draft();
+        draft.RegionPresence = PresenceState.Known;
+        draft.Region = new string('x', 201);
+        Assert.Throws<InvalidOperationException>(() => Submit(draft));
+
+        draft.Region = new string('x', 200);
+        Assert.Equal(draft.Region, Submit(draft).Location.Region.ReportedName);
+    }
+
+    [Fact]
+    public void ToSubmission_RejectsOversizedObservationTextAndAcceptsBoundary()
+    {
+        var draft = Draft();
+        draft.ObservationsText = new string(' ', 20001);
+        Assert.Throws<InvalidOperationException>(() => Submit(draft));
+
+        draft.ObservationsText = new string(' ', 20000);
+        Assert.Empty(Submit(draft).Observations);
     }
 }

@@ -19,7 +19,9 @@ public static class CaseCommandAuthorizationMap
             RequestAssistanceCommand or UpdateAssistanceCommand => Requirement(CaseOperation.ManageAssistance, CaseCapability.ManageAssistance),
             ChangeActionOwnerCommand change => ResolveActionOwnerChange(change),
             CorrectReportCommand => Requirement(CaseOperation.CorrectReport, CaseCapability.CorrectReport),
-            RecordObservationCommand => Requirement(CaseOperation.RecordObservation, CaseCapability.RecordObservation),
+            PostCaseDiscussionCommand { EvidenceKeys.Count: > 0 } or RecordObservationCommand { Attachment: not null } =>
+                Requirement([CaseOperation.ReadCase, CaseOperation.RecordObservation, CaseOperation.ReadAttachment], CaseCapability.RecordObservation),
+            PostCaseDiscussionCommand or RecordObservationCommand => Requirement(CaseOperation.RecordObservation, CaseCapability.RecordObservation),
             ScheduleFollowUpCommand or AcknowledgeFollowUpCommand or RecordFollowUpOutcomeCommand => Requirement(CaseOperation.ManageFollowUp, CaseCapability.ManageFollowUp),
             RaiseEscalationCommand or AcknowledgeEscalationCommand or RecordEscalationActionCommand or CloseEscalationCommand => Requirement(CaseOperation.ManageEscalation, CaseCapability.ManageEscalation),
             RequestCaseActionCommand request => ResolveRequest(request),

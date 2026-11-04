@@ -13,6 +13,16 @@
     min-width: 0;
 }
 
+.operations-analytics__header > div:first-child,
+.operations-analytics__section-heading > div:first-child {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.operations-analytics__actions {
+    flex-shrink: 0;
+}
+
 .operations-analytics__actions,
 .operations-analytics__filters {
     display: flex;

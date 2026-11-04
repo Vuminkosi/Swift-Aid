@@ -43,12 +43,21 @@ public static class EllaiUiProposalPayload
             throw new ArgumentException("UI proposal shape is invalid.");
         if (proposals.Any(proposal => proposal.Kind == UiIntentKind.NavigateFeature && !EllaiFeatureNavigationProposal.IsValid(proposal)))
             throw new ArgumentException("Feature navigation requires one registered destination or local back command.");
+        if (proposals.Any(proposal => proposal.Kind == UiIntentKind.UpdatePublicReportDraft &&
+            (proposal.FeatureId != "report" || proposal.ResourceId is not null ||
+             proposal.ControlId is not ("report.age-years" or "report.gender" or "report.other-observations" or "report.locality" or "report.original-statement" or "report.onset-date") || proposal.Arguments.Count != 0)))
+            throw new ArgumentException("Report draft updates may target only value-free report fields.");
         if (proposals.Any(proposal => proposal.Kind == UiIntentKind.SetPermittedFilter && !EllaiCaseFilterProposal.IsValid(proposal)))
             throw new ArgumentException("Case filtering requires one bounded registered filter and no resource or authority arguments.");
         if (proposals.Any(proposal => proposal.Kind == UiIntentKind.OpenAuthorizedRecord && EllaiCaseNavigationProposal.ReadCaseId(proposal) is null))
             throw new ArgumentException("Case navigation requires a canonical case identifier and no authority or route arguments.");
+        var draftEdits = proposals.Where(proposal => proposal.Kind == UiIntentKind.UpdatePublicReportDraft).ToArray();
+        if (draftEdits.Length > 1 || draftEdits.Length == 1 &&
+            (proposals.Count != 1 || draftEdits[0] is not
+                { FeatureId: "report", ResourceId: null, ControlId: "report.age-years" or "report.other-observations" or "report.locality" or "report.original-statement", Arguments.Count: 0 }))
+            throw new ArgumentException("Report draft updates require one allowlisted control and carry no report values.");
         if (proposals.Any(proposal => proposal.Kind == UiIntentKind.SelectTab && EllaiCaseDetailUiManifest.ReadTab(proposal) is null) ||
-            proposals.Count(proposal => proposal.Kind is UiIntentKind.StartGuidance or UiIntentKind.ControlGuidance or UiIntentKind.SelectTab or UiIntentKind.OpenAuthorizedRecord or UiIntentKind.SetPermittedFilter or UiIntentKind.NavigateFeature) > 1)
+            proposals.Count(proposal => proposal.Kind is UiIntentKind.StartGuidance or UiIntentKind.ControlGuidance or UiIntentKind.SelectTab or UiIntentKind.OpenAuthorizedRecord or UiIntentKind.SetPermittedFilter or UiIntentKind.NavigateFeature or UiIntentKind.UpdatePublicReportDraft) > 1)
             throw new ArgumentException("Navigation requires one registered presentation target and cannot be combined with guidance controls.");
         if (proposals.Count(proposal => proposal.Kind is UiIntentKind.StartGuidance or UiIntentKind.ControlGuidance) > 1 ||
             proposals.Any(proposal => proposal.Kind == UiIntentKind.ControlGuidance && EllaiGuidanceControlProposal.ReadCommand(proposal) is null))

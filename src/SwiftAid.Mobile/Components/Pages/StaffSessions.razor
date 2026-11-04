@@ -1,0 +1,1406 @@
+@page "/sessions/manage"
+@implements IDisposable
+@using SwiftAid.Contracts.Sessions
+@using SwiftAid.Client.Presentation
+@using SwiftAid.Client.Presentation.PublicWorkflows
+@using Microsoft.Extensions.DependencyInjection
+@using SwiftAid.UI.Components.Sessions
+@using Microsoft.AspNetCore.Components
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.AspNetCore.Components.Routing
+@using SwiftAid.UI.Components.Surfaces.Public
+@inject IPublicCommunitySessionClient PublicSessionClient
+@inject ISubscriptionClient SubscriptionClient
+@inject IStaffSessionEditorClient StaffSessionEditor
+@inject IStaffSessionHistoryClient StaffSessionHistory
+@inject NavigationManager Navigation
+@inject SwiftAid.Mobile.Services.Authentication.IMobileAuthenticationSession AuthenticationSession
+@inject IStaffSessionDraftReservationClient DraftReservation
+@inject IHttpClientFactory HttpClientFactory
+@inject SwiftAid.Mobile.Services.Sessions.IMobileSessionPlatform SessionPlatform
+
+<PageTitle>Manage community sessions | SwiftAid</PageTitle>
+<NavigationLock OnBeforeInternalNavigation="ConfirmRetainedLeave" ConfirmExternalNavigation="@HasRetainedProposal" />
+
+<div class="community-sessions-page">
+    <MudButton Href="/sessions" Variant="Variant.Text" Color="Color.Primary" StartIcon="@Icons.Material.Filled.ArrowBack">
+        Community sessions
+    </MudButton>
+    @if (_commandNotice is not null)
+    {
+        <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" role="status">@_commandNotice</MudAlert>
+    }
+    @if (_confirmingRetainedLeave)
+    {
+        <MudPaper Class="pa-4 mb-4" Elevation="0" role="alertdialog" aria-modal="true" aria-label="Unconfirmed session changes">
+            <MudText Typo="Typo.subtitle1">Leave without keeping your session changes?</MudText>
+            <MudText Typo="Typo.body2">The temporary copy and any unsaved session edits will be lost.</MudText>
+            <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="StayWithRetainedProposal">Stay on this page</MudButton>
+            <MudButton Variant="Variant.Text" Color="Color.Secondary" OnClick="LeaveWithRetainedProposal">Leave without saving</MudButton>
+        </MudPaper>
+    }
+    @if (_retainedWorkingCopy is { } retained && string.Equals(retained.ActorId, _actorId, StringComparison.Ordinal))
+    {
+        <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" role="status">
+            @if (_confirmedRetainedCreateId is not null)
+            {
+                <span>The session was saved. Review or discard the retained copy before editing the saved session.</span>
+                @if (!_retainedAccessVerified)
+                {
+                    <MudButton Variant="Variant.Text" OnClick="VerifyConfirmedRetainedAsync" Disabled="_busy">Check access to view</MudButton>
+                }
+            }
+            else
+            {
+                <span>A temporary copy of session entries is retained on this page. Check access to review or restore it.</span>
+                <MudButton Variant="Variant.Text" OnClick="RestoreRetainedWorkingCopyAsync" Disabled="_busy">Check and restore</MudButton>
+            }
+            @if (!_confirmingWorkingCopyDiscard)
+            {
+                <MudButton Variant="Variant.Text" OnClick="() => _confirmingWorkingCopyDiscard = true">Discard retained entries…</MudButton>
+            }
+            else
+            {
+                <MudButton Variant="Variant.Text" Color="Color.Error" OnClick="DiscardRetainedWorkingCopy">Yes, discard</MudButton>
+                <MudButton Variant="Variant.Text" OnClick="() => _confirmingWorkingCopyDiscard = false">Keep entries</MudButton>
+            }
+        </MudAlert>
+        @if (_retainedAccessVerified && !_retainedCanRestore)
+        {
+            <details>
+                <summary>View retained entries</summary>
+                <SessionEditor SessionId="retained.SessionId" ExpectedVersion="retained.ExpectedVersion"
+                               CurrentActorId="@_actorId" InitialWorkingCopy="retained" />
+                <p>Reason: @retained.Reason</p>
+                @if (!string.IsNullOrWhiteSpace(retained.CancellationReason))
+                {
+                    <p>Cancellation reason: @retained.CancellationReason</p>
+                }
+            </details>
+        }
+    }
+    @if (_deferredCreate is not null && string.Equals(_deferredCreateActor, _actorId, StringComparison.Ordinal))
+    {
+        <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" role="status">
+            @if (_deferredCreateOutcomeUnknown)
+            {
+                <span>The new session may have been saved, but its outcome could not be confirmed. Check the session before creating another. This temporary copy lasts only while this page remains open.</span>
+                <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="RetryDeferredCreateAsync" Disabled="_busy">Check session</MudButton>
+            }
+            else
+            {
+                <span>The new session draft was not submitted. When access returns, choose Schedule session to restore it. This temporary copy lasts only while this page remains open.</span>
+            }
+            @if (!_confirmingCreateDiscard)
+            {
+                <MudButton Variant="Variant.Text" Color="Color.Secondary" OnClick="() => _confirmingCreateDiscard = true">Discard temporary copy…</MudButton>
+            }
+            else
+            {
+                <MudText Typo="Typo.caption">@(_deferredCreateOutcomeUnknown ? "Discard the temporary copy? The session may still have been saved." : "Discard the temporary draft?")</MudText>
+                <MudButton Variant="Variant.Text" Color="Color.Error" OnClick="ClearDeferredCreate">Yes, discard copy</MudButton>
+                <MudButton Variant="Variant.Text" OnClick="() => _confirmingCreateDiscard = false">Keep copy</MudButton>
+            }
+        </MudAlert>
+    }
+    @if (_deferredProposal is not null && string.Equals(_deferredProposalActor, _actorId, StringComparison.Ordinal))
+    {
+        <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" role="status">
+            @(_deferredNotSubmitted ? "An update was not submitted because access could not be confirmed." : "An update could not be confirmed.")
+            Check access again to compare your changes. This temporary copy lasts only while this page remains open.
+            <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="RetryDeferredProposalAsync" Disabled="_busy">Check access again</MudButton>
+            @if (!_confirmingDeferredDiscard)
+            {
+                <MudButton Variant="Variant.Text" Color="Color.Secondary" OnClick="() => _confirmingDeferredDiscard = true" Disabled="_busy">Discard temporary copy…</MudButton>
+            }
+            else
+            {
+                <MudText Typo="Typo.caption">Discard the unconfirmed update copy?</MudText>
+                <MudButton Variant="Variant.Text" Color="Color.Error" OnClick="ClearDeferredProposal" Disabled="_busy">Yes, discard copy</MudButton>
+                <MudButton Variant="Variant.Text" OnClick="() => _confirmingDeferredDiscard = false" Disabled="_busy">Keep copy</MudButton>
+            }
+        </MudAlert>
+    }
+    @if (_conflictProposal is { } proposal && _staffView is { } current &&
+         _managementCapabilities.CanEdit && CanRenderEditor(_managementCapabilities))
+    {
+        <SessionConflictReview Proposal="proposal" Current="current" OutcomeUnknown="_proposalOutcomeUnknown" NotSubmitted="_proposalNotSubmitted" OnDismiss="DismissConflictProposal" />
+    }
+    <PublicSessionsSurface @key="(RequestedSessionId, IsCalendarRoute, InitialRemindersView)" Sessions="_sessions"
+                           Loading="_loadingList"
+                           ErrorMessage="@ListError"
+                           SubscriptionsHref="/notifications"
+                           OnRetry="LoadListAsync"
+                           QuerySessionsAsync="@(RequestedSessionId is null ? QuerySessionsAsync : null)"
+                           InitialCalendarView="@(IsCalendarRoute && RequestedSessionId is null)"
+                           LoadInvitationTextAsync="InvitationLoader"
+                           PublicSessionBasePath="@CalendarBasePath"
+                           OpenCalendarAsync="OpenCalendarAsync"
+                           ShareTextAsync="ShareAsync"
+                           LoadSubscriptionStateAsync="LoadSubscriptionStateAsync"
+                           ExecuteSubscriptionActionAsync="ExecuteSubscriptionActionAsync"
+                           OnRequestSignIn="RequestSubscriptionSignInAsync"
+                           InitialSessionId="RequestedSessionId"
+                           InitialRemindersView="InitialRemindersView"
+                           LoadManagementCapabilitiesAsync="LoadManagementCapabilitiesAsync"
+                           OnManageSession="ManageSessionAsync"
+                           HasPendingEditorInput="HasPendingEditorInput"
+                           StaffEditorOpenRequest="_staffEditorOpenRequest"
+                           StaffEditorCapabilities="_managementCapabilities">
+        <StaffSessionEditorContent Context="capability">
+            @if (CanRenderEditor(capability))
+            {
+                var editorGeneration = _editorGeneration;
+                @if (capability.CanCreate || capability.CanEdit || capability.CanReview || capability.CanSchedule || capability.CanCancel || capability.CanComplete)
+                {
+                <SessionEditor @ref="_sessionEditor" @key="(nameof(SessionEditor), _editorGeneration, _editingVersion)"
+                           ManagementCapabilities="capability"
+                           SessionId="_editingSessionId"
+                           ExpectedVersion="_editingVersion"
+                           Status="@_editingStatus"
+                           CreatedByActorId="@_editingCreatedBy"
+                           CurrentActorId="@_actorId"
+                           InitialSession="_staffView"
+                           InitialDraft="_recoveredCreate"
+                           InitialWorkingCopy="_restoredWorkingCopy"
+                           Busy="_busy"
+                           SuppressNavigationPrompt="HasRetainedProposal"
+                           ServerError="@_serverError"
+                           OnCreate="submission => HandleCreateAsync(submission, editorGeneration)"
+                           OnUpdate="submission => HandleUpdateAsync(submission, editorGeneration)"
+                           OnReview="submission => HandleReviewAsync(submission, editorGeneration)"
+                           OnSchedule="reason => HandleScheduleAsync(reason, editorGeneration)"
+                           OnCancel="submission => HandleCancelAsync(submission, editorGeneration)"
+                           OnComplete="reason => HandleCompleteAsync(reason, editorGeneration)" />
+                }
+                @if (capability.CanViewHistory && _editingSessionId is { } historySessionId)
+                {
+                    <SessionHistoryPanel @key="(nameof(SessionHistoryPanel), _editorGeneration, _editingVersion)" SessionId="historySessionId"
+                                         SessionVersion="_editingVersion" LoadHistoryAsync="LoadSessionHistoryAsync" />
+                }
+            }
+        </StaffSessionEditorContent>
+    </PublicSessionsSurface>
+</div>
+
+@code {
+    private IReadOnlyList<PublicSessionView> _sessions = Array.Empty<PublicSessionView>();
+    private bool _loadingList = true;
+    private string? ListError { get; set; }
+    private bool _busy;
+    private bool _canManageSessions;
+    private long _staffLoadGeneration;
+    private long _accessGeneration;
+    private long _identityEpoch;
+    private bool _disposed;
+    private long _capabilityRequestGeneration;
+    private long _editorGeneration;
+    private long _staffEditorOpenRequest;
+    private string? _serverError;
+    private string? _commandNotice;
+    private string? _actorId;
+    private SessionManagementPresentation _managementCapabilities = SessionManagementPresentation.Unavailable();
+    private Guid? _editingSessionId;
+    private long _editingVersion;
+    private string? _editingStatus;
+    private string? _editingCreatedBy;
+    private CommunitySessionView? _staffView;
+    private SessionUpdateSubmission? _conflictProposal;
+    private bool _proposalOutcomeUnknown;
+    private bool _proposalNotSubmitted;
+    private SessionUpdateSubmission? _deferredProposal;
+    private string? _deferredProposalActor;
+    private bool _deferredNotSubmitted;
+    private bool _confirmingDeferredDiscard;
+    private SessionCreateSubmission? _deferredCreate;
+    private SessionCreateSubmission? _recoveredCreate;
+    private string? _deferredCreateActor;
+    private Guid? _deferredCreateSessionId;
+    private bool _deferredCreateOutcomeUnknown;
+    private bool _confirmingCreateDiscard;
+    private bool _confirmingRetainedLeave;
+    private string? _retainedLeaveTarget;
+    private string? _approvedRetainedLeaveTarget;
+    private SessionEditorWorkingCopy? _retainedWorkingCopy;
+    private SessionEditorWorkingCopy? _restoredWorkingCopy;
+    private bool _retainedAccessVerified;
+    private bool _retainedCanRestore;
+    private Guid? _confirmedRetainedCreateId;
+    private bool _confirmingWorkingCopyDiscard;
+    private bool HasRetainedProposal => _deferredProposal is not null || _conflictProposal is not null || _deferredCreate is not null || _retainedWorkingCopy is not null;
+    private SessionEditor? _sessionEditor;
+    private bool HasPendingEditorInput() => _sessionEditor?.HasPendingInput == true || _conflictProposal is not null;
+    private Guid? _loadedRequestId;
+    private bool _pageInitialized;
+    private long _listGeneration;
+    [SupplyParameterFromQuery(Name = "sessionId")] public Guid? RequestedSessionId { get; set; }
+    [SupplyParameterFromQuery(Name = "tab")] public string? RequestedTab { get; set; }
+    private bool InitialRemindersView => RequestedSessionId is not null &&
+        string.Equals(RequestedTab, "reminders", StringComparison.OrdinalIgnoreCase);
+    private bool IsCalendarRoute => string.Equals(Navigation.ToAbsoluteUri(Navigation.Uri).AbsolutePath.TrimEnd('/'),
+        "/sessions/calendar", StringComparison.OrdinalIgnoreCase);
+    private Func<Guid, long, Task<string?>> InvitationLoader => LoadInvitationAsync;
+    private string? CalendarBasePath { get; set; }
+
+    private async Task<SessionHistoryPage?> LoadSessionHistoryAsync(Guid sessionId, long? beforeVersion)
+    {
+        var epoch = Volatile.Read(ref _identityEpoch);
+        var actor = _actorId;
+        var version = _editingVersion;
+        if (string.IsNullOrWhiteSpace(actor) || _editingSessionId != sessionId || !_managementCapabilities.CanViewHistory ||
+            !CanRenderEditor(_managementCapabilities)) return null;
+        var result = await StaffSessionHistory.ReadAsync(sessionId, beforeVersion);
+        if (!IsCurrentIdentityEpoch(epoch) || !string.Equals(actor, _actorId, StringComparison.Ordinal) ||
+            _editingSessionId != sessionId || _editingVersion != version || !_managementCapabilities.CanViewHistory ||
+            !CanRenderEditor(_managementCapabilities) || !result.Succeeded || !result.Metadata.IsAvailable ||
+            result.Metadata.Provenance != UiCapabilityProvenance.LiveService || result.Value?.SessionId != sessionId)
+            return null;
+        return result.Value;
+    }
+
+    private async Task<PublicSessionPage?> QuerySessionsAsync(PublicSessionQuery query)
+    {
+        var result = await PublicSessionClient.QueryPublicAsync(query);
+        return result.Succeeded ? result.Value : null;
+    }
+    protected override async Task OnInitializedAsync()
+    {
+        using var http = HttpClientFactory.CreateClient("SwiftAid.NotificationApi");
+        CalendarBasePath = http.BaseAddress is { } address ? new Uri(address, "public/v1/sessions").AbsoluteUri : null;
+        AuthenticationSession.AuthenticationStateChanged += OnAuthenticationStateChanged;
+        await RefreshStaffAccessAsync();
+        _loadedRequestId = RequestedSessionId;
+        await LoadListAsync();
+        _pageInitialized = true;
+        if (RequestedSessionId is { } sessionId && sessionId != Guid.Empty && _canManageSessions)
+        {
+            await LoadStaffSessionAsync(sessionId);
+        }
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_pageInitialized && _loadedRequestId != RequestedSessionId)
+        {
+            _loadedRequestId = RequestedSessionId;
+            await LoadListAsync();
+        }
+    }
+
+    private async Task<bool> RefreshStaffIdentityAsync(bool preserveCurrentStaffLoad = false)
+    {
+        var generation = Interlocked.Increment(ref _accessGeneration);
+        var previousActorId = _actorId;
+        try
+        {
+            var result = await StaffSessionEditor.GetCurrentActorIdAsync();
+            if (generation != Volatile.Read(ref _accessGeneration))
+            {
+                return false;
+            }
+
+            if (result.Code == UiCapabilityResultCode.Success && result.Metadata.IsAvailable &&
+                !string.IsNullOrWhiteSpace(result.Value))
+            {
+                if (!string.Equals(previousActorId, result.Value, StringComparison.Ordinal))
+                    RetainConflictProposal(previousActorId);
+                _actorId = result.Value;
+                if (!string.Equals(previousActorId, _actorId, StringComparison.Ordinal))
+                {
+                    _managementCapabilities = SessionManagementPresentation.Unavailable();
+                    _canManageSessions = false;
+                    ClearEditorStateCore(invalidateStaffLoad: !preserveCurrentStaffLoad);
+                }
+                return true;
+            }
+
+            RetainConflictProposal(previousActorId);
+            _actorId = null;
+            _canManageSessions = false;
+            _managementCapabilities = SessionManagementPresentation.Unavailable();
+            ClearEditorState();
+            if (result.Code is UiCapabilityResultCode.Denied or UiCapabilityResultCode.Unavailable)
+                _serverError = result.Message ?? "Sign in with an authorized staff account to manage sessions.";
+            return false;
+        }
+        catch (Exception)
+        {
+            if (generation != Volatile.Read(ref _accessGeneration))
+            {
+                return false;
+            }
+
+            RetainConflictProposal(previousActorId);
+            _actorId = null;
+            _canManageSessions = false;
+            _managementCapabilities = SessionManagementPresentation.Unavailable();
+            ClearEditorState();
+            _serverError = "The session workspace is unavailable right now.";
+            return false;
+        }
+    }
+
+    private async Task<bool> RefreshStaffAccessAsync(Guid? sessionId = null, long? expectedVersion = null)
+    {
+        _managementCapabilities = SessionManagementPresentation.Unavailable();
+        _canManageSessions = false;
+        var generation = Interlocked.Increment(ref _capabilityRequestGeneration);
+        try
+        {
+            var presentation = await LoadManagementCapabilitiesAsync(sessionId, expectedVersion);
+            if (generation != Volatile.Read(ref _capabilityRequestGeneration)) return false;
+
+            if (presentation.IsAvailable && presentation.IsCurrent &&
+                presentation.SessionId == sessionId &&
+                (expectedVersion is null || presentation.Version == expectedVersion))
+            {
+                _managementCapabilities = presentation;
+                _canManageSessions = presentation.CanCreate || presentation.CanEdit || presentation.CanReview ||
+                    presentation.CanSchedule || presentation.CanCancel || presentation.CanComplete || presentation.CanViewHistory;
+                if (_canManageSessions)
+                {
+                    _serverError = null;
+                    return true;
+                }
+            }
+
+            _managementCapabilities = SessionManagementPresentation.Unavailable(presentation.Message);
+            _canManageSessions = false;
+            ClearEditorState();
+            _serverError = presentation.Message ?? "Session management access is not available for this session.";
+            return false;
+        }
+        catch (Exception)
+        {
+            if (generation == Volatile.Read(ref _capabilityRequestGeneration))
+            {
+                _managementCapabilities = SessionManagementPresentation.Unavailable("Session management access could not be refreshed.");
+                _canManageSessions = false;
+                ClearEditorState();
+                _serverError = "Session management access could not be refreshed.";
+            }
+            return false;
+        }
+    }
+
+    private async Task<SessionManagementPresentation> LoadManagementCapabilitiesAsync(
+        Guid? sessionId,
+        long? expectedVersion)
+    {
+        if (!await RefreshStaffIdentityAsync())
+        {
+            return SessionManagementPresentation.Unavailable(
+                "Sign in to check session management access.");
+        }
+
+        try
+        {
+            var identityGeneration = Volatile.Read(ref _accessGeneration);
+            var result = await StaffSessionEditor.GetManagementCapabilitiesAsync(sessionId, expectedVersion);
+            if (identityGeneration != Volatile.Read(ref _accessGeneration))
+            {
+                return SessionManagementPresentation.Unavailable("Session management access changed. Refresh and try again.");
+            }
+
+            if (result.Value is not { } capability ||
+                result.Code is not (UiCapabilityResultCode.Success or UiCapabilityResultCode.Conflict))
+            {
+                return SessionManagementPresentation.Unavailable(
+                    result.Message ?? result.Metadata.Notice ?? "Session management access is unavailable.");
+            }
+
+            return ToPresentation(capability, result.Metadata.IsAvailable,
+                result.Message ?? result.Metadata.Notice);
+        }
+        catch (Exception)
+        {
+            return SessionManagementPresentation.Unavailable(
+                "Session management access could not be refreshed.");
+        }
+    }
+
+    private static SessionManagementPresentation ToPresentation(
+        StaffSessionManagementCapabilities capability,
+        bool isAvailable,
+        string? message) => new(
+            isAvailable,
+            capability.IsCurrent,
+            capability.SessionId,
+            capability.Version,
+            capability.Status,
+            capability.CanCreate,
+            capability.CanEdit,
+            capability.CanReview,
+            capability.CanSchedule,
+            capability.CanCancel,
+            capability.CanComplete,
+            message,
+            capability.CanViewHistory,
+            capability.OwnerOrganizationIds);
+
+    private bool CanRenderEditor(SessionManagementPresentation presentation)
+    {
+        if ((_retainedWorkingCopy is not null && _retainedWorkingCopy.ActorId != _actorId) ||
+            (_deferredProposalActor is not null && _deferredProposalActor != _actorId) ||
+            (_deferredCreateActor is not null && _deferredCreateActor != _actorId)) return false;
+        if (_retainedWorkingCopy is { } retained && !ReferenceEquals(_restoredWorkingCopy, retained))
+        {
+            var checkingCreatedSession = _deferredCreateOutcomeUnknown && _deferredCreateActor == _actorId &&
+                _deferredCreateSessionId is { } createdId && createdId == _editingSessionId;
+            var reviewingUpdate = _editingSessionId is { } editingId && retained.SessionId == editingId &&
+                (_deferredProposal?.SessionId == editingId || _conflictProposal?.SessionId == editingId);
+            if (!checkingCreatedSession && !reviewingUpdate) return false;
+        }
+        if (!presentation.IsAvailable || !presentation.IsCurrent)
+        {
+            return false;
+        }
+
+        if (_editingSessionId is null)
+        {
+            return presentation.SessionId is null && presentation.CanCreate;
+        }
+
+        return presentation.SessionId == _editingSessionId &&
+            presentation.Version == _editingVersion &&
+            string.Equals(presentation.Status, _editingStatus, StringComparison.OrdinalIgnoreCase) &&
+            (presentation.CanEdit || presentation.CanReview || presentation.CanSchedule ||
+             presentation.CanCancel || presentation.CanComplete || presentation.CanViewHistory);
+    }
+
+    private async Task ManageSessionAsync(Guid? sessionId)
+    {
+        if ((_deferredProposalActor is not null && _deferredProposalActor != _actorId) ||
+            (_deferredCreateActor is not null && _deferredCreateActor != _actorId))
+        {
+            _commandNotice = "An unconfirmed session change is retained. Sign in with its original account or leave this page to discard it.";
+            return;
+        }
+        if (_retainedWorkingCopy is not null)
+        {
+            _commandNotice = "Restore or explicitly discard the retained session entries before opening another editor.";
+            return;
+        }
+        _commandNotice = null;
+        _conflictProposal = null;
+        if (sessionId is null)
+        {
+            if (_deferredCreateOutcomeUnknown)
+            {
+                _serverError = "Check the unconfirmed session or discard its temporary copy before creating another.";
+                return;
+            }
+            if (!await RefreshStaffAccessAsync())
+            {
+                ClearEditorState();
+                return;
+            }
+
+            if (!_managementCapabilities.CanCreate)
+            {
+                ClearEditorState();
+                return;
+            }
+
+            _serverError = null;
+            _editingSessionId = null;
+            _editingVersion = 0;
+            _editingStatus = null;
+            _editingCreatedBy = _actorId;
+            _staffView = null;
+            _recoveredCreate = string.Equals(_deferredCreateActor, _actorId, StringComparison.Ordinal) ? _deferredCreate : null;
+            ClearDeferredCreate();
+            Interlocked.Increment(ref _editorGeneration);
+            return;
+        }
+
+        _recoveredCreate = null;
+        Interlocked.Increment(ref _editorGeneration);
+        await LoadStaffSessionAsync(sessionId.Value);
+    }
+
+    private async Task LoadStaffSessionAsync(Guid sessionId)
+    {
+        var generation = Interlocked.Increment(ref _staffLoadGeneration);
+        var identityEpoch = Volatile.Read(ref _identityEpoch);
+        var identityAvailable = sessionId != Guid.Empty && await RefreshStaffIdentityAsync(preserveCurrentStaffLoad: true);
+        if (!IsCurrentIdentityEpoch(identityEpoch)) return;
+        if (!identityAvailable || string.IsNullOrWhiteSpace(_actorId))
+        {
+            ClearEditorState();
+            return;
+        }
+
+        _busy = true;
+        _serverError = null;
+        var identityGeneration = Volatile.Read(ref _accessGeneration);
+        try
+        {
+            var result = await StaffSessionEditor.GetStaffAsync(sessionId);
+            if (!IsCurrentIdentityEpoch(identityEpoch) || generation != Volatile.Read(ref _staffLoadGeneration) ||
+                identityGeneration != Volatile.Read(ref _accessGeneration))
+            {
+                return;
+            }
+
+            if (result.Code == UiCapabilityResultCode.Success && result.Metadata.IsAvailable &&
+                result.Value is { Version: > 0 } session && session.SessionId == sessionId)
+            {
+                var capabilityResult = await StaffSessionEditor.GetManagementCapabilitiesAsync(session.SessionId, session.Version);
+                if (!IsCurrentIdentityEpoch(identityEpoch) || generation != Volatile.Read(ref _staffLoadGeneration) ||
+                    identityGeneration != Volatile.Read(ref _accessGeneration)) return;
+                if (capabilityResult.Code != UiCapabilityResultCode.Success || !capabilityResult.Metadata.IsAvailable ||
+                    capabilityResult.Value is not { IsCurrent: true } capabilities ||
+                    capabilities.SessionId != session.SessionId || capabilities.Version != session.Version ||
+                    !string.Equals(capabilities.Status, session.Status, StringComparison.OrdinalIgnoreCase))
+                {
+                    ClearEditorState();
+                    _managementCapabilities = SessionManagementPresentation.Unavailable(
+                        capabilityResult.Message ?? capabilityResult.Metadata.Notice);
+                    _canManageSessions = false;
+                    _serverError = capabilityResult.Message ?? "Session management access is not available for this session.";
+                    return;
+                }
+
+                var presentation = ToPresentation(capabilities, capabilityResult.Metadata.IsAvailable,
+                    capabilityResult.Message ?? capabilityResult.Metadata.Notice);
+                var canManage = capabilities.CanEdit || capabilities.CanReview || capabilities.CanSchedule ||
+                    capabilities.CanCancel || capabilities.CanComplete || capabilities.CanViewHistory;
+                if (!canManage)
+                {
+                    ClearEditorState();
+                    _managementCapabilities = presentation;
+                    _serverError = null;
+                    return;
+                }
+
+                _editingSessionId = session.SessionId;
+                _editingVersion = session.Version;
+                _editingStatus = session.Status;
+                _editingCreatedBy = session.CreatedByActorId;
+                _staffView = session;
+                _managementCapabilities = presentation;
+                _canManageSessions = true;
+                if (capabilities.CanEdit && _deferredProposal is { } deferred &&
+                    deferred.SessionId == session.SessionId &&
+                    string.Equals(_deferredProposalActor, _actorId, StringComparison.Ordinal))
+                {
+                    _conflictProposal = deferred;
+                    _proposalNotSubmitted = _deferredNotSubmitted;
+                    _proposalOutcomeUnknown = !_deferredNotSubmitted;
+                    ClearDeferredProposal();
+                    _serverError = _proposalNotSubmitted
+                        ? "The update was not submitted. Compare your proposal with the current version below."
+                        : "The update outcome could not be confirmed. Compare your proposal with the current version below.";
+                }
+                return;
+            }
+
+            ClearEditorState();
+            _managementCapabilities = SessionManagementPresentation.Unavailable(
+                result.Message ?? result.Metadata.Notice);
+            _canManageSessions = false;
+            _serverError = result.Message ?? "That session is unavailable to this account. You can start a new session below.";
+        }
+        catch (Exception)
+        {
+            if (IsCurrentIdentityEpoch(identityEpoch) && generation == Volatile.Read(ref _staffLoadGeneration))
+            {
+                ClearEditorState();
+                _managementCapabilities = SessionManagementPresentation.Unavailable(
+                    "The session could not be loaded. Refresh and try again.");
+                _canManageSessions = false;
+                _serverError = "That session could not be loaded. You can start a new session below.";
+            }
+        }
+        finally
+        {
+            if (IsCurrentIdentityEpoch(identityEpoch) && generation == Volatile.Read(ref _staffLoadGeneration))
+            {
+                _busy = false;
+            }
+        }
+    }
+
+    private void ClearEditorState()
+        => ClearEditorStateCore(invalidateStaffLoad: true);
+
+    private void ClearEditorStateCore(bool invalidateStaffLoad)
+    {
+        CapturePendingWorkingCopy();
+        _conflictProposal = null;
+        _sessionEditor = null;
+        _restoredWorkingCopy = null;
+        if (invalidateStaffLoad) Interlocked.Increment(ref _staffLoadGeneration);
+        _canManageSessions = false;
+        _managementCapabilities = SessionManagementPresentation.Unavailable();
+        _editingSessionId = null;
+        _editingVersion = 0;
+        _editingStatus = null;
+        _editingCreatedBy = null;
+        _staffView = null;
+        _recoveredCreate = null;
+        Interlocked.Increment(ref _editorGeneration);
+        _busy = false;
+    }
+
+    private void CapturePendingWorkingCopy()
+    {
+        if (_sessionEditor?.HasPendingInput != true) return;
+        var copy = _sessionEditor.CaptureWorkingCopy();
+        if (string.IsNullOrWhiteSpace(copy.ActorId)) return;
+        if (_retainedWorkingCopy is null ||
+            _retainedWorkingCopy.ActorId == copy.ActorId && _retainedWorkingCopy.SessionId == copy.SessionId &&
+            _retainedWorkingCopy.ExpectedVersion == copy.ExpectedVersion)
+        {
+            _retainedWorkingCopy = copy;
+            _retainedAccessVerified = false;
+        }
+    }
+
+    private void RetainConflictProposal(string? actorId)
+    {
+        if (_conflictProposal is null || _deferredProposal is not null || string.IsNullOrWhiteSpace(actorId)) return;
+        _deferredProposal = _conflictProposal;
+        _deferredProposalActor = actorId;
+        _deferredNotSubmitted = _proposalNotSubmitted;
+    }
+
+    private async Task RestoreRetainedWorkingCopyAsync()
+    {
+        if (_retainedWorkingCopy is not { } copy || !string.Equals(copy.ActorId, _actorId, StringComparison.Ordinal)) return;
+        if (_sessionEditor?.HasPendingInput == true)
+        {
+            _commandNotice = "Finish or discard the entries currently open before restoring the retained copy.";
+            return;
+        }
+        var identityEpoch = Volatile.Read(ref _identityEpoch);
+        _retainedAccessVerified = false;
+        _retainedCanRestore = false;
+        if (copy.SessionId is { } sessionId)
+        {
+            await LoadStaffSessionAsync(sessionId);
+            if (!IsCurrentIdentityEpoch(identityEpoch) || !string.Equals(copy.ActorId, _actorId, StringComparison.Ordinal)) return;
+            _retainedAccessVerified = _staffView?.SessionId == sessionId && _managementCapabilities.IsAvailable;
+            _retainedCanRestore = _retainedAccessVerified && _editingVersion == copy.ExpectedVersion &&
+                _managementCapabilities.IsCurrent && _managementCapabilities.SessionId == sessionId &&
+                _managementCapabilities.Version == _editingVersion &&
+                string.Equals(_managementCapabilities.Status, _editingStatus, StringComparison.OrdinalIgnoreCase) &&
+                (_managementCapabilities.CanEdit || _managementCapabilities.CanReview || _managementCapabilities.CanSchedule ||
+                 _managementCapabilities.CanCancel || _managementCapabilities.CanComplete || _managementCapabilities.CanViewHistory);
+        }
+        else
+        {
+            _retainedCanRestore = await RefreshStaffAccessAsync() && _managementCapabilities.CanCreate;
+            if (!IsCurrentIdentityEpoch(identityEpoch) || !string.Equals(copy.ActorId, _actorId, StringComparison.Ordinal)) return;
+            _retainedAccessVerified = _retainedCanRestore;
+            if (_retainedCanRestore)
+            {
+                _editingSessionId = null;
+                _editingVersion = 0;
+                _editingStatus = null;
+                _editingCreatedBy = _actorId;
+                _staffView = null;
+            }
+        }
+        if (_retainedCanRestore)
+        {
+            _restoredWorkingCopy = copy;
+            Interlocked.Increment(ref _editorGeneration);
+            Interlocked.Increment(ref _staffEditorOpenRequest);
+            _commandNotice = "Your retained entries have been restored. Review them before saving.";
+        }
+        else if (_retainedAccessVerified)
+        {
+            _commandNotice = "The session changed. Your retained entries are available below for review; they cannot be applied to the newer version automatically.";
+        }
+        else
+        {
+            _commandNotice = "Access could not be confirmed. Your entries remain on this page.";
+        }
+    }
+
+    private void DiscardRetainedWorkingCopy()
+    {
+        _retainedWorkingCopy = null;
+        _restoredWorkingCopy = null;
+        _retainedAccessVerified = false;
+        _retainedCanRestore = false;
+        _confirmedRetainedCreateId = null;
+        _confirmingWorkingCopyDiscard = false;
+    }
+
+    private async Task VerifyConfirmedRetainedAsync()
+    {
+        if (_confirmedRetainedCreateId is not { } sessionId || _retainedWorkingCopy is not { } copy ||
+            !string.Equals(copy.ActorId, _actorId, StringComparison.Ordinal)) return;
+        var epoch = Volatile.Read(ref _identityEpoch);
+        await LoadStaffSessionAsync(sessionId);
+        if (IsCurrentIdentityEpoch(epoch) && string.Equals(copy.ActorId, _actorId, StringComparison.Ordinal))
+            _retainedAccessVerified = _staffView?.SessionId == sessionId && _managementCapabilities.IsAvailable;
+    }
+
+    private void OnAuthenticationStateChanged(object? sender, EventArgs args)
+    {
+        var authEpoch = Interlocked.Increment(ref _identityEpoch);
+        Interlocked.Increment(ref _accessGeneration);
+        Interlocked.Increment(ref _capabilityRequestGeneration);
+        Interlocked.Increment(ref _staffLoadGeneration);
+        _ = InvokeAsync(async () =>
+        {
+            if (!IsCurrentIdentityEpoch(authEpoch)) return;
+            CapturePendingWorkingCopy();
+            RetainConflictProposal(_actorId);
+            _retainedAccessVerified = false;
+            _retainedCanRestore = false;
+            ClearEditorState();
+            _actorId = null;
+            _commandNotice = null;
+            if (!IsCurrentIdentityEpoch(authEpoch)) return;
+            await RefreshStaffAccessAsync(_editingSessionId, _editingSessionId is null ? null : _editingVersion);
+            if (!IsCurrentIdentityEpoch(authEpoch)) return;
+            if (_canManageSessions && RequestedSessionId is { } id && id != Guid.Empty)
+            {
+                await LoadStaffSessionAsync(id);
+            }
+            StateHasChanged();
+        });
+    }
+
+    public void Dispose()
+    {
+        _disposed = true;
+        Interlocked.Increment(ref _identityEpoch);
+        Interlocked.Increment(ref _accessGeneration);
+        Interlocked.Increment(ref _capabilityRequestGeneration);
+        Interlocked.Increment(ref _staffLoadGeneration);
+        ClearDeferredProposal();
+        ClearDeferredCreate();
+        AuthenticationSession.AuthenticationStateChanged -= OnAuthenticationStateChanged;
+    }
+
+    private bool IsCurrentIdentityEpoch(long epoch) => !_disposed && epoch == Volatile.Read(ref _identityEpoch);
+
+    private void ClearDeferredCreate()
+    {
+        _deferredCreate = null;
+        _deferredCreateActor = null;
+        _deferredCreateSessionId = null;
+        _deferredCreateOutcomeUnknown = false;
+        _confirmingCreateDiscard = false;
+    }
+
+    private void RetainCreate(CreateSessionDraftCommand create, string actorId, bool outcomeUnknown)
+    {
+        _deferredCreate = new SessionCreateSubmission(new CreateSessionInput(
+            create.Title, create.Summary, create.AudienceDescription, create.TopicTags,
+            create.CountryCode, create.RegionId, create.Sector, create.Presenter, create.Language,
+            create.StartUtc, create.TimeZoneId, create.DurationMinutes, create.Capacity,
+            create.Materials.Select(m => new SessionMaterialInput(m.MaterialId, m.SourceVersion, m.RightsEvidence)).ToArray(),
+            create.Visibility, create.ChannelType, create.ChannelLink, create.ReminderLeadHours) { OrganizationId = create.OrganizationId }, create.Reason);
+        _deferredCreateActor = actorId;
+        _deferredCreateSessionId = create.SessionId;
+        _deferredCreateOutcomeUnknown = outcomeUnknown;
+    }
+
+    private async Task RetryDeferredCreateAsync()
+    {
+        if (_busy || !_deferredCreateOutcomeUnknown || _deferredCreateSessionId is not { } id ||
+            _deferredCreateActor is not { } actor) return;
+        if (HasPendingEditorInput())
+        {
+            _commandNotice = "Finish or discard your current session edits before checking the unconfirmed session.";
+            return;
+        }
+        var identityEpoch = Volatile.Read(ref _identityEpoch);
+        await LoadStaffSessionAsync(id);
+        if (!IsCurrentIdentityEpoch(identityEpoch)) return;
+        if (_actorId is null)
+        {
+            _commandNotice = "Access could not be checked. The session outcome is still unconfirmed.";
+            return;
+        }
+        if (!string.Equals(_actorId, actor, StringComparison.Ordinal)) return;
+        if (_staffView is { } session && session.SessionId == id &&
+            string.Equals(session.CreatedByActorId, actor, StringComparison.Ordinal) && CanRenderEditor(_managementCapabilities))
+        {
+            if (_retainedWorkingCopy is { SessionId: null } retained && retained.ActorId == actor)
+            {
+                _confirmedRetainedCreateId = id;
+                _retainedAccessVerified = true;
+                _retainedCanRestore = false;
+            }
+            ClearDeferredCreate();
+            Interlocked.Increment(ref _staffEditorOpenRequest);
+            _commandNotice = $"The session was found. Its reference is {id:D}.";
+        }
+        else
+        {
+            _commandNotice = "The session outcome is still unconfirmed. Do not create another until it can be checked.";
+        }
+    }
+
+    private void ClearDeferredProposal()
+    {
+        _deferredProposal = null;
+        _deferredProposalActor = null;
+        _deferredNotSubmitted = false;
+        _confirmingDeferredDiscard = false;
+    }
+
+    private void ConfirmRetainedLeave(LocationChangingContext context)
+    {
+        if (_approvedRetainedLeaveTarget is { } approved)
+        {
+            _approvedRetainedLeaveTarget = null;
+            if (string.Equals(approved, context.TargetLocation, StringComparison.Ordinal)) return;
+        }
+        if (!HasRetainedProposal) return;
+        context.PreventNavigation();
+        _retainedLeaveTarget = context.TargetLocation;
+        _confirmingRetainedLeave = true;
+    }
+
+    private void StayWithRetainedProposal()
+    {
+        _confirmingRetainedLeave = false;
+        _retainedLeaveTarget = null;
+    }
+
+    private void LeaveWithRetainedProposal()
+    {
+        if (_retainedLeaveTarget is not { } target) return;
+        StayWithRetainedProposal();
+        _approvedRetainedLeaveTarget = target;
+        Navigation.NavigateTo(target);
+    }
+
+    private async Task RetryDeferredProposalAsync()
+    {
+        if (_busy || _deferredProposal is not { } proposal) return;
+        await LoadStaffSessionAsync(proposal.SessionId);
+    }
+
+    private async Task LoadListAsync()
+    {
+        var generation = ++_listGeneration;
+        _loadingList = true;
+        ListError = null;
+        try
+        {
+            if (RequestedSessionId is { } sessionId)
+            {
+                var detail = await PublicSessionClient.GetPublicAsync(sessionId);
+                if (generation != _listGeneration) return;
+                _sessions = detail.Succeeded && detail.Value is { } session ? [session] : [];
+                if (!detail.Succeeded)
+                    ListError = "This session is temporarily unavailable. Try again.";
+                else if (detail.Value is null)
+                    ListError = "This session is not available.";
+                return;
+            }
+            var result = await PublicSessionClient.ListPublicAsync(null);
+            if (generation != _listGeneration) return;
+            if (result.Code == UiCapabilityResultCode.Success && result.Value is not null)
+            {
+                _sessions = result.Value;
+                return;
+            }
+
+            _sessions = Array.Empty<PublicSessionView>();
+            ListError = result.Code switch
+            {
+                UiCapabilityResultCode.Denied => "Published sessions are not available for this request.",
+                UiCapabilityResultCode.Cancelled => "Loading sessions was cancelled. Try again when ready.",
+                UiCapabilityResultCode.Retryable => "Published sessions are temporarily unavailable. Check your connection and try again.",
+                _ => "Published sessions are not connected in this environment."
+            };
+        }
+        catch (Exception)
+        {
+            if (generation != _listGeneration) return;
+            _sessions = Array.Empty<PublicSessionView>();
+            ListError = "Published sessions are temporarily unavailable. Check your connection and try again.";
+        }
+        finally
+        {
+            if (generation == _listGeneration) _loadingList = false;
+        }
+    }
+
+    private async Task<string?> LoadInvitationAsync(Guid sessionId, long expectedVersion)
+    {
+        try
+        {
+            var result = await PublicSessionClient.GetInvitationTextForVersionAsync(sessionId, expectedVersion);
+            return result.Code == UiCapabilityResultCode.Success
+                ? result.Value
+                : null;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    private async Task<PublicSessionsSurface.SessionSubscriptionPanelState?> LoadSubscriptionStateAsync(Guid sessionId)
+    {
+        try
+        {
+            var result = await SubscriptionClient.GetAsync(sessionId);
+            if (!SessionSubscriptionPresentation.IsMatchingRead(result, sessionId) || result.Value is null)
+            {
+                return UnavailableSubscriptionState(sessionId, result.Message ?? result.Metadata.Notice);
+            }
+
+            var status = result.Value.Status switch
+            {
+                SubscriptionStatus.Active => PublicSessionsSurface.SessionSubscriptionStatus.Active,
+                SubscriptionStatus.Unsubscribed => PublicSessionsSurface.SessionSubscriptionStatus.Unsubscribed,
+                SubscriptionStatus.RequiresAuthentication => PublicSessionsSurface.SessionSubscriptionStatus.RequiresAuthentication,
+                _ => PublicSessionsSurface.SessionSubscriptionStatus.Unavailable
+            };
+            var options = (PublicSessionsSurface.SessionSubscriptionOptions?)null;
+            var message = CombineMessages(result.Message, result.Metadata.Notice);
+            if (status is PublicSessionsSurface.SessionSubscriptionStatus.Unsubscribed or PublicSessionsSurface.SessionSubscriptionStatus.Active)
+            {
+                var optionsResult = await SubscriptionClient.GetSubscriptionOptionsAsync(sessionId);
+                if (SessionSubscriptionPresentation.IsMatchingOptions(optionsResult, sessionId) && optionsResult.Value is { } optionValue)
+                {
+                    options = new PublicSessionsSurface.SessionSubscriptionOptions(
+                        optionValue.SessionId,
+                        optionValue.ConsentReference,
+                        optionValue.Version,
+                        optionValue.ConsentText,
+                        optionValue.Channels.Select(MapChannel).ToArray(),
+                        optionValue.IsCurrent);
+                    message = CombineMessages(message, CombineMessages(optionsResult.Message, optionsResult.Metadata.Notice));
+                }
+                else if (status == PublicSessionsSurface.SessionSubscriptionStatus.Unsubscribed)
+                {
+                    return UnavailableSubscriptionState(
+                        sessionId,
+                        CombineMessages(optionsResult.Message, optionsResult.Metadata.Notice));
+                }
+            }
+
+            return new PublicSessionsSurface.SessionSubscriptionPanelState(
+                sessionId, status, result.Value.Version, options, message,
+                CurrentChannel: result.Value.Channel is { } channel ? MapChannel(channel) : null);
+        }
+        catch (Exception)
+        {
+            return UnavailableSubscriptionState(sessionId, "Reminder choices are temporarily unavailable. Try again later.", isError: true);
+        }
+    }
+
+    private async Task<PublicSessionsSurface.SessionSubscriptionPanelState?> ExecuteSubscriptionActionAsync(
+        PublicSessionsSurface.SessionSubscriptionAction action)
+    {
+        try
+        {
+            UiCapabilityResult<SubscriptionView>? result;
+            if (action.Kind == PublicSessionsSurface.SessionSubscriptionActionKind.Subscribe)
+            {
+                var options = await SubscriptionClient.GetSubscriptionOptionsAsync(action.SessionId);
+                if (action.Channel is not { } channel || !Enum.IsDefined(channel) ||
+                    !SessionSubscriptionPresentation.CanSubscribe(options, action.SessionId, action.ConsentReference,
+                        action.ExpectedVersion, MapChannel(channel)))
+                {
+                    var refreshed = await LoadSubscriptionStateAsync(action.SessionId);
+                    return refreshed is null
+                        ? UnavailableSubscriptionState(action.SessionId, "Reminder terms changed. Refresh and review the current options.", isError: true)
+                        : refreshed with { IsError = true, Message = "Reminder terms changed. Refresh and review the current options." };
+                }
+                result = await SubscriptionClient.SubscribeAsync(new SubscriptionRequest(
+                    action.SessionId, action.ConsentReference!, action.ExpectedVersion, MapChannel(channel)));
+            }
+            else if (action.Kind == PublicSessionsSurface.SessionSubscriptionActionKind.Unsubscribe)
+            {
+                result = await SubscriptionClient.UnsubscribeAsync(action.SessionId, action.ExpectedVersion);
+            }
+            else
+            {
+                result = null;
+            }
+
+            if (result is null)
+            {
+                return UnavailableSubscriptionState(action.SessionId, "Review the reminder choices before continuing.", isError: true);
+            }
+
+            var expected = action.Kind == PublicSessionsSurface.SessionSubscriptionActionKind.Subscribe
+                ? SubscriptionStatus.Active : SubscriptionStatus.Unsubscribed;
+            if (SessionSubscriptionPresentation.IsConfirmedUpdate(result, action.SessionId, expected, action.ExpectedVersion) && result.Value is { } value)
+            {
+                var status = value.Status switch
+                {
+                    SubscriptionStatus.Active => PublicSessionsSurface.SessionSubscriptionStatus.Active,
+                    SubscriptionStatus.Unsubscribed => PublicSessionsSurface.SessionSubscriptionStatus.Unsubscribed,
+                    SubscriptionStatus.RequiresAuthentication => PublicSessionsSurface.SessionSubscriptionStatus.RequiresAuthentication,
+                    _ => PublicSessionsSurface.SessionSubscriptionStatus.Unavailable
+                };
+                if (status is PublicSessionsSurface.SessionSubscriptionStatus.Unsubscribed or PublicSessionsSurface.SessionSubscriptionStatus.Active)
+                {
+                    var refreshed = await LoadSubscriptionStateAsync(action.SessionId);
+                    if (refreshed is null)
+                        return UnavailableSubscriptionState(action.SessionId, "The reminder change was saved, but its current status could not be verified. Refresh and check again.", isError: true);
+                    var feedback = SessionSubscriptionPresentation.UpdateFeedback(true,
+                        !refreshed.IsError && refreshed.Status == status && refreshed.Version >= value.Version,
+                        CombineMessages(result.Message, result.Metadata.Notice), refreshed.Message);
+                    return refreshed with { Message = feedback.Message, IsError = feedback.IsError };
+                }
+
+                return new PublicSessionsSurface.SessionSubscriptionPanelState(
+                    action.SessionId,
+                    status,
+                    value.Version,
+                    null,
+                    CombineMessages(result.Message, result.Metadata.Notice));
+            }
+
+            var current = await LoadSubscriptionStateAsync(action.SessionId);
+            return current is null
+                ? UnavailableSubscriptionState(action.SessionId, "The reminder change could not be confirmed. Refresh and check the current status.", isError: true)
+                : current with
+                {
+                    IsError = true,
+                    Message = result.Succeeded ? "The reminder change could not be confirmed. Refresh and check the current status."
+                        : CombineMessages(result.Message, result.Metadata.Notice) ?? "The reminder change could not be confirmed. Refresh and check the current status."
+                };
+        }
+        catch (Exception)
+        {
+            var current = await LoadSubscriptionStateAsync(action.SessionId);
+            return current is null
+                ? UnavailableSubscriptionState(action.SessionId, "The reminder choice could not be updated. Try again.", isError: true)
+                : current with { IsError = true, Message = "The reminder choice could not be updated. Try again." };
+        }
+    }
+
+    private Task RequestSubscriptionSignInAsync(Guid sessionId)
+    {
+        var returnUrl = $"/sessions?sessionId={sessionId:D}&tab=reminders";
+        Navigation.NavigateTo($"/sign-in?returnUrl={Uri.EscapeDataString(returnUrl)}");
+        return Task.CompletedTask;
+    }
+
+    private static PublicSessionsSurface.SessionSubscriptionPanelState UnavailableSubscriptionState(
+        Guid sessionId,
+        string? message,
+        bool isError = false) => new(
+            sessionId,
+            PublicSessionsSurface.SessionSubscriptionStatus.Unavailable,
+            0,
+            null,
+            string.IsNullOrWhiteSpace(message) ? "Reminder choices are not available right now." : message,
+            isError);
+
+    private static string? CombineMessages(string? first, string? second)
+    {
+        var messages = new[] { first, second }
+            .Where(message => !string.IsNullOrWhiteSpace(message))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        return messages.Length == 0 ? null : string.Join(" ", messages);
+    }
+
+    private static PublicSessionsSurface.SessionReminderChannel MapChannel(SubscriptionChannel channel) => channel switch
+    {
+        SubscriptionChannel.Email => PublicSessionsSurface.SessionReminderChannel.Email,
+        SubscriptionChannel.MobilePush => PublicSessionsSurface.SessionReminderChannel.MobilePush,
+        _ => throw new ArgumentOutOfRangeException(nameof(channel), channel, "Unsupported reminder channel.")
+    };
+
+    private static SubscriptionChannel MapChannel(PublicSessionsSurface.SessionReminderChannel channel) => channel switch
+    {
+        PublicSessionsSurface.SessionReminderChannel.Email => SubscriptionChannel.Email,
+        PublicSessionsSurface.SessionReminderChannel.MobilePush => SubscriptionChannel.MobilePush,
+        _ => throw new ArgumentOutOfRangeException(nameof(channel), channel, "Unsupported reminder channel.")
+    };
+
+    private async Task HandleCreateAsync(SessionCreateSubmission submission, long generation)
+    {
+        if (generation != Volatile.Read(ref _editorGeneration)) return;
+        if (_busy) return;
+        var identityEpoch = Volatile.Read(ref _identityEpoch);
+        var actor = _actorId;
+        _busy = true;
+        try
+        {
+            var reservation = await DraftReservation.ReserveDraftAsync(submission.Input.OrganizationId);
+            if (!IsCurrentIdentityEpoch(identityEpoch) || generation != Volatile.Read(ref _editorGeneration) ||
+                !string.Equals(actor, _actorId, StringComparison.Ordinal)) return;
+            if (!reservation.Succeeded || reservation.Value is null)
+            {
+                _serverError = "A session identity could not be reserved. Your entries remain here; try again.";
+                return;
+            }
+            _busy = false;
+            await RunCommandAsync(submission.Input.ToCommand(reservation.Value.SessionId, submission.Reason, DateTimeOffset.UtcNow));
+        }
+        catch (Exception)
+        {
+            if (IsCurrentIdentityEpoch(identityEpoch))
+                _serverError = "A session identity could not be reserved. Your entries remain here; try again.";
+        }
+        finally
+        {
+            if (IsCurrentIdentityEpoch(identityEpoch)) _busy = false;
+        }
+    }
+
+    private Task HandleUpdateAsync(SessionUpdateSubmission submission, long generation) =>
+        generation != Volatile.Read(ref _editorGeneration) || _editingSessionId is null || submission.SessionId != _editingSessionId ||
+        submission.ExpectedVersion <= 0 || submission.ExpectedVersion != _editingVersion
+            ? Task.CompletedTask
+            : RunCommandAsync(submission.Input.ToCommand(
+                submission.SessionId, submission.ExpectedVersion, submission.Reason, DateTimeOffset.UtcNow), submission);
+
+    private Task HandleReviewAsync(SessionReviewSubmission submission, long generation)
+    {
+        if (generation != Volatile.Read(ref _editorGeneration) || _editingSessionId is null || _editingVersion <= 0)
+        {
+            return Task.CompletedTask;
+        }
+
+        return RunCommandAsync(new ReviewSessionCommand(
+            _editingSessionId.Value,
+            _editingVersion,
+            submission.AcknowledgeSelfReview,
+            submission.Reason,
+            DateTimeOffset.UtcNow));
+    }
+
+    private Task HandleScheduleAsync(string reason, long generation)
+    {
+        if (generation != Volatile.Read(ref _editorGeneration) || _editingSessionId is null || _editingVersion <= 0)
+        {
+            return Task.CompletedTask;
+        }
+
+        return RunCommandAsync(new ScheduleSessionCommand(
+            _editingSessionId.Value, _editingVersion, reason, DateTimeOffset.UtcNow));
+    }
+
+    private Task HandleCancelAsync(SessionCancelSubmission submission, long generation)
+    {
+        if (generation != Volatile.Read(ref _editorGeneration) || _editingSessionId is null || _editingVersion <= 0)
+        {
+            return Task.CompletedTask;
+        }
+
+        return RunCommandAsync(new CancelSessionCommand(
+            _editingSessionId.Value,
+            _editingVersion,
+            submission.CancellationReason,
+            submission.Reason,
+            DateTimeOffset.UtcNow));
+    }
+
+    private Task HandleCompleteAsync(string reason, long generation)
+    {
+        if (generation != Volatile.Read(ref _editorGeneration) || _editingSessionId is null || _editingVersion <= 0)
+        {
+            return Task.CompletedTask;
+        }
+
+        return RunCommandAsync(new CompleteSessionCommand(
+            _editingSessionId.Value, _editingVersion, reason, DateTimeOffset.UtcNow));
+    }
+
+    private void DismissConflictProposal() => _conflictProposal = null;
+
+    private async Task RecoverConflictAsync(SessionUpdateSubmission proposal, string? originalActorId, bool outcomeUnknown = false)
+    {
+        var identityEpoch = Volatile.Read(ref _identityEpoch);
+        if (string.IsNullOrWhiteSpace(originalActorId) || !string.Equals(_actorId, originalActorId, StringComparison.Ordinal))
+            return;
+
+        if (outcomeUnknown)
+        {
+            _deferredProposal = proposal;
+            _deferredProposalActor = originalActorId;
+            _deferredNotSubmitted = false;
+        }
+
+        await LoadStaffSessionAsync(proposal.SessionId);
+        if (IsCurrentIdentityEpoch(identityEpoch) && string.Equals(_actorId, originalActorId, StringComparison.Ordinal) &&
+            _editingSessionId == proposal.SessionId && (outcomeUnknown || _editingVersion != proposal.ExpectedVersion) &&
+            _staffView is not null && _managementCapabilities.CanEdit && CanRenderEditor(_managementCapabilities))
+        {
+            _conflictProposal = proposal;
+            _proposalOutcomeUnknown = outcomeUnknown;
+            _proposalNotSubmitted = false;
+            if (outcomeUnknown) ClearDeferredProposal();
+            _serverError = outcomeUnknown
+                ? "The update outcome could not be confirmed. Compare your proposal with the current version below."
+                : "The session changed before your update was saved. Compare your proposal with the current version below.";
+        }
+    }
+
+    private async Task RunCommandAsync(SessionCommand command, SessionUpdateSubmission? proposal = null)
+    {
+        _commandNotice = null;
+        if (command is UpdateSessionCommand && _deferredProposal is not null)
+        {
+            _serverError = "Check access to the unconfirmed update or discard its temporary copy before submitting another update.";
+            return;
+        }
+        if (command is CreateSessionDraftCommand && _deferredCreate is not null)
+        {
+            _serverError = "Restore or discard the temporary draft before submitting another session.";
+            return;
+        }
+        var isCreate = command is CreateSessionDraftCommand;
+        var originalActorId = _actorId;
+        var identityEpoch = Volatile.Read(ref _identityEpoch);
+        var accessAvailable = await RefreshStaffAccessAsync(isCreate ? null : command.SessionId,
+            isCreate ? null : command.ExpectedVersion);
+        if (!IsCurrentIdentityEpoch(identityEpoch) ||
+            _actorId is not null && !string.Equals(originalActorId, _actorId, StringComparison.Ordinal)) return;
+        if (!accessAvailable || !CanPerformCommand(command))
+        {
+            if (proposal is not null && !string.IsNullOrWhiteSpace(originalActorId) &&
+                (_actorId is null || string.Equals(_actorId, originalActorId, StringComparison.Ordinal)))
+            {
+                _deferredProposal = proposal;
+                _deferredProposalActor = originalActorId;
+                _deferredNotSubmitted = true;
+            }
+            if (command is CreateSessionDraftCommand create && !string.IsNullOrWhiteSpace(originalActorId) &&
+                (_actorId is null || string.Equals(_actorId, originalActorId, StringComparison.Ordinal)))
+            {
+                RetainCreate(create, originalActorId, outcomeUnknown: false);
+            }
+            ClearEditorState();
+            _serverError ??= "Session management is unavailable for this account.";
+            return;
+        }
+
+        _busy = true;
+        _serverError = null;
+        var commandAccepted = false;
+        if (command is CreateSessionDraftCommand pendingCreate && !string.IsNullOrWhiteSpace(originalActorId))
+            RetainCreate(pendingCreate, originalActorId, outcomeUnknown: true);
+        if (proposal is not null && !string.IsNullOrWhiteSpace(originalActorId))
+        {
+            _deferredProposal = proposal;
+            _deferredProposalActor = originalActorId;
+            _deferredNotSubmitted = false;
+        }
+        try
+        {
+            var outcome = await StaffSessionEditor.ExecuteAsync(command);
+            if (!IsCurrentIdentityEpoch(identityEpoch) || !string.Equals(originalActorId, _actorId, StringComparison.Ordinal)) return;
+            if (outcome.Code == UiCapabilityResultCode.Success && outcome.Metadata.IsAvailable && outcome.Value is { } result)
+            {
+                if (result.SessionId != command.SessionId || result.Version <= command.ExpectedVersion || string.IsNullOrWhiteSpace(result.Status))
+                    throw new InvalidOperationException("The session command result could not be verified.");
+                commandAccepted = true;
+                if (command is CreateSessionDraftCommand) ClearDeferredCreate();
+                if (proposal is not null) ClearDeferredProposal();
+                if (_retainedWorkingCopy is { } retained && retained.ActorId == originalActorId &&
+                    retained.SessionId == (isCreate ? null : command.SessionId)) DiscardRetainedWorkingCopy();
+                _commandNotice = "The session change was saved.";
+                _conflictProposal = null;
+                await LoadStaffSessionAsync(result.SessionId);
+                if (!IsCurrentIdentityEpoch(identityEpoch)) return;
+                if (_actorId is not null && !string.Equals(_actorId, originalActorId, StringComparison.Ordinal))
+                {
+                    _commandNotice = null;
+                    return;
+                }
+                if (_staffView?.SessionId != result.SessionId || _staffView.Version < result.Version)
+                    _commandNotice = "The session change was saved, but current details could not be refreshed. Check access and reopen the session.";
+                await LoadListAsync();
+            }
+            else
+            {
+                if (command is CreateSessionDraftCommand unconfirmedCreate &&
+                    (outcome.Code is UiCapabilityResultCode.Success or UiCapabilityResultCode.Unavailable or UiCapabilityResultCode.Retryable or UiCapabilityResultCode.Cancelled or UiCapabilityResultCode.Conflict or UiCapabilityResultCode.Denied) &&
+                    !string.IsNullOrWhiteSpace(originalActorId) && string.Equals(_actorId, originalActorId, StringComparison.Ordinal))
+                {
+                    RetainCreate(unconfirmedCreate, originalActorId, outcomeUnknown: true);
+                    ClearEditorState();
+                    _serverError = "The session outcome could not be confirmed. Check it before creating another.";
+                    return;
+                }
+                if (outcome.Code == UiCapabilityResultCode.Conflict && proposal is not null)
+                {
+                    _deferredNotSubmitted = true;
+                    await RecoverConflictAsync(proposal, originalActorId);
+                    return;
+                }
+                if (outcome.Code == UiCapabilityResultCode.InvalidRequest)
+                {
+                    if (command is CreateSessionDraftCommand) ClearDeferredCreate();
+                    if (proposal is not null) ClearDeferredProposal();
+                }
+                _serverError = outcome.Message ?? (outcome.Code == UiCapabilityResultCode.Conflict
+                    ? "The session changed. Reload it and try again."
+                    : "The change could not be recorded. Please try again.");
+                if (outcome.Code is UiCapabilityResultCode.Conflict or UiCapabilityResultCode.Denied or UiCapabilityResultCode.Unavailable)
+                {
+                    ClearEditorState();
+                    _managementCapabilities = SessionManagementPresentation.Unavailable(outcome.Message ?? outcome.Metadata.Notice);
+                    _canManageSessions = false;
+                    if (outcome.Code == UiCapabilityResultCode.Unavailable && proposal is not null)
+                        await RecoverConflictAsync(proposal, originalActorId, outcomeUnknown: true);
+                }
+            }
+        }
+        catch (Exception)
+        {
+            if (!IsCurrentIdentityEpoch(identityEpoch)) return;
+            ClearEditorState();
+            if (commandAccepted)
+            {
+                _commandNotice = "The session change was saved, but current details could not be refreshed. Check access and reopen the session.";
+                return;
+            }
+            _managementCapabilities = SessionManagementPresentation.Unavailable(
+                "The session change could not be confirmed.");
+            _canManageSessions = false;
+            _serverError = "The session change could not be confirmed. Reload the session before trying again.";
+            if (command is CreateSessionDraftCommand unconfirmedCreate && !string.IsNullOrWhiteSpace(originalActorId) &&
+                string.Equals(_actorId, originalActorId, StringComparison.Ordinal))
+                RetainCreate(unconfirmedCreate, originalActorId, outcomeUnknown: true);
+            if (proposal is not null)
+                await RecoverConflictAsync(proposal, originalActorId, outcomeUnknown: true);
+        }
+        finally
+        {
+            if (IsCurrentIdentityEpoch(identityEpoch)) _busy = false;
+        }
+    }
+
+    private bool HasCurrentManagementAccess() =>
+        _canManageSessions && !string.IsNullOrWhiteSpace(_actorId) &&
+        _managementCapabilities is { IsCurrent: true };
+
+    private bool CanPerformCommand(SessionCommand command) => command switch
+    {
+        CreateSessionDraftCommand => HasCurrentManagementAccess() &&
+            _managementCapabilities is { CanCreate: true, SessionId: null, Version: null },
+        UpdateSessionCommand => HasSessionCapability(command, capabilities => capabilities.CanEdit),
+        ReviewSessionCommand => HasSessionCapability(command, capabilities => capabilities.CanReview),
+        ScheduleSessionCommand => HasSessionCapability(command, capabilities => capabilities.CanSchedule),
+        CancelSessionCommand => HasSessionCapability(command, capabilities => capabilities.CanCancel),
+        CompleteSessionCommand => HasSessionCapability(command, capabilities => capabilities.CanComplete),
+        _ => false
+    };
+
+    private bool HasSessionCapability(
+        SessionCommand command,
+        Func<SessionManagementPresentation, bool> capability)
+    {
+        var current = _managementCapabilities;
+        return HasCurrentManagementAccess() && command.ExpectedVersion > 0 &&
+            current is not null && current.SessionId == command.SessionId &&
+            current.Version == command.ExpectedVersion && capability(current);
+    }
+
+    private Task ShareAsync(string text) => SessionPlatform.ShareAsync(text);
+    private Task<bool> OpenCalendarAsync(Guid sessionId) => SessionPlatform.OpenCalendarAsync(sessionId);
+}

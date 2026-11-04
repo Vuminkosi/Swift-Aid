@@ -153,7 +153,8 @@ public sealed record WorkManagementItem(
     IReadOnlyList<WorkManagementWorkerOption> EligibleWorkers,
     string? AssignedWorkerKey = null,
     string? AssignedWorkerLabel = null,
-    bool CanAcknowledgeAssignment = false);
+    bool CanAcknowledgeAssignment = false,
+    bool AssignedToCurrentActor = false);
 
 public sealed record WorkManagementSnapshot(
     Guid CaseId,

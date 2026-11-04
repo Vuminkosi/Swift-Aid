@@ -4,6 +4,7 @@ using System.Security.Claims;
 using SwiftAid.Application.Ellai;
 using SwiftAid.Application.Authorization;
 using SwiftAid.Contracts.Ellai;
+using SwiftAid.Contracts.Intake;
 
 namespace SwiftAid.Gateway.Ellai;
 
@@ -220,6 +221,63 @@ public sealed class EllaiReviewGatewayClient(
         }
     }
 
+    public async Task<bool> GrantReportVoiceConsentAsync(string sessionId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var state = await _authenticationStateProvider.GetAuthenticationStateAsync().ConfigureAwait(false);
+            var principal = ResolvePrincipal(state.User, sessionId);
+            if (principal is null) return false;
+            var actor = ActorContext.FromValidatedPrincipal(principal);
+            return await _serviceProvider.GetRequiredService<ReportVoiceGatewayService>()
+                .GrantAsync(sessionId, actor.ActorId, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch (Exception) { return false; }
+    }
+
+    public async Task<EllaiVoiceTranscriptionResult?> TranscribeSavedReportVoiceAsync(
+        string sessionId, byte[] audio, CancellationToken cancellationToken)
+    {
+        if (audio is null || audio.Length == 0 || audio.Length > EllaiVoiceTranscriptionService.MaximumAudioBytes) return null;
+        try
+        {
+            var state = await _authenticationStateProvider.GetAuthenticationStateAsync().ConfigureAwait(false);
+            var principal = ResolvePrincipal(state.User, sessionId);
+            var sessions = _serviceProvider.GetService<EllaiSessionService>();
+            var voice = _serviceProvider.GetService<EllaiVoiceTranscriptionService>();
+            if (principal is null || sessions is null || voice is null ||
+                await sessions.GetOwnedViewAsync(sessionId, principal, cancellationToken).ConfigureAwait(false) is not { Status: "Active" }) return null;
+            var store = _serviceProvider.GetRequiredService<IEllaiSessionStore>();
+            var before = await store.GetAsync(sessionId, cancellationToken).ConfigureAwait(false);
+            var actor = ActorContext.FromValidatedPrincipal(principal);
+            if (before is null || before.Status != "Active" || before.OwnerActorId != actor.ActorId) return null;
+            using var stream = new MemoryStream(audio, writable: false);
+            var result = await voice.TranscribeSavedReportAsync(sessionId, stream, audio.LongLength, cancellationToken).ConfigureAwait(false);
+            var after = await store.GetAsync(sessionId, cancellationToken).ConfigureAwait(false);
+            return after is { Status: "Active" } && after.OwnerActorId == actor.ActorId && after.ScopeEpoch == before.ScopeEpoch
+                ? result : null;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch (Exception) { return null; }
+    }
+
+    public async Task<ReportVoiceExtractionResponse?> ExtractReportVoiceAsync(
+        string sessionId, string transcript, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var state = await _authenticationStateProvider.GetAuthenticationStateAsync().ConfigureAwait(false);
+            var principal = ResolvePrincipal(state.User, sessionId);
+            if (principal is null) return null;
+            var actor = ActorContext.FromValidatedPrincipal(principal);
+            return await _serviceProvider.GetRequiredService<ReportVoiceGatewayService>()
+                .ExtractAsync(sessionId, actor.ActorId, transcript, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch (Exception) { return null; }
+    }
+
     public async Task<bool> GrantVoiceCaptureConsentAsync(
         string sessionId, CancellationToken cancellationToken)
     {
@@ -247,9 +305,19 @@ public sealed class EllaiReviewGatewayClient(
         }
     }
 
-    public async Task<EllaiVoiceTranscriptionResult?> TranscribeVoiceAsync(
+    public Task<EllaiVoiceTranscriptionResult?> TranscribeVoiceAsync(
         string sessionId, byte[] audio, EllaiVoiceCaptureMode mode, CancellationToken cancellationToken,
-        string? voiceCaptureId = null, long voiceCaptureOffsetSamples = 0)
+        string? voiceCaptureId = null, long voiceCaptureOffsetSamples = 0) =>
+        TranscribeVoiceCoreAsync(sessionId, audio, mode, cancellationToken, voiceCaptureId, voiceCaptureOffsetSamples, true);
+
+    public Task<EllaiVoiceTranscriptionResult?> TranscribeReportVoiceAsync(
+        string sessionId, byte[] audio, EllaiVoiceCaptureMode mode, CancellationToken cancellationToken,
+        string? voiceCaptureId = null, long voiceCaptureOffsetSamples = 0) =>
+        TranscribeVoiceCoreAsync(sessionId, audio, mode, cancellationToken, voiceCaptureId, voiceCaptureOffsetSamples, false);
+
+    private async Task<EllaiVoiceTranscriptionResult?> TranscribeVoiceCoreAsync(
+        string sessionId, byte[] audio, EllaiVoiceCaptureMode mode, CancellationToken cancellationToken,
+        string? voiceCaptureId, long voiceCaptureOffsetSamples, bool submitConversation)
     {
         if (audio is null || audio.Length == 0 || audio.Length > EllaiVoiceTranscriptionService.MaximumAudioBytes
             || !await OwnsSessionAsync(sessionId, cancellationToken).ConfigureAwait(false))
@@ -271,7 +339,7 @@ public sealed class EllaiReviewGatewayClient(
             using var stream = new MemoryStream(audio, writable: false);
             return await voice.TranscribeAsync(
                     sessionId, mode, stream, audio.LongLength, cancellationToken,
-                    voiceCaptureId, voiceCaptureOffsetSamples, submissionPrincipal: principal)
+                    voiceCaptureId, voiceCaptureOffsetSamples, submissionPrincipal: submitConversation ? principal : null)
                 .ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -478,6 +546,17 @@ public sealed class EllaiReviewGatewayClient(
         await using var scope = _serviceProvider.CreateAsyncScope();
         return await EllaiGuidanceProposalEndpoint.PrepareOwnedAsync(actor, sessionId, proposalId,
             scope.ServiceProvider, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<EllaiGuidancePlanDto?> RevalidateGuidancePlanAsync(
+        string sessionId, string proposalId, string planId, string stepId, CancellationToken cancellationToken)
+    {
+        var state = await _authenticationStateProvider.GetAuthenticationStateAsync().ConfigureAwait(false);
+        var principal = ResolvePrincipal(state.User, sessionId);
+        if (principal is null) return null;
+        await using var scope = _serviceProvider.CreateAsyncScope();
+        return await EllaiGuidanceProposalEndpoint.PrepareOwnedAsync(ActorContext.FromValidatedPrincipal(principal),
+            sessionId, proposalId, scope.ServiceProvider, cancellationToken, planId, stepId).ConfigureAwait(false);
     }
 
     public async Task<EllaiGuidanceAdmissionDto?> ReadGuidanceAdmissionAsync(
@@ -746,14 +825,13 @@ public sealed class EllaiReviewGatewayClient(
                 return false;
             }
 
-            await observations.RecordAsync(new StoredUiObservationReport(
+            return await observations.RecordAsync(new StoredUiObservationReport(
                 sessionId, report.ViewInstanceId.Trim(), report.ContextStamp.Trim(),
                 report.Platform.Trim(), report.MountedControlIds
                     .Where(id => !string.IsNullOrWhiteSpace(id))
                     .Select(id => id.Trim())
                     .ToList(),
-                DateTimeOffset.UtcNow, report.ControlStates, report.CurrentNavigationId, report.CompletedControlIds), cancellationToken).ConfigureAwait(false);
-            return true;
+                DateTimeOffset.UtcNow, report.ControlStates, report.CurrentNavigationId, report.CompletedControlIds, report.ValidationInputIds, report.InputStates, report.CurrentCaseId), cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -816,13 +894,24 @@ public sealed class EllaiReviewGatewayClient(
             : null;
     }
 
-    private static Task<bool> HasCurrentScopedStaffAuthorizationAsync(CancellationToken cancellationToken)
+    private async Task<bool> HasCurrentScopedStaffAuthorizationAsync(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        // SwiftAidStaffApi currently establishes authentication only. Until a
-        // trusted server-issued staff + active-scope capability is available,
-        // privileged review/evidence operations fail closed.
-        return Task.FromResult(false);
+        try
+        {
+            var principal = (await _authenticationStateProvider.GetAuthenticationStateAsync()).User;
+            var actor = ActorContext.FromValidatedPrincipal(principal);
+            await using var scope = _serviceProvider.CreateAsyncScope();
+            var source = scope.ServiceProvider.GetService<IScopeService>();
+            if (source is null) return false;
+            var manifest = await source.GetAsync(actor, cancellationToken);
+            var now = DateTimeOffset.UtcNow;
+            return manifest.AccessEpoch == actor.AccessEpoch && manifest.ExpiresAtUtc > now &&
+                manifest.Grants.Any(grant => grant.ValidFromUtc <= now && grant.ExpiresAtUtc > now &&
+                    grant.Operations.Contains(nameof(CaseOperation.ReadCase), StringComparer.Ordinal));
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch (Exception error) when (error is UnauthorizedAccessException or ScopeUnavailableException) { return false; }
     }
 
     private async Task<T?> WithAuthenticatedAsync<T>(

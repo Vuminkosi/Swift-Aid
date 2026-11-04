@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.Extensions.DependencyInjection;
 using SwiftAid.Application.Authorization;
 using SwiftAid.Contracts.Sessions;
+using SwiftAid.Gateway.Endpoints;
 
 namespace SwiftAid.Gateway.Sessions;
 
@@ -31,29 +32,23 @@ public sealed class SessionGatewayClient(
         serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
 
     /// <summary>Lists published public sessions; failures propagate to the presentation adapter.</summary>
-    public async Task<IReadOnlyList<PublicSessionView>> ListPublicAsync(
-        int? limit,
-        CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<PublicSessionView>> ListPublicAsync(int? limit, CancellationToken cancellationToken = default)
     {
-        var service = _serviceProvider.GetService<ICommunitySessionService>()
-            ?? throw new InvalidOperationException("The community session service is unavailable.");
-        return await service.ListPublicAsync(limit, cancellationToken).ConfigureAwait(false);
+        await using var scope = _serviceProvider.CreateAsyncScope();
+        return await scope.ServiceProvider.GetRequiredService<ICommunitySessionService>().ListPublicAsync(limit, cancellationToken);
     }
 
-    public Task<PublicSessionPage> QueryPublicAsync(PublicSessionQuery query, CancellationToken cancellationToken = default)
+    public async Task<PublicSessionPage> QueryPublicAsync(PublicSessionQuery query, CancellationToken cancellationToken = default)
     {
-        var service = _serviceProvider.GetService<ICommunitySessionService>()
-            ?? throw new InvalidOperationException("The community session service is unavailable.");
-        return service.QueryPublicAsync(query, cancellationToken);
+        await using var scope = _serviceProvider.CreateAsyncScope();
+        return await scope.ServiceProvider.GetRequiredService<ICommunitySessionService>().QueryPublicAsync(query, cancellationToken);
     }
 
-    public Task<PublicSessionView?> GetPublicAsync(Guid sessionId, CancellationToken cancellationToken = default)
+    public async Task<PublicSessionView?> GetPublicAsync(Guid sessionId, CancellationToken cancellationToken = default)
     {
-        var service = _serviceProvider.GetService<ICommunitySessionService>()
-            ?? throw new InvalidOperationException("The community session service is unavailable.");
-        return service.GetPublicAsync(sessionId, cancellationToken);
+        await using var scope = _serviceProvider.CreateAsyncScope();
+        return await scope.ServiceProvider.GetRequiredService<ICommunitySessionService>().GetPublicAsync(sessionId, cancellationToken);
     }
-
     /// <summary>Loads the plain-text invitation for a published session, if available.</summary>
     public async Task<string?> GetInvitationTextAsync(
         Guid sessionId,
@@ -98,7 +93,7 @@ public sealed class SessionGatewayClient(
         Guid sessionId,
         CancellationToken cancellationToken = default)
     {
-        var actor = await GetActorAsync().ConfigureAwait(false);
+        var actor = await GetActorAsync(cancellationToken).ConfigureAwait(false);
         var service = _serviceProvider.GetService<ICommunitySessionService>();
         if (actor is null || service is null)
         {
@@ -118,7 +113,7 @@ public sealed class SessionGatewayClient(
     public async Task<string?> GetCurrentActorIdAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var actor = await GetActorAsync().ConfigureAwait(false);
+        var actor = await GetActorAsync(cancellationToken).ConfigureAwait(false);
         return actor?.ActorId;
     }
 
@@ -128,7 +123,7 @@ public sealed class SessionGatewayClient(
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(command);
-        var actor = await GetActorAsync().ConfigureAwait(false);
+        var actor = await GetActorAsync(cancellationToken).ConfigureAwait(false);
         if (actor is null)
         {
             return new SessionStaffOutcome(
@@ -198,23 +193,21 @@ public sealed class SessionGatewayClient(
             message.Contains("changed before", StringComparison.OrdinalIgnoreCase);
     }
 
-    private async Task<ActorContext?> GetActorAsync()
+    private async Task<ActorContext?> GetActorAsync(CancellationToken cancellationToken)
     {
-        var state = await _authenticationStateProvider.GetAuthenticationStateAsync().ConfigureAwait(false);
-        var principal = state.User;
-        if (principal?.Identity?.IsAuthenticated != true)
-        {
-            return null;
-        }
-
         try
         {
-            return ActorContext.FromValidatedPrincipal(principal);
+            cancellationToken.ThrowIfCancellationRequested();
+            var principal = (await _authenticationStateProvider.GetAuthenticationStateAsync().ConfigureAwait(false)).User;
+            if (principal?.Identity?.IsAuthenticated != true) return null;
+            var actor = ActorContext.FromValidatedPrincipal(principal);
+            var access = _serviceProvider.GetService<IWorkspaceAccessRequest>();
+            if (access is null) return null;
+            var current = await access.GetAsync(principal, null, cancellationToken).ConfigureAwait(false);
+            return current.Succeeded && current.Metadata.IsAvailable && current.Value is not null ? actor : null;
         }
-        catch (UnauthorizedAccessException)
-        {
-            return null;
-        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch (Exception exception) when (exception is not OutOfMemoryException) { return null; }
     }
 
 }

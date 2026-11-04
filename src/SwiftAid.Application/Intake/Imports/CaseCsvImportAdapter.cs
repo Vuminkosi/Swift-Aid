@@ -3,12 +3,14 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using SwiftAid.Contracts.Geography;
 using SwiftAid.Contracts.Intake;
+using SwiftAid.Contracts.Intake.Imports;
 using SwiftAid.Domain.Intake;
 
 namespace SwiftAid.Application.Intake.Imports;
 
 public sealed record CaseImportContext(string WorkspaceId, IntakeConfirmations Confirmations,
-    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)] string? OrganizationId = null);
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)] string? OrganizationId = null,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)] string? FileSha256 = null);
 
 /// <summary>Original CSV values remain separate from their normalized submission. Source IDs never confer authority.</summary>
 public sealed record CaseImportRecord(long RowNumber, Guid CommandId, Guid? SourceCaseId, string ExternalRecordId,
@@ -23,21 +25,9 @@ public sealed record CaseImportValidation(CaseImportRecord? Record, string? Erro
 /// <summary>Compatibility adapter for the supplied Zimbabwe/Eswatini case CSVs, not a direct database importer.</summary>
 public static class CaseCsvImportAdapter
 {
-    public static readonly IReadOnlyList<string> Columns = Array.AsReadOnly(new[]
-    {
-        "schema_version", "command_id", "case_id", "external_record_id", "subject_scope", "narrative",
-        "observations_json", "captured_at", "occurred_at", "country_code", "region", "area", "locality",
-        "location_id", "latitude", "longitude", "location_precision", "accountable_owner_id", "workspace_id",
-        "source_language", "source_reference"
-    });
+    public static readonly IReadOnlyList<string> Columns = CaseImportCsvSchema.Columns;
 
-    public static void ValidateHeader(IReadOnlyList<string> header)
-    {
-        if (header.Count != header.Distinct(StringComparer.Ordinal).Count() ||
-            Columns.Any(column => !header.Contains(column, StringComparer.Ordinal)) ||
-            header.Any(column => !Columns.Contains(column, StringComparer.Ordinal) && column != "accuracy_metres"))
-            throw new InvalidDataException("csv-header-invalid");
-    }
+    public static void ValidateHeader(IReadOnlyList<string> header) => CaseImportCsvSchema.ValidateHeader(header);
 
     public static CaseImportValidation Parse(CsvRecord row, IReadOnlyList<string> header, CaseImportContext context, string actorId)
     {

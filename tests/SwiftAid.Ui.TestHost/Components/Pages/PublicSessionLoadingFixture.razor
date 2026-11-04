@@ -1,0 +1,21 @@
+@page "/public-session-loading-fixture"
+@inject SwiftAid.Ui.TestHost.StaffSessionManagerFixture Service
+
+<SwiftAidThemeProvider />
+<MudPopoverProvider />
+<MudDialogProvider />
+<button @onclick="StateHasChanged">Refresh request counts</button>
+<output id="public-list-calls">@Service.PublicListCalls</output>
+<output id="public-query-calls">@Service.PublicQueryCalls</output>
+@if (_ready)
+{
+    <Sessions />
+}
+
+@code {
+    private bool _ready;
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (firstRender) { Service.FailPublicList = true; _ready = true; StateHasChanged(); }
+    }
+}

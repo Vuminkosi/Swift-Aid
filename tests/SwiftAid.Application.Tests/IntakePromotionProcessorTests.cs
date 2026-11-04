@@ -2,11 +2,13 @@ using System.Collections.Immutable;
 using System.Security.Claims;
 using SwiftAid.Application.Authorization;
 using SwiftAid.Application.Cases.Registration;
+using SwiftAid.Application.Cases;
 using SwiftAid.Application.Intake;
 using SwiftAid.Contracts.Commands;
 using SwiftAid.Contracts.Geography;
 using SwiftAid.Contracts.Intake;
 using SwiftAid.Domain.Cases;
+using SwiftAid.Domain.Intake;
 
 namespace SwiftAid.Application.Tests;
 
@@ -86,6 +88,18 @@ public sealed class IntakePromotionProcessorTests
         Assert.Equal(caseId, result.PromotedCaseId);
         Assert.Equal(IntakeStatus.AcceptedIntoCase, result.Receipt!.Status);
         Assert.Null(harness.RegisteredRequest);
+    }
+
+    [Fact]
+    public async Task Promote_TerminalReplayWithoutCaseReadDoesNotRevealCase()
+    {
+        var receiptId = Guid.NewGuid();
+        var harness = new Harness(Source(receiptId, version: 2, IntakeStatus.AcceptedIntoCase),
+            HumanSubmission(), ["workspace-1"], promoted: Guid.NewGuid(), allowCaseRead: false);
+        var result = await harness.Processor.PromoteAsync(
+            new IntakeDecision(receiptId, 2, IntakeDecisionKind.AcceptIntoCase, null), CreateOfficer(), CancellationToken.None);
+        Assert.Equal(IntakeDecisionStatus.NotFoundOrNotAuthorized, result.Status);
+        Assert.Null(result.PromotedCaseId);
     }
 
     [Fact]
@@ -332,6 +346,49 @@ public sealed class IntakePromotionProcessorTests
     }
 
     [Fact]
+    public void ReportedHumanAgeIsValidatedAndPromotedWithReporterProvenance()
+    {
+        var receiptId = Guid.NewGuid();
+        var submission = HumanSubmission() with { AgeYears = 26 };
+        IntakeSubmissionRules.Validate(submission);
+
+        var human = Assert.IsType<CaseReportEventData.HumanV2>(IntakePromotionMapper.ToReport(receiptId, submission));
+        Assert.True(human.Report.AgeYears.Value.HasValue);
+        Assert.Equal(26, human.Report.AgeYears.Value.Value);
+        Assert.Equal(ReportSourceKind.ReporterObservation, human.Report.AgeYears.Provenance.Source);
+        Assert.Equal($"intake:{receiptId:N}:age", human.Report.AgeYears.Provenance.StableReference);
+        Assert.Throws<ArgumentException>(() => IntakeSubmissionRules.Validate(submission with { AgeYears = -1 }));
+        Assert.Throws<ArgumentException>(() => IntakeSubmissionRules.Validate(submission with { SubjectScope = IntakeSubjectScope.Herd }));
+        Assert.Throws<ArgumentException>(() => IntakePromotionMapper.ToReport(receiptId, submission with { SubjectScope = IntakeSubjectScope.Herd }));
+    }
+
+    [Fact]
+    public void UnknownAgeKeepsLegacySerializedPayloadAndKnownAgeRoundTrips()
+    {
+        var submission = HumanSubmission();
+        var options = new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web);
+        var json = System.Text.Json.JsonSerializer.Serialize(submission, options);
+        Assert.DoesNotContain("ageYears", json);
+        var known = System.Text.Json.JsonSerializer.Serialize(submission with { AgeYears = 0 }, options);
+        Assert.Equal(0, System.Text.Json.JsonSerializer.Deserialize<IntakeSubmission>(known, options)!.AgeYears);
+        Assert.Null(System.Text.Json.JsonSerializer.Deserialize<IntakeSubmission>(json, options)!.AgeYears);
+    }
+
+    [Fact]
+    public void ToReport_CaptureChoicesRemainAttributedEvidence()
+    {
+        var submission = HumanSubmission() with { Gender = ReportedGender.Female, DeathRelated = true };
+        var human = Assert.IsType<CaseReportEventData.HumanV2>(IntakePromotionMapper.ToReport(Guid.NewGuid(), submission));
+
+        Assert.Contains(human.Report.Evidence.Observations, item => item.Text == "Reported gender: Female");
+        Assert.Contains(human.Report.Evidence.Observations, item => item.Text == "Death related: Yes");
+
+        var animal = Assert.IsType<CaseReportEventData.AnimalV2>(IntakePromotionMapper.ToReport(
+            Guid.NewGuid(), submission with { SubjectScope = IntakeSubjectScope.Herd, Gender = null, DeathRelated = false }));
+        Assert.Contains(animal.Report.Evidence.Observations, item => item.Text == "Death related: No");
+    }
+
+    [Fact]
     public void ToReport_Animal_MapsSubjectScopeAndLeavesCountsUnknown()
     {
         var baseSubmission = HumanSubmission();
@@ -427,7 +484,8 @@ public sealed class IntakePromotionProcessorTests
             CaseRegistrationResult? registration = null,
             IntakeDecisionResult? apply = null,
             Guid? promoted = null,
-            Exception? registrationThrows = null)
+            Exception? registrationThrows = null,
+            bool allowCaseRead = true)
         {
             Processor = new IntakePromotionProcessor(
                 new StubSource(source, promoted),
@@ -435,12 +493,23 @@ public sealed class IntakePromotionProcessorTests
                 new StubWorkspaces(workspaces),
                 new StubRegistration(registration, registrationThrows, request => _registered = request),
                 new StubPromotions(apply ?? new IntakeDecisionResult(IntakeDecisionStatus.Applied, null)),
-                TimeProvider.System);
+                TimeProvider.System,
+                new StubCaseSummary(allowCaseRead));
         }
 
         public IntakePromotionProcessor Processor { get; }
 
         public RegisterManagedCaseRequest? RegisteredRequest => _registered;
+    }
+
+    private sealed class StubCaseSummary(bool allowed) : ICaseSummaryQuery
+    {
+        public Task<CaseSummaryResult> GetAsync(ActorContext actor, Guid caseId, CancellationToken ct) =>
+            Task.FromResult(allowed
+                ? new CaseSummaryResult(CaseSummaryAccess.Allowed,
+                    new CaseSummaryData(caseId, default, default, default!, default!, "ZW", [], actor.ActorId, null,
+                        DateTimeOffset.UtcNow, DateTimeOffset.UtcNow))
+                : new CaseSummaryResult(CaseSummaryAccess.Denied, null));
     }
 
     private sealed class StubSource(IntakePromotionSource? source, Guid? promoted) : IIntakePromotionSource

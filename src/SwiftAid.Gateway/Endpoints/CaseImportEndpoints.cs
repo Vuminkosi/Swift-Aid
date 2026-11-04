@@ -21,17 +21,75 @@ public static class CaseImportEndpoints
 
     public static void MapCaseImportEndpoints(this IEndpointRouteBuilder endpoints)
     {
-        var routes = endpoints.MapGroup("/api/v1/case-imports").RequireAuthorization(new AuthorizeAttribute
-        {
-            AuthenticationSchemes = IdentityConstants.ApplicationScheme + "," + OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme
-        });
+        var routes = endpoints.MapGroup("/api/v1/case-imports").RequireAuthorization(new AuthorizeAttribute { Policy = "SwiftAidStaffApi" });
         routes.MapPost("/{importId:guid}/rows", ImportAsync).WithMetadata(new RequestSizeLimitAttribute(MaximumBatchBytes));
         routes.MapGet("/{importId:guid}", StatusAsync);
+        routes.MapPost("/{importId:guid}/context-check", CheckContextAsync)
+            .WithMetadata(new RequestSizeLimitAttribute(16 * 1024));
+        routes.MapGet("/workspaces", WorkspacesAsync);
+        routes.MapGet("/recent", RecentAsync);
+        routes.MapGet("/{importId:guid}/issues", IssuesAsync);
+    }
+
+    private static async Task<IResult> CheckContextAsync(Guid importId, CaseImportContext? context, HttpContext http,
+        IAntiforgery antiforgery, ICaseImportStore store, CancellationToken ct)
+    {
+        http.Response.Headers.CacheControl = "no-store";
+        try
+        {
+            var actor = ActorContext.FromValidatedPrincipal(http.User);
+            if (await ManagedCaseRegistrationEndpoints.RequiresAntiforgeryAsync(http))
+                await antiforgery.ValidateRequestAsync(http);
+            CaseCsvImportService.ValidateContext(context);
+            var matches = await store.MatchesContextAsync(actor, importId, context!, ct);
+            return matches is null ? Results.NotFound() : Results.Ok(new { matches = matches.Value });
+        }
+        catch (AntiforgeryValidationException) { return Results.Problem(statusCode: 400, title: "The request token is invalid."); }
+        catch (UnauthorizedAccessException) { return Results.Unauthorized(); }
+        catch (CaseImportException exception) { return Failure(exception.Code); }
+        catch (NotSupportedException) { return Results.Problem(statusCode: 503, title: "Import verification is temporarily unavailable."); }
+    }
+
+    private static async Task<IResult> WorkspacesAsync(HttpContext http, ICaseImportWorkspaceReader reader, CancellationToken ct)
+    {
+        http.Response.Headers.CacheControl = "no-store";
+        try { return Results.Ok(await reader.GetWorkspacesAsync(ActorContext.FromValidatedPrincipal(http.User), ct)); }
+        catch (UnauthorizedAccessException) { return Results.Unauthorized(); }
+        catch (CaseImportException exception) { return Failure(exception.Code); }
+    }
+
+    private static async Task<IResult> RecentAsync(HttpContext http, string workspaceId, string organizationId,
+        string countryCode, ICaseImportWorkspaceReader reader, CancellationToken ct)
+    {
+        http.Response.Headers.CacheControl = "no-store";
+        if (string.IsNullOrWhiteSpace(workspaceId) || workspaceId.Length > 200 ||
+            string.IsNullOrWhiteSpace(organizationId) || organizationId.Length > 200 ||
+            countryCode.Length != 2 || countryCode.Any(character => character is < 'A' or > 'Z'))
+            return Results.Problem(statusCode: 400, title: "The import workspace is invalid.");
+        try
+        {
+            return Results.Ok(await reader.GetRecentAsync(ActorContext.FromValidatedPrincipal(http.User),
+                workspaceId, countryCode, ct, organizationId));
+        }
+        catch (UnauthorizedAccessException) { return Results.Unauthorized(); }
+        catch (CaseImportException exception) { return Failure(exception.Code); }
+    }
+
+    private static async Task<IResult> IssuesAsync(Guid importId, long afterRow, HttpContext http,
+        ICaseImportWorkspaceReader reader, CancellationToken ct)
+    {
+        http.Response.Headers.CacheControl = "no-store";
+        if (importId == Guid.Empty || afterRow < 0)
+            return Results.Problem(statusCode: 400, title: "The import cursor is invalid.");
+        try { return Results.Ok(await reader.GetIssuesAsync(ActorContext.FromValidatedPrincipal(http.User), importId, afterRow, ct)); }
+        catch (UnauthorizedAccessException) { return Results.Unauthorized(); }
+        catch (CaseImportException exception) { return Failure(exception.Code); }
     }
 
     private static async Task<IResult> ImportAsync(Guid importId, long startRow, bool finalBatch,
         HttpContext http, IAntiforgery antiforgery, CaseCsvImportService importer, CancellationToken ct)
     {
+        http.Response.Headers.CacheControl = "no-store";
         try
         {
             var actor = ActorContext.FromValidatedPrincipal(http.User);
@@ -61,6 +119,7 @@ public static class CaseImportEndpoints
 
     private static async Task<IResult> StatusAsync(Guid importId, HttpContext http, ICaseImportStore store, CancellationToken ct)
     {
+        http.Response.Headers.CacheControl = "no-store";
         try
         {
             var summary = await store.GetAsync(ActorContext.FromValidatedPrincipal(http.User), importId, ct);

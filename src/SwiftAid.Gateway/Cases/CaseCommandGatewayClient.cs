@@ -44,8 +44,9 @@ public sealed class CaseCommandGatewayClient(
             return Unavailable(Guid.Empty);
         }
 
-        var processor = _serviceProvider.GetService<ICaseCommandProcessor>();
-        var timeline = _serviceProvider.GetService<ICaseTimelineQuery>();
+        await using var scope = _serviceProvider.CreateAsyncScope();
+        var processor = scope.ServiceProvider.GetService<ICaseCommandProcessor>();
+        var timeline = scope.ServiceProvider.GetService<ICaseTimelineQuery>();
         if (processor is null || timeline is null)
         {
             return Unavailable(Guid.Empty);
@@ -69,9 +70,7 @@ public sealed class CaseCommandGatewayClient(
 
         CaseCommand command;
         var commandId = input.CommandId ?? Guid.NewGuid();
-        var expectedVersion = input.CommandType is ("CorrectReport" or "AcknowledgeAssignment" or "GrantCaseCollaborator" or "RevokeCaseCollaborator") && input.ExpectedVersion.HasValue
-            ? input.ExpectedVersion.Value
-            : timelineResult.Timeline.Header.AggregateVersion;
+        var expectedVersion = input.ExpectedVersion ?? timelineResult.Timeline.Header.AggregateVersion;
         try
         {
             command = MapCommand(input, commandId, expectedVersion);

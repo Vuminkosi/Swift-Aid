@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -93,21 +94,60 @@ public sealed class EventSubscriptionEndpointTests
         Assert.True(response.Headers.CacheControl?.NoStore);
     }
 
-    [Fact]
-    public async Task AuthenticatedMutation_WithoutAntiforgeryProof_IsRejectedBeforeService()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task BearerMutation_UsesAuthenticatedAccountWithoutAntiforgery(bool unsubscribe)
+    {
+        await using var host = await HostFixture.StartAsync();
+        using var request = new HttpRequestMessage(HttpMethod.Post, $"/api/v1/sessions/{SessionId:D}/subscription{(unsubscribe ? "/unsubscribe" : "")}")
+        {
+            Content = unsubscribe ? JsonContent.Create(new { expectedVersion = 1 }) : JsonContent.Create(new { sessionVersion = 1, consentReference = "consent", channel = "Email" })
+        };
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", TestAuthenticationHandler.BearerToken);
+
+        using var response = await host.Client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("actor-1", host.Service.LastAccountId);
+        Assert.True(response.Headers.CacheControl?.NoStore);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CookieOrMixedMutation_WithoutAntiforgery_IsRejected(bool includeBearer)
     {
         await using var host = await HostFixture.StartAsync();
         using var request = new HttpRequestMessage(HttpMethod.Post, $"/api/v1/sessions/{SessionId:D}/subscription")
         {
             Content = JsonContent.Create(new { sessionVersion = 1, consentReference = "consent", channel = "Email" })
         };
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", TestAuthenticationHandler.BearerToken);
-
+        TestAuthenticationHandler.AddCookieAuthentication(request);
+        if (includeBearer) request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", TestAuthenticationHandler.BearerToken);
         using var response = await host.Client.SendAsync(request);
-
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Null(host.Service.LastAccountId);
-        Assert.True(response.Headers.CacheControl?.NoStore);
+    }
+
+    [Fact]
+    public async Task CookieMutation_WithAntiforgery_UsesAuthenticatedAccount()
+    {
+        await using var host = await HostFixture.StartAsync();
+        using var tokenRequest = new HttpRequestMessage(HttpMethod.Get, "/fixture/antiforgery");
+        TestAuthenticationHandler.AddCookieAuthentication(tokenRequest);
+        using var tokenResponse = await host.Client.SendAsync(tokenRequest);
+        var token = await tokenResponse.Content.ReadAsStringAsync();
+        var cookie = tokenResponse.Headers.GetValues("Set-Cookie").Single().Split(';')[0];
+        using var request = new HttpRequestMessage(HttpMethod.Post, $"/api/v1/sessions/{SessionId:D}/subscription")
+        {
+            Content = JsonContent.Create(new { sessionVersion = 1, consentReference = "consent", channel = "Email" })
+        };
+        request.Headers.TryAddWithoutValidation("Cookie", $"{TestAuthenticationHandler.CookieName}={TestAuthenticationHandler.CookieValue}; {cookie}");
+        request.Headers.TryAddWithoutValidation("RequestVerificationToken", token);
+        using var response = await host.Client.SendAsync(request);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("actor-1", host.Service.LastAccountId);
     }
 
     private sealed class HostFixture : IAsyncDisposable
@@ -142,6 +182,8 @@ public sealed class EventSubscriptionEndpointTests
             app.UseAuthentication();
             app.UseAuthorization();
             app.MapEventSubscriptionEndpoints();
+            app.MapGet("/fixture/antiforgery", (Microsoft.AspNetCore.Http.HttpContext context, IAntiforgery antiforgery) =>
+                antiforgery.GetAndStoreTokens(context).RequestToken!);
             await app.StartAsync();
             return new HostFixture(app, app.GetTestClient(), service);
         }
@@ -182,11 +224,18 @@ public sealed class EventSubscriptionEndpointTests
         }
 
         public Task<EventSubscription> SubscribeAsync(Guid sessionId, string accountId, long expectedSessionVersion,
-            string consentReference, string channel, CancellationToken cancellationToken) =>
-            throw new NotSupportedException();
+            string consentReference, string channel, CancellationToken cancellationToken)
+        {
+            LastAccountId = accountId;
+            return Task.FromResult(new EventSubscription(sessionId, accountId, EventSubscriptionStatus.Active, [channel], consentReference, 1));
+        }
 
         public Task<EventSubscription> UnsubscribeAsync(Guid sessionId, string accountId, long expectedSubscriptionVersion,
-            CancellationToken cancellationToken) => throw new NotSupportedException();
+            CancellationToken cancellationToken)
+        {
+            LastAccountId = accountId;
+            return Task.FromResult(new EventSubscription(sessionId, accountId, EventSubscriptionStatus.Unsubscribed, [], null, 2));
+        }
 
         public Task<bool> CanDispatchReminderAsync(Guid sessionId, string accountId, long sessionVersion,
             string consentReference, string channel, CancellationToken cancellationToken,

@@ -84,6 +84,27 @@ test('provider state cannot make a missing or hidden DOM control ready', () => {
     assert.equal(f.collect().controlStates[0].state, 2);
 });
 
+test('invalid replacement removes stale completion and actionability evidence', () => {
+    const f = fixture();
+    f.add('report.subject');
+    const valid = { componentId: 'report.form', controls: [{ controlId: 'report.subject', state: 3, completionAccepted: true }] };
+    for (const invalid of [
+        { componentId: 'invalid#id', controls: [] },
+        { componentId: 'report.form', controls: null },
+        { componentId: 'report.form', controls: [null] },
+        { componentId: 'report.form', controls: Array(21).fill(valid.controls[0]) },
+        { componentId: 'report.form', controls: [{ controlId: 'report.subject', state: 99 }] }
+    ]) {
+        assert.equal(f.context.updateComponent('form', valid), true);
+        assert.equal(f.collect().completedControlIds.join(), 'report.subject');
+        assert.equal(f.collect().controlStates[0].state, 3);
+        assert.equal(f.context.updateComponent('form', invalid), false);
+        const observation = f.collect();
+        assert.equal(observation.completedControlIds.length, 0);
+        assert.equal(observation.controlStates[0].state, 0);
+    }
+});
+
 
 test('navigation cannot crowd current page controls out of a bounded snapshot', () => {
     const f = fixture();
@@ -149,4 +170,34 @@ test('completion changes invalidate context and only literal accepted validation
     assert.notEqual(first.contextStamp, accepted.contextStamp);
     f.context.updateComponent('form', snapshot(false));
     assert.equal(f.collect().completedControlIds.length, 0);
+});
+
+test('validation observations carry only ordered field identifiers and clear on correction', () => {
+    const f = fixture();
+    const snapshot = validationIssues => ({ componentId: 'report.form', controls: [], validationIssues });
+    f.context.updateComponent('form', snapshot([
+        { inputId: 'report.original-statement', message: 'private entered text', anchor: 'untrusted-selector' },
+        { inputId: 'report.occurrence-date', message: 'another message' }
+    ]));
+    const first = f.collect();
+    assert.equal(first.validationInputIds.join(), 'report.original-statement,report.occurrence-date');
+    assert(!JSON.stringify(first).includes('private'));
+    assert(!JSON.stringify(first).includes('untrusted-selector'));
+    f.context.updateComponent('form', snapshot([{ inputId: 'report.occurrence-date' }]));
+    const second = f.collect();
+    assert.equal(second.validationInputIds.join(), 'report.occurrence-date');
+    assert.notEqual(first.contextStamp, second.contextStamp);
+    f.context.removeComponent('form');
+    assert.equal(f.collect().validationInputIds.length, 0);
+});
+
+test('targeted observations do not expose validation identifiers from unrelated components', () => {
+    const f = fixture();
+    f.context.updateComponent('report', { componentId: 'report.form', controls: [{ controlId: 'report.narrative', state: 4 }],
+        validationIssues: [{ inputId: 'report.original-statement' }] });
+    f.context.updateComponent('cases', { componentId: 'cases.form', controls: [{ controlId: 'cases.filter', state: 4 }],
+        validationIssues: [{ inputId: 'cases.filter-value' }] });
+    assert.equal(f.collect(['report.narrative']).validationInputIds.join(), 'report.original-statement');
+    assert.equal(f.collect(['cases.filter']).validationInputIds.join(), 'cases.filter-value');
+    assert.equal(f.collect(['invalid#selector']).validationInputIds.length, 0);
 });

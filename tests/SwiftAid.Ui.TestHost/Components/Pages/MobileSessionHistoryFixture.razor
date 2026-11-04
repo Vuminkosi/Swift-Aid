@@ -1,0 +1,31 @@
+@page "/mobile-session-history-fixture"
+@using SwiftAid.Contracts.Sessions
+@using SwiftAid.UI.Components.Theme
+@using SwiftAid.Ui.TestHost.Components.Sessions
+@using SwiftAid.UI.Components.Surfaces.Public
+@inject SwiftAid.Ui.TestHost.SessionHistoryFixture Fixture
+
+<SwiftAidThemeProvider />
+<MudPopoverProvider />
+<main data-fixture-ready="@_ready.ToString().ToLowerInvariant()">
+    <h1>Session activity fixture</h1>
+    <button @onclick="() => Fixture.ChangeIdentity(true, true)">Allow owner</button>
+    <button @onclick="() => Fixture.ChangeIdentity(true, false)">Switch to another account</button>
+    <button @onclick="() => Fixture.ChangeIdentity(false, false)">Sign out</button>
+    <PublicSessionsSurface Sessions="_sessions" InitialSessionId="_sessions[0].SessionId">
+        <SessionSupplementaryContent Context="session">
+            <MobileSessionHistory @key="(session.SessionId, session.Version)" Session="session" />
+        </SessionSupplementaryContent>
+    </PublicSessionsSurface>
+</main>
+
+@code {
+    private bool _ready;
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (firstRender) { _ready = true; StateHasChanged(); }
+    }
+    private readonly PublicSessionView[] _sessions = [new(Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"), 1,
+        "Synthetic session", "Synthetic summary", "Community", [], "SZ", "region", "education", "Presenter", "English",
+        DateTimeOffset.UtcNow.AddDays(2), "UTC", 60, null, [], SessionChannelType.None, null, "Scheduled", null, 0)];
+}

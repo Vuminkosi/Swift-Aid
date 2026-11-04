@@ -3,6 +3,7 @@
 @using SwiftAid.Client.Presentation
 @using SwiftAid.UI.Components.Surfaces.Operations
 @inject IServiceProvider ServiceProvider
+@implements IDisposable
 
 <PageTitle>Cases | SwiftAid</PageTitle>
 
@@ -14,6 +15,7 @@
                          FilterOptions="_filterOptions"
                          Items="_items"
                          TotalCount="_totalCount"
+                         IsLoadingMore="_loadingMore"
                          StatusMessage="@_statusMessage"
                          OnQueryChanged="ChangeQueryAsync"
                          OnRetry="RefreshAsync" />
@@ -28,6 +30,8 @@
     private int _totalCount;
     private string? _statusMessage;
     private long _loadGeneration;
+    private bool _loadingMore;
+    private CancellationTokenSource? _activeLoad;
 
     protected override Task OnInitializedAsync() => LoadAsync();
 
@@ -60,6 +64,9 @@
     private async Task LoadAsync()
     {
         var generation = Interlocked.Increment(ref _loadGeneration);
+        _activeLoad?.Cancel();
+        using var lifetime = new CancellationTokenSource();
+        _activeLoad = lifetime;
         _state = OperationsSurfaceState.Loading;
         _statusMessage = null;
         StateHasChanged();
@@ -77,7 +84,19 @@
                 return;
             }
 
-            var result = await workspaceClient.ListAsync(_query);
+            _loadingMore = workspaceClient is IIncrementalCaseWorkspaceClient;
+            var result = workspaceClient is IIncrementalCaseWorkspaceClient incremental
+                ? await incremental.ListIncrementallyAsync(_query, page => InvokeAsync(() =>
+                {
+                    if (generation != Volatile.Read(ref _loadGeneration)) return;
+                    _items = page.Items.Select(ToViewRow).ToArray();
+                    _totalCount = page.TotalCount;
+                    _state = _items.Count == 0 ? OperationsSurfaceState.Loading : OperationsSurfaceState.Populated;
+                    StateHasChanged();
+                }), lifetime.Token)
+                : workspaceClient is IProgressiveCaseWorkspaceClient mobileClient
+                    ? await mobileClient.ListInitialAsync(_query, lifetime.Token)
+                    : await workspaceClient.ListAsync(_query, lifetime.Token);
             if (generation != Volatile.Read(ref _loadGeneration))
             {
                 return;
@@ -85,28 +104,19 @@
 
             if (result.Succeeded && result.Value is { } page)
             {
+                _loadingMore = false;
                 _items = page.Items.Select(ToViewRow).ToArray();
                 _totalCount = page.TotalCount;
                 _state = _items.Count == 0 ? OperationsSurfaceState.Empty : OperationsSurfaceState.Populated;
                 _statusMessage = result.Message;
+                _filterOptions = null;
+                StateHasChanged();
 
-                try
-                {
-                    var options = await workspaceClient.GetFilterOptionsAsync();
-                    if (generation == Volatile.Read(ref _loadGeneration))
-                    {
-                        _filterOptions = options.Succeeded && options.Value is { } availableOptions
-                            ? ToViewOptions(availableOptions)
-                            : null;
-                    }
-                }
-                catch (Exception)
-                {
-                    if (generation == Volatile.Read(ref _loadGeneration))
-                    {
-                        _filterOptions = null;
-                    }
-                }
+                var optionsTask = LoadOptionsAsync(workspaceClient, generation);
+                var detailsTask = workspaceClient is IProgressiveCaseWorkspaceClient mobile
+                    ? LoadPreviewsAsync(mobile, page, generation)
+                    : Task.CompletedTask;
+                await Task.WhenAll(optionsTask, detailsTask);
 
                 return;
             }
@@ -145,6 +155,72 @@
                 _statusMessage = "The case list could not be loaded. Refresh to try again.";
             }
         }
+        finally
+        {
+            if (generation == Volatile.Read(ref _loadGeneration))
+            {
+                _loadingMore = false;
+                _activeLoad = null;
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+    }
+
+    public void Dispose()
+    {
+        Interlocked.Increment(ref _loadGeneration);
+        _activeLoad?.Cancel();
+        _activeLoad = null;
+    }
+
+    private async Task LoadOptionsAsync(ICaseWorkspaceClient client, long generation)
+    {
+        try
+        {
+            var options = await client.GetFilterOptionsAsync();
+            if (generation != Volatile.Read(ref _loadGeneration) || _state == OperationsSurfaceState.Denied) return;
+            if (options.Code == UiCapabilityResultCode.Denied)
+            {
+                ClearDenied(options.Message);
+            }
+            else
+            {
+                _filterOptions = options.Succeeded && options.Value is { } availableOptions
+                    ? ToViewOptions(availableOptions) : null;
+            }
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (Exception)
+        {
+            if (generation == Volatile.Read(ref _loadGeneration)) _filterOptions = null;
+        }
+    }
+
+    private async Task LoadPreviewsAsync(IProgressiveCaseWorkspaceClient client, Page<CaseWorkspaceRow> page, long generation)
+    {
+        try
+        {
+            var result = await client.EnrichAsync(page);
+            if (generation != Volatile.Read(ref _loadGeneration) || _state == OperationsSurfaceState.Denied) return;
+            if (result.Code == UiCapabilityResultCode.Denied)
+                ClearDenied(result.Message);
+            else if (result.Succeeded && result.Value is { } enriched)
+                _items = enriched.Items.Select(ToViewRow).ToArray();
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (Exception)
+        {
+            // Optional previews must not hide already authorized queue rows.
+        }
+    }
+
+    private void ClearDenied(string? message)
+    {
+        _items = Array.Empty<OperationsCaseQueue.QueueViewRow>();
+        _totalCount = 0;
+        _filterOptions = null;
+        _state = OperationsSurfaceState.Denied;
+        _statusMessage = message;
     }
 
     private static OperationsCaseQueue.QueueViewRow ToViewRow(CaseWorkspaceRow row) => new(
@@ -161,7 +237,9 @@
         row.RegionLabel,
         row.AssigneeLabel,
         row.ReportedCategoryLabel,
-        row.UpdatedAtUtc);
+        row.UpdatedAtUtc,
+        row.LocationHref,
+        row.ObservationPreview);
 
     private static OperationsCaseQueue.FilterOptionsView ToViewOptions(CaseWorkspaceFilterOptions options) => new(
         options.Sectors.Select(ToViewOption).ToArray(),

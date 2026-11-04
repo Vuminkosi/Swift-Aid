@@ -113,7 +113,11 @@ public sealed class SurveillanceMapAggregateQuery(
             candidates = await _store.GetOwnedCaseAreasAsync(actor.ActorId, sinceUtc, MaxCases + 1, ct)
                 .ConfigureAwait(false);
         }
-        catch (Exception)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception error) when (error is not OutOfMemoryException)
         {
             return new SurveillanceAggregateResult(SurveillanceAggregateAccess.Unavailable, [], now, false);
         }
@@ -125,7 +129,7 @@ public sealed class SurveillanceMapAggregateQuery(
             : await AuthorizeParallelAsync(shortlisted, actor, scopeFactory, ct).ConfigureAwait(false);
 
         var labels = await LoadCountryLabelsAsync(ct).ConfigureAwait(false);
-        var areas = Aggregate(readable, regionCode, labels, now);
+        var areas = Aggregate(readable.Where(row => row.CreatedAtUtc <= now).ToArray(), regionCode, labels, now);
         return new SurveillanceAggregateResult(SurveillanceAggregateAccess.Allowed, areas, now, truncated);
     }
 
@@ -217,6 +221,11 @@ public sealed class SurveillanceMapAggregateQuery(
         {
             return null;
         }
+        catch (InvalidOperationException error) when (error.Message is
+            "The case authority scope is unavailable." or "The current case authority scope is unavailable.")
+        {
+            return null;
+        }
 
         await using (lease.ConfigureAwait(false))
         {
@@ -250,12 +259,28 @@ public sealed class SurveillanceMapAggregateQuery(
         foreach (var country in inScope.GroupBy(row => row.CountryCode, StringComparer.OrdinalIgnoreCase)
                      .OrderBy(group => group.Key, StringComparer.OrdinalIgnoreCase))
         {
-            areas.Add(BuildArea(
+            var countryRows = country.GroupBy(row => row.CaseId).Select(group => group.First()).ToArray();
+            var countryArea = BuildArea(
                 country.Key,
                 countryLabels.GetValueOrDefault(country.Key) ?? country.Key,
                 SurveillanceAggregatePrecision.Country,
-                country,
-                asOfUtc));
+                countryRows,
+                asOfUtc);
+            // A country total and a visible region total can otherwise reveal
+            // a suppressed region, or its complement, by subtraction.
+            if (!countryArea.IsSuppressed && HasSmallRegionalPartition(countryRows))
+            {
+                countryArea = countryArea with
+                {
+                    HumanCount = null,
+                    AnimalCount = null,
+                    Denominator = null,
+                    IsSuppressed = true,
+                    SuppressionReason = "Small counts are withheld to protect privacy."
+                };
+            }
+
+            areas.Add(countryArea);
 
             foreach (var region in country
                          .SelectMany(row => row.RegionIds.Select(regionId => (Row: row, RegionId: regionId)))
@@ -280,6 +305,29 @@ public sealed class SurveillanceMapAggregateQuery(
         return areas;
     }
 
+    private static bool HasSmallRegionalPartition(IReadOnlyList<MapAggregateCaseRow> rows)
+    {
+        foreach (var region in rows.SelectMany(row => row.RegionIds).Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            var inside = rows.Where(row => row.RegionIds.Contains(region, StringComparer.OrdinalIgnoreCase)).ToArray();
+            var outside = rows.Where(row => !row.RegionIds.Contains(region, StringComparer.OrdinalIgnoreCase)).ToArray();
+            if (HasSmallCell(inside) || HasSmallCell(outside))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool HasSmallCell(IReadOnlyList<MapAggregateCaseRow> rows)
+    {
+        var human = rows.Count(row => row.Sector == Sector.HumanHealth);
+        var animal = rows.Count(row => row.Sector == Sector.AnimalHealth);
+        return rows.Count is > 0 and < SuppressionThreshold ||
+               human is > 0 and < SuppressionThreshold || animal is > 0 and < SuppressionThreshold;
+    }
+
     private static SurveillanceAggregateArea BuildArea(
         string areaCode,
         string areaLabel,
@@ -287,8 +335,16 @@ public sealed class SurveillanceMapAggregateQuery(
         IEnumerable<MapAggregateCaseRow> rows,
         DateTimeOffset asOfUtc)
     {
-        var distinct = rows.Select(row => row.CaseId).Distinct().ToArray();
-        if (distinct.Length < SuppressionThreshold)
+        var byCase = rows
+            .GroupBy(row => row.CaseId)
+            .Select(group => group.First())
+            .ToArray();
+        var human = byCase.Count(row => row.Sector == Sector.HumanHealth);
+        var animal = byCase.Count(row => row.Sector == Sector.AnimalHealth);
+        // Suppress the whole row, including the denominator: returning a total
+        // beside a hidden sector would let callers reconstruct the small cell.
+        if (byCase.Length < SuppressionThreshold ||
+            human is > 0 and < SuppressionThreshold || animal is > 0 and < SuppressionThreshold)
         {
             return new SurveillanceAggregateArea(
                 areaCode,
@@ -301,13 +357,6 @@ public sealed class SurveillanceMapAggregateQuery(
                 "Small counts are withheld to protect privacy.",
                 asOfUtc);
         }
-
-        var byCase = rows
-            .GroupBy(row => row.CaseId)
-            .Select(group => group.First())
-            .ToArray();
-        var human = byCase.Count(row => row.Sector == Sector.HumanHealth);
-        var animal = byCase.Count(row => row.Sector == Sector.AnimalHealth);
         return new SurveillanceAggregateArea(
             areaCode,
             areaLabel,

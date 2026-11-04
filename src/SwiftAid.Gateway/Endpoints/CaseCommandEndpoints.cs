@@ -33,13 +33,8 @@ public static class CaseCommandEndpoints
     {
         ArgumentNullException.ThrowIfNull(endpoints);
 
-        var schemes = string.Join(
-            ",",
-            IdentityConstants.ApplicationScheme,
-            OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme);
-
         endpoints.MapPost("/api/v1/cases/{caseId:guid}/commands", PostCommandAsync)
-            .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = schemes })
+            .RequireAuthorization(new AuthorizeAttribute { Policy = "SwiftAidStaffApi" })
             .WithMetadata(new RequestSizeLimitAttribute(MaximumRequestBodyBytes))
             .WithName("PostCaseCommand")
             .Accepts<CaseCommandApiRequest>("application/json")
@@ -52,7 +47,7 @@ public static class CaseCommandEndpoints
             .Produces<ProblemDetails>(StatusCodes.Status503ServiceUnavailable);
 
         endpoints.MapGet("/api/v1/cases/{caseId:guid}/collaborator-candidates", GetCollaboratorCandidatesAsync)
-            .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = schemes });
+            .RequireAuthorization(new AuthorizeAttribute { Policy = "SwiftAidStaffApi" });
     }
 
     private static async Task<IResult> GetCollaboratorCandidatesAsync(

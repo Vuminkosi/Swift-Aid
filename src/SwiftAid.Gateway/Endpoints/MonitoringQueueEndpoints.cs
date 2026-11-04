@@ -23,13 +23,8 @@ public static class MonitoringQueueEndpoints
     {
         ArgumentNullException.ThrowIfNull(endpoints);
 
-        var schemes = string.Join(
-            ",",
-            IdentityConstants.ApplicationScheme,
-            OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme);
-
         endpoints.MapGet("/api/v1/cases/monitoring/queue", GetQueueAsync)
-            .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = schemes })
+            .RequireAuthorization(new AuthorizeAttribute { Policy = "SwiftAidStaffApi" })
             .WithName("GetMonitoringQueue")
             .Produces<MonitoringQueueResult>(StatusCodes.Status200OK)
             .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)

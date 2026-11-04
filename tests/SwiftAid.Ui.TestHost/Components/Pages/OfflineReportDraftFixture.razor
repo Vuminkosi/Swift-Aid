@@ -1,0 +1,41 @@
+@page "/offline-report-draft-fixture"
+@using SwiftAid.Contracts.Intake
+@using SwiftAid.UI.Components.Public
+@using SwiftAid.UI.Components.Public.GuidedReportStepper
+@using SwiftAid.UI.Components.Theme
+
+<SwiftAidThemeProvider />
+<MudPopoverProvider />
+<main>
+    <GuidedReportStepper Draft="_draft" Countries="[]" CountryCatalogueIsCurrent="false"
+        CurrentDraftId="_draftId" SavedDraft="_saved" OnSaveDraft="Save" />
+    <output id="saved-country">@_result?.Location.CountryCode</output>
+    <output id="saved-version">@_result?.Location.CatalogueVersion</output>
+    <output id="saved-narrative">@_result?.Narrative</output>
+    <output id="saved-confirmations">@(_result is null ? "" : $"{_result.Confirmations.OccurrenceCountryConfirmed},{_result.Confirmations.ProcessingConfirmed}")</output>
+</main>
+
+@code {
+    private readonly Guid _draftId = Guid.NewGuid();
+    private PublicReportDraft _draft = default!;
+    private IntakeSubmission _saved = default!;
+    private IntakeSubmission? _result;
+
+    protected override void OnInitialized()
+    {
+        var original = new PublicReportDraft
+        {
+            SubjectScope = IntakeSubjectScope.Human, Narrative = "Original synthetic report", CountryCode = "SZ",
+            CountryConfirmed = true, ProcessingConfirmed = true
+        };
+        _saved = original.ToSubmission("countries-v1", "/privacy", "v1", [new("SZ", "Eswatini")], true)
+            with { ClientSubmissionId = _draftId };
+        _draft = PublicReportDraft.FromSubmission(_saved);
+    }
+
+    private void Save(PublicReportSaveRequest request)
+    {
+        _result = request.Submission;
+        request.ConfirmPersisted(_draftId);
+    }
+}

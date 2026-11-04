@@ -1,5 +1,6 @@
 @page "/workspace/imports"
 @using System.Text
+@using System.Security.Cryptography
 @using SwiftAid.Application.Intake.Imports
 @using SwiftAid.Client.Presentation
 @using SwiftAid.Client.Presentation.PublicWorkflows
@@ -57,6 +58,14 @@
                         @if (_importId.HasValue && _summary?.State != "Completed")
                         {
                             <MudText Typo="Typo.body2">Resume from report @(_summary?.NextRow ?? 1). Saved cases will not be added again.</MudText>
+                        }
+                        @if (_legacyFileUnverified)
+                        {
+                            <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true" role="status">
+                                This older import did not record a file fingerprint, so the original file cannot be verified automatically.
+                            </MudAlert>
+                            <MudCheckBox T="bool" @bind-Value="_legacyConfirmed" Disabled="_busy"
+                                         Label="I confirm this is the unchanged original file." />
                         }
                         <MudCheckBox T="bool" @bind-Value="_reviewed" Disabled="_busy"
                                      Label="I have reviewed these reports and confirmed their occurrence country." />
@@ -156,9 +165,10 @@
     private IBrowserFile? _file;
     private Guid? _importId;
     private int _filePickerGeneration;
-    private bool _loading = true, _busy, _reviewed, _confirmed, _pause;
+    private bool _loading = true, _busy, _reviewed, _confirmed, _pause, _legacyFileUnverified, _legacyConfirmed;
     private string? _message;
-    private bool CanStart => !_busy && _workspace is not null && _file is not null && _reviewed && _confirmed && _summary?.State != "Completed";
+    private bool CanStart => !_busy && _workspace is not null && _file is not null && _reviewed && _confirmed &&
+        (!_legacyFileUnverified || _legacyConfirmed) && _summary?.State != "Completed";
 
     protected override Task OnInitializedAsync() => LoadAsync();
 
@@ -210,6 +220,7 @@
         _workspace = _workspaces.FirstOrDefault(w => w.WorkspaceId == _destination?.WorkspaceId &&
             w.OrganizationId == _destination?.OrganizationId && w.CountryCode == _country);
         _reviewed = _confirmed = false;
+        _legacyFileUnverified = _legacyConfirmed = false;
         _recent = [];
         try { if (_workspace is not null) _recent = await Imports.GetRecentAsync(_workspace, _lifetime.Token); }
         catch (Exception exception) when (exception is not OutOfMemoryException) { _message = "Recent imports could not be loaded."; }
@@ -219,6 +230,7 @@
     {
         _file = null;
         _message = null;
+        _legacyFileUnverified = _legacyConfirmed = false;
         if (args.File.Size > 64L * 1024 * 1024 || !args.File.Name.EndsWith(".csv", StringComparison.OrdinalIgnoreCase))
         { _message = "Choose a CSV file no larger than 64 MB."; return; }
         _file = args.File;
@@ -229,16 +241,39 @@
         if (!CanStart || _catalogue is null || _policy is null) return;
         _busy = true;
         _pause = false;
-        _issues.Clear();
         _run = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
         _importId ??= Guid.NewGuid();
         try
         {
             _summary = await Imports.GetAsync(_importId.Value, _run.Token);
-            _context ??= new(_workspace!.WorkspaceId, new(true, _workspace.CountryCode, _catalogue.Version,
-                true, true, _policy.Reference, _policy.Version, null, null, null),
-                _summary is null ? _workspace.OrganizationId : _summary.OrganizationId);
             if (_summary?.State == "Completed") { _message = CompletionMessage(); return; }
+            _message = "Checking the selected file…";
+            await InvokeAsync(StateHasChanged);
+            byte[] fingerprint;
+            await using (var fingerprintStream = _file!.OpenReadStream(64L * 1024 * 1024, _run.Token))
+                fingerprint = await SHA256.HashDataAsync(fingerprintStream, _run.Token);
+            string fileSha256;
+            try { fileSha256 = Convert.ToHexString(fingerprint).ToLowerInvariant(); }
+            finally { CryptographicOperations.ZeroMemory(fingerprint); }
+            var context = new CaseImportContext(_workspace!.WorkspaceId, new(true, _workspace.CountryCode, _catalogue.Version,
+                true, true, _policy.Reference, _policy.Version, null, null, null),
+                _summary is null ? _workspace.OrganizationId : _summary.OrganizationId, fileSha256);
+            if (_summary is not null && !await Imports.MatchesContextAsync(_importId.Value, context, _run.Token))
+            {
+                var legacyContext = context with { FileSha256 = null };
+                if (!await Imports.MatchesContextAsync(_importId.Value, legacyContext, _run.Token))
+                    throw new CaseImportException("import-context-conflict");
+                if (!_legacyFileUnverified || !_legacyConfirmed)
+                {
+                    _legacyFileUnverified = true;
+                    _legacyConfirmed = false;
+                    _message = "Confirm that you selected the original file before resuming.";
+                    return;
+                }
+                context = legacyContext;
+            }
+            _context = context;
+            _issues.Clear();
             await using var stream = _file!.OpenReadStream(64L * 1024 * 1024, _run.Token);
             using var reader = new StreamReader(stream, new UTF8Encoding(false, true), false, 4096, leaveOpen: true);
             await foreach (var batch in CaseCsvBatchReader.ReadAsync(reader, _summary?.NextRow ?? 1, _run.Token))
@@ -256,7 +291,17 @@
         }
         catch (InvalidDataException) { _message = "The file format needs review. Saved cases are safe; check the CSV before continuing."; }
         catch (OperationCanceledException) { _message = "Import interrupted. Saved cases are safe; resume with the same file."; }
-        catch (CaseImportException exception) { _message = FailureMessage(exception.Code); }
+        catch (CaseImportException exception)
+        {
+            if (exception.Code is "not-authorized" or "registration-denied")
+            {
+                _summary = null;
+                _context = null;
+                _issues.Clear();
+                _recent = [];
+            }
+            _message = FailureMessage(exception.Code);
+        }
         catch (Exception exception) when (exception is not OutOfMemoryException) { _message = "Import interrupted. Saved cases are safe; resume with the same file."; }
         finally
         {
@@ -278,6 +323,13 @@
             _issues.AddRange(await Imports.GetIssuesAsync(item.ImportId, 0, _lifetime.Token));
             _message = _summary?.State == "Completed" ? CompletionMessage() : "Select the original file and confirm its details to resume.";
         }
+        catch (CaseImportException exception) when (exception.Code == "not-authorized")
+        {
+            _summary = null;
+            _issues.Clear();
+            _recent = [];
+            _message = FailureMessage(exception.Code);
+        }
         catch (Exception exception) when (exception is not OutOfMemoryException) { _message = "This import could not be loaded. Refresh your access and try again."; }
     }
 
@@ -285,7 +337,7 @@
     {
         _importId = null; _summary = null; _context = null; _file = null;
         _filePickerGeneration++;
-        _reviewed = _confirmed = false; _issues.Clear(); _message = null;
+        _reviewed = _confirmed = _legacyFileUnverified = _legacyConfirmed = false; _issues.Clear(); _message = null;
     }
 
     private void Pause() { _pause = true; _message = "Pausing after the current batch…"; }
@@ -307,7 +359,7 @@
     {
         "not-authorized" or "registration-denied" => "Your current access does not permit this import. Saved cases remain available to authorized members.",
         "import-busy" => "This import is already running. Wait for it to finish before resuming.",
-        "import-context-conflict" => "The workspace, country or report-handling terms differ from the original import. Review the original import before continuing.",
+        "import-context-conflict" => "The selected file or import settings differ from the original import. Select the original file and settings to resume.",
         "row-content-conflict" => "The selected file differs from the original import. Resume using the unchanged original file.",
         _ => "Import paused. Saved cases are safe; check the file and resume to retry."
     };
@@ -326,5 +378,5 @@
         }
     };
 
-    public void Dispose() { _lifetime.Cancel(); _lifetime.Dispose(); }
+    public void Dispose() { _run?.Cancel(); _lifetime.Cancel(); _lifetime.Dispose(); }
 }

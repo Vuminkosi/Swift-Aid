@@ -51,6 +51,7 @@ if (migrateDatabase)
 builder.Services.AddScoped<SwiftAid.UI.Ellai.Guidance.EllaiDisplayedReceiptContext>();
 builder.Services.AddScoped<SwiftAid.UI.Ellai.Guidance.EllaiValidationGuidance>();
 builder.Services.AddScoped<SwiftAid.UI.Ellai.Guidance.EllaiCaseFilterContext>();
+builder.Services.AddScoped<SwiftAid.UI.Ellai.Guidance.EllaiPublicReportDraftContext>();
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 builder.Services.AddHttpContextAccessor();
@@ -73,17 +74,37 @@ builder.Services.AddScoped<SwiftAid.Contracts.Cases.ICaseTranslationClient, Case
 builder.Services.AddScoped<ICaseCorrectionReadClient, CaseCorrectionReadGatewayClient>();
 
 
-builder.Services.AddScoped<IAiInvestigationClient, UnavailableInvestigationClient>();
-builder.Services.AddScoped<IOrganizationManagementClient, UnavailableOrganizationManagementClient>();
+builder.Services.AddScoped<IAiInvestigationClient, SwiftAid.Gateway.Ellai.InvestigationGatewayClient>();
+builder.Services.AddScoped<OrganizationManagementContext>();
+builder.Services.AddScoped<IOrganizationManagementClient, OrganizationManagementGatewayClient>();
 if (builder.Configuration.GetValue<bool>("Identity:Enabled") || builder.Configuration.GetValue<bool>("Federation:Enabled"))
+{
     builder.Services.AddScoped<IAccountPresentationClient, GatewayAccountPresentationClient>();
+    builder.Services.AddScoped<IOrganizationMembershipClient, GatewayOrganizationMembershipClient>();
+}
 else
+{
     builder.Services.AddScoped<IAccountPresentationClient, UnavailableAccountPresentationClient>();
+    builder.Services.AddScoped<IOrganizationMembershipClient, UnavailableOrganizationMembershipClient>();
+}
 builder.Services.AddScoped<IWorkspaceAccessClient, GatewayWorkspaceAccessClient>();
 builder.Services.AddScoped<IStaffSessionEditorClient, GatewayStaffSessionEditorClient>();
 builder.Services.AddScoped<IStaffSessionHistoryClient, GatewayStaffSessionHistoryClient>();
 builder.Services.AddScoped<IMapAggregateClient, MapAggregateGatewayClient>();
+builder.Services.AddScoped<IGeoLookupClient, ScopedGeoLookupClient>();
+builder.Services.AddScoped<CaseDiscussionGatewayClient>();
+builder.Services.AddScoped<ICaseDiscussionClient>(services => services.GetRequiredService<CaseDiscussionGatewayClient>());
+builder.Services.AddScoped<ICaseDiscussionCommandClient>(services => services.GetRequiredService<CaseDiscussionGatewayClient>());
+builder.Services.AddScoped<ICaseObservationClient, CaseObservationGatewayClient>();
+builder.Services.AddScoped<CaseEvidenceGatewayClient>();
+builder.Services.AddScoped<ICaseEvidenceClient>(services => services.GetRequiredService<CaseEvidenceGatewayClient>());
+builder.Services.AddScoped<ICaseEvidenceUploadClient>(services => services.GetRequiredService<CaseEvidenceGatewayClient>());
+builder.Services.AddScoped<ICaseEvidenceContentClient>(services => services.GetRequiredService<CaseEvidenceGatewayClient>());
 builder.Services.AddScoped<ISurveillanceMapDetailsClient, SurveillanceMapDetailsGatewayClient>();
+builder.Services.AddScoped<ISurveillanceMapDetailsRequest, SurveillanceMapDetailsRequest>();
+builder.Services.AddScoped<IWorkspaceAccessRequest, WorkspaceAccessRequest>();
+builder.Services.AddScoped<IStaffSessionEditorReadRequest, StaffSessionEditorReadRequest>();
+builder.Services.AddDataProtection();
 builder.Services.AddScoped<ICaseWorkspaceClient, CaseWorkspaceGatewayClient>();
 builder.Services.AddScoped<SwiftAid.Gateway.Ingestion.IWorkspaceImportClient, SwiftAid.Gateway.Ingestion.WorkspaceImportClient>();
 builder.Services.AddScoped<IWorkManagementClient, CommandBackedWorkManagementClient>();
@@ -95,16 +116,34 @@ GatewayAuthenticationRegistration.Configure(builder.Services, builder.Configurat
 builder.Services.AddSwiftAidInfrastructure(builder.Configuration, builder.Environment);
 GatewayAuthenticationRegistration.ConfigurePersistentCookieDataProtection(builder.Services);
 builder.Services.AddScoped<SwiftAid.Application.Authorization.IScopeService,
-    SwiftAid.Application.Authorization.ScopeService>();
+    SwiftAid.Gateway.Ellai.GatewaySessionScopeService>();
+builder.Services.AddScoped<SwiftAid.Infrastructure.Authorization.PostgresSessionScopeService>();
+builder.Services.AddScoped<SwiftAid.Infrastructure.Demo.DemoAccessProvisioner>();
+builder.Services.AddHostedService<DemoAccountStartupSeeder>();
+if (builder.Configuration.GetValue<bool>("DemoAccess:Enabled") && !builder.Environment.IsDevelopment())
+{
+    throw new InvalidOperationException("Demo access requires the Development environment.");
+}
 builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiSessionScopeResolver>();
 builder.Services.AddScoped<WebGuestIntakeService>(services =>
     new WebGuestIntakeService(services.GetRequiredService<IServiceScopeFactory>()));
 builder.Services.AddScoped<IPublicIntakeSubmissionClient, WebPublicIntakeSubmissionClient>();
 builder.Services.AddScoped<IPublicIntakeMetadataClient, WebPublicIntakeMetadataClient>();
+builder.Services.AddScoped<SwiftAid.Browser.Services.BrowserGuestSubmissionPersistence>();
+builder.Services.AddScoped<SwiftAid.Client.Intake.IGuestSubmissionPersistence>(services =>
+    services.GetRequiredService<SwiftAid.Browser.Services.BrowserGuestSubmissionPersistence>());
+builder.Services.AddScoped<SwiftAid.Client.Intake.IGuestIntakeTransport, GatewayGuestIntakeTransport>();
+builder.Services.AddScoped<SwiftAid.Client.Intake.IGuestSubmissionCoordinator, SwiftAid.Client.Intake.GuestSubmissionCoordinator>();
+builder.Services.AddScoped<SwiftAid.Client.Intake.IGuestSubmissionStore>(services =>
+    new SwiftAid.Client.Intake.GuestDraftStore(
+        services.GetRequiredService<SwiftAid.Client.Intake.IGuestSubmissionPersistence>(),
+        transport: services.GetRequiredService<SwiftAid.Client.Intake.IGuestIntakeTransport>()));
 builder.Services.AddScoped<IPublicCommunitySessionClient, WebPublicCommunitySessionClient>();
 builder.Services.AddScoped<SwiftAid.Contracts.Intake.IIntakeCoordinationClient, IntakeCoordinationGatewayClient>();
 builder.Services.AddScoped<SwiftAid.Contracts.Cases.ICaseTimelineClient, SwiftAid.Gateway.Cases.CaseTimelineGatewayClient>();
 builder.Services.AddScoped<SwiftAid.Contracts.Cases.IFollowUpRecommendationReviewClient, SwiftAid.Gateway.Cases.FollowUpReviewGatewayClient>();
+builder.Services.AddScoped<SwiftAid.Contracts.Cases.IOrganizationSuggestionDecisionClient, SwiftAid.Gateway.Cases.OrganizationDecisionGatewayClient>();
+builder.Services.AddScoped<SwiftAid.Contracts.Cases.ICaseCorrelationClient, SwiftAid.Gateway.Cases.CaseCorrelationGatewayClient>();
 builder.Services.AddScoped<SwiftAid.Contracts.Cases.IEligibleHealthOfficerClient, SwiftAid.Gateway.Cases.EligibleHealthOfficerGatewayClient>();
 builder.Services.AddScoped<SwiftAid.Contracts.Cases.IHealthOfficerAdministrationClient, SwiftAid.Gateway.Cases.HealthOfficerAdministrationGatewayClient>();
 if (builder.Configuration.GetValue<bool>("Ellai:Operational:OfficerDirectory:Enabled") &&
@@ -126,6 +165,8 @@ builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiUtteranceSubmissionSe
 builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiPolicyService>();
 builder.Services.AddScoped<SwiftAid.Application.Ellai.IEllaiLocationReplayProtector, SwiftAid.Gateway.Ellai.EllaiLocationReplayProtector>();
 builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiToolBroker>();
+builder.Services.Configure<SwiftAid.Infrastructure.HealthEvidence.ApprovedHealthSourceOptions>(builder.Configuration.GetSection("Ellai:HealthSources"));
+builder.Services.AddSingleton<SwiftAid.Application.HealthEvidence.IApprovedHealthSourceRegistry, SwiftAid.Infrastructure.HealthEvidence.ConfiguredHealthSourceRegistry>();
 builder.Services.AddScoped(_ => new SwiftAid.Application.Ellai.EllaiTechnicalDocs(
     SwiftAid.Application.Ellai.EllaiTechnicalDocs.TryResolvePath(
         builder.Environment.ContentRootPath,
@@ -152,7 +193,7 @@ builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiModelGuidancePlanner>
 builder.Services.AddScoped<SwiftAid.Application.Ellai.IEllaiUiDiscoveryService, SwiftAid.Application.Ellai.EllaiUiDiscoveryService>();
 builder.Services.AddScoped<SwiftAid.Application.Ellai.IEllaiGuidancePlanner, SwiftAid.Application.Ellai.EllaiGuidancePlanner>();
 builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiGuidanceSessionCoordinator>();
-builder.Services.AddScoped<SwiftAid.UI.Ellai.Guidance.IEllaiGuidanceControl, SwiftAid.Gateway.Ellai.EllaiGuidanceControlAdapter>();
+builder.Services.AddScoped<SwiftAid.UI.Ellai.Guidance.IEllaiGuidanceControl, SwiftAid.UI.Ellai.Guidance.SharedEllaiGuidanceControl>();
 builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiApprovedActionService>();
 
 builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiApprovalService>();
@@ -204,6 +245,9 @@ builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiTrainingVerifier>();
     builder.Services.AddScoped<SwiftAid.Intelligence.Meta.EllaiReasoningRouter>();
     SwiftAid.Gateway.Ellai.EllaiReasoningRegistration.AddEllaiUsageAccounting(builder.Services, ellai);
     builder.Services.AddScoped<SwiftAid.Application.Ellai.IEllaiTurnCompletionClient, SwiftAid.Intelligence.Meta.EllaiProviderTurnClient>();
+    builder.Services.AddScoped<SwiftAid.Application.Intake.ReportVoiceExtraction>();
+    builder.Services.AddScoped<SwiftAid.Application.Intake.ReportVoiceExtractionAdmission>();
+    builder.Services.AddScoped<SwiftAid.Gateway.Ellai.ReportVoiceGatewayService>();
     if (ellai.Enabled)
     {
         var policyPath = SwiftAid.Application.Ellai.EllaiRuntimePolicy.ResolvePath(builder.Environment.ContentRootPath, ellai.PolicyPath);
@@ -251,6 +295,9 @@ builder.Services.AddHostedService<SessionReminderDeliveryWorker>();
 builder.Services.AddHostedService<SwiftAid.Gateway.Ingestion.IngestionOutboxWorker>();
 builder.Services.Configure<SwiftAid.Infrastructure.Classification.ClassificationOptions>(builder.Configuration.GetSection("Classification"));
 builder.Services.AddScoped<SwiftAid.Infrastructure.Classification.ClassificationRegistry>();
+builder.Services.Configure<SwiftAid.Gateway.Ellai.EllaiEnrichmentScheduleOptions>(builder.Configuration.GetSection("Ellai:Operational:Enrichment"));
+builder.Services.AddScoped<SwiftAid.Infrastructure.Classification.EllaiEnrichmentWork>();
+builder.Services.AddHostedService<SwiftAid.Gateway.Ellai.EllaiEnrichmentScheduleWorker>();
 builder.Services.Configure<SwiftAid.Gateway.Ellai.EllaiQualityScheduleOptions>(builder.Configuration.GetSection("Ellai:Operational:Quality"));
 builder.Services.AddScoped<SwiftAid.Infrastructure.Classification.EllaiQualityWork>();
 builder.Services.AddScoped<SwiftAid.Gateway.Ellai.EllaiQualitySweep>();
@@ -260,6 +307,16 @@ builder.Services.Configure<SwiftAid.Gateway.Ellai.EllaiFollowUpScheduleOptions>(
 builder.Services.AddScoped<SwiftAid.Infrastructure.Classification.EllaiFollowUpWork>();
 builder.Services.AddScoped<SwiftAid.Gateway.Ellai.EllaiFollowUpSweep>();
 builder.Services.AddHostedService<SwiftAid.Gateway.Ellai.EllaiFollowUpScheduleWorker>();
+builder.Services.Configure<SwiftAid.Infrastructure.Classification.EllaiOrganizationOptions>(builder.Configuration.GetSection("Ellai:Operational:Organization"));
+builder.Services.Configure<SwiftAid.Gateway.Ellai.EllaiOrganizationScheduleOptions>(builder.Configuration.GetSection("Ellai:Operational:Organization"));
+builder.Services.AddScoped<SwiftAid.Infrastructure.Classification.EllaiOrganizationWork>();
+builder.Services.AddScoped<SwiftAid.Gateway.Ellai.EllaiOrganizationSweep>();
+builder.Services.AddHostedService<SwiftAid.Gateway.Ellai.EllaiOrganizationScheduleWorker>();
+builder.Services.Configure<SwiftAid.Infrastructure.Classification.EllaiCorrelationOptions>(builder.Configuration.GetSection("Ellai:Operational:Correlation"));
+builder.Services.Configure<SwiftAid.Gateway.Ellai.EllaiCorrelationScheduleOptions>(builder.Configuration.GetSection("Ellai:Operational:Correlation"));
+builder.Services.AddScoped<SwiftAid.Infrastructure.Classification.EllaiCorrelationWork>();
+builder.Services.AddScoped<SwiftAid.Gateway.Ellai.EllaiCorrelationSweep>();
+builder.Services.AddHostedService<SwiftAid.Gateway.Ellai.EllaiCorrelationScheduleWorker>();
 builder.Services.Configure<SwiftAid.Infrastructure.Classification.TranslationOptions>(builder.Configuration.GetSection("ExperimentalMultilingualIntelligence"));
 builder.Services.AddScoped<SwiftAid.Infrastructure.Classification.TranslationRegistry>();
 builder.Services.AddScoped<SwiftAid.Infrastructure.Classification.CaseTranslationService>();
@@ -289,6 +346,19 @@ app.UseWhen(
 app.UseHttpsRedirection();
 app.UseWebSockets();
 app.UseAuthentication();
+if (app.Configuration.GetValue<bool>("DemoAccess:Enabled"))
+{
+    app.Use(async (context, next) =>
+    {
+        if (context.User.Identity?.IsAuthenticated == true)
+        {
+            var actor = SwiftAid.Application.Authorization.ActorContext.FromValidatedPrincipal(context.User);
+            await context.RequestServices.GetRequiredService<SwiftAid.Infrastructure.Demo.DemoAccessProvisioner>()
+                .EnsureAsync(actor, context.RequestAborted);
+        }
+        await next(context);
+    });
+}
 app.UseAuthorization();
 app.UseRateLimiter();
 app.UseAntiforgery();
@@ -308,11 +378,28 @@ app.MapClassificationWorkerEndpoints();
 app.MapCaseClassificationEndpoints();
 app.MapCaseTranslationEndpoints();
 app.MapSurveillanceSignalEndpoints();
+app.MapSurveillanceMapDetailsEndpoints();
+app.MapWorkspaceAccessEndpoints();
+app.MapAnalyticsEndpoints();
+app.MapStaffSessionEditorReadEndpoints();
+app.MapStaffSessionDraftEndpoints();
 app.MapCaseTimelineEndpoints();
+app.MapCaseMonitoringPageEndpoints();
+app.MapCaseWorkDiscoveryEndpoints();
 app.MapEligibleHealthOfficerEndpoints();
 app.MapHealthOfficerDesignationEndpoints();
 app.MapFollowUpReviewEndpoints();
+app.MapOrganizationDecisionEndpoints();
+app.MapCaseCorrelationEndpoints();
+app.MapSpatialAnalysisEndpoints();
+app.MapHealthSourceEndpoints();
+app.MapCommunityResearchEndpoints();
+app.MapCorrelationDecisionEndpoints();
 app.MapCaseDetailEndpoints();
+app.MapCaseEvidenceEndpoints();
+app.MapCaseDiscussionEndpoints();
+app.MapOrganizationManagementEndpoints();
+app.MapInvestigationEndpoints();
 app.MapCaseQueueEndpoints();
 app.MapMapAggregateEndpoints();
 app.MapHomeOverviewEndpoints();
@@ -344,6 +431,8 @@ public static class GatewayAuthenticationRegistration
             return;
         }
 
+        services.AddSingleton<Microsoft.AspNetCore.DataProtection.IDataProtectionProvider>(provider =>
+            provider.GetRequiredService<ProtectedPayloadDataProtectionProvider>());
         ConfigureCookieProvider(services, IdentityConstants.ApplicationScheme);
         ConfigureCookieProvider(services, IdentityConstants.ExternalScheme);
         ConfigureCookieProvider(services, EllaiGuestEndpoints.AuthenticationScheme);

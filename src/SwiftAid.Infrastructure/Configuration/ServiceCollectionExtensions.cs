@@ -21,6 +21,9 @@ using SwiftAid.Application.Abstractions;
 using SwiftAid.Application.Attachments;
 using SwiftAid.Application.Authorization;
 using SwiftAid.Application.Cases;
+using SwiftAid.Application.Cases.Correlation;
+using SwiftAid.Application.Cases.Spatial;
+using SwiftAid.Application.CommunityResearch;
 using SwiftAid.Application.Demo;
 using SwiftAid.Application.Cases.Commands;
 using SwiftAid.Application.Cases.Registration;
@@ -40,6 +43,7 @@ using SwiftAid.Infrastructure.Persistence.Notifications;
 using SwiftAid.Infrastructure.Persistence.Protection;
 using SwiftAid.Infrastructure.Persistence.Registration;
 using SwiftAid.Infrastructure.Persistence.Repositories.Cases;
+using SwiftAid.Infrastructure.Persistence.CommunityResearch;
 using SwiftAid.Infrastructure.Persistence.Repositories.Intake;
 using SwiftAid.Infrastructure.Persistence.Sessions;
 using SwiftAid.Infrastructure.Persistence.Transactions;
@@ -151,7 +155,7 @@ public static class ServiceCollectionExtensions
         intakeMetadataOptions.Validate();
         services.TryAddSingleton(intakeMetadataOptions);
         services.TryAddSingleton<IIntakePublicMetadataProvider>(
-            _ => new IntakePublicMetadataProvider(intakeMetadataOptions));
+            _ => new IntakePublicMetadataProvider(intakeMetadataOptions, intakeLimits));
         var demoDataOptions = ReadDemoDataOptions(configuration);
         demoDataOptions.Validate();
         services.TryAddSingleton(demoDataOptions);
@@ -402,8 +406,14 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ICaseCommandPersistence, PostgresCaseCommandPersistence>();
         services.AddScoped<ICaseCommandProcessor, CaseCommandProcessor>();
         services.AddScoped<ICaseTimelineStore, PostgresCaseTimelineStore>();
+        services.AddScoped<ICaseCorrelationStore, PostgresCaseCorrelationStore>();
+        services.AddScoped<CaseCorrelationQuery>();
+        services.AddScoped<ICommunityFeedbackAggregateSubmission, PostgresCommunityFeedbackAggregateSubmission>();
+        services.AddScoped<ICommunityFeedbackAggregateReview, PostgresCommunityFeedbackAggregateReview>();
+        services.AddScoped<ICaseCorrelationDecisionService, PostgresCaseCorrelationDecisionService>();
         services.AddScoped<ICaseTimelineQuery, CaseTimelineQuery>();
         services.AddScoped<IFollowUpRecommendationReviewService, PostgresFollowUpRecommendationReviewService>();
+        services.AddScoped<IOrganizationSuggestionDecisionService, PostgresOrganizationSuggestionDecisionService>();
         services.Configure<HealthOfficerDirectoryOptions>(configuration.GetSection("Ellai:Operational:OfficerDirectory"));
         services.AddScoped<IEligibleHealthOfficerStore, PostgresEligibleHealthOfficerStore>();
         services.AddScoped<IHealthOfficerEscalationReviewStore, PostgresHealthOfficerEscalationReviewStore>();
@@ -426,17 +436,20 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IEligibleHealthOfficerQuery>(provider => new EligibleHealthOfficerQuery(
             provider.GetRequiredService<IEligibleHealthOfficerStore>(), provider.GetRequiredService<ICaseAccessPolicy>(),
             provider.GetRequiredService<ICaseCommandUnitOfWork>(), provider.GetRequiredService<IOptions<HealthOfficerDirectoryOptions>>().Value));
+        services.AddScoped<ICaseReportAttributionQuery, CaseReportAttributionQuery>();
         services.AddScoped<ICaseCollaboratorCandidatesStore, PostgresCaseCollaboratorCandidatesStore>();
         services.AddScoped<ICaseCollaboratorCandidatesQuery, CaseCollaboratorCandidatesQuery>();
         services.AddScoped<ICaseQueueStore, PostgresCaseQueueStore>();
         services.AddScoped<ICaseQueueQuery, CaseQueueQuery>();
         services.AddScoped<IMapAggregateStore, PostgresMapAggregateStore>();
         services.AddScoped<IMapAggregateQuery, SurveillanceMapAggregateQuery>();
+        services.AddScoped<OwnedCaseSpatialAnalysis>();
         services.AddScoped<IDashboardAggregateStore, PostgresDashboardAggregateStore>();
         services.AddScoped<IDashboardAggregateQuery, DashboardAggregateQuery>();
         services.AddScoped<ICaseSummaryStore, PostgresCaseSummaryStore>();
         services.AddScoped<ICaseSummaryQuery, CaseSummaryQuery>();
         services.AddScoped<ICaseReportReadQuery, CaseReportReadQuery>();
+        services.AddScoped<ICaseOccurrenceLocationQuery, CaseReportReadQuery>();
         services.AddScoped<ICaseMapCandidateStore, PostgresCaseQueueStore>();
         services.AddScoped<ICaseCorrectionReadQuery, CaseCorrectionReadQuery>();
         services.AddScoped<IHomeOverviewStore, PostgresHomeOverviewStore>();
@@ -445,6 +458,10 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ICaseMonitoringSummaryStore, PostgresCaseMonitoringSummaryStore>();
         services.AddScoped<ICaseMonitoringSummaryQuery, CaseMonitoringSummaryQuery>();
         services.AddScoped<ICaseMonitoringQueueStore, PostgresCaseMonitoringQueueStore>();
+        services.AddScoped<ICaseMonitoringPageStore, PostgresCaseMonitoringPageStore>();
+        services.AddScoped<ICaseMonitoringPageQuery, CaseMonitoringPageQuery>();
+        services.AddScoped<ICaseWorkDiscoveryStore, PostgresCaseWorkDiscoveryStore>();
+        services.AddScoped<ICaseWorkDiscoveryQuery, CaseWorkDiscoveryQuery>();
         services.AddScoped<ICaseMonitoringQueueQuery, CaseMonitoringQueueQuery>();
         // Community sessions ride the same pipeline flag: when the pipeline is disabled the
         // service stays unregistered and the staff/public session endpoints fail closed

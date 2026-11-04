@@ -31,34 +31,29 @@ public static class IntakeCoordinationEndpoints
     {
         ArgumentNullException.ThrowIfNull(endpoints);
 
-        var schemes = string.Join(
-            ",",
-            IdentityConstants.ApplicationScheme,
-            OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme);
-
         endpoints.MapGet("/api/v1/intake/coordination/queue", GetQueueAsync)
-            .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = schemes })
+            .RequireAuthorization(new AuthorizeAttribute { Policy = "SwiftAidStaffApi" })
             .WithName("GetIntakeCoordinationQueue")
             .Produces<IReadOnlyList<IntakeCoordinationQueueEntry>>(StatusCodes.Status200OK)
             .Produces<ProblemDetails>(StatusCodes.Status401Unauthorized)
             .Produces<ProblemDetails>(StatusCodes.Status404NotFound);
 
         endpoints.MapGet("/api/v1/intake/coordination/{id}", GetDetailAsync)
-            .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = schemes })
+            .RequireAuthorization(new AuthorizeAttribute { Policy = "SwiftAidStaffApi" })
             .WithName("GetIntakeCoordinationDetail")
             .Produces<IntakeCoordinationDetail>(StatusCodes.Status200OK)
             .Produces<ProblemDetails>(StatusCodes.Status401Unauthorized)
             .Produces<ProblemDetails>(StatusCodes.Status404NotFound);
 
         endpoints.MapGet("/api/v1/intake/coordination/queues", GetQueuesAsync)
-            .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = schemes })
+            .RequireAuthorization(new AuthorizeAttribute { Policy = "SwiftAidStaffApi" })
             .WithName("GetIntakeCoordinationQueues")
             .Produces<IReadOnlyList<IntakeCoordinationQueueOption>>(StatusCodes.Status200OK)
             .Produces<ProblemDetails>(StatusCodes.Status401Unauthorized)
             .Produces<ProblemDetails>(StatusCodes.Status404NotFound);
 
         endpoints.MapPost("/api/v1/intake/coordination/{id}/actions", PostActionAsync)
-            .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = schemes })
+            .RequireAuthorization(new AuthorizeAttribute { Policy = "SwiftAidStaffApi" })
             .WithMetadata(new RequestSizeLimitAttribute(MaximumRequestBodyBytes))
             .WithName("RecordIntakeCoordinationAction")
             .Accepts<IntakeCoordinationActionRequest>("application/json")

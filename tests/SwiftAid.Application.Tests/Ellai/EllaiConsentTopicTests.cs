@@ -104,6 +104,23 @@ public sealed class EllaiTopicServiceTests
     }
 
     [Fact]
+    public async Task AtomicTopicPayloadUpdateAllowsOnlyOneWriterAndKeepsSessionIsolation()
+    {
+        var store = new InMemoryEllaiTopicStore();
+        var topics = new EllaiTopicService(store);
+        var topic = await topics.TrackAsync("session-1", "History", [], "before", "v1");
+        Assert.False(await topics.CompareExchangePayloadAsync("session-2", topic.TopicId, "before", "v1", "foreign", "v2", default));
+        var writes = await Task.WhenAll(
+            Task.Run(() => topics.CompareExchangePayloadAsync("session-1", topic.TopicId, "before", "v1", "first", "v2", default)),
+            Task.Run(() => topics.CompareExchangePayloadAsync("session-1", topic.TopicId, "before", "v1", "second", "v2", default)));
+        Assert.Single(writes, result => result);
+        var stored = await topics.GetAsync("session-1", topic.TopicId, default);
+        Assert.Contains(stored!.EntityRef, new[] { "first", "second" });
+        Assert.Equal("v2", stored.EntityVersion);
+        Assert.False(await topics.CompareExchangePayloadAsync("session-1", topic.TopicId, "before", "v1", "stale", "v3", default));
+    }
+
+    [Fact]
     public void SixthDetourRequiresExplicitChoice()
     {
         var topics = new EllaiTopicService();

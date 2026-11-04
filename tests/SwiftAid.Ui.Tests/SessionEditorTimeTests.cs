@@ -13,7 +13,7 @@ public sealed class SessionEditorTimeTests
     {
         var input = new CreateSessionInput("Draft", "Summary", "Community", ["topic"], "SZ", "region",
             "education", "Presenter", "en", new DateTimeOffset(2026, 11, 4, 12, 0, 0, TimeSpan.Zero),
-            "UTC", 60, 20, [new SessionMaterialInput("card", "1")], SessionVisibility.Public,
+            "UTC", 60, 20, [new SessionMaterialInput("card", "1", "Synthetic reuse rights")], SessionVisibility.Public,
             SessionChannelType.None, null, [24]);
         var editor = new SessionEditor();
         typeof(SessionEditor).GetProperty(nameof(SessionEditor.InitialDraft))!.SetValue(editor, new SessionCreateSubmission(input, "reason"));
@@ -99,9 +99,9 @@ public sealed class SessionEditorTimeTests
     public async Task UnsavedEditsCannotBeReviewedOrPublished()
     {
         var id = Guid.NewGuid();
-        var saved = new CommunitySessionView(id, 1, "Title", "Summary", "Community", ["topic"],
+        var saved = new CommunitySessionView(id, "fixture-org", 1, "Title", "Summary", "Community", ["topic"],
             "SZ", "region", "education", "Presenter", "en", DateTimeOffset.UtcNow.AddDays(2),
-            "UTC", 60, null, [new StoredSessionMaterial("material", "1")], SessionVisibility.Public,
+            "UTC", 60, null, [new SessionMaterialRef("material", "1")], SessionVisibility.Public,
             SessionChannelType.None, null, [24], "Draft", "creator", null, false, 0, null);
         var editor = new SessionEditor();
         typeof(SessionEditor).GetProperty(nameof(SessionEditor.SessionId))!.SetValue(editor, id);
@@ -136,9 +136,9 @@ public sealed class SessionEditorTimeTests
     public void ReschedulingPreservesTheExactPublishedContent()
     {
         var id = Guid.NewGuid();
-        var published = new CommunitySessionView(id, 3, " Published title ", "Summary", "Community", ["topic"],
+        var published = new CommunitySessionView(id, "fixture-org", 3, " Published title ", "Summary", "Community", ["topic"],
             "SZ", "region", "education", "Presenter", "en", new DateTimeOffset(2026, 11, 1, 5, 30, 0, TimeSpan.Zero),
-            "America/New_York", 60, null, [new StoredSessionMaterial("material", "1")], SessionVisibility.Public,
+            "America/New_York", 60, null, [new SessionMaterialRef("material", "1")], SessionVisibility.Public,
             SessionChannelType.None, null, [24], "Scheduled", "creator", "reviewer", false, 0, null);
         var editor = new SessionEditor();
         typeof(SessionEditor).GetProperty(nameof(SessionEditor.SessionId))!.SetValue(editor, id);

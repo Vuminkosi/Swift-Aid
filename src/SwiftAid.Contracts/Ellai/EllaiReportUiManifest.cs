@@ -40,7 +40,7 @@ public static class EllaiReportUiManifest
             productFactIds,
             NavigationId,
             anchorBindingKey,
-            ["HighlightControl"],
+            InputsFor(controlId).Count > 0 ? ["HighlightControl", "UpdatePublicReportDraft"] : ["HighlightControl"],
             riskClass,
             [GuidanceMode.Navigation, GuidanceMode.SystemTour, GuidanceMode.Presentation],
             prerequisites,
@@ -63,19 +63,26 @@ public static class EllaiReportUiManifest
         "report.subject" =>
         [
             new("report.subject-kind", "Human health or animal health", "selection", true, "Always", "Choose one concern type."),
-            new("report.animal-scope", "Individual, herd, flock or other group", "selection", true, "Animal health selected", "Choose the reported animal scope; do not infer it.")
+            new("report.animal-scope", "Individual, herd, flock or other group", "selection", true, "Animal health selected", "Choose the reported animal scope; do not infer it."),
+            new("report.gender", "Reported gender", "selection", false, "Human health selected", "Capture only when the reporter explicitly states it; otherwise leave unknown."),
+            new("report.death-related", "Is this concern related to a death?", "selection", false, "Human or animal health selected", "Choose yes, no or unknown; do not infer it.")
         ],
         "report.narrative" =>
         [
-            new("report.original-statement", "Describe what happened", "multiline-text", false, "Details page", "At most 6000 characters; a narrative or at least one observation is required."),
+            new("report.original-statement", "Describe what happened", "multiline-text", false, "Details page", "Follow the current limit shown on the form; a narrative or at least one observation is required."),
+            new("report.age-years", "Age in years", "text", false, "Human health selected", "Enter a nonnegative whole number of completed years, or leave unknown."),
             new("report.observation-choices", "Reported observation choices", "multiple-selection", false, "Human or animal choices follow the selected subject", "Select only reported observations. Unselected does not mean absent."),
-            new("report.other-observations", "Add other observations", "multiline-text", false, "Details page", "At most 20000 characters, 20 observations and 1000 characters per observation; a narrative or observation is required.")
+            new("report.other-observations", "Add other observations", "multiline-text", false, "Details page", "Follow the current count and length limits shown on the form; a narrative or observation is required.")
         ],
         "report.time-location" =>
         [
             new("report.time-precision", "When did this happen?", "selection", true, "Details page", "Unknown, approximate date, date only or exact time; preserve uncertainty."),
-            new("report.occurrence-date", "Reported date", "date", true, "Time precision is not Unknown", "Provide the reported date."),
-            new("report.occurrence-time", "Reported time", "time", true, "Time precision is Exact", "A valid time and UTC offset are required together."),
+            new("report.onset-precision", "When did symptoms or signs start?", "selection", true, "Details page", "Unknown, approximate date, date only or exact time; keep reported onset distinct from occurrence and upload times."),
+            new("report.onset-date", "Reported symptom or sign onset date", "date", true, "Onset precision is not Unknown", "Enter only the reported onset date as YYYY-MM-DD."),
+            new("report.onset-time", "Reported onset time", "time", true, "Onset precision is Exact", "Enter the reported 24-hour local onset time."),
+            new("report.onset-utc-offset", "Onset time difference from UTC", "text", true, "Onset precision is Exact", "Provide the reported UTC offset; do not guess it."),
+            new("report.occurrence-date", "Reported date", "date", true, "Time precision is not Unknown", "Enter the reported date as YYYY-MM-DD."),
+            new("report.occurrence-time", "Reported time", "time", true, "Time precision is Exact", "Enter a 24-hour time and a valid UTC offset."),
             new("report.utc-offset", "Time difference from UTC", "text", true, "Time precision is Exact", "Provide a valid UTC offset, such as +02:00, matching the reported time."),
             new("report.occurrence-country", "Country where the event happened", "selection", true, "Details page", "Select a country from the current application catalogue."),
             new("report.place-search", "Search for the place", "place-selection", false, "The place registry is available", "Select a reported place; do not infer device location."),

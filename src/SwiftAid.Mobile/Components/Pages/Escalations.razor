@@ -2,16 +2,17 @@
 @using Microsoft.Extensions.DependencyInjection
 @using SwiftAid.Client.Presentation
 @using SwiftAid.Contracts.Cases
+@using SwiftAid.Mobile.Services.Presentation
 @using SwiftAid.UI.Components.Surfaces.Operations
 @using SwiftAid.UI.Components.Surfaces.Operations.WorkManagement
 @attribute [Microsoft.AspNetCore.Authorization.Authorize]
-@inject IMonitoringQueueClient MonitoringClient
+@inject ICaseWorkDiscoveryClient WorkDiscovery
 @inject IServiceProvider ServiceProvider
 
 <PageTitle>Escalations | SwiftAid</PageTitle>
 <OperationsWorkManagementSurface Title="Escalations"
                                  Description="Review open escalations, current status, due times, and available actions."
-                                 State="_state" Items="_items" Filter="_filter"
+                                 State="_state" Items="_items" Filter="_filter" ShowKindFilter="false"
                                  HasPreviousPage="_hasPreviousPage" HasNextPage="_hasNextPage"
                                  IsBusy="_busy" StatusMessage="@_statusMessage" StatusIsError="_statusIsError"
                                  OnAction="ExecuteActionAsync" OnFilterChanged="ChangeFilterAsync" OnRetry="RefreshAsync" />
@@ -63,7 +64,8 @@
                 return;
             }
 
-            var queue = await MonitoringClient.GetOpenAsync(100);
+            var queue = await MobileCaseWorkDiscoveryReader.ReadAsync(WorkDiscovery,
+                CaseWorkDiscoveryKind.Escalation, CaseWorkDiscoveryScope.Open);
             if (queue.Access != CaseQueueAccess.Allowed)
             {
                 _state = queue.Access == CaseQueueAccess.Denied ? OperationsSurfaceState.Denied : OperationsSurfaceState.Unavailable;
@@ -73,16 +75,25 @@
                 return;
             }
 
-            var query = CreateQuery();
+            var query = CreateQuery() with { Page = new PageRequest(1, 100) };
             var loadedItems = new List<OperationsWorkManagementSurface.OperationsWorkItem>();
             var hadUnavailable = false;
             var hadDenied = false;
             var hadFailure = false;
-            foreach (var caseId in queue.Items.Select(item => item.CaseId).Distinct())
+            var hadOffline = false;
+            var limited = false;
+            var caseResults = await MobileCaseWorkReader.ReadAsync(workClient, queue.CaseIds, query);
+            foreach (var caseResult in caseResults)
             {
-                var result = await workClient.GetAsync(caseId, query);
-                if (result.Succeeded && result.Value is { } snapshot && snapshot.CaseId == caseId)
+                if (caseResult.Result is not { } result)
                 {
+                    hadFailure = true;
+                    hadOffline |= caseResult.IsOffline;
+                    continue;
+                }
+                if (result.Succeeded && result.Value is { } snapshot && snapshot.CaseId == caseResult.CaseId)
+                {
+                    limited |= result.Message == CommandBackedWorkManagementClient.LimitedMonitoringNotice;
                     var mappedItems = snapshot.Items.Items
                         .Select(item => MapItem(snapshot, item))
                         .Where(item => item is not null)
@@ -90,7 +101,6 @@
                         .ToArray();
                     hadFailure |= mappedItems.Length != snapshot.Items.Items.Count;
                     loadedItems.AddRange(mappedItems);
-                    _hasNextPage |= snapshot.Items.HasMore;
                     continue;
                 }
 
@@ -99,20 +109,25 @@
                 hadFailure |= result.Code is not (UiCapabilityResultCode.Denied or UiCapabilityResultCode.Unavailable);
             }
 
-            _items = loadedItems;
-            if (_items.Count > 0 || (!hadDenied && !hadUnavailable && !hadFailure))
+            var orderedItems = loadedItems.OrderBy(item => item.DueAtUtc ?? DateTimeOffset.MaxValue)
+                .ThenByDescending(item => item.UpdatedAtUtc).ThenBy(item => item.CaseId)
+                .ThenBy(item => item.WorkKey, StringComparer.Ordinal).ToArray();
+            var offset = (long)(_filter.PageNumber - 1) * _filter.PageSize;
+            _items = orderedItems.Skip((int)Math.Min(offset, orderedItems.Length)).Take(_filter.PageSize).ToArray();
+            _hasNextPage = offset + _items.Count < orderedItems.Length;
+            if (orderedItems.Length > 0 || (!hadDenied && !hadUnavailable && !hadFailure))
             {
                 _state = OperationsSurfaceState.Populated;
                 _statusMessage = hadDenied || hadUnavailable || hadFailure
                     ? "Some open work could not be loaded. Refresh to try again."
-                    : null;
+                    : limited ? CommandBackedWorkManagementClient.LimitedMonitoringNotice : null;
             }
             else
             {
-                _state = hadDenied ? OperationsSurfaceState.Denied : hadUnavailable ? OperationsSurfaceState.Unavailable : OperationsSurfaceState.Error;
+                _state = hadDenied ? OperationsSurfaceState.Denied : hadUnavailable ? OperationsSurfaceState.Unavailable : hadOffline ? OperationsSurfaceState.Offline : OperationsSurfaceState.Error;
                 _statusMessage = hadDenied
                     ? "You do not have permission to view this work."
-                    : hadUnavailable ? "Open work is unavailable right now." : "Open work could not be loaded. Refresh to try again.";
+                    : hadUnavailable ? "Open work is unavailable right now." : hadOffline ? "Check your connection, then refresh open work." : "Open work could not be loaded. Refresh to try again.";
             }
         }
         catch (HttpRequestException)

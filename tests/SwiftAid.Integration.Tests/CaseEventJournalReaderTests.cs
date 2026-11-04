@@ -14,6 +14,30 @@ namespace SwiftAid.Integration.Tests;
 public sealed class CaseEventJournalReaderTests
 {
     [Fact]
+    public void Original_attachment_binding_round_trips_in_protected_journal_payload()
+    {
+        var attachment = new RecordedAttachment(Guid.NewGuid(), "field-note.txt", "text/plain; charset=utf-8", 4,
+            Convert.ToHexString(System.Security.Cryptography.SHA256.HashData("note"u8)));
+        var observation = new CaseObservationRecorded(Guid.NewGuid(), 3, 1, Guid.NewGuid(), "staff-1", null,
+            RecordedAtUtc, Guid.NewGuid(), "Original attachment added.", "File upload", Attachment: attachment);
+        var replayed = Assert.IsType<CaseObservationRecorded>(RoundTrip(observation));
+        Assert.Equal(attachment, replayed.Attachment);
+        Assert.Equal(2, new CaseEventSerializer().GetSchemaVersion(observation));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("Environmental")]
+    public void Observation_category_round_trips_without_relabeling_legacy_events(string? category)
+    {
+        var observation = new CaseObservationRecorded(Guid.NewGuid(), 3, 1, Guid.NewGuid(), "staff-1", null,
+            RecordedAtUtc, Guid.NewGuid(), "Water point damaged.", "Site visit", category);
+        var replayed = Assert.IsType<CaseObservationRecorded>(RoundTrip(observation));
+        Assert.Equal(category, replayed.Category);
+        Assert.Equal(category is null ? 1 : 2, new CaseEventSerializer().GetSchemaVersion(observation));
+    }
+
+    [Fact]
     public void ActionOwnerChanged_RoundTripsAndReplaysExplicitTransfer()
     {
         var initial = CaseAggregate.CreateManagedCase(Guid.NewGuid(), Guid.NewGuid(), "workspace-1", CreateHumanReport(),

@@ -9,6 +9,26 @@ namespace SwiftAid.Application.Tests;
 public sealed class CaseCsvImportTests
 {
     [Fact]
+    public void LegacyContextSerializationRemainsUnchangedWhenFingerprintIsAbsent()
+    {
+        var (_, context) = Example();
+        Assert.Equal(JsonSerializer.Serialize(new { context.WorkspaceId, context.Confirmations }), JsonSerializer.Serialize(context));
+        var withOrganization = context with { OrganizationId = "org-1" };
+        Assert.Equal(JsonSerializer.Serialize(new { withOrganization.WorkspaceId, withOrganization.Confirmations, withOrganization.OrganizationId }),
+            JsonSerializer.Serialize(withOrganization));
+    }
+
+    [Theory]
+    [InlineData("short")]
+    [InlineData("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")]
+    [InlineData("gggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg")]
+    public void ImportContextRejectsMalformedFingerprints(string fingerprint)
+    {
+        var (_, context) = Example();
+        var error = Assert.Throws<CaseImportException>(() => CaseCsvImportService.ValidateContext(context with { FileSha256 = fingerprint }));
+        Assert.Equal("invalid-import-context", error.Code);
+    }
+    [Fact]
     public async Task Quoted_observations_and_multiline_text_survive_buffer_boundaries()
     {
         var records = new List<CsvRecord>();

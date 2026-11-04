@@ -6,7 +6,9 @@
 
 <div class="public-report-surface">
     <GuidedReportStepper Draft="Draft"
+                         TextLimits="TextLimits"
                          CurrentDraftId="CurrentDraftId"
+                         SavedDraft="SavedDraft"
                          Countries="Countries"
                          CountryCatalogueVersion="@CountryCatalogueVersion"
                          CountryCatalogueIsCurrent="CountryCatalogueIsCurrent"
@@ -22,6 +24,8 @@
                          GeoCountries="GeoCountries"
                          OnSaveDraft="OnSaveDraft"
                          DraftSavingAvailable="DraftSavingAvailable"
+                         EditableDraftSnapshotsSupported="EditableDraftSnapshotsSupported"
+                         ServerValidationRevision="ServerValidationRevision"
                          SubmitButtonLabel="Send report"
                          SubmitProgressLabel="Sending…"
                          DraftSaveButtonLabel="Save draft on this device"
@@ -29,6 +33,7 @@
                          DraftSavedMessage="Your report draft is saved on this device. It has not been sent."
                          OnSubmit="@(SubmitAvailable ? OnSendReport : default)">
         <DetailsLeadContent>
+            <ReportVoiceAssistant ReadSavedVoiceWaveAsync="ReadSavedVoiceWaveAsync" />
             @if (ShowVoiceCapture)
             {
                 <section class="public-report-voice" aria-labelledby="public-report-voice-title">
@@ -142,8 +147,20 @@
 </div>
 
 @code {
+    [Parameter] public PublicIntakeTextLimits? TextLimits { get; set; }
     private bool _temporaryCleanupRetrying;
     private bool _temporaryCleanupRetryFailed;
+
+    private static readonly HashSet<string> SadcCountryCodes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "AO", "BW", "KM", "CD", "SZ", "LS", "MG", "MW",
+        "MU", "MZ", "NA", "SC", "ZA", "TZ", "ZM", "ZW"
+    };
+
+    private IReadOnlyList<PublicCountryOption> ReportCountries => Countries
+        .Where(country => SadcCountryCodes.Contains(country.Code) ||
+            string.Equals(country.Code, Draft.CountryCode, StringComparison.OrdinalIgnoreCase))
+        .ToArray();
 
     [Parameter] public IReadOnlyList<PublicCountryOption> Countries { get; set; } = [];
     [Parameter] public Func<string, string?, CancellationToken, Task<GeoPlaceQueryResult>>? PlaceSearchFunc { get; set; }
@@ -161,8 +178,11 @@
     [Parameter] public bool DraftSavingAvailable { get; set; }
     [Parameter] public bool SubmitAvailable { get; set; }
     [Parameter] public Guid? CurrentDraftId { get; set; }
+    [Parameter] public IntakeSubmission? SavedDraft { get; set; }
     [Parameter, EditorRequired] public PublicReportDraft Draft { get; set; } = default!;
     [Parameter] public EventCallback<PublicReportSaveRequest> OnSaveDraft { get; set; }
+    [Parameter] public bool EditableDraftSnapshotsSupported { get; set; }
+    [Parameter] public long ServerValidationRevision { get; set; }
     [Parameter] public EventCallback<IntakeSubmission> OnSendReport { get; set; }
     [Parameter] public string? Feedback { get; set; }
     [Parameter] public bool FeedbackIsError { get; set; }
@@ -172,6 +192,7 @@
     [Parameter] public TimeSpan VoiceElapsed { get; set; }
     [Parameter] public string? VoiceMessage { get; set; }
     [Parameter] public bool VoiceSaved { get; set; }
+    [Parameter] public Func<CancellationToken, Task<byte[]>>? ReadSavedVoiceWaveAsync { get; set; }
     [Parameter] public bool TemporaryCleanupPending { get; set; }
     [Parameter] public EventCallback OnRetryTemporaryCleanup { get; set; }
     [Parameter] public EventCallback OnStartRecording { get; set; }

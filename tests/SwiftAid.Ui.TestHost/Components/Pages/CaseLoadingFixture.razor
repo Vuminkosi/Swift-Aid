@@ -1,0 +1,24 @@
+@page "/case-loading-fixture"
+@inject SwiftAid.Ui.TestHost.CaseLoadingFixture Service
+
+<SwiftAidThemeProvider />
+<MudPopoverProvider />
+<button @onclick="Service.DenyOptions">Revoke access</button>
+<button @onclick="Service.ReleasePreview">Release preview</button>
+@if (_ready)
+{
+    <MyCases />
+}
+
+@code {
+    private bool _ready;
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _ready = true;
+            StateHasChanged();
+        }
+    }
+}

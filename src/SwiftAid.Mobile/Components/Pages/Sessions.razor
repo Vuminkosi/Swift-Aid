@@ -4,6 +4,7 @@
 @using SwiftAid.Client.Presentation.PublicWorkflows
 @using SwiftAid.Contracts.Sessions
 @using SwiftAid.UI.Components.Surfaces.Public
+@using SwiftAid.Mobile.Components.Sessions
 @inject IPublicCommunitySessionClient SessionClient
 @inject ISubscriptionClient SubscriptionClient
 @inject NavigationManager Navigation
@@ -12,6 +13,7 @@
 
 <PageTitle>Community sessions | SwiftAid</PageTitle>
 
+<MobileSessionManagementLink />
 <PublicSessionsSurface @key="(RequestedSessionId, IsCalendarRoute, InitialRemindersView)" Sessions="_sessions"
                        InitialSessionId="RequestedSessionId"
                        InitialRemindersView="InitialRemindersView"
@@ -27,7 +29,11 @@
                        ShareTextAsync="ShareAsync"
                        LoadSubscriptionStateAsync="LoadSubscriptionStateAsync"
                        ExecuteSubscriptionActionAsync="ExecuteSubscriptionActionAsync"
-                       OnRequestSignIn="RequestSignInAsync" />
+                       OnRequestSignIn="RequestSignInAsync">
+    <SessionSupplementaryContent Context="session">
+        <MobileSessionHistory @key="(session.SessionId, session.Version)" Session="session" />
+    </SessionSupplementaryContent>
+</PublicSessionsSurface>
 
 @code {
     [SupplyParameterFromQuery(Name = "sessionId")]
@@ -88,18 +94,9 @@
                     _listError = "This session is not available.";
                 return;
             }
-            var result = await SessionClient.ListPublicAsync();
-            if (generation != _listGeneration) return;
-            if (result.Succeeded && result.Value is { } sessions)
-            {
-                _sessions = sessions;
-            }
-            else
-            {
-                _sessions = Array.Empty<PublicSessionView>();
-                _listError = result.Message ?? result.Metadata.Notice ??
-                    "Published sessions are temporarily unavailable. Check your connection and try again.";
-            }
+            // The surface owns the searchable, paged public query. A preliminary
+            // unfiltered request would delay it and can block it on an unrelated failure.
+            _sessions = Array.Empty<PublicSessionView>();
         }
         catch (OperationCanceledException)
         {
@@ -184,11 +181,9 @@
             if (action.Kind == PublicSessionsSurface.SessionSubscriptionActionKind.Subscribe)
             {
                 var currentOptions = await SubscriptionClient.GetSubscriptionOptionsAsync(action.SessionId);
-                if (!currentOptions.Succeeded || currentOptions.Value is not { IsCurrent: true } options ||
-                    action.ConsentReference is null || action.Channel is null ||
-                    !string.Equals(options.ConsentReference, action.ConsentReference, StringComparison.Ordinal) ||
-                    options.Version != action.ExpectedVersion ||
-                    !options.Channels.Any(channel => channel == ToClientChannel(action.Channel.Value)))
+                if (action.Channel is not { } channel || !Enum.IsDefined(channel) ||
+                    !SessionSubscriptionPresentation.CanSubscribe(currentOptions, action.SessionId, action.ConsentReference,
+                        action.ExpectedVersion, ToClientChannel(channel)))
                 {
                     return await LoadSubscriptionStateAsync(action.SessionId) is { } stale
                         ? stale with { IsError = true, Message = "Reminder terms changed. Refresh and review the current options." }
@@ -197,13 +192,17 @@
 
                 result = await SubscriptionClient.SubscribeAsync(new SubscriptionRequest(
                     action.SessionId,
-                    options.ConsentReference,
+                    action.ConsentReference!,
                     action.ExpectedVersion,
                     ToClientChannel(action.Channel.Value)));
             }
-            else
+            else if (action.Kind == PublicSessionsSurface.SessionSubscriptionActionKind.Unsubscribe)
             {
                 result = await SubscriptionClient.UnsubscribeAsync(action.SessionId, action.ExpectedVersion);
+            }
+            else
+            {
+                return ErrorSubscriptionState(action.SessionId, "Review the reminder choices before continuing.");
             }
 
             var updatedState = await LoadSubscriptionStateAsync(action.SessionId);

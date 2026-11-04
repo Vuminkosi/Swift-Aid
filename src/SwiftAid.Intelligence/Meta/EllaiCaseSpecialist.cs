@@ -5,7 +5,7 @@ using SwiftAid.Contracts.Ellai;
 
 namespace SwiftAid.Intelligence.Meta;
 
-/// <summary>Bounded, read-only case queue and history specialist. The supervisor owns publication.</summary>
+/// <summary>Read-only case specialist with access to other admitted SwiftAid reads. The supervisor owns publication.</summary>
 public sealed class EllaiCaseSpecialist(IChatClient client, IEllaiFrameworkAgentFactory? agentFactory = null)
 {
     public async Task<EllaiSpecialistResult> RunAsync(string task, string trustedPolicy, bool enabled,
@@ -28,20 +28,18 @@ public sealed class EllaiCaseSpecialist(IChatClient client, IEllaiFrameworkAgent
 
         if (!EllaiSpecialistRegistry.TryGet(EllaiSpecialistRegistry.Case, out var profile)) return new(EllaiSpecialistOutcome.Denied, null);
         var observations = new List<(EllaiToolRequest Request, EllaiToolResult Result)>();
+        var deniedObservation = false;
         async Task<EllaiToolResult> InvokeCaseTool(EllaiToolContext child, EllaiToolRequest request, CancellationToken token)
         {
-            if (request.ToolName == EllaiToolNames.State &&
-                (!request.Arguments.TryGetValue("projection", out var projection) ||
-                 !string.Equals(projection, "queue", StringComparison.OrdinalIgnoreCase)))
-                return new(request.ToolName, false, "Only the authorized case queue is available.", [], string.Empty, 0, false,
-                    EllaiToolReasonCodes.InvalidArguments);
             var result = await invoke(child, request, token).ConfigureAwait(false);
             if (result.Allowed) observations.Add((request, result));
+            else if (result.ReasonCode != EllaiToolReasonCodes.InvalidArguments) deniedObservation = true;
             return result;
         }
         var revalidationFailed = false;
         async Task<bool> RevalidateObservations(CancellationToken token)
         {
+            if (deniedObservation) { revalidationFailed = true; return false; }
             foreach (var (request, original) in observations)
             {
                 if (!await isCurrent(token).ConfigureAwait(false)) { revalidationFailed = true; return false; }
@@ -64,13 +62,15 @@ public sealed class EllaiCaseSpecialist(IChatClient client, IEllaiFrameworkAgent
         {
             decision = await agent.RunAsync(context, trustedPolicy +
                 "\nYou are the case specialist, not the supervisor. Delegation is unavailable here. " +
-                "Use the authorized case queue for owned-case searches and the case timeline for a specific case. " +
-                "Report only observed cases and history, distinguish an empty result from an unavailable query, and mention incomplete pages. " +
+                "Use the authorized case queue for owned-case searches and the case timeline for a specific case. Set include_related to true only when asked for possible related cases. You may use any other admitted read tool when relevant to the user's SwiftAid question. " +
+                "Report only observed results, distinguish an empty result from an unavailable query, and mention incomplete pages. " +
                 "Never calculate a total from a sampled case list; use an authorized aggregate for counts. " +
                 "do not invent events, people, conclusions or actions. Return only JSON with final_decision containing " +
                 "schemaVersion 2, kind Answer, displayText, spokenText, claims, questions, uiIntents, planProposal, " +
                 "topicRefs, resumeSuggestion and stopReason. Each factual claim has claimId, text, kind Observed and " +
                 "evidence copied exactly from the tool result: sourceKind, resourceId, version, fieldPath, evidenceId. " +
+                "Each claim text must exactly match a line from the cited case result. Set displayText and spokenText to the claim texts joined by newlines, with no other prose. " +
+                "When using a truncated case timeline, include its first line as a claim with the timeline evidence. " +
                 "Use empty arrays and null for unused fields.",
                 [new ChatMessage(ChatRole.User, task)], 2048, isCurrent, InvokeCaseTool, usage, ct,
                 revalidateTool: revalidate ?? invoke, revalidateStreamObservations: RevalidateObservations, maxModelCalls: profile.MaxModelCalls, allowEmptyCaseQueue: true).ConfigureAwait(false);
@@ -81,11 +81,32 @@ public sealed class EllaiCaseSpecialist(IChatClient client, IEllaiFrameworkAgent
             decision?.DisplayText == "No matching cases were found in your current owned-case queue." &&
             decision.SpokenText == decision.DisplayText;
         if (revalidationFailed) return new(EllaiSpecialistOutcome.Stale, null);
+        if (EllaiSpecialistGrounding.IsFrameworkVerifiedDeterministic(decision, observations))
+            return new(EllaiSpecialistOutcome.Completed, decision);
         if (decision is null || decision.Kind != DecisionKind.Answer || decision.Claims.Count == 0 && !verifiedEmpty ||
             decision.UiIntents.Count != 0 || decision.PlanProposal is not null ||
-            decision.Claims.Any(claim => claim.Kind != ClaimKind.Observed || claim.Evidence.Count == 0 ||
-                claim.Evidence.Any(reference => reference.SourceKind != "CaseQueue")))
+            decision.Claims.Any(claim => claim.Kind != ClaimKind.Observed || claim.Evidence.Count == 0))
             return new(EllaiSpecialistOutcome.Unverified, null);
+        if (!verifiedEmpty)
+        {
+            var grounded = new HashSet<(EvidenceRef Reference, string Line)>();
+            foreach (var (request, result) in observations)
+                foreach (var reference in result.Evidence)
+                    foreach (var line in EllaiFrameworkAgent.EvidenceLines(request.ToolName, result, reference))
+                        grounded.Add((reference, line));
+            if (decision.Claims.Any(claim => claim.Evidence.Any(reference => !grounded.Contains((reference, claim.Text)))) ||
+                decision.DisplayText != string.Join("\n", decision.Claims.Select(claim => claim.Text)) ||
+                decision.SpokenText != decision.DisplayText)
+                return new(EllaiSpecialistOutcome.Unverified, null);
+            foreach (var (request, result) in observations.Where(observation =>
+                observation.Request.ToolName == EllaiToolNames.CaseTimeline && observation.Result.Truncated))
+            {
+                if (decision.Claims.Any(claim => claim.Evidence.Any(result.Evidence.Contains)) &&
+                    !decision.Claims.Any(claim => claim.Text == result.ResultSummary.Split('\n')[0] &&
+                        claim.Evidence.Any(result.Evidence.Contains)))
+                    return new(EllaiSpecialistOutcome.Unverified, null);
+            }
+        }
         foreach (var (request, original) in observations)
         {
             if (!await isCurrent(ct).ConfigureAwait(false)) return new(EllaiSpecialistOutcome.Denied, null);

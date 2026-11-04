@@ -1,3 +1,5 @@
+using SwiftAid.Contracts.Geography;
+
 namespace SwiftAid.Contracts.Cases;
 
 /// <summary>Original report evidence, returned only after current case-read authorization.</summary>
@@ -7,7 +9,9 @@ public sealed record CaseReportDetails(
     string? Narrative,
     IReadOnlyList<string> Observations,
     CaseReportPlace? Location,
-    CaseNearbyFacilities? NearbyFacilities = null);
+    CaseNearbyFacilities? NearbyFacilities = null,
+    ReportedTime? ReportedOnset = null,
+    long AggregateVersion = 0);
 
 /// <summary>Distances computed privately from occurrence coordinates, never reporter GPS.</summary>
 public sealed record CaseNearbyFacilities(

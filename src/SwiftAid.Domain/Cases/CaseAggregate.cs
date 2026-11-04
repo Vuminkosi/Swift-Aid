@@ -104,7 +104,7 @@ public sealed record CaseActionRequested(Guid CaseId, long AggregateVersion, lon
 public sealed record CaseActionRequestReviewed(Guid CaseId, long AggregateVersion, long ReportRevision, Guid CommandId, string ActorId, DateTimeOffset? OccurredAtUtc, DateTimeOffset RecordedAtUtc, Guid RequestId, CaseActionReviewOutcome Outcome, Guid? LinkedAcceptedEventId, string Reason) : CaseEvent(CaseId, AggregateVersion, ReportRevision, CommandId, ActorId, OccurredAtUtc, RecordedAtUtc);
 public sealed record CaseResolved(Guid CaseId, long AggregateVersion, long ReportRevision, Guid CommandId, string ActorId, DateTimeOffset? OccurredAtUtc, DateTimeOffset RecordedAtUtc, string Reason) : CaseEvent(CaseId, AggregateVersion, ReportRevision, CommandId, ActorId, OccurredAtUtc, RecordedAtUtc);
 public sealed record CaseReopened(Guid CaseId, long AggregateVersion, long ReportRevision, Guid CommandId, string ActorId, DateTimeOffset? OccurredAtUtc, DateTimeOffset RecordedAtUtc, string Reason, string AccountableOwnerId) : CaseEvent(CaseId, AggregateVersion, ReportRevision, CommandId, ActorId, OccurredAtUtc, RecordedAtUtc);
-public sealed record CaseObservationRecorded(Guid CaseId, long AggregateVersion, long ReportRevision, Guid CommandId, string ActorId, DateTimeOffset? OccurredAtUtc, DateTimeOffset RecordedAtUtc, Guid ObservationId, string Narrative, string Source) : CaseEvent(CaseId, AggregateVersion, ReportRevision, CommandId, ActorId, OccurredAtUtc, RecordedAtUtc);
+public sealed record CaseObservationRecorded(Guid CaseId, long AggregateVersion, long ReportRevision, Guid CommandId, string ActorId, DateTimeOffset? OccurredAtUtc, DateTimeOffset RecordedAtUtc, Guid ObservationId, string Narrative, string Source, string? Category = null, RecordedAttachment? Attachment = null) : CaseEvent(CaseId, AggregateVersion, ReportRevision, CommandId, ActorId, OccurredAtUtc, RecordedAtUtc);
 public sealed record CaseFollowUpScheduled(Guid CaseId, long AggregateVersion, long ReportRevision, Guid CommandId, string ActorId, DateTimeOffset? OccurredAtUtc, DateTimeOffset RecordedAtUtc, Guid FollowUpId, string Purpose, string AssigneeActorId, DateTimeOffset DueAtUtc) : CaseEvent(CaseId, AggregateVersion, ReportRevision, CommandId, ActorId, OccurredAtUtc, RecordedAtUtc);
 
 public sealed record ActionOwnerChanged(Guid CaseId, long AggregateVersion, long ReportRevision, Guid CommandId,
@@ -252,6 +252,7 @@ public sealed partial class CaseAggregate
             ReviewCaseActionRequestCommand review => DecideReview(review, actor, version),
             ResolveCaseCommand resolution => DecideResolution(resolution, actor, version),
             ReopenCaseCommand reopening => DecideReopen(reopening, actor, version),
+            PostCaseDiscussionCommand discussion => DecideDiscussion(discussion, actor, version),
             RecordObservationCommand observation => DecideRecordObservation(observation, actor, version),
             ScheduleFollowUpCommand schedule => DecideScheduleFollowUp(schedule, actor, version),
             ChangeActionOwnerCommand ownerChange => DecideChangeActionOwner(ownerChange, actor, version),
@@ -479,6 +480,23 @@ public sealed partial class CaseAggregate
         if (Workflow == CaseWorkflow.Resolved) throw new InvalidOperationException($"Monitoring work cannot be recorded on a resolved case; reopen it before {operation}.");
     }
 
+    private IReadOnlyList<CaseEvent> DecideDiscussion(PostCaseDiscussionCommand command, ActorCapabilities actor, long version)
+    {
+        RequireCapability(actor, CaseCapability.RecordObservation);
+        RequireUnresolvedMonitoringTarget("posting a discussion");
+        if (!command.IsValid)
+            throw new ArgumentException("A bounded discussion message is required.");
+        var evidence = _events.OfType<CaseObservationRecorded>().Where(item => item.Attachment is not null)
+            .Select(item => item.ObservationId.ToString("D")).ToHashSet(StringComparer.Ordinal);
+        if (command.EvidenceKeys.Count > 10 || command.EvidenceKeys.Any(key => !evidence.Contains(key)))
+            throw new ArgumentException("Evidence must belong to this case.");
+        // The caller directory is the accountable owner; expanding mentions requires fresh recipient scope checks.
+        if (command.MentionReferences.Count > 1 || command.MentionReferences.Any(actorId => actorId != AccountableOwnerId))
+            throw new ArgumentException("Mention recipient is not an accountable case participant.");
+        return [new CaseDiscussionPosted(CaseId, version, ReportRevision, command.CommandId, actor.ActorId,
+            null, command.RecordedAtUtc, command.Message, Array.AsReadOnly(command.MentionReferences.ToArray()),
+            Array.AsReadOnly(command.EvidenceKeys.ToArray()))];
+    }
     private IReadOnlyList<CaseEvent> DecideRecordObservation(RecordObservationCommand command, ActorCapabilities actor, long version)
     {
         RequireCapability(actor, CaseCapability.RecordObservation);
@@ -487,7 +505,10 @@ public sealed partial class CaseAggregate
         RequireText(command.Narrative, nameof(command.Narrative));
         RequireText(command.Source, nameof(command.Source));
         if (_events.OfType<CaseObservationRecorded>().Any(item => item.ObservationId == command.ObservationId)) throw new InvalidOperationException("The observation identifier is already recorded on this case.");
-        return Array.AsReadOnly<CaseEvent>([new CaseObservationRecorded(CaseId, version, ReportRevision, command.CommandId, actor.ActorId, command.OccurredAtUtc, command.RecordedAtUtc, command.ObservationId, command.Narrative, command.Source)]);
+        if (command.Category is not (null or "Clinical" or "Environmental" or "Community"))
+            throw new ArgumentException("Unknown observation category.", nameof(command.Category));
+        if (command.Attachment is { IsValid: false }) throw new ArgumentException("Invalid original evidence metadata.");
+        return Array.AsReadOnly<CaseEvent>([new CaseObservationRecorded(CaseId, version, ReportRevision, command.CommandId, actor.ActorId, command.OccurredAtUtc, command.RecordedAtUtc, command.ObservationId, command.Narrative, command.Source, command.Category, command.Attachment)]);
     }
 
     private IReadOnlyList<CaseEvent> DecideScheduleFollowUp(ScheduleFollowUpCommand command, ActorCapabilities actor, long version)
@@ -725,6 +746,9 @@ public sealed partial class CaseAggregate
                     acknowledgement.ActorId != AccountableOwnerId || AssignmentAcknowledgedAtUtc is not null || Workflow == CaseWorkflow.Resolved)
                     throw new InvalidDataException("Acknowledgement must reference the current pending assignment and its owner.");
                 AssignmentAcknowledgedAtUtc = acknowledgement.RecordedAtUtc;
+                break;
+            case CaseDiscussionPosted discussion when discussion.ReportRevision == ReportRevision:
+                RequireText(discussion.Message, nameof(discussion.Message));
                 break;
             case CaseObservationRecorded observation when observation.ReportRevision == ReportRevision:
                 RequireText(observation.Narrative, nameof(observation.Narrative));
@@ -978,6 +1002,7 @@ public sealed partial class CaseAggregate
         CaseActionRequestReviewed review => review,
         CaseResolved resolution => resolution,
         CaseReopened reopening => reopening,
+        CaseDiscussionPosted discussion => discussion with { MentionReferences = Array.AsReadOnly(discussion.MentionReferences.ToArray()), EvidenceKeys = Array.AsReadOnly(discussion.EvidenceKeys.ToArray()) },
         CaseObservationRecorded observation => observation,
         CaseFollowUpScheduled scheduled => scheduled,
         CaseFollowUpAcknowledged acknowledgement => acknowledgement,
@@ -1006,3 +1031,8 @@ public sealed partial class CaseAggregate
     }
 
 }
+
+public sealed record CaseDiscussionPosted(Guid CaseId, long AggregateVersion, long ReportRevision, Guid CommandId,
+    string ActorId, DateTimeOffset? OccurredAtUtc, DateTimeOffset RecordedAtUtc, string Message,
+    IReadOnlyList<string> MentionReferences, IReadOnlyList<string> EvidenceKeys)
+    : CaseEvent(CaseId, AggregateVersion, ReportRevision, CommandId, ActorId, OccurredAtUtc, RecordedAtUtc);

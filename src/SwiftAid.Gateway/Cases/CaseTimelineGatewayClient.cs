@@ -34,7 +34,8 @@ public sealed class CaseTimelineGatewayClient(
             return new CaseTimelineResult(CaseTimelineAccess.NotFoundOrNotAuthorized, null);
         }
 
-        var timeline = _serviceProvider.GetService<ICaseTimelineQuery>();
+        await using var scope = _serviceProvider.CreateAsyncScope();
+        var timeline = scope.ServiceProvider.GetService<ICaseTimelineQuery>();
         if (timeline is null)
         {
             return new CaseTimelineResult(CaseTimelineAccess.NotFoundOrNotAuthorized, null);

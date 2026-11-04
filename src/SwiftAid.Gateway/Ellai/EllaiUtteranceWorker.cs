@@ -11,7 +11,9 @@ public sealed class EllaiUtteranceWorker(
     ILogger<EllaiUtteranceWorker> logger,
     TimeSpan? leaseRenewalInterval = null) : BackgroundService
 {
-    public const int MaxTokensPerTurn = 2048;
+    // Structured guided plans include controls, preconditions and completion rules.
+    // Keep enough output capacity for a complete plan; usage accounting still bounds each run.
+    public const int MaxTokensPerTurn = 8192;
     private static readonly TimeSpan ClaimLease = TimeSpan.FromMinutes(10);
     private static readonly TimeSpan IdlePollDelay = TimeSpan.FromSeconds(1);
     private static readonly EllaiIsolatedToolCalls ToolCalls = new();
@@ -145,6 +147,7 @@ public sealed class EllaiUtteranceWorker(
                     {
                         UiProposalsJson = EllaiUiProposalPayload.Serialize(runOutcome.Decision?.UiIntents ?? []),
                         FrameworkSessionJson = runOutcome.FrameworkSessionJson,
+                        DecisionJson = runOutcome.Decision is null ? null : System.Text.Json.JsonSerializer.Serialize(runOutcome.Decision),
                         ExpectedOwnerActorId = work.Actor.ActorId,
                         ExpectedScopeEpoch = work.ScopeEpoch,
                         ToolTraceJson = runOutcome.InheritedObservations is null
@@ -359,7 +362,12 @@ public sealed class EllaiUtteranceWorker(
                     if (detachQueue && (queue is null || remember is null))
                         return new EllaiToolResult(request.ToolName, false, "The queue is unavailable.", [],
                             string.Empty, 0, false, EllaiToolReasonCodes.Unavailable);
-                    return await broker.InvokeAsync(context, request, toolCt, queue, index, remember, geography).ConfigureAwait(false);
+                    var toolStarted = System.Diagnostics.Stopwatch.GetTimestamp();
+                    var result = await broker.InvokeAsync(context, request, toolCt, queue, index, remember, geography).ConfigureAwait(false);
+                    _logger.LogInformation("Ellai read tool: session={SessionId} turn={TurnId} tool={ToolName} allowed={Allowed} reason={ReasonCode} elapsedMs={ElapsedMs}.",
+                        work.SessionId, item.ClientUtteranceId, request.ToolName, result.Allowed, result.ReasonCode,
+                        System.Diagnostics.Stopwatch.GetElapsedTime(toolStarted).TotalMilliseconds);
+                    return result;
                 }
 
                 return detachQueue
@@ -395,7 +403,7 @@ public sealed class EllaiUtteranceWorker(
                 (request.Arguments.Count == 1 && request.Arguments.TryGetValue("projection", out var projection) &&
                     string.Equals(projection, "feature", StringComparison.OrdinalIgnoreCase))
             : request.ToolName is EllaiToolNames.Topic or EllaiToolNames.Evidence or EllaiToolNames.ClassificationEvidence or
-                EllaiToolNames.OwnedCaseCount or EllaiToolNames.Receipts or EllaiToolNames.ImportDestinations or
+                EllaiToolNames.OwnedCaseCount or EllaiToolNames.CaseSummary or EllaiToolNames.OwnedRegionCounts or EllaiToolNames.ApprovedHealthSources or EllaiToolNames.Receipts or EllaiToolNames.ImportDestinations or
                 EllaiToolNames.Imports or EllaiToolNames.ImportStatus or
                 EllaiToolNames.UiCatalogue or EllaiToolNames.UiObserve or
                 EllaiToolNames.Now or EllaiToolNames.Capabilities or

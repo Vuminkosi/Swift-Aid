@@ -16,20 +16,7 @@ public sealed class CaseCsvImportService(ICaseImportStore store, IManagedCaseReg
         long startRow, bool finalBatch, TextReader reader, CancellationToken ct)
     {
         using var batchMeasurement = CaseImportMetrics.Measure("batch");
-        if (string.IsNullOrWhiteSpace(context.WorkspaceId) || context.WorkspaceId.Length > 200 || context.Confirmations is null)
-            throw new CaseImportException("invalid-import-context");
-        if (context.OrganizationId is not null && (string.IsNullOrWhiteSpace(context.OrganizationId) || context.OrganizationId.Length > 200 ||
-            context.OrganizationId != context.OrganizationId.Trim() || context.OrganizationId.Any(char.IsControl)))
-            throw new CaseImportException("invalid-import-context");
-        // Check context shape before persisting an accepted import. Country/policy currency is also checked per row.
-        var confirmations = context.Confirmations;
-        if (!confirmations.ReportReviewConfirmed || !confirmations.ProcessingConfirmed || !confirmations.OccurrenceCountryConfirmed ||
-            confirmations.OccurrenceCountryCode is not { Length: 2 } ||
-            string.IsNullOrWhiteSpace(confirmations.OccurrenceCountryCatalogueVersion) || confirmations.OccurrenceCountryCatalogueVersion.Length > 64 ||
-            string.IsNullOrWhiteSpace(confirmations.ProcessingPolicyReference) || confirmations.ProcessingPolicyReference.Length > 200 ||
-            string.IsNullOrWhiteSpace(confirmations.ProcessingPolicyVersion) || confirmations.ProcessingPolicyVersion.Length > 64 ||
-            confirmations.RecordingConfirmed is not null || confirmations.RecordingPolicyReference is not null || confirmations.RecordingPolicyVersion is not null)
-            throw new CaseImportException("invalid-import-context");
+        ValidateContext(context);
         await using var records = BoundedCsvReader.ReadAsync(reader, ct).GetAsyncEnumerator(ct);
         if (!await records.MoveNextAsync()) throw new CaseImportException("csv-header-missing");
         var header = records.Current.Fields;
@@ -116,5 +103,26 @@ public sealed class CaseCsvImportService(ICaseImportStore store, IManagedCaseReg
             catch (Exception exception) when (exception is not OutOfMemoryException) { /* Lease expiry is the durable recovery fallback. */ }
         }
         return new(importId, outcomes, await store.GetAsync(actor, importId, ct), error);
+    }
+
+    /// <summary>Checks the same context shape before admission or a read-only resume check.</summary>
+    public static void ValidateContext(CaseImportContext? context)
+    {
+        if (context is null || string.IsNullOrWhiteSpace(context.WorkspaceId) || context.WorkspaceId.Length > 200 || context.Confirmations is null)
+            throw new CaseImportException("invalid-import-context");
+        if (context.OrganizationId is not null && (string.IsNullOrWhiteSpace(context.OrganizationId) || context.OrganizationId.Length > 200 ||
+            context.OrganizationId != context.OrganizationId.Trim() || context.OrganizationId.Any(char.IsControl)))
+            throw new CaseImportException("invalid-import-context");
+        if (context.FileSha256 is not null && (context.FileSha256.Length != 64 ||
+            context.FileSha256.Any(character => character is not (>= '0' and <= '9' or >= 'a' and <= 'f'))))
+            throw new CaseImportException("invalid-import-context");
+        var confirmations = context.Confirmations;
+        if (!confirmations.ReportReviewConfirmed || !confirmations.ProcessingConfirmed || !confirmations.OccurrenceCountryConfirmed ||
+            confirmations.OccurrenceCountryCode is not { Length: 2 } ||
+            string.IsNullOrWhiteSpace(confirmations.OccurrenceCountryCatalogueVersion) || confirmations.OccurrenceCountryCatalogueVersion.Length > 64 ||
+            string.IsNullOrWhiteSpace(confirmations.ProcessingPolicyReference) || confirmations.ProcessingPolicyReference.Length > 200 ||
+            string.IsNullOrWhiteSpace(confirmations.ProcessingPolicyVersion) || confirmations.ProcessingPolicyVersion.Length > 64 ||
+            confirmations.RecordingConfirmed is not null || confirmations.RecordingPolicyReference is not null || confirmations.RecordingPolicyVersion is not null)
+            throw new CaseImportException("invalid-import-context");
     }
 }

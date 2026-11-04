@@ -413,6 +413,7 @@ The mobile experience has three logical stages: **capture → review known/unkno
 | SA-REP-12 | P0 | Atomically establish initial ownership when a permitted reporting worker's case is accepted, then return its authoritative receipt/version. |
 | SA-REP-13 | P0 | Accept a report with a pending original-audio attachment reference without pretending the audio is already uploaded or transcribed. |
 | SA-REP-14 | P1 | Provide additional photo/document evidence only after attachment-type validation, authorization, and privacy requirements are implemented. Image capture must not imply image-based diagnosis. |
+| SA-REP-15 | P1 | During Ellai guided reporting, accept only bounded, explicitly reported details into the unsaved report draft. Never save or submit from conversational capture. When validation fails, explain the missing or invalid field, focus and highlight that field, and address validation issues one at a time; revalidate after correction before moving to the next issue. Preserve unknown facts as unknown. |
 
 ### 6.3 Confirmation rules
 
@@ -780,6 +781,12 @@ The application uses Microsoft AI/MCP tooling with verified Meta models. These a
 | SA-AI-13 | P0 | Enforce the plan's configured limits: at most three reasoning/tool iterations, four tool calls, one schema-repair retry, and bounded request duration/output. |
 | SA-AI-14 | Gate | Enable Meta ASR only after the participant account, specific Meta model endpoint, media format, language behavior and credit eligibility are verified. No fixed price or universal language claim is made by this spec. Non-Meta transcription endpoints are prohibited. |
 | SA-AI-15 | P0 | Measure field accuracy, missingness, unsupported claims, citation validity, latency and usage on fixed examples; report failures and sample sizes. |
+
+For a retained case-result set, Ellai may filter current, actor-authorized rows by the recorded `Classified` or `Unclassified` status. The filter does not expose classifier labels or scores, infer a classification, or establish a diagnosis. When no observation projection is requested, the response identifies matching case IDs and versions only. Unknown status is omitted from either filtered result. Detailed classification evidence remains a separate permission- and processing-gated capability.
+
+For a retained case-result set, Ellai may answer who is recorded as submitting one selected case by accepting its `case_id` only when that ID belongs to the retained set and rechecking the current `ReadCase` permission. The timeline supplies only a safe profile display label for the original `CaseReported` event; opaque actor IDs are never returned as names. When a guest intake was promoted, the tool must explain that the managed-case event identifies the accepting staff member, not the original guest submitter, whose identity is unavailable in that timeline.
+
+Ellai may also narrow a retained case-result set to an exact occurrence-place ID selected from the current geographic registry. It must reauthorize every retained case before reading its protected occurrence location, require the matching country, omit unknown or inaccessible locations with incomplete status, and never substitute access-region membership for the recorded occurrence place. Place and classification-status filters may be combined only with `field=observations` to return verbatim reported observations from the matching cases; observation output must be identified as unverified reporting, never as diagnosis, and must omit narrative and coordinates. Other field projections remain exclusive of those filters.
 
 ### 15.3 Human review experience
 

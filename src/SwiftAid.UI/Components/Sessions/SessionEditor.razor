@@ -75,50 +75,50 @@
             </MudItem>
         }
         <MudItem xs="12" md="6">
-            <MudTextField T="string" Label="Title" @bind-Value="_title" Disabled="@IsScheduled" Required="true"
+            <MudTextField T="string" Immediate="true" Label="Title" @bind-Value="_title" Disabled="@IsScheduled" Required="true"
                          Error='@HasError("Title")' ErrorText='@FieldError("Title")' />
         </MudItem>
         <MudItem xs="12" md="6">
-            <MudTextField T="string" Label="Presenter" @bind-Value="_presenter" Disabled="@IsScheduled" Required="true"
+            <MudTextField T="string" Immediate="true" Label="Presenter" @bind-Value="_presenter" Disabled="@IsScheduled" Required="true"
                          Error='@HasError("Presenter")' ErrorText='@FieldError("Presenter")' />
         </MudItem>
         <MudItem xs="12">
-            <MudTextField T="string" Label="Public summary" Lines="3" @bind-Value="_summary" Disabled="@IsScheduled" Required="true"
+            <MudTextField T="string" Immediate="true" Label="Public summary" Lines="3" @bind-Value="_summary" Disabled="@IsScheduled" Required="true"
                          HelperText="Shown to the public. Logistics only: what the session covers, never patient details."
                          Error='@HasError("Summary")' ErrorText='@FieldError("Summary")' />
         </MudItem>
         <MudItem xs="12">
-            <MudTextField T="string" Label="Who should attend" @bind-Value="_audience" Disabled="@IsScheduled" Required="true"
+            <MudTextField T="string" Immediate="true" Label="Who should attend" @bind-Value="_audience" Disabled="@IsScheduled" Required="true"
                          HelperText="Describe the audience in general terms, for example livestock keepers near the showgrounds."
                          Error='@HasError("Audience")' ErrorText='@FieldError("Audience")' />
         </MudItem>
         <MudItem xs="12" md="4">
-            <MudTextField T="string" Label="Country code" @bind-Value="_country" Disabled="@(!IsNew)" Required="true"
+            <MudTextField T="string" Immediate="true" Label="Country code" @bind-Value="_country" Disabled="@(!IsNew)" Required="true"
                          Error='@HasError("Country")' ErrorText='@FieldError("Country")' />
         </MudItem>
         <MudItem xs="12" md="4">
-            <MudTextField T="string" Label="Region" @bind-Value="_region" Disabled="@(!IsNew)" Required="true"
+            <MudTextField T="string" Immediate="true" Label="Region" @bind-Value="_region" Disabled="@(!IsNew)" Required="true"
                          Error='@HasError("Region")' ErrorText='@FieldError("Region")' />
         </MudItem>
         <MudItem xs="12" md="4">
-            <MudTextField T="string" Label="Sector" @bind-Value="_sector" Disabled="@(!IsNew)" Required="true"
+            <MudTextField T="string" Immediate="true" Label="Sector" @bind-Value="_sector" Disabled="@(!IsNew)" Required="true"
                          Error='@HasError("Sector")' ErrorText='@FieldError("Sector")' />
         </MudItem>
         <MudItem xs="12" md="6">
-            <MudTextField T="string" Label="Language" @bind-Value="_language" Disabled="@IsScheduled" Required="true"
+            <MudTextField T="string" Immediate="true" Label="Language" @bind-Value="_language" Disabled="@IsScheduled" Required="true"
                          Error='@HasError("Language")' ErrorText='@FieldError("Language")' />
         </MudItem>
         <MudItem xs="12" md="6">
-            <MudTextField T="string" Label="Topic tags (comma separated)" @bind-Value="_topicTagsText" Disabled="@IsScheduled"
+            <MudTextField T="string" Immediate="true" Label="Topic tags (comma separated)" @bind-Value="_topicTagsText" Disabled="@IsScheduled"
                          Error='@HasError("Tags")' ErrorText='@FieldError("Tags")' />
         </MudItem>
         <MudItem xs="12" md="6">
-            <MudTextField T="string" Label="Time zone" @bind-Value="_timeZone" Disabled="@(!IsNew)" @bind-Value:after="ClearAmbiguousOffset" Required="true"
+            <MudTextField T="string" Immediate="true" Label="Time zone" @bind-Value="_timeZone" Disabled="@(!IsNew)" @bind-Value:after="ClearAmbiguousOffset" Required="true"
                          HelperText="An IANA time zone, for example Africa/Harare."
                          Error='@HasError("TimeZone")' ErrorText='@FieldError("TimeZone")' />
         </MudItem>
         <MudItem xs="12" md="6">
-            <MudTextField T="DateTime?" Format="s" InputType="InputType.DateTimeLocal" Label="Start date and time"
+            <MudTextField T="DateTime?" Immediate="true" Format="s" InputType="InputType.DateTimeLocal" Label="Start date and time"
                          @bind-Value="_startLocal" @bind-Value:after="ClearAmbiguousOffset" Disabled="@_storedTimeZoneUnavailable" Required="true"
                          HelperText="Wall-clock time in the time zone above."
                          Error='@HasError("Start")' ErrorText='@FieldError("Start")' />
@@ -137,11 +137,11 @@
             </MudItem>
         }
         <MudItem xs="6" md="3">
-            <MudTextField T="string" Label="Duration (minutes)" @bind-Value="_durationText" Disabled="@IsScheduled" Required="true" InputType="InputType.Number"
+            <MudTextField T="string" Immediate="true" Label="Duration (minutes)" @bind-Value="_durationText" Disabled="@IsScheduled" Required="true" InputType="InputType.Number"
                          Error='@HasError("Duration")' ErrorText='@FieldError("Duration")' />
         </MudItem>
         <MudItem xs="6" md="3">
-            <MudTextField T="string" Label="Capacity (optional)" @bind-Value="_capacityText" Disabled="@IsScheduled" InputType="InputType.Number"
+            <MudTextField T="string" Immediate="true" Label="Capacity (optional)" @bind-Value="_capacityText" Disabled="@IsScheduled" InputType="InputType.Number"
                          Error='@HasError("Capacity")' ErrorText='@FieldError("Capacity")' />
         </MudItem>
         <MudItem xs="12" md="6">
@@ -161,13 +161,13 @@
         @if (!string.Equals(_channelType, "None", StringComparison.Ordinal))
         {
             <MudItem xs="12">
-                <MudTextField T="string" Label="Channel link" @bind-Value="_channelLink" Disabled="@IsScheduled" Required="true"
+                <MudTextField T="string" Immediate="true" Label="Channel link" @bind-Value="_channelLink" Disabled="@IsScheduled" Required="true"
                              HelperText="Paste the destination link from the channel you already manage. SwiftAid never posts on your behalf."
                              Error='@HasError("ChannelLink")' ErrorText='@FieldError("ChannelLink")' />
             </MudItem>
         }
         <MudItem xs="12">
-            <MudTextField T="string" Label="Reminder lead hours (comma separated, optional)" @bind-Value="_reminderLeadsText"
+            <MudTextField T="string" Immediate="true" Label="Reminder lead hours (comma separated, optional)" @bind-Value="_reminderLeadsText"
                          HelperText="Whole hours between 1 and 168, no repeats. Example: 24, 1."
                          Error='@HasError("ReminderLeads")' ErrorText='@FieldError("ReminderLeads")' />
         </MudItem>
@@ -181,9 +181,9 @@
                 var row = _materials[materialIndex];
                 var removeMaterialLabel = $"Remove material {materialIndex + 1}";
                 <div class="session-editor__material-row" @key="row.Key">
-                    <MudTextField T="string" Label="Material" @bind-Value="row.MaterialId" Disabled="@IsScheduled" />
-                    <MudTextField T="string" Label="Source version" @bind-Value="row.SourceVersion" Disabled="@IsScheduled" />
-                    <MudTextField T="string" Label="Source and reuse-rights evidence" @bind-Value="row.RightsEvidence" Disabled="@IsScheduled"
+                    <MudTextField T="string" Immediate="true" Label="Material" @bind-Value="row.MaterialId" Disabled="@IsScheduled" />
+                    <MudTextField T="string" Immediate="true" Label="Source version" @bind-Value="row.SourceVersion" Disabled="@IsScheduled" />
+                    <MudTextField T="string" Immediate="true" Label="Source and reuse-rights evidence" @bind-Value="row.RightsEvidence" Disabled="@IsScheduled"
                                   HelperText="Required before an organization owner can approve this material." />
                     <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error"
                                    OnClick="() => RemoveMaterial(row)" aria-label="@removeMaterialLabel" Disabled="@(!CanEditFields || Busy || IsScheduled)" />
@@ -201,7 +201,7 @@
 
     @if (CanProvideReason)
     {
-        <MudTextField T="string" Label="Reason for this change" @bind-Value="_reason" Required="true"
+        <MudTextField T="string" Immediate="true" Label="Reason for this change" @bind-Value="_reason" Required="true"
                      HelperText="Recorded with the change for review."
                      Error='@HasError("Reason")' ErrorText='@FieldError("Reason")' />
     }
@@ -256,7 +256,7 @@
                             Cancellation applies to the saved session. Your unsaved changes will not be saved.
                         </MudAlert>
                     }
-                    <MudTextField T="string" Label="Cancellation reason" @bind-Value="_cancellationReason" Required="true"
+                    <MudTextField T="string" Immediate="true" Label="Cancellation reason" @bind-Value="_cancellationReason" Required="true"
                                  Error='@HasError("CancellationReason")' ErrorText='@FieldError("CancellationReason")' />
                     <MudButton Variant="Variant.Text" Color="Color.Error" OnClick="SubmitCancelAsync" Disabled="Busy" StartIcon="@Icons.Material.Filled.Cancel">Yes, cancel this session</MudButton>
                     <MudButton Variant="Variant.Text" Color="Color.Default" OnClick="() => _confirmingCancel = false" Disabled="Busy" StartIcon="@Icons.Material.Filled.ArrowBack">Keep session</MudButton>
@@ -280,6 +280,7 @@
     [Parameter] public CommunitySessionView? InitialSession { get; set; }
 
     [Parameter] public SessionCreateSubmission? InitialDraft { get; set; }
+    [Parameter] public SessionEditorWorkingCopy? InitialWorkingCopy { get; set; }
 
     [Parameter] public SessionManagementPresentation? ManagementCapabilities { get; set; }
 
@@ -328,6 +329,7 @@
     private Guid? _loadedForSessionId;
     private string?[]? _savedFields;
     private bool _draftRestored;
+    private bool _workingCopyRestored;
     private bool _storedTimeZoneUnavailable;
     private bool _confirmingLeave;
     private string? _approvedLocation;
@@ -397,6 +399,59 @@
             foreach (var material in input.Materials)
                 _materials.Add(new MaterialRow { MaterialId = material.MaterialId, SourceVersion = material.SourceVersion, RightsEvidence = material.RightsEvidence ?? string.Empty });
             _reason = draft.Reason;
+        }
+        if (InitialWorkingCopy is { } workingCopy && !_workingCopyRestored &&
+            !string.IsNullOrWhiteSpace(CurrentActorId) && string.Equals(workingCopy.ActorId, CurrentActorId, StringComparison.Ordinal) &&
+            workingCopy.SessionId == SessionId && workingCopy.ExpectedVersion == ExpectedVersion)
+        {
+            _workingCopyRestored = true;
+            RestoreWorkingCopy(workingCopy);
+        }
+    }
+
+    /// <summary>Captures incomplete entries without validating or submitting them.</summary>
+    public SessionEditorWorkingCopy CaptureWorkingCopy() => new(
+        CurrentActorId, SessionId, ExpectedVersion, _title, _organizationId, _summary, _audience, _country, _region, _sector, _presenter, _language,
+        _topicTagsText, _timeZone, _startLocal, _ambiguousOffsetMinutes, _durationText, _capacityText,
+        _visibility, _channelType, _channelLink, _reminderLeadsText,
+        _materials.Select(item => new SessionMaterialInput(item.MaterialId, item.SourceVersion, item.RightsEvidence)).ToArray(),
+        _reason, _cancellationReason, _acknowledgeSelfReview, _storedTimeZoneUnavailable, _savedFields?.ToArray());
+
+    private void RestoreWorkingCopy(SessionEditorWorkingCopy copy)
+    {
+        _title = copy.Title;
+        _organizationId = copy.OrganizationId;
+        _summary = copy.Summary;
+        _audience = copy.Audience;
+        _country = copy.Country;
+        _region = copy.Region;
+        _sector = copy.Sector;
+        _presenter = copy.Presenter;
+        _language = copy.Language;
+        _topicTagsText = copy.TopicTags;
+        _timeZone = copy.TimeZone;
+        _startLocal = copy.StartLocal;
+        _ambiguousOffsetMinutes = copy.AmbiguousOffsetMinutes;
+        _durationText = copy.Duration;
+        _capacityText = copy.Capacity;
+        _visibility = copy.Visibility;
+        _channelType = copy.ChannelType;
+        _channelLink = copy.ChannelLink;
+        _reminderLeadsText = copy.ReminderLeads;
+        _reason = copy.Reason;
+        _cancellationReason = copy.CancellationReason;
+        _acknowledgeSelfReview = copy.AcknowledgeSelfReview;
+        _storedTimeZoneUnavailable = copy.StoredTimeZoneUnavailable;
+        _savedFields = copy.SavedFields?.ToArray();
+        _materials.Clear();
+        foreach (var material in copy.Materials)
+        {
+            _materials.Add(new MaterialRow
+            {
+                MaterialId = material.MaterialId,
+                SourceVersion = material.SourceVersion,
+                RightsEvidence = material.RightsEvidence ?? string.Empty
+            });
         }
     }
 

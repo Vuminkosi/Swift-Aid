@@ -1,0 +1,20 @@
+@page "/guest-report-loading-fixture"
+@inject SwiftAid.Ui.TestHost.GuestReportLoadingFixture Service
+@using SwiftAid.Ui.TestHost.Components.Public
+
+<SwiftAidThemeProvider />
+<MudPopoverProvider />
+<MudDialogProvider />
+<button @onclick="Service.ReleasePolicy">Release policy</button>
+@if (_ready)
+{
+    <GuestReport />
+}
+
+@code {
+    private bool _ready;
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (firstRender) { _ready = true; StateHasChanged(); }
+    }
+}

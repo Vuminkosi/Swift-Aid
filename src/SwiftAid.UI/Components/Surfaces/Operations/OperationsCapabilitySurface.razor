@@ -46,12 +46,23 @@
             </MudTable>
         </MudHidden>
         <MudHidden Breakpoint="Breakpoint.MdAndDown" Invert="true">
-            <MudList T="string" Dense="true" aria-label="@($"{Title} results")">
+            <div class="operations-capability__list" role="list" aria-label="@($"{Title} results")">
                 @foreach (var item in Items)
                 {
-                    <MudListItem T="string" Text="@item.Title" SecondaryText="@MobileDescription(item)" />
+                    <MudPaper Outlined="true" Class="operations-capability__item" role="listitem">
+                        <MudText Typo="Typo.subtitle2">@item.Title</MudText>
+                        @if (!string.IsNullOrWhiteSpace(item.Summary))
+                        {
+                            <MudText Typo="Typo.body2">@item.Summary</MudText>
+                        }
+                        <MudText Typo="Typo.body2">Category: @item.Category</MudText>
+                        <MudText Typo="Typo.body2">Value: @item.Value</MudText>
+                        <MudText Typo="Typo.body2">Location: @(item.Location ?? "—")</MudText>
+                        <MudText Typo="Typo.body2">Status: @(item.Status ?? "—")</MudText>
+                        <MudText Typo="Typo.body2">Updated: @(item.OccurredAtUtc?.ToLocalTime().ToString("g") ?? "—")</MudText>
+                    </MudPaper>
                 }
-            </MudList>
+            </div>
         </MudHidden>
     }
 
@@ -97,10 +108,4 @@
         _ => string.Empty
     };
 
-    private static string MobileDescription(OperationsListItemView item)
-    {
-        var details = new[] { item.Category, item.Value, item.Location, item.Status }
-            .Where(value => !string.IsNullOrWhiteSpace(value));
-        return string.Join(" · ", details);
-    }
 }

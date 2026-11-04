@@ -133,6 +133,45 @@ public sealed class EllaiReasoningBackendTests
     }
 
     [Fact]
+    public async Task ReportVoiceUsesStructuredSchemaWithoutChangingNormalEllaiRequests()
+    {
+        const string response = """{"choices":[{"message":{"content":"{\"fields\":[]}"},"finish_reason":"stop"}]}""";
+        var options = Bind(new Dictionary<string, string?>
+        {
+            ["Ellai__Enabled"] = "true", ["Ellai__ApiKey"] = "test-key",
+            ["Ellai__ApiUrl"] = "https://api.meta.ai/v1", ["Ellai__ReasoningModel"] = "fixture"
+        });
+        var handler = new StubHandler(response);
+        using var http = new HttpClient(handler);
+        var adapter = new EllaiReasoningAdapter(http, options);
+        await adapter.CompleteReportVoiceAsync([new("user", "synthetic")], 4096, default);
+        using (var payload = JsonDocument.Parse(handler.RequestBody!))
+        {
+            Assert.Equal(4096, payload.RootElement.GetProperty("max_tokens").GetInt32());
+            var format = payload.RootElement.GetProperty("response_format");
+            Assert.Equal("low", payload.RootElement.GetProperty("reasoning_effort").GetString());
+            Assert.Equal("json_schema", format.GetProperty("type").GetString());
+            Assert.True(format.GetProperty("json_schema").GetProperty("strict").GetBoolean());
+            Assert.True(format.GetProperty("json_schema").GetProperty("schema").GetProperty("properties").TryGetProperty("fields", out _));
+        }
+        var guidanceSchema = JsonSerializer.Deserialize<JsonElement>("""{"type":"object","properties":{"steps":{"type":"array","items":{"type":"string"}}},"required":["steps"],"additionalProperties":false}""");
+        await adapter.CompleteStructuredAsync([new("user", "synthetic guidance")], 16384, guidanceSchema, default);
+        using (var payload = JsonDocument.Parse(handler.RequestBody!))
+        {
+            var schema = payload.RootElement.GetProperty("response_format").GetProperty("json_schema");
+            Assert.Equal("guidance_plan", schema.GetProperty("name").GetString());
+            Assert.False(schema.GetProperty("strict").GetBoolean());
+            Assert.Equal(guidanceSchema.GetRawText(), schema.GetProperty("schema").GetRawText());
+            Assert.Equal("low", payload.RootElement.GetProperty("reasoning_effort").GetString());
+        }
+        await adapter.CompleteAsync([new("user", "ordinary Ellai")], 64, default);
+        using var normal = JsonDocument.Parse(handler.RequestBody!);
+        Assert.False(normal.RootElement.TryGetProperty("response_format", out _));
+        Assert.False(normal.RootElement.TryGetProperty("reasoning_effort", out _));
+        Assert.Equal(64, normal.RootElement.GetProperty("max_tokens").GetInt32());
+    }
+
+    [Fact]
     public async Task MetaProviderSerializesCorrelatedToolCallsAndResults()
     {
         const string response = """{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}]}""";
@@ -201,6 +240,43 @@ public sealed class EllaiReasoningBackendTests
         Assert.Equal(5, result.Usage.CompletionTokens);
         using var request = JsonDocument.Parse(handler.RequestBody!);
         Assert.True(request.RootElement.GetProperty("stream").GetBoolean());
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task StreamingProvidersPreserveOutputLimitAndRejectInterruptedStreams(bool meta)
+    {
+        var options = Bind(new Dictionary<string, string?>
+        {
+            ["Ellai__Enabled"] = "true",
+            ["Ellai__ApiKey"] = "test-key",
+            ["Ellai__ApiUrl"] = "https://api.meta.ai/v1",
+            ["Ellai__ReasoningModel"] = "muse-spark-1.3-contributor",
+            ["Ellai__ReasoningBackend"] = meta ? "meta" : "ollama",
+            ["Ellai__Reasoning__Ollama__Endpoint"] = "http://localhost:11434",
+        });
+        var partial = meta
+            ? "data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n"
+            : "{\"message\":{\"content\":\"partial\"},\"done\":false}\n";
+        var ending = meta
+            ? "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"length\"}]}\n\ndata: [DONE]\n\n"
+            : "{\"done\":true,\"done_reason\":\"length\"}\n";
+
+        async Task<EllaiReasoningResult> Run(string body)
+        {
+            using var http = new HttpClient(new StubHandler(body));
+            var messages = new[] { new EllaiChatMessage("user", "hello") };
+            return meta
+                ? await new EllaiReasoningAdapter(http, options).CompleteStreamingAsync(
+                    messages, 64, (_, _) => ValueTask.CompletedTask, CancellationToken.None)
+                : await new OllamaEllaiReasoningProvider(http, options).CompleteStreamingAsync(
+                    messages, 64, (_, _) => ValueTask.CompletedTask, CancellationToken.None);
+        }
+
+        Assert.Equal("length", (await Run(partial + ending)).FinishReason);
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => Run(partial));
+        Assert.Contains("ended before completion", error.Message, StringComparison.Ordinal);
     }
 
     [Fact]

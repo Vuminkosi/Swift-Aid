@@ -560,6 +560,7 @@ public sealed class PostgresEllaiSessionStore(SwiftAidDbContext dbContext, TimeS
                 ui_proposals_json = CAST({resolution.UiProposalsJson} AS jsonb),
                 tool_trace_json = CAST({resolution.ToolTraceJson} AS jsonb),
                 framework_session_json = CAST({resolution.FrameworkSessionJson} AS jsonb),
+                decision_json = CAST({resolution.DecisionJson} AS jsonb),
                 work_payload_json = NULL, lease_expires_at_utc = NULL, completed_at_utc = {completedAtUtc}
             WHERE session_id = {sessionId} AND client_utterance_id = {clientUtteranceId}
               AND attempt_count = {attemptCount} AND completed_at_utc IS NULL AND outcome = 'Processing'

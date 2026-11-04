@@ -32,7 +32,23 @@
     }
     else
     {
-        <MudTable data-ellai-control="@ControlId("table")" data-bonboarding-anchor="@Anchor("table")" Items="_items" Hover="true" Dense="true" aria-label="Open monitoring work">
+        <div data-ellai-control="@ControlId("table")" data-bonboarding-anchor="@Anchor("table")">
+        <MudHidden Breakpoint="Breakpoint.MdAndDown" Invert="true">
+            <div class="monitoring-queue__list" role="list" aria-label="Open monitoring work">
+                @foreach (var item in VisibleItems)
+                {
+                    <MudPaper Outlined="true" Class="monitoring-queue__item" role="listitem">
+                        <MudChip T="string" Size="Size.Small" Color="@KindColor(item.Kind)">@KindLabel(item.Kind)</MudChip>
+                        <MudLink Href="@($"/case/{item.CaseId:D}")" aria-label="@($"Open case {item.CaseId:D}")">@item.Summary</MudLink>
+                        <MudText Typo="Typo.body2">@(string.IsNullOrWhiteSpace(item.AssigneeActorId) ? "Unassigned" : "Assigned")</MudText>
+                        <MudText Typo="Typo.body2" Class="@(item.IsOverdue ? "monitoring-queue__overdue" : null)">Due: @(item.DueAtUtc?.ToLocalTime().ToString("g") ?? "—")</MudText>
+                        <MudChip T="string" Size="Size.Small" Color="@StatusColor(item)">@item.Status</MudChip>
+                    </MudPaper>
+                }
+            </div>
+        </MudHidden>
+        <MudHidden Breakpoint="Breakpoint.MdAndDown">
+        <MudTable Items="VisibleItems" Hover="true" Dense="true" aria-label="Open monitoring work">
             <HeaderContent>
                 <MudTh>Work</MudTh>
                 <MudTh>Summary</MudTh>
@@ -49,7 +65,7 @@
                         @context.Summary
                     </MudLink>
                 </MudTd>
-                <MudTd DataLabel="Assignee">@(context.AssigneeActorId ?? "—")</MudTd>
+                <MudTd DataLabel="Assignee">@(string.IsNullOrWhiteSpace(context.AssigneeActorId) ? "Unassigned" : "Assigned")</MudTd>
                 <MudTd DataLabel="Due">
                     @if (context.DueAtUtc.HasValue)
                     {
@@ -67,6 +83,16 @@
                 </MudTd>
             </RowTemplate>
         </MudTable>
+        </MudHidden>
+        </div>
+        @if (_items.Count > EffectivePageSize)
+        {
+            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" aria-label="Monitoring pages">
+                <MudButton Variant="Variant.Text" Size="Size.Small" Disabled="@(_pageNumber <= 1)" OnClick="PreviousPage">Previous</MudButton>
+                <MudText Typo="Typo.caption">Page @_pageNumber</MudText>
+                <MudButton Variant="Variant.Text" Size="Size.Small" Disabled="@(_pageNumber * EffectivePageSize >= _items.Count)" OnClick="NextPage">Next</MudButton>
+            </MudStack>
+        }
         <MudText Typo="Typo.caption" Color="Color.Secondary" Class="monitoring-queue__notice">
             Due earliest first. Only work on cases you may read is listed.
         </MudText>
@@ -93,11 +119,17 @@
     [Parameter] public MonitoringQueueScope Scope { get; set; } = MonitoringQueueScope.Assigned;
 
     [Parameter] public int? Limit { get; set; }
+    [Parameter] public int PageSize { get; set; } = 25;
 
     private IReadOnlyList<MonitoringQueueItem> _items = Array.Empty<MonitoringQueueItem>();
     private bool _loading = true;
     private bool _denied;
     private string? _error;
+    private int _pageNumber = 1;
+    private int EffectivePageSize => Math.Clamp(PageSize, 1, 100);
+    private IReadOnlyList<MonitoringQueueItem> VisibleItems => _items.Skip((_pageNumber - 1) * EffectivePageSize).Take(EffectivePageSize).ToArray();
+    private void PreviousPage() { if (_pageNumber > 1) _pageNumber--; }
+    private void NextPage() { if (_pageNumber * EffectivePageSize < _items.Count) _pageNumber++; }
 
     protected override async Task OnInitializedAsync()
     {
@@ -123,6 +155,7 @@
         _denied = false;
         _error = null;
         _items = Array.Empty<MonitoringQueueItem>();
+        _pageNumber = 1;
         StateHasChanged();
 
         try

@@ -1,4 +1,5 @@
 using SwiftAid.Application.Ellai;
+using SwiftAid.Application.Intake;
 using SwiftAid.Contracts.Ellai;
 using SwiftAid.Intelligence.Meta;
 using System.Buffers.Binary;
@@ -49,11 +50,24 @@ public sealed class EllaiVoiceTranscriptionService(
         }
     }
 
-    public async Task<EllaiVoiceTranscriptionResult?> TranscribeAsync(
+    public Task<EllaiVoiceTranscriptionResult?> TranscribeAsync(
         string sessionId, EllaiVoiceCaptureMode mode, Stream audio, long? contentLength,
         CancellationToken cancellationToken, string? voiceCaptureId = null,
         long voiceCaptureOffsetSamples = 0, ClaimsPrincipal? submissionPrincipal = null,
-        EllaiLanguagePreferences? speechPreferences = null)
+        EllaiLanguagePreferences? speechPreferences = null) =>
+        TranscribeCoreAsync(sessionId, mode, audio, contentLength, cancellationToken, voiceCaptureId,
+            voiceCaptureOffsetSamples, submissionPrincipal, speechPreferences, savedReportRecording: false);
+
+    /// <summary>Transcribes an existing report recording under report-specific consent, without microphone or conversation admission.</summary>
+    public Task<EllaiVoiceTranscriptionResult?> TranscribeSavedReportAsync(
+        string sessionId, Stream audio, long? contentLength, CancellationToken cancellationToken) =>
+        TranscribeCoreAsync(sessionId, EllaiVoiceCaptureMode.Recorded, audio, contentLength, cancellationToken,
+            null, 0, null, null, savedReportRecording: true);
+
+    private async Task<EllaiVoiceTranscriptionResult?> TranscribeCoreAsync(
+        string sessionId, EllaiVoiceCaptureMode mode, Stream audio, long? contentLength,
+        CancellationToken cancellationToken, string? voiceCaptureId, long voiceCaptureOffsetSamples,
+        ClaimsPrincipal? submissionPrincipal, EllaiLanguagePreferences? speechPreferences, bool savedReportRecording)
     {
         ArgumentNullException.ThrowIfNull(audio);
         if (string.IsNullOrWhiteSpace(sessionId)
@@ -66,7 +80,9 @@ public sealed class EllaiVoiceTranscriptionService(
             return null;
         }
 
-        if (!await HasConsentAsync(sessionId, cancellationToken).ConfigureAwait(false))
+        if (savedReportRecording
+                ? !await HasSavedReportConsentAsync(sessionId, cancellationToken).ConfigureAwait(false)
+                : !await HasConsentAsync(sessionId, cancellationToken).ConfigureAwait(false))
         {
             return null;
         }
@@ -162,6 +178,7 @@ public sealed class EllaiVoiceTranscriptionService(
                 bounded, "ellai-capture.wav", "audio/wav", cancellationToken).ConfigureAwait(false);
             var transcript = result.Transcript.Trim();
             if (transcript.Length is not (> 0 and <= 8_000)) return null;
+            if (savedReportRecording && !await HasSavedReportConsentAsync(sessionId, cancellationToken).ConfigureAwait(false)) return null;
             if (submissionPrincipal is null) return new EllaiVoiceTranscriptionResult(transcript);
             using var admission = new EllaiVoiceTurnAdmission(services, sessionId, submissionPrincipal,
                 speechPreferences: speechPreferences);
@@ -460,6 +477,16 @@ public sealed class EllaiVoiceTranscriptionService(
                 EllaiConsentPurposes.VoiceTranscription, AudioDataClass, now)
             && consent.IsGranted(sessionId, EllaiConsentDimension.Transcription,
                 EllaiConsentPurposes.VoiceTranscription, AudioDataClass, now);
+    }
+
+    public async Task<bool> HasSavedReportConsentAsync(string sessionId, CancellationToken cancellationToken)
+    {
+        await consent.HydrateAsync(sessionId, consentStore, cancellationToken).ConfigureAwait(false);
+        var now = DateTimeOffset.UtcNow;
+        return consent.IsGranted(sessionId, EllaiConsentDimension.Transcription,
+                ReportVoiceExtractionAdmission.ConsentPurpose, AudioDataClass, now)
+            && consent.IsGranted(sessionId, EllaiConsentDimension.ReasoningText,
+                ReportVoiceExtractionAdmission.ConsentPurpose, ReportVoiceExtractionAdmission.ConsentDataClass, now);
     }
 
     private async Task RevokeGrantsAsync(

@@ -29,11 +29,17 @@ public sealed class ClassificationOutboxDispatcher(SwiftAidDbContext db, INatsCl
         {
             row = await db.Set<ClassificationEventEntity>().FromSqlInterpolated($"""
                 SELECT o.* FROM swiftaid_classification.outbox o
+                LEFT JOIN managed_cases c ON c.case_id = o."CaseId"
+                CROSS JOIN LATERAL (SELECT COALESCE((
+                    SELECT report.received_at_utc FROM swiftaid_intake.intake_promotions promotion
+                    JOIN swiftaid_intake.intake_reports report ON report.receipt_id = promotion.receipt_id
+                    WHERE promotion.case_id = c.case_id
+                ), c.created_at_utc, o."CreatedAtUtc") AS received_at_utc) report_time
                 WHERE o."PublishedAtUtc" IS NULL AND o."ExhaustedAtUtc" IS NULL AND o."Attempts" < 8
                   AND o."AvailableAtUtc" <= {now} AND (o."LeaseUntilUtc" IS NULL OR o."LeaseUntilUtc" <= {now})
                   AND NOT EXISTS (SELECT 1 FROM swiftaid_classification.outbox p WHERE p."ResultId" = o."ResultId"
                     AND p."Sequence" < o."Sequence" AND p."PublishedAtUtc" IS NULL)
-                ORDER BY o."Sequence" LIMIT 1 FOR UPDATE OF o SKIP LOCKED
+                ORDER BY report_time.received_at_utc DESC, o."CaseId", o."Sequence" LIMIT 1 FOR UPDATE OF o SKIP LOCKED
                 """).SingleOrDefaultAsync(ct);
             if (row is null) return false;
             row.LeaseId = lease; row.LeaseUntilUtc = now.AddSeconds(60); row.Attempts++;

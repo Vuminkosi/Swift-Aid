@@ -7,14 +7,65 @@ using SwiftAid.Application.Identity;
 using SwiftAid.Client.Presentation;
 using SwiftAid.Gateway.Presentation;
 using SwiftAid.Gateway.Ingestion;
+using SwiftAid.Gateway.Endpoints;
+using SwiftAid.Gateway.Sessions;
+using SwiftAid.Application.Sessions;
+using SwiftAid.Contracts.Sessions;
 using SwiftAid.Infrastructure.Identity;
 using SwiftAid.Infrastructure.Persistence;
+using SwiftAid.Infrastructure.Persistence.Sessions;
 
 namespace SwiftAid.Integration.Tests;
 
 [Collection(IntakePostgresCollection.Name)]
 public sealed class GatewayWorkspaceAccessTests
 {
+    [IntakePostgresFact]
+    public async Task InProcessSessionCommandsRecheckThePersistedAccountEpoch()
+    {
+        await using var fixture = await CaseImportPostgresTests.Fixture.CreateAsync();
+        var auth = new Authentication();
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton<TimeProvider>(TimeProvider.System);
+        services.AddSingleton<AuthenticationStateProvider>(auth);
+        services.AddScoped(_ => new SwiftAidDbContext(new DbContextOptionsBuilder<SwiftAidDbContext>()
+            .UseNpgsql(fixture.Db.Database.GetConnectionString()).UseOpenIddict().Options));
+        services.AddScoped<IOrganizationOwnerAuthorizer, PostgresOrganizationOwnerAuthorizer>();
+        services.AddScoped<IOrganizationMembershipService, OrganizationMembershipService>();
+        services.AddScoped<IWorkspaceAccessRequest, WorkspaceAccessRequest>();
+        services.AddScoped<ICommunitySessionService>(sp => new CommunitySessionService(
+            new PostgresCommunitySessionStore(sp.GetRequiredService<SwiftAidDbContext>()),
+            materialEligibility: new PostgresSessionMaterialEligibility(sp.GetRequiredService<SwiftAidDbContext>()),
+            ownerAuthorizer: sp.GetRequiredService<IOrganizationOwnerAuthorizer>()));
+        services.AddScoped<SessionGatewayClient>();
+        await using var provider = services.BuildServiceProvider();
+        await using var scope = provider.CreateAsyncScope();
+        var organization = "session-epoch-" + Guid.NewGuid().ToString("N");
+        Assert.Equal(OrganizationCreateStatus.Created,
+            (await scope.ServiceProvider.GetRequiredService<IOrganizationMembershipService>().CreateAsync("officer-1", organization, default)).Status);
+        var client = scope.ServiceProvider.GetRequiredService<SessionGatewayClient>();
+        var sessionId = Guid.NewGuid();
+        var create = new CreateSessionDraftCommand(sessionId, organization, "Synthetic community session", "Synthetic summary",
+            "Community", [], "ZW", "region", "HumanHealth", "Presenter", "en", DateTimeOffset.UtcNow.AddDays(7),
+            "UTC", 60, null, [new SessionMaterialRef("fixture", "1", "Synthetic source with reuse rights")],
+            SessionVisibility.Public, SessionChannelType.None, null, [], "Fixture", DateTimeOffset.UtcNow);
+        var accepted = await client.ExecuteAsync(create);
+        Assert.True(accepted.Succeeded, accepted.Error);
+        Assert.NotNull(await client.GetStaffAsync(sessionId));
+        var reviewed = await client.ExecuteAsync(new ReviewSessionCommand(sessionId, 1, true, "Review", DateTimeOffset.UtcNow));
+        Assert.True(reviewed.Succeeded, reviewed.Error);
+        var scheduled = await client.ExecuteAsync(new ScheduleSessionCommand(sessionId, 2, "Schedule", DateTimeOffset.UtcNow));
+        Assert.True(scheduled.Succeeded, scheduled.Error);
+        Assert.NotNull(await client.GetPublicAsync(sessionId));
+        auth.Epoch = 8;
+        var denied = await client.ExecuteAsync(new CancelSessionCommand(sessionId, 3, "Fixture cancellation", "Cancel", DateTimeOffset.UtcNow));
+        Assert.False(denied.Succeeded);
+        Assert.Null(await client.GetStaffAsync(sessionId));
+        Assert.Equal(3, await fixture.Db.Set<CommunitySessionEntity>().Where(item => item.SessionId == sessionId)
+            .Select(item => item.Version).SingleAsync());
+    }
+
     [IntakePostgresFact]
     public async Task Lists_both_organizations_and_revalidates_selection_membership_and_session()
     {

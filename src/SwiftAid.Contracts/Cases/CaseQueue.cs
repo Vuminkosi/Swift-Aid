@@ -15,7 +15,8 @@ public sealed record CaseQueueItem(
     string? Sector = null,
     string? Classification = null,
     string? WorkspaceId = null,
-    DateTimeOffset? CreatedAtUtc = null);
+    DateTimeOffset? CreatedAtUtc = null,
+    bool HasReportJournal = true);
 
 /// <summary>Queue read outcome distinguishing denial/unavailability from an empty queue.</summary>
 public enum CaseQueueAccess

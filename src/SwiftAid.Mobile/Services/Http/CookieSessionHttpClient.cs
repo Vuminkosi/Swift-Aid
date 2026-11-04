@@ -12,6 +12,7 @@ namespace SwiftAid.Mobile.Services.Http;
 /// </summary>
 public class CookieSessionHttpClient : IDisposable
 {
+    private const string EllaiGuestCookieName = ".SwiftAid.Ellai.Guest";
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, CookieSessionHttpClient> SharedByAddress = new(
         StringComparer.OrdinalIgnoreCase);
 
@@ -251,7 +252,14 @@ public class CookieSessionHttpClient : IDisposable
         }
     }
 
-    public async Task ClearCookiesAsync(CancellationToken cancellationToken = default)
+    public Task ClearCookiesAsync(CancellationToken cancellationToken = default) =>
+        ClearCookiesCoreAsync(preserveEllaiGuest: false, cancellationToken);
+
+    /// <summary>Clears account credentials while keeping the separate, in-memory guest Ellai session.</summary>
+    public Task ClearAccountCookiesAsync(CancellationToken cancellationToken = default) =>
+        ClearCookiesCoreAsync(preserveEllaiGuest: true, cancellationToken);
+
+    private async Task ClearCookiesCoreAsync(bool preserveEllaiGuest, CancellationToken cancellationToken)
     {
         await _restoreGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -261,10 +269,20 @@ public class CookieSessionHttpClient : IDisposable
             {
                 ObjectDisposedException.ThrowIf(_disposed, this);
                 persistence = _cookiePersistence;
-                var baseAddress = _client.BaseAddress?.ToString();
+                var gateway = _client.BaseAddress;
+                var guestCookies = preserveEllaiGuest && gateway is not null
+                    ? _handler.CookieContainer.GetCookies(gateway).Cast<System.Net.Cookie>()
+                        .Where(cookie => string.Equals(cookie.Name, EllaiGuestCookieName, StringComparison.Ordinal) && !cookie.Expired)
+                        .ToArray()
+                    : [];
+                var baseAddress = gateway?.ToString();
                 _client.Dispose();
                 _handler.Dispose();
                 (_handler, _client) = CreateClient(baseAddress);
+                foreach (var cookie in guestCookies)
+                {
+                    _handler.CookieContainer.Add(gateway!, cookie);
+                }
                 _restoreCompleted = true;
             }
 

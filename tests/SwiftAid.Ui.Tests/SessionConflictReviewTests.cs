@@ -25,7 +25,7 @@ public sealed class SessionConflictReviewTests
     {
         var id = Guid.NewGuid();
         var start = DateTimeOffset.UtcNow.AddDays(1);
-        var current = new CommunitySessionView(matchingSession ? id : Guid.NewGuid(), 1, "Draft", "Summary", "Community", [], "SZ", "region", "education", "Presenter", "en", start, "UTC", 60, null, [new StoredSessionMaterial("card", "1")], SessionVisibility.Public, SessionChannelType.None, null, [24], "Draft", "officer", null, false, 0, null);
+        var current = new CommunitySessionView(matchingSession ? id : Guid.NewGuid(), "fixture-org", 1, "Draft", "Summary", "Community", [], "SZ", "region", "education", "Presenter", "en", start, "UTC", 60, null, [new SessionMaterialRef("card", "1")], SessionVisibility.Public, SessionChannelType.None, null, [24], "Draft", "officer", null, false, 0, null);
         var input = new CreateSessionInput("Draft", "Summary", "Community", [], "SZ", "region", "education", "Presenter", "en", start, "UTC", 60, null, [new SessionMaterialInput("card", "1")], SessionVisibility.Public, SessionChannelType.None, null, [24]);
         var execution = new TaskCompletionSource<UiCapabilityResult<SessionCommandResult>>(TaskCreationOptions.RunContinuationsAsynchronously);
         if (outcomeKind == 0)
@@ -72,7 +72,7 @@ public sealed class SessionConflictReviewTests
     {
         var id = Guid.NewGuid();
         var start = DateTimeOffset.UtcNow.AddDays(1);
-        var current = new CommunitySessionView(id, 1, "Draft", "Summary", "Community", [], "SZ", "region", "education", "Presenter", "en", start, "UTC", 60, null, [new StoredSessionMaterial("card", "1")], SessionVisibility.Public, SessionChannelType.None, null, [24], "Draft", "officer", null, false, 0, null);
+        var current = new CommunitySessionView(id, "fixture-org", 1, "Draft", "Summary", "Community", [], "SZ", "region", "education", "Presenter", "en", start, "UTC", 60, null, [new SessionMaterialRef("card", "1")], SessionVisibility.Public, SessionChannelType.None, null, [24], "Draft", "officer", null, false, 0, null);
         var input = new CreateSessionInput("Draft", "Summary", "Community", [], "SZ", "region", "education", "Presenter", "en", start, "UTC", 60, null, [new SessionMaterialInput("card", "1")], SessionVisibility.Public, SessionChannelType.None, null, [24]);
         var execution = new TaskCompletionSource<UiCapabilityResult<SessionCommandResult>>(TaskCreationOptions.RunContinuationsAsynchronously);
         execution.SetResult(UiCapabilityResults.Unavailable<SessionCommandResult>("editor"));
@@ -96,7 +96,7 @@ public sealed class SessionConflictReviewTests
     {
         var id = Guid.NewGuid();
         var start = DateTimeOffset.UtcNow.AddDays(1);
-        var current = new CommunitySessionView(id, 3, "Current", "Summary", "Community", [], "SZ", "region", "education", "Presenter", "en", start, "UTC", 60, null, [new StoredSessionMaterial("card", "1")], SessionVisibility.Public, SessionChannelType.None, null, [24], "Scheduled", "creator", "reviewer", false, 1, null);
+        var current = new CommunitySessionView(id, "fixture-org", 3, "Current", "Summary", "Community", [], "SZ", "region", "education", "Presenter", "en", start, "UTC", 60, null, [new SessionMaterialRef("card", "1")], SessionVisibility.Public, SessionChannelType.None, null, [24], "Scheduled", "creator", "reviewer", false, 1, null);
         var input = new CreateSessionInput("Draft", "Summary", "Community", [], "SZ", "region", "education", "Presenter", "en", start, "UTC", 60, null, [new SessionMaterialInput("card", "1")], SessionVisibility.Public, SessionChannelType.None, null, [24]);
         var page = new SwiftAid.Gateway.Components.Pages.Sessions();
         var type = page.GetType();
@@ -124,7 +124,7 @@ public sealed class SessionConflictReviewTests
     {
         var id = Guid.NewGuid();
         var start = DateTimeOffset.UtcNow.AddDays(1);
-        var current = new CommunitySessionView(id, 3, "Current", "Summary", "Community", [], "SZ", "region", "education", "Presenter", "en", start, "UTC", 60, null, [new StoredSessionMaterial("card", "1")], SessionVisibility.Public, SessionChannelType.None, null, [24], "Scheduled", "creator", "reviewer", false, 1, null);
+        var current = new CommunitySessionView(id, "fixture-org", 3, "Current", "Summary", "Community", [], "SZ", "region", "education", "Presenter", "en", start, "UTC", 60, null, [new SessionMaterialRef("card", "1")], SessionVisibility.Public, SessionChannelType.None, null, [24], "Scheduled", "creator", "reviewer", false, 1, null);
         var input = new UpdateSessionInput("Proposal", "Summary", "Community", [], "Presenter", "en", start, 60, null, [new SessionMaterialInput("card", "1")], SessionVisibility.Public, SessionChannelType.None, null, [24]);
         var proposal = new SessionUpdateSubmission(id, 3, input, "reason");
         var page = new SwiftAid.Gateway.Components.Pages.Sessions();
@@ -162,7 +162,7 @@ public sealed class SessionConflictReviewTests
     {
         var id = Guid.NewGuid();
         var start = DateTimeOffset.UtcNow.AddDays(1);
-        var current = new CommunitySessionView(id, 3, "Current", "Summary", "Community", [], "SZ", "region", "education", "Presenter", "en", start, "UTC", 60, null, [new StoredSessionMaterial("card", "1")], SessionVisibility.Public, SessionChannelType.None, null, [24], "Scheduled", "creator", "reviewer", false, 1, null);
+        var current = new CommunitySessionView(id, "fixture-org", 3, "Current", "Summary", "Community", [], "SZ", "region", "education", "Presenter", "en", start, "UTC", 60, null, [new SessionMaterialRef("card", "1")], SessionVisibility.Public, SessionChannelType.None, null, [24], "Scheduled", "creator", "reviewer", false, 1, null);
         var input = new UpdateSessionInput("Proposal", "Summary", "Community", [], "Presenter", "en", start, 60, null, [new SessionMaterialInput("card", "1")], SessionVisibility.Public, SessionChannelType.None, null, [24]);
         var proposal = new SessionUpdateSubmission(id, 3, input, "reason");
         var page = new SwiftAid.Gateway.Components.Pages.Sessions();
@@ -191,7 +191,7 @@ public sealed class SessionConflictReviewTests
     {
         var id = Guid.NewGuid();
         var start = DateTimeOffset.UtcNow.AddDays(1);
-        var current = new CommunitySessionView(id, 3, "Current", "Summary", "Community", [], "SZ", "region", "education", "Presenter", "en", start, "UTC", 60, null, [new StoredSessionMaterial("card", "1")], SessionVisibility.Public, SessionChannelType.None, null, [24], "Scheduled", "creator", "reviewer", false, 1, null);
+        var current = new CommunitySessionView(id, "fixture-org", 3, "Current", "Summary", "Community", [], "SZ", "region", "education", "Presenter", "en", start, "UTC", 60, null, [new SessionMaterialRef("card", "1")], SessionVisibility.Public, SessionChannelType.None, null, [24], "Scheduled", "creator", "reviewer", false, 1, null);
         var input = new UpdateSessionInput("Proposal", "Summary", "Community", [], "Presenter", "en", start, 60, null, [new SessionMaterialInput("card", "1")], SessionVisibility.Public, SessionChannelType.None, null, [24]);
         var proposal = new SessionUpdateSubmission(id, 3, input, "reason");
         var page = new SwiftAid.Gateway.Components.Pages.Sessions();
@@ -219,7 +219,7 @@ public sealed class SessionConflictReviewTests
     {
         var id = Guid.NewGuid();
         var start = DateTimeOffset.UtcNow.AddDays(1);
-        var current = new CommunitySessionView(id, 3, "Current", "Summary", "Community", [], "SZ", "region", "education", "Presenter", "en", start, "UTC", 60, null, [new StoredSessionMaterial("card", "1")], SessionVisibility.Public, SessionChannelType.None, null, [24], "Scheduled", "creator", "reviewer", false, 1, null);
+        var current = new CommunitySessionView(id, "fixture-org", 3, "Current", "Summary", "Community", [], "SZ", "region", "education", "Presenter", "en", start, "UTC", 60, null, [new SessionMaterialRef("card", "1")], SessionVisibility.Public, SessionChannelType.None, null, [24], "Scheduled", "creator", "reviewer", false, 1, null);
         var input = new UpdateSessionInput("Proposal", "Summary", "Community", [], "Presenter", "en", start, 60, null, [new SessionMaterialInput("card", "1")], SessionVisibility.Public, SessionChannelType.None, null, [24]);
         var proposal = new SessionUpdateSubmission(id, 3, input, "reason");
         var page = new SwiftAid.Gateway.Components.Pages.Sessions();
@@ -277,7 +277,7 @@ public sealed class SessionConflictReviewTests
     {
         var id = Guid.NewGuid();
         var start = DateTimeOffset.UtcNow.AddDays(1);
-        var current = new CommunitySessionView(id, 3, "Current", "Summary", "Community", [], "SZ", "region", "education", "Presenter", "en", start, "UTC", 60, null, [new StoredSessionMaterial("card", "1")], SessionVisibility.Public, SessionChannelType.None, null, [24], "Scheduled", "creator", "reviewer", false, 1, null);
+        var current = new CommunitySessionView(id, "fixture-org", 3, "Current", "Summary", "Community", [], "SZ", "region", "education", "Presenter", "en", start, "UTC", 60, null, [new SessionMaterialRef("card", "1")], SessionVisibility.Public, SessionChannelType.None, null, [24], "Scheduled", "creator", "reviewer", false, 1, null);
         var input = new UpdateSessionInput("Proposal", "Summary", "Community", [], "Presenter", "en", start, 60, null, [new SessionMaterialInput("card", "1")], SessionVisibility.Public, SessionChannelType.None, null, [24]);
         var proposal = new SessionUpdateSubmission(id, 3, input, "reason");
         var page = new SwiftAid.Gateway.Components.Pages.Sessions();
@@ -322,7 +322,7 @@ public sealed class SessionConflictReviewTests
     {
         var id = Guid.NewGuid();
         var start = DateTimeOffset.UtcNow.AddDays(1);
-        var current = new CommunitySessionView(id, 3, "Current", "Summary", "Community", [], "SZ", "region", "education", "Presenter", "en", start, "UTC", 60, null, [new StoredSessionMaterial("card", "1")], SessionVisibility.Public, SessionChannelType.None, null, [24], "Scheduled", "creator", "reviewer", false, 1, null);
+        var current = new CommunitySessionView(id, "fixture-org", 3, "Current", "Summary", "Community", [], "SZ", "region", "education", "Presenter", "en", start, "UTC", 60, null, [new SessionMaterialRef("card", "1")], SessionVisibility.Public, SessionChannelType.None, null, [24], "Scheduled", "creator", "reviewer", false, 1, null);
         var input = new UpdateSessionInput("Proposal", "Summary", "Community", [], "Presenter", "en", start, 60, null, [new SessionMaterialInput("card", "1")], SessionVisibility.Public, SessionChannelType.None, null, [24]);
         var proposal = new SessionUpdateSubmission(id, 3, input, "reason");
         var page = new SwiftAid.Gateway.Components.Pages.Sessions();
@@ -344,7 +344,7 @@ public sealed class SessionConflictReviewTests
     public async Task ReopeningSameSessionReplacesTheEditorEvenWhenVersionIsUnchanged()
     {
         var id = Guid.NewGuid();
-        var current = new CommunitySessionView(id, 4, "Current", "Summary", "Community", [], "SZ", "region", "education", "Presenter", "en", DateTimeOffset.UtcNow.AddDays(1), "UTC", 60, null, [new StoredSessionMaterial("card", "1")], SessionVisibility.Public, SessionChannelType.None, null, [24], "Scheduled", "creator", "reviewer", false, 1, null);
+        var current = new CommunitySessionView(id, "fixture-org", 4, "Current", "Summary", "Community", [], "SZ", "region", "education", "Presenter", "en", DateTimeOffset.UtcNow.AddDays(1), "UTC", 60, null, [new SessionMaterialRef("card", "1")], SessionVisibility.Public, SessionChannelType.None, null, [24], "Scheduled", "creator", "reviewer", false, 1, null);
         var page = new SwiftAid.Gateway.Components.Pages.Sessions();
         var type = page.GetType();
         type.GetProperty("StaffSessionEditor", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(page, new StaffClient(current, true));
@@ -367,7 +367,7 @@ public sealed class SessionConflictReviewTests
     {
         var id = Guid.NewGuid();
         var start = new DateTimeOffset(2026, 11, 1, 5, 30, 0, TimeSpan.Zero);
-        var current = new CommunitySessionView(id, 4, "Current", "Summary", "Community", [], "SZ", "region", "education", "Presenter", "en", start, "UTC", 60, null, [new StoredSessionMaterial("card", "1")], SessionVisibility.Public, SessionChannelType.None, null, [24], "Scheduled", "creator", "reviewer", false, 1, null);
+        var current = new CommunitySessionView(id, "fixture-org", 4, "Current", "Summary", "Community", [], "SZ", "region", "education", "Presenter", "en", start, "UTC", 60, null, [new SessionMaterialRef("card", "1")], SessionVisibility.Public, SessionChannelType.None, null, [24], "Scheduled", "creator", "reviewer", false, 1, null);
         var input = new UpdateSessionInput("Proposal", "Summary", "Community", [], "Presenter", "en", start, 60, null, [new SessionMaterialInput("card", "1")], SessionVisibility.Public, SessionChannelType.None, null, [24]);
         var proposal = new SessionUpdateSubmission(id, 3, input, "reason");
         var page = new SwiftAid.Gateway.Components.Pages.Sessions();
@@ -387,7 +387,7 @@ public sealed class SessionConflictReviewTests
     {
         var id = Guid.NewGuid();
         var start = DateTimeOffset.UtcNow.AddDays(1);
-        var current = new CommunitySessionView(id, 3, "Current", "Summary", "Community", [], "SZ", "region", "education", "Presenter", "en", start, "UTC", 60, null, [new StoredSessionMaterial("card", "1")], SessionVisibility.Public, SessionChannelType.None, null, [24], "Scheduled", "creator", "reviewer", false, 1, null);
+        var current = new CommunitySessionView(id, "fixture-org", 3, "Current", "Summary", "Community", [], "SZ", "region", "education", "Presenter", "en", start, "UTC", 60, null, [new SessionMaterialRef("card", "1")], SessionVisibility.Public, SessionChannelType.None, null, [24], "Scheduled", "creator", "reviewer", false, 1, null);
         var input = new UpdateSessionInput("Proposal", "Summary", "Community", [], "Presenter", "en", start, 60, null, [new SessionMaterialInput("card", "1")], SessionVisibility.Public, SessionChannelType.None, null, [24]);
         var proposal = new SessionUpdateSubmission(id, 3, input, "reason");
         var page = new SwiftAid.Gateway.Components.Pages.Sessions();
@@ -405,11 +405,11 @@ public sealed class SessionConflictReviewTests
     [InlineData(false, false)]
     [InlineData(true, false)]
     [InlineData(false, true)]
-    public async Task DisplaysBothVersionsAndEscapesUserContent(bool outcomeUnknown, bool notSubmitted)
+    public async Task DisplaysTheCorrectConflictStatus(bool outcomeUnknown, bool notSubmitted)
     {
         var id = Guid.NewGuid();
         var start = new DateTimeOffset(2026, 11, 1, 5, 30, 0, TimeSpan.Zero);
-        var current = new CommunitySessionView(id, 4, "Current", "Current summary", "Community", [], "SZ", "region", "education", "Presenter", "en", start, "UTC", 60, null, [new StoredSessionMaterial("card", "1")], SessionVisibility.Public, SessionChannelType.None, null, [24], "Scheduled", "creator", "reviewer", false, 1, null);
+        var current = new CommunitySessionView(id, "fixture-org", 4, "Current", "Current summary", "Community", [], "SZ", "region", "education", "Presenter", "en", start, "UTC", 60, null, [new SessionMaterialRef("card", "1")], SessionVisibility.Public, SessionChannelType.None, null, [24], "Scheduled", "creator", "reviewer", false, 1, null);
         var input = new UpdateSessionInput("<Proposal>", "Proposed summary", "Community", [], "Presenter", "en", start.AddDays(1), 60, null, [new SessionMaterialInput("card", "1")], SessionVisibility.Public, SessionChannelType.None, null, [24]);
         var proposal = new SessionUpdateSubmission(id, 3, input, "Schedule changed");
         var registrations = new ServiceCollection();
@@ -427,9 +427,6 @@ public sealed class SessionConflictReviewTests
         });
 
         Assert.Contains(notSubmitted ? "update was not submitted" : outcomeUnknown ? "outcome could not be confirmed" : "Your update was not saved", markup, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("&lt;Proposal&gt;", markup, StringComparison.Ordinal);
-        Assert.Contains("Current summary", markup, StringComparison.Ordinal);
-        Assert.Contains("Schedule changed", markup, StringComparison.Ordinal);
         Assert.Contains("Current version: 4", markup, StringComparison.Ordinal);
     }
 

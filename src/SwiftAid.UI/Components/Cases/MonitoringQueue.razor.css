@@ -18,3 +18,7 @@
 .monitoring-queue__overdue {
     font-weight: 600;
 }
+
+.monitoring-queue__list { display: grid; gap: 0.5rem; }
+.monitoring-queue__list ::deep .monitoring-queue__item { display: flex; flex-wrap: wrap; align-items: center; gap: 0.25rem 0.75rem; padding: 0.625rem 0.75rem; min-width: 0; overflow-wrap: anywhere; }
+.monitoring-queue__list ::deep .monitoring-queue__item .mud-typography { font-size: 0.8125rem; line-height: 1.35; }

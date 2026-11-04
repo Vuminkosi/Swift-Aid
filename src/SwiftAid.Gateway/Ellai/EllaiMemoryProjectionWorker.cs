@@ -33,7 +33,8 @@ public sealed class EllaiMemoryProjectionWorker(IServiceScopeFactory scopes,
                 var since = DateTimeOffset.UtcNow.AddHours(-24);
                 var rows = await (from topic in db.Set<EllaiTopicEntity>().AsNoTracking()
                                   join session in db.Set<EllaiSessionEntity>().AsNoTracking() on topic.SessionId equals session.SessionId
-                                  where topic.Title == EllaiCaseResultMemory.TopicTitle && topic.EntityVersion == "case-results/1"
+                                  where topic.Title == EllaiCaseResultMemory.TopicTitle &&
+                                      (topic.EntityVersion == "case-results/1" || topic.EntityVersion == "case-results/2" || topic.EntityVersion == "case-results/3")
                                       && topic.UpdatedAtUtc > since && session.Status == "Active"
                                   orderby topic.TopicId
                                   select new { Topic = topic, session.OwnerActorId, session.ScopeEpoch })

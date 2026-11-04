@@ -9,7 +9,7 @@ namespace SwiftAid.Application.Ellai;
 /// formats and authorization after this structural validation.</summary>
 public static class EllaiToolContractCatalog
 {
-    public const int CurrentSchemaVersion = 1;
+    public const int CurrentSchemaVersion = 6;
 
     private const int ReferenceLength = 120;
     private const int ObservationJsonLength = 16_384;
@@ -21,9 +21,16 @@ public static class EllaiToolContractCatalog
             ["limit"] = "Maximum number of returned items, subject to the tool's narrower limit.",
             ["ref"] = "Exact bounded reference or topic text.",
             ["country"] = "Uppercase ISO 3166-1 alpha-2 country code.",
+            ["place_id"] = "Exact selected occurrence-place identifier from the geographic registry; provide the matching country.",
+            ["place_name"] = "Exact reported region, area or locality label when the registry has no match. Case-insensitive, no substring expansion; cannot accompany place_id.",
             ["workflow"] = "Recorded case workflow filter.",
             ["sort"] = "Supported queue ordering.",
-            ["field"] = "Optional country or workflow field selector for case-results.",
+            ["group_by"] = "Optional authorized case grouping dimension; for retained evidence, groups only the exact earlier result set. reported-day groups by managed-case creation date in UTC; onset-day groups by reporter-supplied symptom/sign onset date.",
+            ["reported_from"] = "Inclusive UTC calendar date for managed-case creation/report time; use with reported_before.",
+            ["reported_before"] = "Exclusive UTC calendar date for managed-case creation/report time; use with reported_from.",
+            ["observed_term"] = "Optional literal substring to match case-insensitively in currently authorized verbatim reported observations; it is not a diagnosis or clinical classifier.",
+            ["field"] = "Optional country, workflow, verbatim reported observations or recorded submitter attribution for retained cases.",
+            ["classification_filter"] = "Filter retained, currently authorized case results by recorded classified or unclassified status; does not return classifier labels or scores.",
             ["feature"] = "Feature identifier in the current authorized scope.",
             ["receipt"] = "Receipt identifier bound to the current session.",
             ["topic"] = "Optional approved product fact topic.",
@@ -38,13 +45,18 @@ public static class EllaiToolContractCatalog
             ["organization_id"] = "Authorized destination organization identifier.",
             ["import_id"] = "Canonical import identifier.",
             ["case_id"] = "Canonical case identifier.",
+            ["include_related"] = "Set to true only when the user requests possible related cases.",
             ["window_days"] = "Required whole-day lookback window from 1 to 365 days.",
+            ["status"] = "Optional public session status: Scheduled, Completed, or Cancelled.",
+            ["jurisdiction"] = "Exact jurisdiction of the approved source.",
+            ["language"] = "Exact language of the approved source.",
         };
 
     private static readonly IReadOnlyDictionary<string, IReadOnlyList<string>> AllowedValues =
         new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal)
         {
-            ["field"] = Array.AsReadOnly(new[] { "country", "workflow" })
+            ["field"] = Array.AsReadOnly(new[] { "country", "workflow", "observations", "submitter" }),
+            ["group_by"] = Array.AsReadOnly(new[] { "region", "locality" })
         };
 
     private static readonly IReadOnlyDictionary<string, ToolContract> Contracts =
@@ -52,8 +64,9 @@ public static class EllaiToolContractCatalog
         {
             [EllaiToolNames.State] = Contract(EllaiToolNames.State,
                 ("projection", false), ("limit", false),
-                ("country", false), ("workflow", false), ("sort", false)),
-            [EllaiToolNames.Evidence] = Contract(EllaiToolNames.Evidence, ("ref", true), ("field", false)),
+                ("country", false), ("workflow", false), ("sort", false), ("place_id", false),
+                ("reported_from", false), ("reported_before", false), ("group_by", false), ("observed_term", false)),
+            [EllaiToolNames.Evidence] = Contract(EllaiToolNames.Evidence, ("ref", true), ("field", false), ("classification_filter", false), ("group_by", false), ("country", false), ("place_id", false), ("case_id", false)),
             [EllaiToolNames.Topic] = Contract(EllaiToolNames.Topic, ("ref", true)),
             [EllaiToolNames.Capabilities] = Contract(EllaiToolNames.Capabilities, ("feature", false)),
             [EllaiToolNames.Receipts] = Contract(EllaiToolNames.Receipts, ("receipt", false)),
@@ -70,8 +83,14 @@ public static class EllaiToolContractCatalog
             [EllaiToolNames.Imports] = Contract(EllaiToolNames.Imports, ("workspace_id", true), ("organization_id", true), ("country", true)),
             [EllaiToolNames.ImportStatus] = Contract(EllaiToolNames.ImportStatus, ("import_id", true)),
             [EllaiToolNames.ClassificationEvidence] = Contract(EllaiToolNames.ClassificationEvidence, ("case_id", true)),
+            [EllaiToolNames.ClassificationSnapshot] = Contract(EllaiToolNames.ClassificationSnapshot, ("case_id", true)),
+            [EllaiToolNames.SurveillanceSignals] = Contract(EllaiToolNames.SurveillanceSignals, ("case_id", true)),
             [EllaiToolNames.OwnedCaseCount] = Contract(EllaiToolNames.OwnedCaseCount, ("window_days", true)),
-            [EllaiToolNames.CaseTimeline] = Contract(EllaiToolNames.CaseTimeline, ("case_id", true)),
+            [EllaiToolNames.CaseSummary] = Contract(EllaiToolNames.CaseSummary, ("country", false), ("place_id", false), ("place_name", false), ("reported_from", false), ("reported_before", false), ("field", false)),
+            [EllaiToolNames.OwnedRegionCounts] = Contract(EllaiToolNames.OwnedRegionCounts),
+            [EllaiToolNames.ApprovedHealthSources] = Contract(EllaiToolNames.ApprovedHealthSources, ("topic", true), ("jurisdiction", true), ("language", true)),
+            [EllaiToolNames.CaseTimeline] = Contract(EllaiToolNames.CaseTimeline, ("case_id", true), ("include_related", false)),
+            [EllaiToolNames.PublicSessions] = Contract(EllaiToolNames.PublicSessions, ("status", false)),
         });
 
     /// <summary>Read-only contracts indexed by canonical advertised tool name.</summary>
@@ -131,7 +150,7 @@ public static class EllaiToolContractCatalog
                 return false;
             }
             if (toolName == EllaiToolNames.Evidence && name == "ref" &&
-                !string.Equals(value, EllaiCaseResultMemory.Reference, StringComparison.Ordinal))
+                value is not (EllaiCaseResultMemory.Reference or EllaiCaseResultMemory.OriginalReference))
             {
                 error = "Argument 'ref' is not a supported evidence reference.";
                 return false;
@@ -165,7 +184,7 @@ public static class EllaiToolContractCatalog
                 if (argument.AllowedValues is { Count: > 0 })
                     property["enum"] = argument.AllowedValues;
                 else if (toolName == EllaiToolNames.Evidence && argument.Name == "ref")
-                    property["enum"] = new[] { EllaiCaseResultMemory.Reference };
+                    property["enum"] = new[] { EllaiCaseResultMemory.Reference, EllaiCaseResultMemory.OriginalReference };
                 return property;
             },
             StringComparer.Ordinal);
@@ -250,8 +269,12 @@ public static class EllaiToolContractCatalog
         (toolName, argumentName) switch
         {
             (EllaiToolNames.State, "projection") => Array.AsReadOnly(new[] { "feature", "queue" }),
+            (EllaiToolNames.CaseSummary, "field") => Array.AsReadOnly(new[] { "observations" }),
+            (EllaiToolNames.PublicSessions, "status") => Array.AsReadOnly(new[] { "Scheduled", "Completed", "Cancelled" }),
             (EllaiToolNames.State, "workflow") => Array.AsReadOnly(new[] { "Reported", "UnderReview", "Active", "AwaitingFollowUp", "Resolved" }),
             (EllaiToolNames.State, "sort") => Array.AsReadOnly(new[] { "latest-reported", "latest-updated" }),
+            (EllaiToolNames.Evidence, "group_by") => Array.AsReadOnly(new[] { "region", "locality", "reported-day", "onset-day" }),
+            (EllaiToolNames.Evidence, "classification_filter") => Array.AsReadOnly(new[] { "Classified", "Unclassified" }),
             _ => AllowedValues.GetValueOrDefault(argumentName)
         };
 
@@ -259,8 +282,10 @@ public static class EllaiToolContractCatalog
         (toolName, argumentName) switch
         {
             (EllaiToolNames.State, "projection") => "^(feature|queue)$",
-            (EllaiToolNames.State, "country") or (EllaiToolNames.Locations, "country") or (EllaiToolNames.Imports, "country") => "^[A-Z]{2}$",
+            (EllaiToolNames.State, "country") or (EllaiToolNames.Evidence, "country") or
+                (EllaiToolNames.Locations, "country") or (EllaiToolNames.Imports, "country") => "^[A-Z]{2}$",
             (EllaiToolNames.State, "limit") or (EllaiToolNames.UiCatalogue, "limit") => "^([1-9]|1[0-9]|20)$",
+            (EllaiToolNames.State, "reported_from") or (EllaiToolNames.State, "reported_before") => "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
             (EllaiToolNames.DocsSearch, "limit") => "^([1-9]|1[0-9]|20)$",
             (EllaiToolNames.Locations, "limit") => "^([1-9]|10)$",
             (EllaiToolNames.OwnedCaseCount, "window_days") => "^([1-9]|[1-9][0-9]|[12][0-9]{2}|3[0-5][0-9]|36[0-5])$",

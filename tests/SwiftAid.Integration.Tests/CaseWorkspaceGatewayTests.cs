@@ -9,6 +9,47 @@ namespace SwiftAid.Integration.Tests;
 public sealed class CaseWorkspaceGatewayTests
 {
     [Theory]
+    [InlineData(CaseQueueAccess.Allowed)]
+    [InlineData(CaseQueueAccess.Denied)]
+    public async Task IncrementalListPublishesAuthorizedFirstPageBeforeContinuationCompletes(CaseQueueAccess continuationAccess)
+    {
+        var first = Row("HumanHealth", "Recorded");
+        var queue = new GatedQueue(first, continuationAccess);
+        var client = new CaseWorkspaceGatewayClient(queue, new Metadata());
+        var observed = new TaskCompletionSource<Page<CaseWorkspaceRow>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var loading = client.ListIncrementallyAsync(new(new PageRequest(1, 25)), page =>
+        {
+            observed.TrySetResult(page);
+            return Task.CompletedTask;
+        });
+        try
+        {
+            var partial = await observed.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal(first.CaseId, Assert.Single(partial.Items).CaseId);
+            Assert.False(loading.IsCompleted);
+        }
+        finally { queue.Release.TrySetResult(); }
+        var final = await loading;
+        Assert.Equal(continuationAccess == CaseQueueAccess.Allowed
+            ? UiCapabilityResultCode.Success : UiCapabilityResultCode.Denied, final.Code);
+        if (continuationAccess == CaseQueueAccess.Denied) Assert.Null(final.Value);
+        else Assert.Equal(first.CaseId, Assert.Single(final.Value!.Items).CaseId);
+    }
+
+    private sealed class GatedQueue(CaseQueueItem first, CaseQueueAccess continuationAccess) : ICaseQueueClient
+    {
+        public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public Task<CaseQueueResult> GetMineAsync(int? limit, CancellationToken cancellationToken = default) =>
+            GetMineAsync(limit, null, cancellationToken);
+        public async Task<CaseQueueResult> GetMineAsync(int? limit, string? cursor, CancellationToken cancellationToken = default)
+        {
+            if (cursor is null) return new(CaseQueueAccess.Allowed, [first], "next");
+            await Release.Task.WaitAsync(cancellationToken);
+            return new(continuationAccess, []);
+        }
+    }
+
+    [Theory]
     [InlineData(CaseWorkspaceSort.UpdatedNewestFirst)]
     [InlineData(CaseWorkspaceSort.UpdatedOldestFirst)]
     public async Task EqualTimestampsKeepStablePageMembershipAcrossQueueReordering(CaseWorkspaceSort sort)

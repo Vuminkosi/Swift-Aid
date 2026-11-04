@@ -35,7 +35,10 @@ public sealed class EllaiFrameworkAgent
         Func<CancellationToken, Task<bool>>? revalidateStreamObservations = null,
         string? frameworkSessionJson = null, int maxModelCalls = int.MaxValue,
         bool enableKnowledgeSpecialist = false, bool enableCaseSpecialist = false, bool enableAnalyticsSpecialist = false,
-        bool allowEmptyCaseQueue = false, bool enableUiSpecialist = false)
+        bool allowEmptyCaseQueue = false, bool enableUiSpecialist = false, bool enableGeospatialSpecialist = false,
+        bool enableWorkflowSpecialist = false, bool enableCommunitySessionsSpecialist = false, bool enableSurveillanceSpecialist = false,
+        bool enableReportingSpecialist = false, bool enableSpatialSpecialist = false, bool enableHealthResearchSpecialist = false,
+        bool enableOperationalReadSpecialists = false)
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentException.ThrowIfNullOrWhiteSpace(instructions);
@@ -74,6 +77,12 @@ public sealed class EllaiFrameworkAgent
         var evidenceSources = new Dictionary<EvidenceRef, List<string>>();
         EllaiToolResult? countResult = null;
         EllaiToolRequest? countRequest = null;
+        EllaiToolResult? reportingResult = null;
+        EllaiToolRequest? reportingRequest = null;
+        EllaiToolResult? spatialResult = null;
+        EllaiToolRequest? spatialRequest = null;
+        EllaiToolResult? healthSourceResult = null;
+        EllaiToolRequest? healthSourceRequest = null;
         EllaiToolResult? emptyQueueResult = null;
         EllaiToolRequest? emptyQueueRequest = null;
         var toolCalls = 0;
@@ -101,6 +110,21 @@ public sealed class EllaiFrameworkAgent
                     countResult = result;
                     countRequest = request;
                 }
+                if (request.ToolName == EllaiToolNames.CaseSummary && result.Allowed)
+                {
+                    reportingResult = result;
+                    reportingRequest = request;
+                }
+                if (request.ToolName == EllaiToolNames.OwnedRegionCounts && result.Allowed)
+                {
+                    spatialResult = result;
+                    spatialRequest = request;
+                }
+                if (request.ToolName == EllaiToolNames.ApprovedHealthSources && result.Allowed)
+                {
+                    healthSourceResult = result;
+                    healthSourceRequest = request;
+                }
                 if ((enableCaseSpecialist || allowEmptyCaseQueue) && IsEmptyQueueObservation(request, result))
                 {
                     emptyQueueResult = result;
@@ -119,9 +143,12 @@ public sealed class EllaiFrameworkAgent
         async Task<EllaiToolResult> InvokeGuardedTool(EllaiToolContext toolContext, EllaiToolRequest request, CancellationToken token)
         {
             var result = await guard.InvokeAsync(toolContext, request, token).ConfigureAwait(false);
+            if (request.ToolName == EllaiToolNames.CaseSummary && result.Allowed &&
+                FunctionInvokingChatClient.CurrentContext is { } summaryInvocation)
+                summaryInvocation.Terminate = true;
             // Only stop after the guard's post-call authorization has passed.
             // The final count is constructed from a fresh authorized read below.
-            if ((request.ToolName == EllaiToolNames.OwnedCaseCount && result.Allowed ||
+            if (((request.ToolName == EllaiToolNames.OwnedCaseCount || request.ToolName == EllaiToolNames.OwnedRegionCounts || request.ToolName == EllaiToolNames.ApprovedHealthSources) && result.Allowed ||
                  (enableCaseSpecialist || allowEmptyCaseQueue) && IsEmptyQueueObservation(request, result)) && toolCalls == 1 &&
                 FunctionInvokingChatClient.CurrentContext is { FunctionCount: 1 } invocation)
                 invocation.Terminate = true;
@@ -152,19 +179,25 @@ public sealed class EllaiFrameworkAgent
                         return "Documentation changed while it was being checked.";
                     }
                     if (result.Outcome != EllaiSpecialistOutcome.Completed || result.Decision is null)
+                    {
+                        Interlocked.Exchange(ref invalidDelegation, 1);
                         return "Knowledge specialist could not verify an answer.";
+                    }
                     var json = System.Text.Json.JsonSerializer.Serialize(result.Decision);
-                    return json.Length <= 12000 ? json : "Knowledge specialist result exceeded its limit.";
+                    if (json.Length <= 12000) return json;
+                    Interlocked.Exchange(ref invalidDelegation, 1);
+                    return "Knowledge specialist result exceeded its limit.";
                 }
                 catch (OperationCanceledException) when (!token.IsCancellationRequested && deadline.IsCancellationRequested)
                 { Interlocked.Exchange(ref invalidDelegation, 1); return "Knowledge specialist timed out."; }
                 catch (EllaiFrameworkFailureException)
                 {
+                    Interlocked.Exchange(ref invalidDelegation, 1);
                     return "Knowledge specialist could not complete the request.";
                 }
             }
             tools.Add(AIFunctionFactory.Create(DelegateKnowledge, name: "ellai_delegate_knowledge",
-                description: "Delegate one bounded question about approved documentation to the knowledge specialist."));
+                description: "Delegate a question about approved documentation or other admitted SwiftAid information to the knowledge specialist."));
         }
         if (enableCaseSpecialist && context.Actor is not null &&
             (context.AllowedTools?.Contains(EllaiToolNames.CaseTimeline) == true ||
@@ -190,19 +223,25 @@ public sealed class EllaiFrameworkAgent
                         return "Case data changed while it was being checked.";
                     }
                     if (result.Outcome != EllaiSpecialistOutcome.Completed || result.Decision is null)
+                    {
+                        Interlocked.Exchange(ref invalidDelegation, 1);
                         return "Case specialist could not verify an answer.";
+                    }
                     var json = System.Text.Json.JsonSerializer.Serialize(result.Decision);
-                    return json.Length <= 12000 ? json : "Case specialist result exceeded its limit.";
+                    if (json.Length <= 12000) return json;
+                    Interlocked.Exchange(ref invalidDelegation, 1);
+                    return "Case specialist result exceeded its limit.";
                 }
                 catch (OperationCanceledException) when (!token.IsCancellationRequested && deadline.IsCancellationRequested)
                 { Interlocked.Exchange(ref invalidDelegation, 1); return "Case specialist timed out."; }
                 catch (EllaiFrameworkFailureException error) when (error.Code != EllaiToolReasonCodes.DeniedByPolicy)
                 {
+                    Interlocked.Exchange(ref invalidDelegation, 1);
                     return "Case specialist could not complete the request.";
                 }
             }
             tools.Add(AIFunctionFactory.Create(DelegateCase, name: "ellai_delegate_case",
-                description: "Delegate one bounded question about the authorized owned-case queue or a case timeline."));
+                description: "Delegate one bounded question about the authorized owned-case queue, a case timeline, or possible related-case suggestions and their review status. Suggestions do not establish identity or causation."));
         }
         if (enableAnalyticsSpecialist && context.Actor is not null &&
             context.AllowedTools?.Contains(EllaiToolNames.OwnedCaseCount) == true)
@@ -222,19 +261,168 @@ public sealed class EllaiFrameworkAgent
                         instructions, true, context, usage, Current, InvokeGuardedTool, revalidateTool ?? invoke, deadline.Token,
                         calls => Interlocked.Add(ref delegatedModelCalls, calls)).ConfigureAwait(false);
                     if (result.Outcome != EllaiSpecialistOutcome.Completed || result.Decision is null)
+                    {
+                        Interlocked.Exchange(ref invalidDelegation, 1);
                         return "Analytics specialist could not verify an answer.";
+                    }
                     var json = System.Text.Json.JsonSerializer.Serialize(result.Decision);
-                    return json.Length <= 12000 ? json : "Analytics specialist result exceeded its limit.";
+                    if (json.Length <= 12000) return json;
+                    Interlocked.Exchange(ref invalidDelegation, 1);
+                    return "Analytics specialist result exceeded its limit.";
                 }
                 catch (OperationCanceledException) when (!token.IsCancellationRequested && deadline.IsCancellationRequested)
                 { Interlocked.Exchange(ref invalidDelegation, 1); return "Analytics specialist timed out."; }
                 catch (EllaiFrameworkFailureException)
                 {
+                    Interlocked.Exchange(ref invalidDelegation, 1);
                     return "Analytics specialist could not complete the request.";
                 }
             }
             tools.Add(AIFunctionFactory.Create(DelegateAnalytics, name: "ellai_delegate_analytics",
-                description: "Delegate one authorized owned-case count with an explicit 1 to 365 day window."));
+                description: "Delegate an authorized owned-case count with an explicit 1 to 365 day window, or another admitted SwiftAid read."));
+        }
+        async Task<string> DelegateMvpRead(string agentId, string task, CancellationToken token)
+        {
+            token.ThrowIfCancellationRequested();
+            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
+            deadline.CancelAfter(TimeSpan.FromSeconds(SwiftAid.Application.Ellai.Specialists.EllaiSpecialistRegistry.TryGet(agentId, out var profile)
+                ? profile.TimeoutSeconds : 1));
+            try
+            {
+                var result = await new EllaiMvpReadSpecialist(_client, _agentFactory).RunAsync(agentId, task, instructions,
+                    context, usage, Current, InvokeGuardedTool, revalidateTool ?? invoke, deadline.Token,
+                    calls => Interlocked.Add(ref delegatedModelCalls, calls)).ConfigureAwait(false);
+                if (result.Outcome != EllaiSpecialistOutcome.Completed || result.Decision is null)
+                { Interlocked.Exchange(ref invalidDelegation, 1); return "Specialist could not verify an answer."; }
+                var json = System.Text.Json.JsonSerializer.Serialize(result.Decision);
+                if (json.Length <= 12000) return json;
+                Interlocked.Exchange(ref invalidDelegation, 1);
+                return "Specialist result exceeded its limit.";
+            }
+            catch (OperationCanceledException) when (!token.IsCancellationRequested && deadline.IsCancellationRequested)
+            { Interlocked.Exchange(ref invalidDelegation, 1); return "Specialist timed out."; }
+            catch (EllaiFrameworkFailureException)
+            { Interlocked.Exchange(ref invalidDelegation, 1); return "Specialist could not complete the request."; }
+        }
+        if (enableOperationalReadSpecialists && context.AllowedTools is { Count: > 0 })
+        {
+            var operationalRoles = new[]
+            {
+                (SwiftAid.Application.Ellai.Specialists.EllaiSpecialistRegistry.Enrichment, "ellai_delegate_enrichment_read", "enrichment"),
+                (SwiftAid.Application.Ellai.Specialists.EllaiSpecialistRegistry.Organization, "ellai_delegate_organization_read", "organization"),
+                (SwiftAid.Application.Ellai.Specialists.EllaiSpecialistRegistry.FollowUp, "ellai_delegate_followup_read", "follow-up"),
+                (SwiftAid.Application.Ellai.Specialists.EllaiSpecialistRegistry.Quality, "ellai_delegate_quality_read", "data quality"),
+                (SwiftAid.Application.Ellai.Specialists.EllaiSpecialistRegistry.Correlation, "ellai_delegate_correlation_read", "correlation")
+            };
+            foreach (var (agentId, functionName, roleName) in operationalRoles)
+            {
+                var delegationCount = 0;
+                Task<string> DelegateOperationalRead(string task, CancellationToken token) => Interlocked.Increment(ref delegationCount) == 1
+                    ? DelegateMvpRead(agentId, task, token)
+                    : Task.FromResult("Operational specialist read delegation limit reached.");
+                tools.Add(AIFunctionFactory.Create(DelegateOperationalRead, name: functionName,
+                    description: $"Ask the {roleName} specialist a SwiftAid question using the session's admitted reads. This does not run a background job or execute an action."));
+            }
+        }
+        if (enableHealthResearchSpecialist && context.Actor is not null && context.AllowedTools?.Contains(EllaiToolNames.ApprovedHealthSources) == true)
+        {
+            var delegationCount = 0;
+            async Task<string> DelegateHealthResearch(string topic, string jurisdiction, string language, CancellationToken token)
+            {
+                token.ThrowIfCancellationRequested();
+                if (Interlocked.Increment(ref delegationCount) != 1) return "Health-source delegation limit reached.";
+                using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
+                deadline.CancelAfter(TimeSpan.FromSeconds(SwiftAid.Application.Ellai.Specialists.EllaiSpecialistRegistry.TryGet(
+                    SwiftAid.Application.Ellai.Specialists.EllaiSpecialistRegistry.HealthResearch, out var profile) ? profile.TimeoutSeconds : 1));
+                try
+                {
+                    var result = await new EllaiHealthResearchSpecialist().RunAsync(topic, jurisdiction, language, true, context, usage,
+                        Current, InvokeGuardedTool, revalidateTool ?? invoke, deadline.Token).ConfigureAwait(false);
+                    if (result.Outcome != EllaiSpecialistOutcome.Completed || result.Decision is null)
+                    { Interlocked.Exchange(ref invalidDelegation, 1); return "Approved source references could not be verified."; }
+                    var json = System.Text.Json.JsonSerializer.Serialize(result.Decision);
+                    if (json.Length <= 12000) return json;
+                    Interlocked.Exchange(ref invalidDelegation, 1);
+                    return "Approved source references exceeded their limit.";
+                }
+                catch (OperationCanceledException) when (!token.IsCancellationRequested && deadline.IsCancellationRequested)
+                { Interlocked.Exchange(ref invalidDelegation, 1); return "Approved source search timed out."; }
+                catch (EllaiFrameworkFailureException)
+                { Interlocked.Exchange(ref invalidDelegation, 1); return "Approved source references could not be retrieved."; }
+            }
+            tools.Add(AIFunctionFactory.Create(DelegateHealthResearch, name: "ellai_delegate_health_research",
+                description: "List approved source references for an exact topic, jurisdiction, and language. Do not generate advice or health education."));
+        }
+        if (enableHealthResearchSpecialist && context.AllowedTools is { Count: > 0 })
+        {
+            var generalDelegations = 0;
+            Task<string> DelegateHealthRead(string task, CancellationToken token) => Interlocked.Increment(ref generalDelegations) == 1
+                ? DelegateMvpRead(SwiftAid.Application.Ellai.Specialists.EllaiSpecialistRegistry.HealthResearch, task, token)
+                : Task.FromResult("Health-research read delegation limit reached.");
+            tools.Add(AIFunctionFactory.Create(DelegateHealthRead, name: "ellai_delegate_health_research_read",
+                description: "Ask the health-research specialist a SwiftAid question using the session's admitted reads."));
+        }
+        if (enableSpatialSpecialist && context.Actor is not null && context.AllowedTools?.Contains(EllaiToolNames.OwnedRegionCounts) == true)
+        {
+            var delegationCount = 0;
+            async Task<string> DelegateSpatial(string task, CancellationToken token)
+            {
+                token.ThrowIfCancellationRequested();
+                if (Interlocked.Increment(ref delegationCount) != 1) return "Spatial delegation limit reached.";
+                using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
+                deadline.CancelAfter(TimeSpan.FromSeconds(SwiftAid.Application.Ellai.Specialists.EllaiSpecialistRegistry.TryGet(
+                    SwiftAid.Application.Ellai.Specialists.EllaiSpecialistRegistry.Spatial, out var profile) ? profile.TimeoutSeconds : 1));
+                try
+                {
+                    var result = await new EllaiSpatialSpecialist().RunAsync(task, true, context, usage, Current,
+                        InvokeGuardedTool, revalidateTool ?? invoke, deadline.Token).ConfigureAwait(false);
+                    if (result.Outcome != EllaiSpecialistOutcome.Completed || result.Decision is null)
+                    { Interlocked.Exchange(ref invalidDelegation, 1); return "Spatial analysis could not verify an answer."; }
+                    var json = System.Text.Json.JsonSerializer.Serialize(result.Decision);
+                    if (json.Length <= 12000) return json;
+                    Interlocked.Exchange(ref invalidDelegation, 1);
+                    return "Spatial result exceeded its limit.";
+                }
+                catch (OperationCanceledException) when (!token.IsCancellationRequested && deadline.IsCancellationRequested)
+                { Interlocked.Exchange(ref invalidDelegation, 1); return "Spatial analysis timed out."; }
+                catch (EllaiFrameworkFailureException)
+                { Interlocked.Exchange(ref invalidDelegation, 1); return "Spatial analysis could not complete the request."; }
+            }
+            tools.Add(AIFunctionFactory.Create(DelegateSpatial, name: "ellai_delegate_spatial",
+                description: "Delegate a bounded count of the current officer's readable cases by region over the last 30 days; not a hotspot or incidence estimate."));
+        }
+        if (enableSpatialSpecialist && context.AllowedTools is { Count: > 0 })
+        {
+            var generalDelegations = 0;
+            Task<string> DelegateSpatialRead(string task, CancellationToken token) => Interlocked.Increment(ref generalDelegations) == 1
+                ? DelegateMvpRead(SwiftAid.Application.Ellai.Specialists.EllaiSpecialistRegistry.Spatial, task, token)
+                : Task.FromResult("Spatial read delegation limit reached.");
+            tools.Add(AIFunctionFactory.Create(DelegateSpatialRead, name: "ellai_delegate_spatial_read",
+                description: "Ask the spatial specialist a SwiftAid question using the session's admitted reads."));
+        }
+        if (context.AllowedTools?.Contains(EllaiToolNames.ProductFacts) == true)
+        {
+            var generalRoles = new[]
+            {
+                (enableKnowledgeSpecialist && !context.AllowedTools.Contains(EllaiToolNames.DocsSearch) && !context.AllowedTools.Contains(EllaiToolNames.DocsGet),
+                    SwiftAid.Application.Ellai.Specialists.EllaiSpecialistRegistry.Knowledge, "ellai_delegate_knowledge_read", "knowledge"),
+                (enableCaseSpecialist && (context.Actor is null || !context.AllowedTools.Contains(EllaiToolNames.CaseTimeline) && !context.AllowedTools.Contains(EllaiToolNames.State)),
+                    SwiftAid.Application.Ellai.Specialists.EllaiSpecialistRegistry.Case, "ellai_delegate_case_read", "case"),
+                (enableAnalyticsSpecialist && (context.Actor is null || !context.AllowedTools.Contains(EllaiToolNames.OwnedCaseCount)),
+                    SwiftAid.Application.Ellai.Specialists.EllaiSpecialistRegistry.Analytics, "ellai_delegate_analytics_read", "analytics"),
+                (enableSurveillanceSpecialist && !context.AllowedTools.Contains(EllaiToolNames.ClassificationSnapshot) && !context.AllowedTools.Contains(EllaiToolNames.SurveillanceSignals),
+                    SwiftAid.Application.Ellai.Specialists.EllaiSpecialistRegistry.Surveillance, "ellai_delegate_surveillance_read", "surveillance")
+            };
+            foreach (var (enabled, agentId, functionName, roleName) in generalRoles)
+            {
+                if (!enabled) continue;
+                var delegationCount = 0;
+                Task<string> DelegateGeneralRead(string task, CancellationToken token) => Interlocked.Increment(ref delegationCount) == 1
+                    ? DelegateMvpRead(agentId, task, token)
+                    : Task.FromResult("Specialist read delegation limit reached.");
+                tools.Add(AIFunctionFactory.Create(DelegateGeneralRead, name: functionName,
+                    description: $"Ask the {roleName} specialist about SwiftAid using only this session's admitted reads."));
+            }
         }
         if (enableUiSpecialist && context.AllowedTools is { } uiTools &&
             (uiTools.Contains(EllaiToolNames.UiCatalogue) || uiTools.Contains(EllaiToolNames.UiObserve)))
@@ -263,7 +451,9 @@ public sealed class EllaiFrameworkAgent
                         return "UI specialist could not verify an answer.";
                     }
                     var json = System.Text.Json.JsonSerializer.Serialize(result.Decision);
-                    return json.Length <= 12000 ? json : "UI specialist result exceeded its limit.";
+                    if (json.Length <= 12000) return json;
+                    Interlocked.Exchange(ref invalidDelegation, 1);
+                    return "UI specialist result exceeded its limit.";
                 }
                 catch (OperationCanceledException) when (!token.IsCancellationRequested && deadline.IsCancellationRequested)
                 { Interlocked.Exchange(ref invalidDelegation, 1); return "UI specialist timed out."; }
@@ -272,6 +462,178 @@ public sealed class EllaiFrameworkAgent
             }
             tools.Add(AIFunctionFactory.Create(DelegateUi, name: "ellai_delegate_ui",
                 description: "Delegate one read-only question about entitled controls and the current screen."));
+        }
+        if (enableGeospatialSpecialist && context.AllowedTools?.Contains(EllaiToolNames.Locations) == true)
+        {
+            var delegationCount = 0;
+            async Task<string> DelegateGeospatial(string task, CancellationToken token)
+            {
+                token.ThrowIfCancellationRequested();
+                if (Interlocked.Increment(ref delegationCount) != 1) return "Geographic delegation limit reached.";
+                using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
+                deadline.CancelAfter(TimeSpan.FromSeconds(SwiftAid.Application.Ellai.Specialists.EllaiSpecialistRegistry.TryGet(
+                    SwiftAid.Application.Ellai.Specialists.EllaiSpecialistRegistry.Geospatial, out var profile) ? profile.TimeoutSeconds : 1));
+                try
+                {
+                    var result = await new EllaiGeospatialSpecialist(_client, _agentFactory).RunAsync(task, instructions, context,
+                        usage, Current, InvokeGuardedTool, revalidateTool ?? invoke, deadline.Token,
+                        calls => Interlocked.Add(ref delegatedModelCalls, calls)).ConfigureAwait(false);
+                    if (result.Outcome != EllaiSpecialistOutcome.Completed || result.Decision is null)
+                    {
+                        Interlocked.Exchange(ref invalidDelegation, 1);
+                        return "Geographic specialist could not verify an answer.";
+                    }
+                    var json = System.Text.Json.JsonSerializer.Serialize(result.Decision);
+                    if (json.Length <= 12000) return json;
+                    Interlocked.Exchange(ref invalidDelegation, 1);
+                    return "Geographic specialist result exceeded its limit.";
+                }
+                catch (OperationCanceledException) when (!token.IsCancellationRequested && deadline.IsCancellationRequested)
+                { Interlocked.Exchange(ref invalidDelegation, 1); return "Geographic specialist timed out."; }
+                catch (EllaiFrameworkFailureException)
+                { Interlocked.Exchange(ref invalidDelegation, 1); return "Geographic specialist could not complete the request."; }
+            }
+            tools.Add(AIFunctionFactory.Create(DelegateGeospatial, name: "ellai_delegate_geospatial",
+                description: "Find registry-backed place candidates or read other admitted SwiftAid information; does not perform case mapping or spatial analysis."));
+        }
+        if (enableWorkflowSpecialist && context.AllowedTools?.Contains(EllaiToolNames.Receipts) == true)
+        {
+            var delegationCount = 0;
+            async Task<string> DelegateWorkflow(string task, CancellationToken token)
+            {
+                token.ThrowIfCancellationRequested();
+                if (Interlocked.Increment(ref delegationCount) != 1) return "Workflow delegation limit reached.";
+                using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
+                deadline.CancelAfter(TimeSpan.FromSeconds(SwiftAid.Application.Ellai.Specialists.EllaiSpecialistRegistry.TryGet(
+                    SwiftAid.Application.Ellai.Specialists.EllaiSpecialistRegistry.Workflow, out var profile) ? profile.TimeoutSeconds : 1));
+                try
+                {
+                    var result = await new EllaiWorkflowSpecialist(_client, _agentFactory).RunAsync(task, instructions, context,
+                        usage, Current, InvokeGuardedTool, revalidateTool ?? invoke, deadline.Token,
+                        calls => Interlocked.Add(ref delegatedModelCalls, calls)).ConfigureAwait(false);
+                    if (result.Outcome != EllaiSpecialistOutcome.Completed || result.Decision is null)
+                    {
+                        Interlocked.Exchange(ref invalidDelegation, 1);
+                        return "Workflow specialist could not verify an answer.";
+                    }
+                    var json = System.Text.Json.JsonSerializer.Serialize(result.Decision);
+                    if (json.Length <= 12000) return json;
+                    Interlocked.Exchange(ref invalidDelegation, 1);
+                    return "Workflow specialist result exceeded its limit.";
+                }
+                catch (OperationCanceledException) when (!token.IsCancellationRequested && deadline.IsCancellationRequested)
+                { Interlocked.Exchange(ref invalidDelegation, 1); return "Workflow specialist timed out."; }
+                catch (EllaiFrameworkFailureException)
+                { Interlocked.Exchange(ref invalidDelegation, 1); return "Workflow specialist could not complete the request."; }
+            }
+            tools.Add(AIFunctionFactory.Create(DelegateWorkflow, name: "ellai_delegate_workflow",
+                description: "Read current-session action receipt status or other admitted SwiftAid information; cannot approve or execute actions."));
+        }
+        if (enableCommunitySessionsSpecialist && context.AllowedTools?.Contains(EllaiToolNames.PublicSessions) == true)
+        {
+            var delegationCount = 0;
+            async Task<string> DelegateCommunitySessions(string task, CancellationToken token)
+            {
+                token.ThrowIfCancellationRequested();
+                if (Interlocked.Increment(ref delegationCount) != 1) return "Community sessions delegation limit reached.";
+                using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
+                deadline.CancelAfter(TimeSpan.FromSeconds(SwiftAid.Application.Ellai.Specialists.EllaiSpecialistRegistry.TryGet(
+                    SwiftAid.Application.Ellai.Specialists.EllaiSpecialistRegistry.CommunitySessions, out var profile) ? profile.TimeoutSeconds : 1));
+                try
+                {
+                    var result = await new EllaiCommunitySessionsSpecialist(_client, _agentFactory).RunAsync(task, instructions, context,
+                        usage, Current, InvokeGuardedTool, revalidateTool ?? invoke, deadline.Token,
+                        calls => Interlocked.Add(ref delegatedModelCalls, calls)).ConfigureAwait(false);
+                    if (result.Outcome != EllaiSpecialistOutcome.Completed || result.Decision is null)
+                    {
+                        Interlocked.Exchange(ref invalidDelegation, 1);
+                        return "Community sessions specialist could not verify an answer.";
+                    }
+                    var json = System.Text.Json.JsonSerializer.Serialize(result.Decision);
+                    if (json.Length <= 12000) return json;
+                    Interlocked.Exchange(ref invalidDelegation, 1);
+                    return "Community sessions specialist result exceeded its limit.";
+                }
+                catch (OperationCanceledException) when (!token.IsCancellationRequested && deadline.IsCancellationRequested)
+                { Interlocked.Exchange(ref invalidDelegation, 1); return "Community sessions specialist timed out."; }
+                catch (EllaiFrameworkFailureException)
+                { Interlocked.Exchange(ref invalidDelegation, 1); return "Community sessions specialist could not complete the request."; }
+            }
+            tools.Add(AIFunctionFactory.Create(DelegateCommunitySessions, name: "ellai_delegate_community_sessions",
+                description: "Read published public sessions or other admitted SwiftAid information; cannot schedule or execute actions."));
+        }
+        if (enableSurveillanceSpecialist && context.AllowedTools is { } surveillanceTools &&
+            (surveillanceTools.Contains(EllaiToolNames.ClassificationSnapshot) || surveillanceTools.Contains(EllaiToolNames.SurveillanceSignals)))
+        {
+            var delegationCount = 0;
+            async Task<string> DelegateSurveillance(string task, CancellationToken token)
+            {
+                token.ThrowIfCancellationRequested();
+                if (Interlocked.Increment(ref delegationCount) != 1) return "Surveillance delegation limit reached.";
+                using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
+                deadline.CancelAfter(TimeSpan.FromSeconds(SwiftAid.Application.Ellai.Specialists.EllaiSpecialistRegistry.TryGet(
+                    SwiftAid.Application.Ellai.Specialists.EllaiSpecialistRegistry.Surveillance, out var profile) ? profile.TimeoutSeconds : 1));
+                try
+                {
+                    var result = await new EllaiSurveillanceSpecialist(_client, _agentFactory).RunAsync(task, instructions, context,
+                        usage, Current, InvokeGuardedTool, revalidateTool ?? invoke, deadline.Token,
+                        calls => Interlocked.Add(ref delegatedModelCalls, calls)).ConfigureAwait(false);
+                    if (result.Outcome != EllaiSpecialistOutcome.Completed || result.Decision is null)
+                    {
+                        Interlocked.Exchange(ref invalidDelegation, 1);
+                        return "Surveillance specialist could not verify an answer.";
+                    }
+                    var json = System.Text.Json.JsonSerializer.Serialize(result.Decision);
+                    if (json.Length <= 12000) return json;
+                    Interlocked.Exchange(ref invalidDelegation, 1);
+                    return "Surveillance specialist result exceeded its limit.";
+                }
+                catch (OperationCanceledException) when (!token.IsCancellationRequested && deadline.IsCancellationRequested)
+                { Interlocked.Exchange(ref invalidDelegation, 1); return "Surveillance specialist timed out."; }
+                catch (EllaiFrameworkFailureException)
+                { Interlocked.Exchange(ref invalidDelegation, 1); return "Surveillance specialist could not complete the request."; }
+            }
+            tools.Add(AIFunctionFactory.Create(DelegateSurveillance, name: "ellai_delegate_surveillance",
+                description: "Read authorized persisted classification, review signals or other admitted SwiftAid information, without making a diagnosis."));
+        }
+        if (enableReportingSpecialist && context.AllowedTools is { } reportingTools &&
+            (reportingTools.Contains(EllaiToolNames.UiCatalogue) || reportingTools.Contains(EllaiToolNames.UiObserve)))
+        {
+            var delegationCount = 0;
+            async Task<string> DelegateReporting(string task, CancellationToken token)
+            {
+                token.ThrowIfCancellationRequested();
+                if (Interlocked.Increment(ref delegationCount) != 1) return "Reporting delegation limit reached.";
+                using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
+                deadline.CancelAfter(TimeSpan.FromSeconds(SwiftAid.Application.Ellai.Specialists.EllaiSpecialistRegistry.TryGet(
+                    SwiftAid.Application.Ellai.Specialists.EllaiSpecialistRegistry.Reporting, out var profile) ? profile.TimeoutSeconds : 1));
+                try
+                {
+                    var result = await new EllaiReportingSpecialist(_client, _agentFactory).RunAsync(task, instructions, context,
+                        usage, Current, InvokeGuardedTool, revalidateTool ?? invoke, deadline.Token,
+                        calls => Interlocked.Add(ref delegatedModelCalls, calls)).ConfigureAwait(false);
+                    if (result.Outcome == EllaiSpecialistOutcome.Stale)
+                    {
+                        Interlocked.Exchange(ref invalidDelegation, 1);
+                        return "The UI changed while it was being checked.";
+                    }
+                    if (result.Outcome != EllaiSpecialistOutcome.Completed || result.Decision is null)
+                    {
+                        Interlocked.Exchange(ref invalidDelegation, 1);
+                        return "Reporting specialist could not verify an answer.";
+                    }
+                    var json = System.Text.Json.JsonSerializer.Serialize(result.Decision);
+                    if (json.Length <= 12000) return json;
+                    Interlocked.Exchange(ref invalidDelegation, 1);
+                    return "Reporting specialist result exceeded its limit.";
+                }
+                catch (OperationCanceledException) when (!token.IsCancellationRequested && deadline.IsCancellationRequested)
+                { Interlocked.Exchange(ref invalidDelegation, 1); return "Reporting specialist timed out."; }
+                catch (EllaiFrameworkFailureException)
+                { Interlocked.Exchange(ref invalidDelegation, 1); return "Reporting specialist could not complete the request."; }
+            }
+            tools.Add(AIFunctionFactory.Create(DelegateReporting, name: "ellai_delegate_reporting",
+                description: "Read entitled report-form controls and current observation; cannot submit or modify a report."));
         }
         var guardedClient = new ModelCallGuard(_client, Current, usage, maxModelCalls);
         var functionClient = new FunctionInvokingChatClient(guardedClient)
@@ -385,16 +747,29 @@ public sealed class EllaiFrameworkAgent
                 }
             }
         }
+        catch (EllaiFrameworkFailureException error) when (
+            error.Code == EllaiToolReasonCodes.DeniedByPolicy &&
+            Volatile.Read(ref invalidDelegation) != 0 && streamedSegments.Count == 0)
+        {
+            LastFailureCode = EllaiToolReasonCodes.DeniedByPolicy;
+            return null;
+        }
         finally { LastModelCallCount = guardedClient.CallSequence + Volatile.Read(ref delegatedModelCalls); }
         if (Volatile.Read(ref invalidDelegation) != 0) { LastFailureCode = EllaiToolReasonCodes.DeniedByPolicy; return null; }
         EllaiDecision? decision = null;
         if (guard.FailureCode is not null) { LastFailureCode = guard.FailureCode; return null; }
-        while (countResult is null && emptyQueueResult is null)
+        while (reportingResult is null && (toolCalls != 1 || countResult is null && spatialResult is null && healthSourceResult is null && emptyQueueResult is null))
         {
             LastModelCallCount = guardedClient.CallSequence + Volatile.Read(ref delegatedModelCalls);
             if (guard.FailureCode is not null) { LastFailureCode = guard.FailureCode; return null; }
             if (!await Current(ct).ConfigureAwait(false)) { LastFailureCode = EllaiToolReasonCodes.DeniedByPolicy; return null; }
             decision = EllaiModelTurnParser.Parse(guardedClient.LastText).Turn?.FinalDecision;
+            if (toolCalls > 1 && (countResult is not null || spatialResult is not null || healthSourceResult is not null) &&
+                decision is { Claims.Count: 0 })
+            {
+                LastFailureCode = EllaiToolReasonCodes.Unavailable;
+                return null;
+            }
             if (decision is not null && EllaiDecisionValidator.Validate(decision).Count == 0 &&
                 !decision.Claims.Any(claim => claim?.Evidence is { } refs && refs.Any(reference => reference is null || !evidence.Contains(reference))) &&
                 (decision.PlanProposal is null || !decision.PlanProposal.Actions.Any(action =>
@@ -427,7 +802,99 @@ public sealed class EllaiFrameworkAgent
             }
             finally { LastModelCallCount = guardedClient.CallSequence + Volatile.Read(ref delegatedModelCalls); }
         }
-        if (countResult is not null)
+        if (reportingResult is not null)
+        {
+            if (streamedSegments.Count != 0 || reportingRequest is null || reportingResult.Truncated ||
+                reportingResult.LocationReplayScope is not { } summaryScope || !summaryScope.IsValid() ||
+                reportingResult.Evidence.Count != 1 || reportingResult.Evidence[0].SourceKind != "CaseReportingSummary" ||
+                !await Current(ct).ConfigureAwait(false))
+            { LastFailureCode = EllaiToolReasonCodes.Unavailable; return null; }
+            var fresh = await (revalidateTool ?? invoke)(context, reportingRequest, ct).ConfigureAwait(false);
+            if (!fresh.Allowed || fresh.Truncated || !fresh.Evidence.SequenceEqual(reportingResult.Evidence) ||
+                EllaiObservedToolResult.ResultFingerprint(fresh) != summaryScope.ResultDigest ||
+                !await Current(ct).ConfigureAwait(false))
+            { LastFailureCode = EllaiToolReasonCodes.Unavailable; return null; }
+            // Publish the complete checked summary atomically. Splitting a large
+            // aggregate into sentences would repeat the full database scan per sentence.
+            var claims = fresh.ResultSummary.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+                .Select((line, index) => new GroundedClaim($"reporting-{index}", line, ClaimKind.Observed, fresh.Evidence)).ToArray();
+            decision = new EllaiDecision(EllaiDecision.CurrentSchemaVersion, DecisionKind.Answer,
+                fresh.ResultSummary, fresh.ResultSummary, claims, [], [], null, [], null, null);
+            if (EllaiDecisionValidator.Validate(decision).Count != 0)
+            { LastFailureCode = EllaiToolReasonCodes.Unavailable; return null; }
+            if (onTextDelta is not null) await onTextDelta(decision.DisplayText, ct).ConfigureAwait(false);
+            ct.ThrowIfCancellationRequested();
+            if (!await Current(ct).ConfigureAwait(false))
+            { LastFailureCode = EllaiToolReasonCodes.DeniedByPolicy; return null; }
+            await SaveSessionAsync().ConfigureAwait(false);
+            return decision;
+        }
+        if (healthSourceResult is not null && toolCalls == 1)
+        {
+            if (streamedSegments.Count != 0 || toolCalls != 1 || healthSourceRequest is null || healthSourceResult.Truncated ||
+                healthSourceResult.HealthSourceReplayScope is not { } originalScope || !originalScope.IsValid() ||
+                healthSourceResult.Evidence.Count != 1 || healthSourceResult.Evidence[0] is not
+                    { SourceKind: "HealthSourceRegistry", ResourceId: "approved-sources", Version: "metadata/1" } ||
+                !await Current(ct).ConfigureAwait(false))
+            { LastFailureCode = EllaiToolReasonCodes.Unavailable; return null; }
+            async Task<EllaiToolResult> ReadCurrentSources(CancellationToken token) =>
+                await (revalidateTool ?? invoke)(context, healthSourceRequest, token).ConfigureAwait(false);
+            var fresh = await ReadCurrentSources(ct).ConfigureAwait(false);
+            if (!fresh.Allowed || fresh.Truncated || !fresh.Evidence.SequenceEqual(healthSourceResult.Evidence) ||
+                EllaiObservedToolResult.ResultFingerprint(fresh) != originalScope.ResultDigest || !await Current(ct).ConfigureAwait(false))
+            { LastFailureCode = EllaiToolReasonCodes.Unavailable; return null; }
+            decision = new EllaiDecision(EllaiDecision.CurrentSchemaVersion, DecisionKind.Answer,
+                fresh.ResultSummary, fresh.ResultSummary,
+                [new GroundedClaim("approved-health-sources", fresh.ResultSummary, ClaimKind.Observed, fresh.Evidence)],
+                [], [], null, [], null, null);
+            if (EllaiDecisionValidator.Validate(decision).Count != 0)
+            { LastFailureCode = EllaiToolReasonCodes.Unavailable; return null; }
+            async Task<bool> SourcePublicationCurrent(CancellationToken token)
+            {
+                if (!await Current(token).ConfigureAwait(false)) return false;
+                var current = await ReadCurrentSources(token).ConfigureAwait(false);
+                return current.Allowed && !current.Truncated && current.Evidence.SequenceEqual(fresh.Evidence) &&
+                    EllaiObservedToolResult.ResultFingerprint(current) == originalScope.ResultDigest && await Current(token).ConfigureAwait(false);
+            }
+            if (onTextDelta is not null && !await PublishValidatedTextAsync(decision.DisplayText, onTextDelta, SourcePublicationCurrent, ct).ConfigureAwait(false))
+            { LastFailureCode = EllaiToolReasonCodes.DeniedByPolicy; return null; }
+            if (!await SourcePublicationCurrent(ct).ConfigureAwait(false))
+            { LastFailureCode = EllaiToolReasonCodes.DeniedByPolicy; return null; }
+            await SaveSessionAsync().ConfigureAwait(false);
+            return decision;
+        }
+        if (spatialResult is not null && toolCalls == 1)
+        {
+            if (streamedSegments.Count != 0 || toolCalls != 1 || spatialRequest is null ||
+                spatialResult.Truncated || spatialResult.Evidence.Count != 1 ||
+                spatialResult.Evidence[0] is not { SourceKind: "SpatialAggregate", ResourceId: "owned-regions", Version: "region-count/1" } original ||
+                !await Current(ct).ConfigureAwait(false))
+            { LastFailureCode = EllaiToolReasonCodes.Unavailable; return null; }
+            var fresh = await (revalidateTool ?? invoke)(context, spatialRequest, ct).ConfigureAwait(false);
+            if (!fresh.Allowed || fresh.Truncated || fresh.Evidence.Count != 1 || fresh.Evidence[0] != original ||
+                !await Current(ct).ConfigureAwait(false))
+            { LastFailureCode = EllaiToolReasonCodes.Unavailable; return null; }
+            decision = new EllaiDecision(EllaiDecision.CurrentSchemaVersion, DecisionKind.Answer,
+                fresh.ResultSummary, fresh.ResultSummary,
+                [new GroundedClaim("owned-region-counts", fresh.ResultSummary, ClaimKind.Observed, fresh.Evidence)],
+                [], [], null, [], null, null);
+            if (EllaiDecisionValidator.Validate(decision).Count != 0)
+            { LastFailureCode = EllaiToolReasonCodes.Unavailable; return null; }
+            async Task<bool> SpatialPublicationCurrent(CancellationToken token)
+            {
+                if (!await Current(token).ConfigureAwait(false)) return false;
+                var current = await (revalidateTool ?? invoke)(context, spatialRequest, token).ConfigureAwait(false);
+                return current.Allowed && !current.Truncated && current.Evidence.Count == 1 && current.Evidence[0] == original &&
+                    await Current(token).ConfigureAwait(false);
+            }
+            if (onTextDelta is not null && !await PublishValidatedTextAsync(decision.DisplayText, onTextDelta, SpatialPublicationCurrent, ct).ConfigureAwait(false))
+            { LastFailureCode = EllaiToolReasonCodes.DeniedByPolicy; return null; }
+            if (!await SpatialPublicationCurrent(ct).ConfigureAwait(false))
+            { LastFailureCode = EllaiToolReasonCodes.DeniedByPolicy; return null; }
+            await SaveSessionAsync().ConfigureAwait(false);
+            return decision;
+        }
+        if (countResult is not null && toolCalls == 1)
         {
             if (streamedSegments.Count != 0) { LastFailureCode = "InvalidDecision"; return null; }
             if (toolCalls != 1 || !HasCountEvidence(countResult) || countRequest is null ||
@@ -495,7 +962,7 @@ public sealed class EllaiFrameworkAgent
             await SaveSessionAsync().ConfigureAwait(false);
             return decision;
         }
-        if (emptyQueueResult is not null)
+        if (emptyQueueResult is not null && toolCalls == 1)
         {
             if (streamedSegments.Count != 0 || toolCalls != 1 || emptyQueueRequest is null ||
                 !IsEmptyQueueObservation(emptyQueueRequest, emptyQueueResult) || !await Current(ct).ConfigureAwait(false))
@@ -522,7 +989,12 @@ public sealed class EllaiFrameworkAgent
             await SaveSessionAsync().ConfigureAwait(false);
             return decision;
         }
-        if (decision is null) return null;
+        if (decision is null)
+        {
+            if (countResult is not null || spatialResult is not null || healthSourceResult is not null || emptyQueueResult is not null)
+                LastFailureCode ??= EllaiToolReasonCodes.Unavailable;
+            return null;
+        }
         if (!streamSafeToolObservations && (revalidateStreamObservations is null ||
             !await revalidateStreamObservations(ct).ConfigureAwait(false)))
         {
@@ -564,7 +1036,7 @@ public sealed class EllaiFrameworkAgent
         return decision;
     }
 
-    private static IEnumerable<string> EvidenceLines(string toolName, EllaiToolResult result, EvidenceRef reference)
+    internal static IEnumerable<string> EvidenceLines(string toolName, EllaiToolResult result, EvidenceRef reference)
     {
         var lines = result.ResultSummary.Split('\n').Select(line => line.Trim()).Where(line => line.Length != 0);
         if (toolName == EllaiToolNames.ProductFacts && reference.SourceKind == "ProductFact" &&
@@ -582,6 +1054,42 @@ public sealed class EllaiFrameworkAgent
         if (result.Evidence.Count == 1)
         {
             foreach (var line in lines) yield return line;
+            yield break;
+        }
+        if ((toolName is EllaiToolNames.UiCatalogue or EllaiToolNames.UiObserve) &&
+            (reference.SourceKind is "UiCatalogue" or "UiObservation"))
+        {
+            var prefix = $"control {reference.ResourceId} · ";
+            foreach (var line in lines.Where(line => line.StartsWith(prefix, StringComparison.Ordinal)))
+                yield return line;
+            yield break;
+        }
+        if (toolName == EllaiToolNames.SurveillanceSignals && reference.SourceKind == "SurveillanceSignal")
+        {
+            var prefix = $"case {reference.ResourceId} signal {reference.EvidenceId}: ";
+            foreach (var line in lines.Where(line => line.StartsWith(prefix, StringComparison.Ordinal)))
+                yield return line;
+            yield break;
+        }
+        if (toolName == EllaiToolNames.ClassificationSnapshot && reference.SourceKind == "CaseClassification")
+        {
+            var prefix = $"case {reference.ResourceId} classification {reference.EvidenceId}: ";
+            foreach (var line in lines.Where(line => line.StartsWith(prefix, StringComparison.Ordinal)))
+                yield return line;
+            yield break;
+        }
+        if (toolName == EllaiToolNames.PublicSessions && reference.SourceKind == "PublicSession")
+        {
+            var prefix = $"session {reference.ResourceId} · ";
+            foreach (var line in lines.Where(line => line.StartsWith(prefix, StringComparison.Ordinal)))
+                yield return line;
+            yield break;
+        }
+        if (toolName == EllaiToolNames.Receipts && reference.SourceKind == "Receipt")
+        {
+            var prefix = $"receipt {reference.ResourceId} · ";
+            foreach (var line in lines.Where(line => line.StartsWith(prefix, StringComparison.Ordinal)))
+                yield return line;
             yield break;
         }
         if (reference.SourceKind == "CaseQueue" &&
@@ -602,7 +1110,12 @@ public sealed class EllaiFrameworkAgent
         {
             var text = value.Trim();
             bool Matches(EvidenceRef reference, IReadOnlyList<string> lines) =>
-                (reference.SourceKind == "ProductFact" || reference.SourceKind == "CaseQueue" &&
+                (reference.SourceKind == "ProductFact" || reference.SourceKind == "SurveillanceSignal" &&
+                    text.StartsWith($"case {reference.ResourceId} signal {reference.EvidenceId}:", StringComparison.Ordinal) ||
+                 (reference.SourceKind is "UiCatalogue" or "UiObservation") &&
+                    text.StartsWith($"control {reference.ResourceId} ·", StringComparison.Ordinal) || reference.SourceKind == "CaseClassification" &&
+                    text.StartsWith($"case {reference.ResourceId} classification {reference.EvidenceId}:", StringComparison.Ordinal) || reference.SourceKind == "PublicSession" &&
+                    text.StartsWith($"session {reference.ResourceId} ·", StringComparison.Ordinal) || reference.SourceKind == "CaseQueue" &&
                     (text.StartsWith($"case {reference.ResourceId};", StringComparison.Ordinal) ||
                      text.StartsWith($"case {reference.ResourceId} ·", StringComparison.Ordinal))) &&
                 lines.Contains(text, StringComparer.Ordinal);
@@ -866,6 +1379,37 @@ public sealed class EllaiFrameworkAgentFactory : IEllaiFrameworkAgentFactory
         ArgumentNullException.ThrowIfNull(client);
         ArgumentNullException.ThrowIfNull(options);
         return client.AsAIAgent(options);
+    }
+}
+
+/// <summary>Requests the final decision schema on the Meta-hosted route while retaining native tools.</summary>
+public sealed class EllaiStructuredFrameworkAgentFactory : IEllaiFrameworkAgentFactory
+{
+    private sealed record StreamSegment(string Text, IReadOnlyList<GroundedClaim> Claims);
+    private sealed record DecisionEnvelope(
+        [property: System.Text.Json.Serialization.JsonPropertyName("stream_segments")] IReadOnlyList<StreamSegment>? StreamSegments,
+        [property: System.Text.Json.Serialization.JsonPropertyName("final_decision")] EllaiDecision FinalDecision);
+
+    private static readonly System.Text.Json.JsonElement Schema = CreateSchema();
+
+    private static System.Text.Json.JsonElement CreateSchema()
+    {
+        var json = new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web)
+        {
+            TypeInfoResolver = new System.Text.Json.Serialization.Metadata.DefaultJsonTypeInfoResolver(),
+            Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter(allowIntegerValues: false) }
+        };
+        var schema = System.Text.Json.Schema.JsonSchemaExporter.GetJsonSchemaAsNode(json, typeof(DecisionEnvelope));
+        return System.Text.Json.JsonSerializer.SerializeToElement(schema);
+    }
+
+    public AIAgent Create(IChatClient client, ChatClientAgentOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        options.ChatOptions ??= new ChatOptions();
+        options.ChatOptions.Instructions += "\nThe response schema requires stream_segments; use null when no verified streaming segments are supplied.";
+        options.ChatOptions.ResponseFormat = ChatResponseFormat.ForJsonSchema(Schema, "ellai_decision");
+        return EllaiFrameworkAgentFactory.Instance.Create(client, options);
     }
 }
 

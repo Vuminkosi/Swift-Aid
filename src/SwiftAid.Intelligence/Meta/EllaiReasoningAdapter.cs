@@ -20,9 +20,27 @@ public sealed record EllaiReasoningResult(string Text, string Model, string Fini
 public sealed class EllaiReasoningAdapter(HttpClient http, EllaiOptions options)
 {
     private const int MaximumStreamLineLength = 64 * 1024;
+    private static readonly JsonElement ReportVoiceSchema = JsonSerializer.Deserialize<JsonElement>("""
+        {"type":"object","properties":{"fields":{"type":"array","items":{"type":"object",
+        "properties":{"field":{"type":"string"},"value":{"type":"string"},"evidence":{"type":"string"}},
+        "required":["field","value","evidence"],"additionalProperties":false}}},
+        "required":["fields"],"additionalProperties":false}
+        """);
 
-    public async Task<EllaiReasoningResult> CompleteAsync(
-        IReadOnlyList<EllaiChatMessage> messages, int maxTokens, CancellationToken ct)
+    public Task<EllaiReasoningResult> CompleteAsync(
+        IReadOnlyList<EllaiChatMessage> messages, int maxTokens, CancellationToken ct) =>
+        CompleteCoreAsync(messages, maxTokens, reportVoice: false, ct);
+
+    public Task<EllaiReasoningResult> CompleteReportVoiceAsync(
+        IReadOnlyList<EllaiChatMessage> messages, int maxTokens, CancellationToken ct) =>
+        CompleteCoreAsync(messages, maxTokens, reportVoice: true, ct);
+
+    public Task<EllaiReasoningResult> CompleteStructuredAsync(
+        IReadOnlyList<EllaiChatMessage> messages, int maxTokens, JsonElement schema, CancellationToken ct) =>
+        CompleteCoreAsync(messages, maxTokens, false, ct, schema);
+
+    private async Task<EllaiReasoningResult> CompleteCoreAsync(
+        IReadOnlyList<EllaiChatMessage> messages, int maxTokens, bool reportVoice, CancellationToken ct, JsonElement? schema = null)
     {
         ArgumentNullException.ThrowIfNull(messages);
         if (!options.HasReasoningRoute)
@@ -35,18 +53,27 @@ public sealed class EllaiReasoningAdapter(HttpClient http, EllaiOptions options)
             throw new ArgumentException("A non-empty message list and 1..16384 max tokens are required.");
         }
 
-        var payload = new
-        {
-            model = options.ReasoningModel,
-            messages = messages.Select(MetaCompatibleChatMessage.ToPayload).ToList(),
-            max_tokens = maxTokens
-        };
+        var wireMessages = messages.Select(MetaCompatibleChatMessage.ToPayload).ToList();
+        var payload = reportVoice || schema.HasValue
+            ? JsonSerializer.Serialize(new
+            {
+                model = options.ReasoningModel,
+                messages = wireMessages,
+                max_tokens = maxTokens,
+                reasoning_effort = "low",
+                response_format = new
+                {
+                    type = "json_schema",
+                    json_schema = new { name = reportVoice ? "report_voice" : "guidance_plan", strict = reportVoice, schema = schema ?? ReportVoiceSchema }
+                }
+            })
+            : JsonSerializer.Serialize(new { model = options.ReasoningModel, messages = wireMessages, max_tokens = maxTokens });
 
         using var request = new HttpRequestMessage(
             HttpMethod.Post, options.ApiUrl.TrimEnd('/') + "/chat/completions");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", options.ApiKey);
         request.Content = new StringContent(
-            JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
+            payload, Encoding.UTF8, "application/json");
 
         int status;
         string body;
@@ -153,6 +180,8 @@ public sealed class EllaiReasoningAdapter(HttpClient http, EllaiOptions options)
             var promptTokens = 0;
             var completionTokens = 0;
             var reasoningTokens = 0;
+            var finishReason = string.Empty;
+            var completed = false;
             await using var stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
             using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: false,
                 bufferSize: 4096, leaveOpen: false);
@@ -171,6 +200,7 @@ public sealed class EllaiReasoningAdapter(HttpClient http, EllaiOptions options)
                 var data = line.AsSpan(5).Trim();
                 if (data.SequenceEqual("[DONE]"))
                 {
+                    completed = true;
                     break;
                 }
                 if (data.IsEmpty)
@@ -209,6 +239,11 @@ public sealed class EllaiReasoningAdapter(HttpClient http, EllaiOptions options)
                     }
 
                     var choice = choices[0];
+                    if (choice.TryGetProperty("finish_reason", out var finish)
+                        && finish.ValueKind == JsonValueKind.String)
+                    {
+                        finishReason = finish.GetString() ?? string.Empty;
+                    }
                     if (!choice.TryGetProperty("delta", out var delta)
                         || !delta.TryGetProperty("content", out var content)
                         || content.ValueKind != JsonValueKind.String)
@@ -230,7 +265,12 @@ public sealed class EllaiReasoningAdapter(HttpClient http, EllaiOptions options)
                 }
             }
 
-            return new EllaiReasoningResult(text.ToString(), model, "stop",
+            if (!completed)
+            {
+                throw new InvalidOperationException("Ellai reasoning stream ended before completion.");
+            }
+
+            return new EllaiReasoningResult(text.ToString(), model, finishReason,
                 new EllaiReasoningUsage(promptTokens, completionTokens,
                     promptTokens + completionTokens, reasoningTokens));
         }

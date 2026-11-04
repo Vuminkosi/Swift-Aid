@@ -106,6 +106,25 @@ async function run(browser, baseUrl, name, test) {
     process.stdout.write(`PASS ${name}\n`);
 }
 
+async function testEncryptedFormSnapshotSurvivesPageRestart(browser, baseUrl) {
+    const { context, page } = await createPage(browser, baseUrl);
+    try {
+        const marker = 'SYNTHETIC-INCOMPLETE-FORM-SNAPSHOT';
+        const record = { ...makeRecord(submissionA, 1, 'synthetic'),
+            formSnapshot: { schemaVersion: 1, json: JSON.stringify({ occurrenceTime: marker }) } };
+        await saveNew(page, record);
+        const raw = await readRaw(page, 'records', submissionA);
+        assert(!JSON.stringify(raw).includes(marker));
+        await page.close();
+        const restarted = await context.newPage();
+        await restarted.goto(baseUrl);
+        await restarted.evaluate(async () => { const { guestStorage } = await import('/guest-storage.js'); await guestStorage.initialize(); });
+        assert.deepEqual((await getRecord(restarted, submissionA)).formSnapshot, record.formSnapshot);
+    } finally {
+        await context.close();
+    }
+}
+
 async function testConcurrentVersionRace(browser, baseUrl) {
     const { context, page: first } = await createPage(browser, baseUrl);
     try {
@@ -371,6 +390,7 @@ async function main() {
     let browser;
     try {
         browser = await chromium.launch({ channel: "chrome", headless: true });
+        await run(browser, baseUrl, "encrypted form snapshot survives page restart", testEncryptedFormSnapshotSurvivesPageRestart);
         await run(browser, baseUrl, "two-instance same-version CAS has one winner", testConcurrentVersionRace);
         await run(browser, baseUrl, "stale member batch aborts all writes", testStaleBatchAtomicity);
         await run(browser, baseUrl, "missing key with encrypted data fails closed", testMissingKeyWithDataFailsClosed);

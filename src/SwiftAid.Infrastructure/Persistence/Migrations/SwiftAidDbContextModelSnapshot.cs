@@ -855,7 +855,7 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         {
                             t.HasCheckConstraint("ck_case_events_actor", "length(btrim(actor_id)) > 0");
 
-                            t.HasCheckConstraint("ck_case_events_type", "event_type IN ('CaseReported', 'CaseAssigned', 'CaseReportCorrected', 'CaseActionRequested', 'CaseActionRequestReviewed', 'CaseResolved', 'CaseReopened', 'CaseObservationRecorded', 'CaseFollowUpScheduled', 'CaseFollowUpAcknowledged', 'CaseFollowUpOutcomeRecorded', 'CaseEscalationRaised', 'CaseEscalationAcknowledged', 'CaseEscalationActionRecorded', 'CaseEscalationClosed', 'CaseAssignmentAcknowledged', 'CaseCollaboratorGranted', 'CaseCollaboratorRevoked', 'AssistanceRequested', 'AssistanceAccepted', 'AssistanceProgressRecorded', 'AssistanceProvided', 'AssistanceReceiptConfirmed', 'AssistanceUnfulfilled', 'AssistanceCancelled', 'ActionOwnerChanged')");
+                            t.HasCheckConstraint("ck_case_events_type", "event_type IN ('CaseReported', 'CaseAssigned', 'CaseReportCorrected', 'CaseActionRequested', 'CaseActionRequestReviewed', 'CaseResolved', 'CaseReopened', 'CaseObservationRecorded', 'CaseFollowUpScheduled', 'CaseFollowUpAcknowledged', 'CaseFollowUpOutcomeRecorded', 'CaseEscalationRaised', 'CaseEscalationAcknowledged', 'CaseEscalationActionRecorded', 'CaseEscalationClosed', 'CaseAssignmentAcknowledged', 'CaseCollaboratorGranted', 'CaseCollaboratorRevoked', 'AssistanceRequested', 'AssistanceAccepted', 'AssistanceProgressRecorded', 'AssistanceProvided', 'AssistanceReceiptConfirmed', 'AssistanceUnfulfilled', 'AssistanceCancelled', 'ActionOwnerChanged', 'CaseDiscussionPosted')");
 
                             t.HasCheckConstraint("ck_case_events_versions", "aggregate_version > 0 AND report_revision > 0 AND schema_version > 0");
                         });
@@ -991,6 +991,9 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                     b.Property<long>("Eligible")
                         .HasColumnType("bigint");
 
+                    b.Property<long>("Expired")
+                        .HasColumnType("bigint");
+
                     b.Property<long>("Failed")
                         .HasColumnType("bigint");
 
@@ -1015,6 +1018,9 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<long>("Superseded")
+                        .HasColumnType("bigint");
+
                     b.Property<DateTimeOffset>("UpdatedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
@@ -1032,7 +1038,7 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
 
                     b.ToTable("backfills", "swiftaid_classification", t =>
                         {
-                            t.HasCheckConstraint("ck_backfill_counts", "\"Eligible\" = \"Pending\" + \"NewlyClassified\" + \"Reused\" + \"Abstained\" + \"Failed\" AND LEAST(\"Pending\", \"NewlyClassified\", \"Reused\", \"Abstained\", \"Failed\") >= 0");
+                            t.HasCheckConstraint("ck_backfill_counts", "\"Eligible\" = \"Pending\" + \"NewlyClassified\" + \"Reused\" + \"Abstained\" + \"Failed\" + \"Superseded\" + \"Expired\" AND LEAST(\"Pending\", \"NewlyClassified\", \"Reused\", \"Abstained\", \"Failed\", \"Superseded\", \"Expired\") >= 0");
 
                             t.HasCheckConstraint("ck_backfill_state", "\"State\" IN ('Running','Paused','Completed')");
                         });
@@ -1070,7 +1076,7 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
 
                     b.ToTable("backfill_items", "swiftaid_classification", t =>
                         {
-                            t.HasCheckConstraint("ck_backfill_item_state", "\"State\" IN ('Pending','NewlyClassified','Reused','Abstained','Failed')");
+                            t.HasCheckConstraint("ck_backfill_item_state", "\"State\" IN ('Pending','NewlyClassified','Reused','Abstained','Failed','Superseded','Expired')");
                         });
                 });
 
@@ -1699,6 +1705,33 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Ellai.AgentInvestigationEntity", b =>
+                {
+                    b.Property<string>("SessionId")
+                        .HasColumnType("text")
+                        .HasColumnName("session_id");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at_utc");
+
+                    b.Property<string>("OwnerActorId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("owner_actor_id");
+
+                    b.Property<string>("ProtectedRequest")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("protected_request");
+
+                    b.HasKey("SessionId");
+
+                    b.HasIndex("OwnerActorId", "CreatedAtUtc");
+
+                    b.ToTable("agent_investigations", (string)null);
+                });
+
             modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Ellai.EllaiCheckpointEntity", b =>
                 {
                     b.Property<string>("CheckpointId")
@@ -1962,7 +1995,7 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
 
                             t.HasCheckConstraint("ck_ellai_sessions_ids_nonempty", "length(btrim(session_id)) > 0 AND length(btrim(scope_epoch)) > 0");
 
-                            t.HasCheckConstraint("ck_ellai_sessions_status", "status IN ('Active', 'Completed', 'Cancelled')");
+                            t.HasCheckConstraint("ck_ellai_sessions_status", "status IN ('Active', 'Paused', 'Completed', 'Cancelled')");
 
                             t.HasCheckConstraint("ck_ellai_sessions_version", "version > 0");
                         });
@@ -2118,6 +2151,10 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                     b.Property<DateTimeOffset?>("CompletedAtUtc")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("completed_at_utc");
+
+                    b.Property<string>("DecisionJson")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("decision_json");
 
                     b.Property<string>("FrameworkSessionJson")
                         .HasColumnType("jsonb")
@@ -2364,6 +2401,10 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("follow_up_id");
 
+                    b.Property<long?>("AcknowledgedVersion")
+                        .HasColumnType("bigint")
+                        .HasColumnName("acknowledged_version");
+
                     b.Property<string>("AssigneeActorId")
                         .IsRequired()
                         .HasColumnType("text")
@@ -2413,6 +2454,8 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
 
                     b.ToTable("managed_case_follow_ups", null, t =>
                         {
+                            t.HasCheckConstraint("ck_managed_case_follow_ups_ack_version", "acknowledged_version IS NULL OR acknowledged_version >= 0");
+
                             t.HasCheckConstraint("ck_managed_case_follow_ups_status", "status IN ('Scheduled', 'Completed', 'Missed', 'Unreachable', 'Cancelled', 'Acknowledged')");
 
                             t.HasCheckConstraint("ck_managed_case_follow_ups_text", "length(btrim(purpose)) > 0 AND length(btrim(assignee_actor_id)) > 0");
@@ -3630,6 +3673,30 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                             t.HasCheckConstraint("ck_push_devices_platform", "platform IN ('Android', 'Ios', 'Web')");
 
                             t.HasCheckConstraint("ck_push_devices_token_material", "length(protected_token) > 0 AND octet_length(token_fingerprint) = 32");
+                        });
+                });
+
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.OrganizationAdministrationEntity", b =>
+                {
+                    b.Property<string>("OrganizationId")
+                        .HasColumnType("text")
+                        .HasColumnName("organization_id");
+
+                    b.Property<string>("ProtectedState")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("protected_state");
+
+                    b.Property<long>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("bigint")
+                        .HasColumnName("version");
+
+                    b.HasKey("OrganizationId");
+
+                    b.ToTable("organization_administration", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_organization_administration_version", "version > 0");
                         });
                 });
 
@@ -5279,6 +5346,21 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         .HasConstraintName("fk_domain_outbox_event");
                 });
 
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Ellai.AgentInvestigationEntity", b =>
+                {
+                    b.HasOne("SwiftAid.Infrastructure.Persistence.ActorEntity", null)
+                        .WithMany()
+                        .HasForeignKey("OwnerActorId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("SwiftAid.Infrastructure.Persistence.Ellai.EllaiSessionEntity", null)
+                        .WithOne()
+                        .HasForeignKey("SwiftAid.Infrastructure.Persistence.Ellai.AgentInvestigationEntity", "SessionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Ellai.EllaiCheckpointEntity", b =>
                 {
                     b.HasOne("SwiftAid.Infrastructure.Persistence.Ellai.EllaiSessionEntity", null)
@@ -5560,6 +5642,15 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
                         .HasConstraintName("fk_push_devices_actor");
+                });
+
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.OrganizationAdministrationEntity", b =>
+                {
+                    b.HasOne("SwiftAid.Infrastructure.Persistence.OrganizationEntity", null)
+                        .WithOne()
+                        .HasForeignKey("SwiftAid.Infrastructure.Persistence.OrganizationAdministrationEntity", "OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.OrganizationEntity", b =>
