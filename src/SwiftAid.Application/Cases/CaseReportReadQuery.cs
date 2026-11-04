@@ -3,6 +3,7 @@ using SwiftAid.Application.Authorization;
 using SwiftAid.Application.Cases.Commands;
 using SwiftAid.Application.Intake;
 using SwiftAid.Contracts.Cases;
+using SwiftAid.Contracts.Geography;
 using SwiftAid.Domain.Cases;
 
 namespace SwiftAid.Application.Cases;
@@ -94,6 +95,12 @@ public sealed class CaseReportReadQuery(
             CaseReportEventData.AnimalV2 animal => animal.Report.Context.Location,
             _ => null
         };
+        ReportedTime? onset = aggregate.ReportData switch
+        {
+            CaseReportEventData.HumanV2 human when human.Report.Context.Onset is { Value.HasValue: true } onsetFact =>
+                onsetFact.Value.Value,
+            _ => null
+        };
         var legacy = aggregate.ReportData as CaseReportEventData.LegacyV1;
         var observations = evidence?.Observations.Select(item => item.Text)
             ?? legacy?.Report.Observations.Select(item => item.Narrative)
@@ -102,7 +109,7 @@ public sealed class CaseReportReadQuery(
         observations = observations.Concat(aggregate.Events.OfType<CaseObservationRecorded>().Select(item => item.Narrative));
         return new(aggregate.CaseId, aggregate.ReportRevision,
             evidence?.Narrative?.Text ?? legacy?.Report.Narrative, observations.ToArray(),
-            ProjectLocation(aggregate), NearbyMedicalFacilities.Find(location));
+            ProjectLocation(aggregate), NearbyMedicalFacilities.Find(location), onset, aggregate.AggregateVersion);
     }
 
     private static CaseReportPlace? ProjectLocation(CaseAggregate aggregate)

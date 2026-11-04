@@ -89,7 +89,7 @@ public sealed class EllaiCaseResultMemory(EllaiTopicService topics, ICaseQueueQu
         if (caseId == Guid.Empty || caseId is not null && field != "submitter")
             return new(EllaiToolNames.Topic, false, "A case_id is valid only for submitter attribution on a retained case.", [], "", 0, false,
                 EllaiToolReasonCodes.InvalidArguments);
-        if (groupBy is not null && (groupBy is not ("region" or "locality" or "reported-day") || field is not null || placeId is not null || caseId is not null))
+        if (groupBy is not null && (groupBy is not ("region" or "locality" or "reported-day" or "onset-day") || field is not null || placeId is not null || caseId is not null))
             return new(EllaiToolNames.Topic, false, "Grouping can only be used on retained cases without a field or exact-place filter.", [], "", 0, false,
                 EllaiToolReasonCodes.InvalidArguments);
         if (context.Actor is null) return Unavailable();
@@ -227,6 +227,55 @@ public sealed class EllaiCaseResultMemory(EllaiTopicService topics, ICaseQueueQu
                 (unavailableRows ? "Cases no longer available under current access are omitted. " : "") +
                 (unknownClassification ? "Cases with unknown classification are excluded. " : "") + groupSummary,
                 groupEvidence.Length, reportedDayIncomplete) { HistoryValidUntilUtc = snapshot.ExpiresAtUtc };
+        }
+        if (groupBy == "onset-day")
+        {
+            if (caseReports is null)
+                return new(EllaiToolNames.Topic, false, "Authorized reporter-supplied onset dates are unavailable for this session; the retained cases were not grouped.", [], "", 0, false,
+                    EllaiToolReasonCodes.Unavailable);
+            var groupsByDate = new Dictionary<string, List<(CaseReportDetails Report, string Precision)>>(StringComparer.Ordinal);
+            var unknownOnsets = false;
+            foreach (var pair in rows)
+            {
+                ct.ThrowIfCancellationRequested();
+                var report = await caseReports.GetAsync(context.Actor, pair.row.CaseId, ct).ConfigureAwait(false);
+                ct.ThrowIfCancellationRequested();
+                var onset = report?.ReportedOnset;
+                var date = onset is null ? null : GetReportedOnsetDate(onset);
+                if (date is null)
+                {
+                    unknownOnsets = true;
+                    continue;
+                }
+                var key = date.Value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+                if (!groupsByDate.TryGetValue(key, out var group)) groupsByDate[key] = group = [];
+                group.Add((report!, onset!.Precision.ToString()));
+            }
+            var onsetGroups = groupsByDate.OrderBy(item => item.Key, StringComparer.Ordinal).ToArray();
+            var onsetEvidence = onsetGroups.SelectMany(group => group.Value.Select(pair =>
+                new EvidenceRef("CaseQueue", pair.Report.CaseId.ToString("D"),
+                    pair.Report.AggregateVersion.ToString(CultureInfo.InvariantCulture), "onset-day", pair.Report.CaseId.ToString("D")))).ToArray();
+            var onsetSummary = JsonSerializer.Serialize(new
+            {
+                groupBy,
+                dateBasis = "reporter-supplied symptom or sign onset date; exact instants use their UTC calendar date, date-only facts retain their reported local date",
+                groups = onsetGroups.Select(group => new
+                {
+                    onsetDate = group.Key,
+                    count = group.Value.Count,
+                    precisionCounts = group.Value.GroupBy(pair => pair.Precision, StringComparer.Ordinal)
+                        .ToDictionary(items => items.Key, items => items.Count(), StringComparer.Ordinal),
+                    cases = group.Value.Select(pair => pair.Report.CaseId).ToArray()
+                }).ToArray(),
+                context = "Only currently authorized retained cases with an exact or date-only reported onset are grouped. Approximate, missing, unknown and inaccessible onset dates are omitted and make this result incomplete. This grouping does not deduplicate separately submitted cases."
+            });
+            var onsetIncomplete = incomplete || unavailableRows || unknownOnsets || unknownClassification ||
+                onsetEvidence.Length != rows.Length;
+            return new EllaiToolResult(EllaiToolNames.Topic, true, null, onsetEvidence,
+                completeness + "Grouped currently authorized retained cases by reporter-supplied symptom or sign onset day. Exact instants use their UTC calendar date; date-only facts retain their reported local date. " +
+                (unknownOnsets ? "Cases with missing, unknown, approximate or inaccessible onset dates are omitted. " : "") +
+                "This does not deduplicate separately submitted cases. " + onsetSummary,
+                onsetEvidence.Length, onsetIncomplete) { HistoryValidUntilUtc = snapshot.ExpiresAtUtc };
         }
         if (groupBy is "region" or "locality")
         {
@@ -387,6 +436,14 @@ public sealed class EllaiCaseResultMemory(EllaiTopicService topics, ICaseQueueQu
 
     public static string SourceVersion(string snapshot) => Convert.ToHexString(
         System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(snapshot)));
+
+    private static DateOnly? GetReportedOnsetDate(SwiftAid.Contracts.Geography.ReportedTime onset) => onset.Precision switch
+    {
+        SwiftAid.Contracts.Geography.ReportedTimePrecision.Exact when onset.Value.HasValue =>
+            DateOnly.FromDateTime(onset.Value.Value.UtcDateTime),
+        SwiftAid.Contracts.Geography.ReportedTimePrecision.DateOnly => onset.LocalDate,
+        _ => null
+    };
 
     private static EllaiToolResult CreateObservationResult(
         IReadOnlyList<(CaseReference Old, CaseReportDetails Report)> reports, string completeness,

@@ -24,7 +24,7 @@ public static class EllaiToolContractCatalog
             ["place_id"] = "Exact selected occurrence-place identifier from the geographic registry; provide the matching country.",
             ["workflow"] = "Recorded case workflow filter.",
             ["sort"] = "Supported queue ordering.",
-            ["group_by"] = "Optional authorized case grouping dimension; for retained evidence, groups only the exact earlier result set. Evidence also supports reported-day in UTC.",
+            ["group_by"] = "Optional authorized case grouping dimension; for retained evidence, groups only the exact earlier result set. reported-day groups by managed-case creation date in UTC; onset-day groups by reporter-supplied symptom/sign onset date.",
             ["reported_from"] = "Inclusive UTC calendar date for managed-case creation/report time; use with reported_before.",
             ["reported_before"] = "Exclusive UTC calendar date for managed-case creation/report time; use with reported_from.",
             ["observed_term"] = "Optional literal substring to match case-insensitively in currently authorized verbatim reported observations; it is not a diagnosis or clinical classifier.",
@@ -259,7 +259,7 @@ public static class EllaiToolContractCatalog
             (EllaiToolNames.State, "projection") => Array.AsReadOnly(new[] { "feature", "queue" }),
             (EllaiToolNames.State, "workflow") => Array.AsReadOnly(new[] { "Reported", "UnderReview", "Active", "AwaitingFollowUp", "Resolved" }),
             (EllaiToolNames.State, "sort") => Array.AsReadOnly(new[] { "latest-reported", "latest-updated" }),
-            (EllaiToolNames.Evidence, "group_by") => Array.AsReadOnly(new[] { "region", "locality", "reported-day" }),
+            (EllaiToolNames.Evidence, "group_by") => Array.AsReadOnly(new[] { "region", "locality", "reported-day", "onset-day" }),
             (EllaiToolNames.Evidence, "classification_filter") => Array.AsReadOnly(new[] { "Classified", "Unclassified" }),
             _ => AllowedValues.GetValueOrDefault(argumentName)
         };

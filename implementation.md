@@ -4644,3 +4644,9 @@ PASS: Gateway build (dotnet build src/SwiftAid.Gateway/SwiftAid.Gateway.csproj -
 The Find another way action now binds replanning to the latest completed durable conversation turn. If a user turn is still queued or processing, it waits instead of starting a plan fenced against an older turn. The existing proposal and conversation are retained, allowing a changed UI observation to be replanned without highlighting an absent target.
 
 PASS: Gateway build (dotnet build src/SwiftAid.Gateway/SwiftAid.Gateway.csproj --no-restore -m:1 -nr:false -p:WasmBuildNative=false --verbosity quiet, 0 warnings, 0 errors); git diff --check. Tests were not added or run, per user instruction. NOT VERIFIED: live Bit.Bonboarding replan after a missing target, or cross-page recovery in a browser.
+
+### Ellai retained-case symptom-onset grouping - 2026-11-04
+
+Retained, currently authorized cases can now be grouped by reporter-supplied symptom/sign onset day through `ellai_evidence(group_by=onset-day)`. The protected case-report read projects onset separately from submission/capture time and supplies the aggregate version used by the evidence reference. Exact instants group by UTC calendar date; date-only values retain their reported local date. Unknown, missing, approximate, or inaccessible onset dates are omitted and mark the result incomplete. The prompt now selects this grouping for onset-date recalculation and continues to disclose that separately submitted duplicate identity is unavailable.
+
+PASS: Gateway build (`dotnet build src/SwiftAid.Gateway/SwiftAid.Gateway.csproj --no-restore -m:1 -nr:false -p:WasmBuildNative=false --verbosity quiet`, 0 warnings, 0 errors); `git diff --check`. Tests were not added or run, per user instruction. NOT VERIFIED: live model tool selection, onset grouping against authorized case records, duplicate-submission detection, and end-to-end conversation scenario 3.3.
