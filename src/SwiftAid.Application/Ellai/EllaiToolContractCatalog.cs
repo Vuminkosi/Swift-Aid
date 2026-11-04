@@ -24,7 +24,7 @@ public static class EllaiToolContractCatalog
             ["place_id"] = "Exact selected occurrence-place identifier from the geographic registry; provide the matching country.",
             ["workflow"] = "Recorded case workflow filter.",
             ["sort"] = "Supported queue ordering.",
-            ["field"] = "Optional country, workflow or verbatim reported observations for retained case results.",
+            ["field"] = "Optional country, workflow, verbatim reported observations or recorded submitter attribution for retained cases.",
             ["classification_filter"] = "Filter retained, currently authorized case results by recorded classified or unclassified status; does not return classifier labels or scores.",
             ["feature"] = "Feature identifier in the current authorized scope.",
             ["receipt"] = "Receipt identifier bound to the current session.",
@@ -46,7 +46,7 @@ public static class EllaiToolContractCatalog
     private static readonly IReadOnlyDictionary<string, IReadOnlyList<string>> AllowedValues =
         new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal)
         {
-            ["field"] = Array.AsReadOnly(new[] { "country", "workflow", "observations" })
+            ["field"] = Array.AsReadOnly(new[] { "country", "workflow", "observations", "submitter" })
         };
 
     private static readonly IReadOnlyDictionary<string, ToolContract> Contracts =
@@ -55,7 +55,7 @@ public static class EllaiToolContractCatalog
             [EllaiToolNames.State] = Contract(EllaiToolNames.State,
                 ("projection", false), ("limit", false),
                 ("country", false), ("workflow", false), ("sort", false), ("place_id", false)),
-            [EllaiToolNames.Evidence] = Contract(EllaiToolNames.Evidence, ("ref", true), ("field", false), ("classification_filter", false), ("country", false), ("place_id", false)),
+            [EllaiToolNames.Evidence] = Contract(EllaiToolNames.Evidence, ("ref", true), ("field", false), ("classification_filter", false), ("country", false), ("place_id", false), ("case_id", false)),
             [EllaiToolNames.Topic] = Contract(EllaiToolNames.Topic, ("ref", true)),
             [EllaiToolNames.Capabilities] = Contract(EllaiToolNames.Capabilities, ("feature", false)),
             [EllaiToolNames.Receipts] = Contract(EllaiToolNames.Receipts, ("receipt", false)),

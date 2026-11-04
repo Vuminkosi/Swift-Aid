@@ -15,7 +15,8 @@ public sealed record CaseTimelineRow(
     string ActorId,
     DateTimeOffset? OccurredAtUtc,
     DateTimeOffset RecordedAtUtc,
-    int SchemaVersion);
+    int SchemaVersion,
+    string? ActorDisplayLabel = null);
 
 /// <summary>Persistence port for the authorized timeline read. Cursor pages arrive newest-first.</summary>
 public interface ICaseTimelineStore
@@ -180,7 +181,8 @@ public sealed class CaseTimelineQuery(
         row.ActorId,
         row.OccurredAtUtc,
         row.RecordedAtUtc,
-        row.SchemaVersion);
+        row.SchemaVersion,
+        row.ActorDisplayLabel);
 
     private static string LabelFor(string eventType, int schemaVersion) => eventType switch
     {

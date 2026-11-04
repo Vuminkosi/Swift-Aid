@@ -10,7 +10,7 @@ namespace SwiftAid.Application.Ellai;
 /// every recall uses the ordinary owner-filtered, per-case authorized query.</summary>
 public sealed class EllaiCaseResultMemory(EllaiTopicService topics, ICaseQueueQuery queue,
     IEllaiExactReferenceIndex? index = null, ICaseOccurrenceLocationQuery? occurrenceLocations = null,
-    ICaseReportReadQuery? caseReports = null)
+    ICaseReportReadQuery? caseReports = null, ICaseTimelineQuery? caseTimeline = null)
 {
     public const string Reference = "case-results";
     public const string OriginalReference = "case-results-original";
@@ -70,10 +70,10 @@ public sealed class EllaiCaseResultMemory(EllaiTopicService topics, ICaseQueueQu
 
     public async Task<EllaiToolResult> RecallAsync(
         EllaiToolContext context, CancellationToken ct, string? field = null, string? classificationFilter = null,
-        bool original = false, string? country = null, string? placeId = null)
+        bool original = false, string? country = null, string? placeId = null, Guid? caseId = null)
     {
         ct.ThrowIfCancellationRequested();
-        if (field is not null && field is not ("country" or "workflow" or "observations"))
+        if (field is not null && field is not ("country" or "workflow" or "observations" or "submitter"))
             return new(EllaiToolNames.Topic, false, "Unsupported case-result field selector.", [], "", 0, false,
                 EllaiToolReasonCodes.InvalidArguments);
         if (classificationFilter is not null && (classificationFilter is not ("Classified" or "Unclassified") ||
@@ -84,6 +84,9 @@ public sealed class EllaiCaseResultMemory(EllaiTopicService topics, ICaseQueueQu
             country is not null && (country.Length != 2 || country.Any(character => character is < 'A' or > 'Z')) ||
             placeId is not null && (placeId.Length is < 1 or > 120 || placeId != placeId.Trim() || field is not null and not "observations"))
             return new(EllaiToolNames.Topic, false, "An exact occurrence-place filter requires a country and cannot be combined with a field selector.", [], "", 0, false,
+                EllaiToolReasonCodes.InvalidArguments);
+        if (caseId == Guid.Empty || caseId is not null && field != "submitter")
+            return new(EllaiToolNames.Topic, false, "A case_id is valid only for submitter attribution on a retained case.", [], "", 0, false,
                 EllaiToolReasonCodes.InvalidArguments);
         if (context.Actor is null) return Unavailable();
         EllaiTopicEntry? indexedTopic = null;
@@ -160,6 +163,12 @@ public sealed class EllaiCaseResultMemory(EllaiTopicService topics, ICaseQueueQu
             return classificationFilter == "Unclassified" ? classification == "Unclassified" :
                 classification is not ("Unclassified" or "unknown");
         }).ToArray();
+        if (caseId is { } selectedCase)
+        {
+            if (!snapshot.Cases.Any(item => item.Id == selectedCase)) return Unavailable();
+            rows = rows.Where(pair => pair.row.CaseId == selectedCase).ToArray();
+            if (rows.Length == 0) return Unavailable();
+        }
         var unknownLocations = false;
         if (placeId is not null)
         {
@@ -212,6 +221,55 @@ public sealed class EllaiCaseResultMemory(EllaiTopicService topics, ICaseQueueQu
             var result = CreateObservationResult(visibleReports, completeness, classificationFilter, country, placeId,
                 outputTruncated, incomplete || unknownLocations || reports.Count != rows.Length || authorizedRows.Length != snapshot.Cases.Count);
             return result with
+            { HistoryValidUntilUtc = snapshot.ExpiresAtUtc };
+        }
+        if (field == "submitter")
+        {
+            if (caseTimeline is null) return Unavailable();
+            var attributions = new List<(Guid CaseId, Guid EventId, long Version, string? DisplayName, bool GuestIntake)>();
+            var attributionIncomplete = false;
+            foreach (var pair in rows)
+            {
+                ct.ThrowIfCancellationRequested();
+                var timeline = await caseTimeline.GetAsync(context.Actor, pair.row.CaseId, 500, ct).ConfigureAwait(false);
+                ct.ThrowIfCancellationRequested();
+                if (timeline.Access != CaseTimelineAccess.Found || timeline.Timeline is not { } currentTimeline)
+                {
+                    attributionIncomplete = true;
+                    continue;
+                }
+                var reportEvent = currentTimeline.Entries.FirstOrDefault(item => item.Kind == CaseTimelineEntryKind.Authoritative &&
+                    item.EventType == "CaseReported");
+                var guestIntake = currentTimeline.Entries.Any(item => item.Kind == CaseTimelineEntryKind.Derived &&
+                    item.EventType == "IntakePromoted");
+                if (reportEvent is null)
+                {
+                    attributionIncomplete = true;
+                    continue;
+                }
+                if (currentTimeline.HasOlderEntries)
+                    attributionIncomplete = true;
+                attributions.Add((pair.row.CaseId, reportEvent.EventId, reportEvent.AggregateVersion,
+                    reportEvent.SafeActorDisplayLabel, guestIntake));
+            }
+            var attributionEvidence = attributions.Select(item => new EvidenceRef("CaseTimeline", item.CaseId.ToString("D"),
+                item.Version.ToString(CultureInfo.InvariantCulture), "submitter", item.EventId.ToString("D"))).ToArray();
+            var summary = JsonSerializer.Serialize(new
+            {
+                context = "Recorded case attribution. For promoted guest intake, the managed-case timeline identifies the accepting staff member, not the original guest submitter.",
+                cases = attributions.Select(item => new
+                {
+                    caseId = item.CaseId,
+                    submitter = item.GuestIntake ? (string?)null : item.DisplayName,
+                    acceptedBy = item.GuestIntake ? item.DisplayName : null,
+                    attribution = item.GuestIntake ? "Promoted guest intake; original submitter identity is not available in the managed-case timeline. acceptedBy is the recorded staff member who accepted it." :
+                        item.DisplayName is null ? "Recorded submitter name is not available." : "Recorded report submitter."
+                }).ToArray()
+            });
+            return new EllaiToolResult(EllaiToolNames.Topic, true, null, attributionEvidence,
+                completeness + "Recorded submitter details from the current retained cases; unavailable records or names are not guessed. " +
+                (attributionIncomplete || attributions.Count != rows.Length ? "Some attribution records are incomplete or unavailable. " : "") + summary,
+                attributions.Count, incomplete || attributionIncomplete || attributions.Count != rows.Length || authorizedRows.Length != snapshot.Cases.Count)
             { HistoryValidUntilUtc = snapshot.ExpiresAtUtc };
         }
         var evidence = rows.Select(pair => new EvidenceRef("CaseQueue", pair.row.CaseId.ToString("D"),

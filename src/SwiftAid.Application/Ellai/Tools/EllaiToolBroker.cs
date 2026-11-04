@@ -189,7 +189,7 @@ public sealed class EllaiToolBroker
     private static readonly string[] ToolDescriptions =
     {
         $"{EllaiToolNames.State}(projection=[feature|queue], limit=1..20, country?, workflow?, sort?, place_id?) — permitted feature or owned-case queue. country is an uppercase two-letter code (Zimbabwe=ZW, Eswatini=SZ); workflow is Reported, UnderReview, Active, AwaitingFollowUp or Resolved; sort=latest-reported or latest-updated. For an occurrence-place search, select an exact registry ID using ellai_locations and supply country, place_id and sort=latest-reported; workflow is not supported with place_id. Unknown locations and incomplete scans cannot establish a complete list. Reported is a recorded workflow, not proof that no human reviewed a case. For retained results, use ellai_evidence with classification_filter=Classified or Unclassified to check recorded status; this does not return classifier labels or establish a diagnosis.",
-        $"{EllaiToolNames.Evidence}(ref=[case-results|case-results-original], field=[country|workflow|observations]?, classification_filter=[Classified|Unclassified]?, country?, place_id?) — re-read retained cases under current access. field=observations returns only verbatim reported observations, labeled unverified reports and not diagnoses; it never returns narrative or coordinates. Classification and exact place filters can combine with observations. Place filtering requires a selected registry ID and matching country. Reauthorizes each case; unavailable rows are omitted and marked incomplete.",
+        $"{EllaiToolNames.Evidence}(ref=[case-results|case-results-original], field=[country|workflow|observations|submitter]?, classification_filter=[Classified|Unclassified]?, country?, place_id?, case_id?) — re-read retained cases under current access. field=observations returns only verbatim reported observations, labeled unverified reports and not diagnoses; field=submitter returns authorized recorded attribution and distinguishes promoted guest intake from its accepting staff member. Use case_id from the retained results to answer about one selected case; it must belong to that result set. Neither projection returns narrative or coordinates. Classification and exact place filters can combine with observations. Place filtering requires a selected registry ID and matching country. Reauthorizes each case; unavailable rows are omitted and marked incomplete.",
         $"{EllaiToolNames.Topic}(ref) — session topic candidates with checkpoints. Use ref=case-results for the latest retained list or case-results-original for the first retained list; never invent a remembered result set.",
         $"{EllaiToolNames.Capabilities}(feature?) — capability readiness, no credentials.",
         $"{EllaiToolNames.Receipts}(receipt?) — durable receipts, session-bound.",
@@ -239,6 +239,7 @@ public sealed class EllaiToolBroker
     private readonly ICaseQueueQuery? _queue;
     private readonly ICaseOccurrenceLocationQuery? _occurrenceLocations;
     private readonly ICaseReportReadQuery? _caseReports;
+    private readonly ICaseTimelineQuery? _caseTimeline;
     private readonly IEllaiApprovalStore? _receipts;
     private readonly EllaiTopicService? _topics;
     private readonly IEllaiExactReferenceIndex? _referenceIndex;
@@ -275,7 +276,7 @@ public sealed class EllaiToolBroker
         SwiftAid.Application.Surveillance.ISignalReviewService? signals = null,
         EllaiUiAuthorityResolver? uiAuthority = null, IEllaiExactReferenceIndex? referenceIndex = null,
         IDashboardAggregateQuery? dashboard = null, ICaseOccurrenceLocationQuery? occurrenceLocations = null,
-        ICaseReportReadQuery? caseReports = null)
+        ICaseReportReadQuery? caseReports = null, ICaseTimelineQuery? caseTimeline = null)
     {
         _policy = policy ?? throw new ArgumentNullException(nameof(policy));
         _consent = consent ?? throw new ArgumentNullException(nameof(consent));
@@ -283,6 +284,7 @@ public sealed class EllaiToolBroker
         _queue = queue;
         _occurrenceLocations = occurrenceLocations;
         _caseReports = caseReports;
+        _caseTimeline = caseTimeline;
         _receipts = receipts;
         _topics = topics;
         _referenceIndex = referenceIndex;
@@ -509,14 +511,21 @@ public sealed class EllaiToolBroker
         }
 
         var field = request.Arguments.GetValueOrDefault("field");
-        if (field is not null && field is not ("country" or "workflow" or "observations"))
+        if (field is not null && field is not ("country" or "workflow" or "observations" or "submitter"))
         {
-            return Deny(request.ToolName, "field must be country, workflow or observations.",
+            return Deny(request.ToolName, "field must be country, workflow, observations or submitter.",
                 EllaiToolReasonCodes.InvalidArguments);
         }
         var country = request.Arguments.GetValueOrDefault("country");
         var placeId = request.Arguments.GetValueOrDefault("place_id");
         var classificationFilter = request.Arguments.GetValueOrDefault("classification_filter");
+        var caseIdText = request.Arguments.GetValueOrDefault("case_id");
+        Guid? selectedCaseId = null;
+        if (caseIdText is not null && (!Guid.TryParseExact(caseIdText, "D", out var parsedCaseId) ||
+            parsedCaseId == Guid.Empty || field != "submitter"))
+            return Deny(request.ToolName, "case_id must identify a retained case when field=submitter.",
+                EllaiToolReasonCodes.InvalidArguments);
+        if (caseIdText is not null) selectedCaseId = Guid.ParseExact(caseIdText, "D");
         if ((country is null) != (placeId is null) ||
             placeId is not null && (placeId.Length is < 1 or > 120 || placeId != placeId.Trim() ||
                 field is not null and not "observations" || classificationFilter is not null && field != "observations") ||
@@ -529,13 +538,16 @@ public sealed class EllaiToolBroker
         if (field == "observations" && _caseReports is null)
             return Deny(request.ToolName, "Authorized report observations are unavailable for this session.",
                 EllaiToolReasonCodes.Unavailable);
+        if (field == "submitter" && _caseTimeline is null)
+            return Deny(request.ToolName, "Authorized case attribution is unavailable for this session.",
+                EllaiToolReasonCodes.Unavailable);
 
         try
         {
-            var result = await new EllaiCaseResultMemory(_topics, _queue, referenceIndex, _occurrenceLocations, _caseReports)
+            var result = await new EllaiCaseResultMemory(_topics, _queue, referenceIndex, _occurrenceLocations, _caseReports, _caseTimeline)
                 .RecallAsync(context, ct, field, classificationFilter,
                     original: request.Arguments["ref"] == EllaiCaseResultMemory.OriginalReference,
-                    country: country, placeId: placeId).ConfigureAwait(false);
+                    country: country, placeId: placeId, caseId: selectedCaseId).ConfigureAwait(false);
             return result with { ToolName = request.ToolName };
         }
         catch (OperationCanceledException)

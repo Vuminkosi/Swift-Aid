@@ -60,7 +60,7 @@ public sealed record EllaiToolTrace(int Version, bool HistoryIncluded, IReadOnly
                     (item.RetainedClassificationFilter is null || item.ToolName == EllaiToolNames.Evidence &&
                         item.RetainedClassificationFilter.IsValid() && item.CaseSnapshotExpiresAtUtc is not null) &&
                     (item.RetainedCaseReplay is null || item.ToolName is EllaiToolNames.Topic or EllaiToolNames.Evidence &&
-                        (item.Truncated || item.RetainedCaseReplay.Field == "observations" ||
+                        (item.Truncated || item.RetainedCaseReplay.Field is "observations" or "submitter" ||
                             item.RetainedCaseReplay.ClassificationFilter is not null || item.RetainedCaseReplay.PlaceId is not null) &&
                         item.CaseSnapshotExpiresAtUtc is not null && item.RetainedCaseReplay.IsValid() &&
                         (item.ToolName != EllaiToolNames.Topic || item.RetainedCaseReplay.Field is null)) &&

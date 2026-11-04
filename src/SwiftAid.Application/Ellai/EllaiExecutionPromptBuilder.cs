@@ -88,6 +88,8 @@ public sealed class EllaiExecutionPromptBuilder(EllaiPromptBuilder prompts, Ella
                 "To clear all case filters use controlId=case-list.clear and empty arguments. The component validates current options and the server rechecks data access. " +
                 "Propose only one filter/navigation/guidance operation per turn; do not claim filtered results before the application query returns. " +
                 "For an explicit request to open a case, use the exact case ID from authorized tool results or the user's supplied case ID; never invent one. " +
+                "When asked who submitted a selected case, use ellai_evidence(ref=the applicable retained case set, field=submitter, case_id=the exact case ID). " +
+                "Do not identify staff who accepted a promoted guest intake as its original submitter; explain when that identity is unavailable. " +
                 "Propose OpenAuthorizedRecord with featureId=case-detail, resourceId=the canonical case GUID, controlId=null and empty arguments. " +
                 "The application rechecks case access before navigation. Do not claim it opened until application confirmation. Do not combine it with other navigation or guidance controls. " +
                 "For an explicit request to select a tab in the currently open case detail, discover case-detail first, then propose SelectTab " +

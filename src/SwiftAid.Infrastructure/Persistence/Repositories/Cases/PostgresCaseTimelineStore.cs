@@ -91,11 +91,11 @@ public sealed class PostgresCaseTimelineStore(SwiftAidDbContext dbContext) : ICa
             events = events.Where(item => item.AggregateVersion < cursor);
         }
 
-        var rows = await events
-            .OrderByDescending(item => item.AggregateVersion)
-            .ThenByDescending(item => item.RecordedAtUtc)
-            .Take(limit)
-            .Select(item => new CaseTimelineRow(
+        var rows = await (from item in events
+            join profile in _dbContext.UserProfiles.AsNoTracking() on item.ActorId equals profile.UserId into profiles
+            from profile in profiles.DefaultIfEmpty()
+            orderby item.AggregateVersion descending, item.RecordedAtUtc descending
+            select new CaseTimelineRow(
                 item.EventId,
                 item.EventType,
                 item.AggregateVersion,
@@ -104,7 +104,9 @@ public sealed class PostgresCaseTimelineStore(SwiftAidDbContext dbContext) : ICa
                 item.ActorId,
                 item.OccurredAtUtc,
                 item.RecordedAtUtc,
-                item.SchemaVersion))
+                item.SchemaVersion,
+                item.EventType == "CaseReported" && profile != null ? profile.DisplayName : null))
+            .Take(limit)
             .ToArrayAsync(ct).ConfigureAwait(false);
         return rows;
     }
