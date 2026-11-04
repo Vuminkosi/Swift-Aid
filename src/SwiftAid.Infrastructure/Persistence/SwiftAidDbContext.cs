@@ -292,9 +292,12 @@ public sealed class SwiftAidDbContext(DbContextOptions<SwiftAidDbContext> option
         ConfigureLockToken(organizations);
         organizations.HasKey(entity => entity.OrganizationId).HasName("pk_organizations");
         organizations.Property(entity => entity.OrganizationId).HasColumnName("organization_id").HasColumnType("text");
+        organizations.Property(entity => entity.OwnerActorId).HasColumnName("owner_actor_id").HasColumnType("text");
         organizations.Property(entity => entity.Status).HasColumnName("status").HasConversion<string>().HasColumnType("text");
         organizations.Property(entity => entity.CreatedAtUtc).HasColumnName("created_at_utc").HasColumnType("timestamp with time zone");
         organizations.Property(entity => entity.UpdatedAtUtc).HasColumnName("updated_at_utc").HasColumnType("timestamp with time zone");
+        organizations.HasOne<ActorEntity>().WithMany().HasForeignKey(entity => entity.OwnerActorId)
+            .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_organizations_owner_actor");
         var workspaces = modelBuilder.Entity<WorkspaceEntity>();
         workspaces.ToTable("workspaces", table =>
         {

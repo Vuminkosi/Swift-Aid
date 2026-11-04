@@ -3637,6 +3637,10 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         .HasDefaultValue((short)0)
                         .HasColumnName("lock_token");
 
+                    b.Property<string>("OwnerActorId")
+                        .HasColumnType("text")
+                        .HasColumnName("owner_actor_id");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasColumnType("text")
@@ -3648,6 +3652,8 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
 
                     b.HasKey("OrganizationId")
                         .HasName("pk_organizations");
+
+                    b.HasIndex("OwnerActorId");
 
                     b.ToTable("organizations", null, t =>
                         {
@@ -5424,6 +5430,15 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
                         .HasConstraintName("fk_push_devices_actor");
+                });
+
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.OrganizationEntity", b =>
+                {
+                    b.HasOne("SwiftAid.Infrastructure.Persistence.ActorEntity", null)
+                        .WithMany()
+                        .HasForeignKey("OwnerActorId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_organizations_owner_actor");
                 });
 
             modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.OrganizationInvitationEntity", b =>

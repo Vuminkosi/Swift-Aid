@@ -74,7 +74,7 @@ The shared public surface now offers library/calendar selection, month navigatio
 
 ## Material approval policy
 
-The user clarified that any owner of the organization can approve and publish material. Organization membership alone is not evidence of ownership: the current `OrganizationMembershipEntity` records status and validity but no owner designation, and the session material references do not identify an owning organization. An authoritative owner assignment and material-to-organization binding are still needed to enforce this decision. This policy does not itself approve any existing material or establish reuse rights, withdrawal status, or permissions for unrelated session actions.
+The user clarified that any owner of the organization can approve and publish material. Organization membership alone is not evidence of ownership: the current `OrganizationMembershipEntity` records status and validity but no owner designation, and the session material references do not identify an owning organization. New organization creation now records the creator as its explicit owner. Existing organizations remain unassigned because their historical owner cannot be inferred safely. A material-to-organization binding and a governed approval/rights/withdrawal source are still needed before this decision can authorize publication. This policy does not itself approve any existing material or establish reuse rights, withdrawal status, or permissions for unrelated session actions.
 
 ## Work in progress: public material references
 

@@ -105,6 +105,7 @@ public sealed class OrganizationMembershipService(
             _dbContext.Organizations.Add(new OrganizationEntity
             {
                 OrganizationId = organization,
+                OwnerActorId = actorId,
                 Status = PersistentResourceStatus.Active,
                 CreatedAtUtc = now,
                 UpdatedAtUtc = now

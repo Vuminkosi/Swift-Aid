@@ -56,6 +56,8 @@ public sealed class ActorAccessStateEntity
 public sealed class OrganizationEntity
 {
     public required string OrganizationId { get; set; }
+    /// <summary>Explicit owner used for organization owner capabilities. Null means ownership is unverified.</summary>
+    public string? OwnerActorId { get; set; }
     public PersistentResourceStatus Status { get; set; }
     public DateTimeOffset CreatedAtUtc { get; set; }
     public DateTimeOffset UpdatedAtUtc { get; set; }
