@@ -842,6 +842,12 @@ public sealed class EllaiToolBroker
         }
 
         var list = await _receipts.ListBySessionAsync(context.SessionId, ct).ConfigureAwait(false);
+        if (list.Any(receipt => receipt is null ||
+            !string.Equals(receipt.SessionId, context.SessionId, StringComparison.Ordinal)))
+        {
+            return Deny(request.ToolName, "Receipt authority is unavailable for this session.",
+                EllaiToolReasonCodes.Unavailable);
+        }
         var items = list.Take(MaxItems).ToList();
         var lines = items.Select(DescribeReceipt);
         var refs = items.Select(receipt => new EvidenceRef(
