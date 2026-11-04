@@ -180,6 +180,16 @@ revoked PostgreSQL cases passed 2/2 before and after commit; the focused runner
 and framework contract filter passed 155/155. Translation in this test is a
 synthetic client, not NLLB, and revalidation is not atomic with persistence.
 Translated tool answers whose provenance cannot be replayed fail closed.
+The same authorized and revoked count scenarios were subsequently exercised
+with the real pinned NLLB service via the Gateway language client and a
+disposable loopback relay. The runner cases passed 2/2, with the revoked case
+passing again after commit. Two outbox-worker cases using the real language
+service, scripted framework model and disposable PostGIS also passed 2/2; the
+revoked worker case passed again after commit. The worker committed and
+published the translated authorized answer, while withholding the translated
+answer after synthetic grant expiry. This checks the service contract and
+authorization boundary, not translation quality, live Muse in the same run,
+or deployed Gateway behavior.
 
 ## Provider observations and open checks
 
