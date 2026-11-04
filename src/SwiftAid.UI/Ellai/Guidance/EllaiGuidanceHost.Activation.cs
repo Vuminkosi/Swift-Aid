@@ -142,7 +142,7 @@ public partial class EllaiGuidanceHost
                                 : controlId == "report.locality"
                                     ? "Added the reported locality to the open report draft. Review it before submitting."
                                     : controlId == "report.onset-date"
-                                        ? "Added the explicitly reported symptom or sign onset date to the open draft. Review it before submitting."
+                                        ? "Added the reported symptom or sign onset detail to the open draft. Review or correct the date before submitting."
                                     : "Added your reported statement to the open report draft. Review it before submitting."
                     : controlId == "report.age-years"
                         ? "I could not update the age. Open the report details and enter it there."
@@ -155,7 +155,7 @@ public partial class EllaiGuidanceHost
                                 : controlId == "report.locality"
                                     ? "I could not add that locality. Enter it in the report details instead."
                                     : controlId == "report.onset-date"
-                                        ? "I could not capture that onset date. Enter the explicitly reported date in the onset field instead."
+                                        ? "I could not capture that onset detail. Enter its date in the onset field, or choose that it is unknown."
                                     : "I could not add that statement to the report details.";
             }
             return;

@@ -387,7 +387,7 @@
                     }
                     <div><dt>Original statement</dt><dd>@UnknownIfEmpty(Draft.Narrative)</dd><dd class="guided-report__provenance">Your words, shown as entered</dd></div>
                     <div><dt>Separate observations</dt><dd>@ObservationSummary</dd><dd class="guided-report__provenance">You entered these details. No others were added.</dd></div>
-                    <div><dt>Reported symptom or sign onset</dt><dd>@OnsetSummary</dd><dd class="guided-report__provenance">@(Draft.OnsetPrecision == ReportedTimePrecision.Unknown ? "Not provided; remains unknown" : "From the onset details you entered")</dd></div>
+                    <div><dt>Reported symptom or sign onset</dt><dd>@OnsetSummary</dd><dd class="guided-report__provenance">@OnsetProvenance</dd></div>
                     <div><dt>Event occurrence time</dt><dd>@TimeSummary</dd><dd class="guided-report__provenance">@(Draft.OccurrencePrecision == ReportedTimePrecision.Unknown ? "Not provided; remains unknown" : "From the time you entered")</dd></div>
                     <div><dt>Country</dt><dd>@CountrySummary</dd><dd class="guided-report__provenance">@(string.IsNullOrWhiteSpace(Draft.CountryCode) ? "Not provided; remains unknown" : "You selected this")</dd></div>
                     <div><dt>Location</dt><dd>@LocationSummary</dd><dd class="guided-report__provenance">@LocationProvenance</dd></div>
@@ -880,16 +880,36 @@
                 existing.Where(value => !string.Equals(value, matches[0], StringComparison.Ordinal)));
             _editContext.NotifyFieldChanged(new FieldIdentifier(Draft, nameof(Draft.ObservationsText)));
             return true;
-        }, onsetDate =>
+        }, (onsetDate, relativeDay, statement) =>
         {
+            if (onsetDate is null)
+            {
+                if (relativeDay is null || Draft.CapturedAt is not { } capturedAt) return false;
+                var captureDate = DateOnly.FromDateTime(capturedAt.DateTime);
+                onsetDate = relativeDay == SwiftAid.UI.Ellai.Guidance.EllaiRelativeOnsetDay.Today ? captureDate : captureDate.AddDays(-1);
+            }
+
+            var existingNarrative = Draft.Narrative?.Trim();
+            var narrativeLines = string.IsNullOrEmpty(existingNarrative)
+                ? Array.Empty<string>()
+                : existingNarrative.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            var updatedNarrative = narrativeLines.Contains(statement, StringComparer.Ordinal)
+                ? existingNarrative
+                : string.Join(Environment.NewLine, narrativeLines.Append(statement));
+            if (updatedNarrative is not null && updatedNarrative.Length > MaximumNarrativeCharacters) return false;
+
             Draft.OnsetPrecision = ReportedTimePrecision.DateOnly;
-            Draft.OnsetDate = onsetDate.ToDateTime(TimeOnly.MinValue);
-            Draft.OnsetDateText = onsetDate.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+            Draft.OnsetDate = onsetDate.Value.ToDateTime(TimeOnly.MinValue);
+            Draft.OnsetDateText = onsetDate.Value.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
             Draft.OnsetTime = null;
             Draft.OnsetOffset = null;
             Draft.OnsetZoneId = null;
+            Draft.OnsetDateInterpretedFromCaptureContext = relativeDay is not null;
+            Draft.Narrative = updatedNarrative;
             _editContext.NotifyFieldChanged(new FieldIdentifier(Draft, nameof(Draft.OnsetPrecision)));
             _editContext.NotifyFieldChanged(new FieldIdentifier(Draft, nameof(Draft.OnsetDateText)));
+            _editContext.NotifyFieldChanged(new FieldIdentifier(Draft, nameof(Draft.OnsetDateInterpretedFromCaptureContext)));
+            _editContext.NotifyFieldChanged(new FieldIdentifier(Draft, nameof(Draft.Narrative)));
             return true;
         });
         if (!EllaiDraftContext.FlushPending(this))
@@ -949,6 +969,12 @@
         ReportedTimePrecision.DateOnly => Draft.OnsetDate?.ToString("d") ?? "Date unknown",
         _ => Draft.OnsetDate is { } date ? $"Approximately {date:d}" : "Approximately; date unknown"
     };
+
+    private string OnsetProvenance => Draft.OnsetPrecision == ReportedTimePrecision.Unknown
+        ? "Not provided; remains unknown"
+        : Draft.OnsetDateInterpretedFromCaptureContext
+            ? "Interpreted from your words using the draft capture date and local time offset; review or correct before submitting."
+            : "From the onset details you entered";
 
     private string CountrySummary => string.IsNullOrWhiteSpace(Draft.CountryCode)
         ? "Unknown"
@@ -1400,7 +1426,9 @@
     {
         Draft.OnsetDateText = value;
         Draft.OnsetDate = PublicReportDraft.ParseOccurrenceDate(value);
+        Draft.OnsetDateInterpretedFromCaptureContext = false;
         _editContext.NotifyFieldChanged(new FieldIdentifier(Draft, nameof(Draft.OnsetDateText)));
+        _editContext.NotifyFieldChanged(new FieldIdentifier(Draft, nameof(Draft.OnsetDateInterpretedFromCaptureContext)));
         return Task.CompletedTask;
     }
 
@@ -1685,6 +1713,7 @@
         actual.OnsetTime == expected.OnsetTime &&
         actual.OnsetOffset == expected.OnsetOffset &&
         actual.OnsetZoneId == expected.OnsetZoneId &&
+        actual.OnsetDateInterpretedFromCaptureContext == expected.OnsetDateInterpretedFromCaptureContext &&
         actual.CapturedAt == expected.CapturedAt &&
         actual.LocationUnknown == expected.LocationUnknown &&
         actual.CountryCode == expected.CountryCode &&

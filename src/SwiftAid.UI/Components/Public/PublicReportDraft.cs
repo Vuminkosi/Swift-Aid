@@ -16,6 +16,7 @@ public sealed class PublicReportDraft : IValidatableObject
         using var target = System.Text.Json.JsonDocument.Parse(System.Text.Json.JsonSerializer.Serialize(restored));
         foreach (var property in source.RootElement.EnumerateObject())
         {
+            if (property.Name == nameof(OnsetDateInterpretedFromCaptureContext)) continue;
             if (!target.RootElement.TryGetProperty(property.Name, out var value)) return false;
             if (IsEmptyText(property.Value) && IsEmptyText(value)) continue;
             if (property.Value.ValueKind != value.ValueKind || property.Value.GetRawText() != value.GetRawText()) return false;
@@ -68,6 +69,7 @@ public sealed class PublicReportDraft : IValidatableObject
                 expected.Add(nameof(OnsetOffset));
                 expected.Add(nameof(OnsetZoneId));
             }
+            if (snapshot.SchemaVersion >= 6) expected.Add(nameof(OnsetDateInterpretedFromCaptureContext));
             var names = document.RootElement.EnumerateObject().Select(property => property.Name).ToArray();
             if (names.Length != expected.Count || names.Distinct(StringComparer.Ordinal).Count() != names.Length ||
                 names.Any(name => !expected.Contains(name)))
@@ -123,6 +125,7 @@ public sealed class PublicReportDraft : IValidatableObject
     public string? OnsetTime { get; set; }
     public string? OnsetOffset { get; set; }
     public string? OnsetZoneId { get; set; }
+    public bool OnsetDateInterpretedFromCaptureContext { get; set; }
     public DateTimeOffset? CapturedAt { get; set; }
     public bool LocationUnknown { get; set; } = true;
     public string? CountryCode { get; set; }
@@ -220,7 +223,7 @@ public sealed class PublicReportDraft : IValidatableObject
             OnsetTime = localOnset.Time,
             OnsetOffset = localOnset.Offset,
             OnsetZoneId = onset.ZoneId,
-            CapturedAt = submission.CapturedAt.Value,
+            CapturedAt = ToLocalCaptureTime(submission.CapturedAt),
             LocationUnknown = string.IsNullOrWhiteSpace(location.CountryCode) &&
                               location.Region.Presence != PresenceState.Known &&
                               location.Area.Presence != PresenceState.Known &&
@@ -470,6 +473,17 @@ public sealed class PublicReportDraft : IValidatableObject
 
         var date = occurrence.LocalDate ?? occurrence.RangeStart;
         return (date?.ToDateTime(TimeOnly.MinValue), null, occurrence.OriginalOffset);
+    }
+
+    private static DateTimeOffset? ToLocalCaptureTime(ReportedTime capturedAt)
+    {
+        if (capturedAt.Value is not { } instant) return null;
+        var offset = TimeSpan.Zero;
+        if (!string.IsNullOrWhiteSpace(capturedAt.OriginalOffset) &&
+            TimeSpan.TryParse(capturedAt.OriginalOffset, out var parsedOffset) &&
+            parsedOffset >= TimeSpan.FromHours(-14) && parsedOffset <= TimeSpan.FromHours(14))
+            offset = parsedOffset;
+        return instant.ToOffset(offset);
     }
 
     /// <summary>Formats an offset exactly as the intake contract requires (signed ±HH:mm).</summary>

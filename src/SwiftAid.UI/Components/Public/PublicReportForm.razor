@@ -162,7 +162,7 @@
                     {
                         <div>
                             <label class="public-report__label" for="public-onset-date">Reported onset date</label>
-                            <InputDate TValue="DateTime?" id="public-onset-date" class="public-report__control" @bind-Value="_draft.OnsetDate" />
+                            <InputDate TValue="DateTime?" id="public-onset-date" class="public-report__control" @bind-Value="_draft.OnsetDate" @bind-Value:after="OnsetDateChangedAsync" />
                         </div>
                     }
                 </div>
@@ -254,7 +254,7 @@
                     <div>
                         <dt>Reported symptom or sign onset</dt>
                         <dd>@OnsetSummary</dd>
-                        <dd class="public-report__fact-source">@(_draft.OnsetPrecision == ReportedTimePrecision.Unknown ? "Not provided; remains unknown" : "From the onset details you entered")</dd>
+                        <dd class="public-report__fact-source">@OnsetProvenance</dd>
                     </div>
                     <div>
                         <dt>Reported place</dt>
@@ -508,6 +508,19 @@
         ReportedTimePrecision.DateOnly => _draft.OnsetDate?.ToString("d") ?? "Date unknown",
         _ => _draft.OnsetDate is { } date ? $"Approximately {date:d}" : "Approximately; date unknown"
     };
+
+    private string OnsetProvenance => _draft.OnsetPrecision == ReportedTimePrecision.Unknown
+        ? "Not provided; remains unknown"
+        : _draft.OnsetDateInterpretedFromCaptureContext
+            ? "Interpreted using the draft capture date and local time offset; review or correct before submitting."
+            : "From the onset details you entered";
+
+    private Task OnsetDateChangedAsync()
+    {
+        _draft.OnsetDateText = _draft.OnsetDate?.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+        _draft.OnsetDateInterpretedFromCaptureContext = false;
+        return Task.CompletedTask;
+    }
 
     private string LocationSummary
     {
