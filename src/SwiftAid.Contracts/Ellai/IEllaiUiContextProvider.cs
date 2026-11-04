@@ -39,6 +39,8 @@ public sealed record EllaiUiState(
 {
     /// <summary>Application-authored validation guidance; contains no entered field values.</summary>
     public IReadOnlyList<EllaiUiValidationIssue> ValidationIssues { get; init; } = [];
+
+    public IReadOnlyList<UiInputState> InputStates { get; init; } = [];
 }
 
 public sealed record EllaiUiValidationIssue(string InputId, string Anchor, string Message);

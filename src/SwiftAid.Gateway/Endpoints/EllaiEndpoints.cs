@@ -639,7 +639,7 @@ public static class EllaiEndpoints
             || !string.Equals(request.SessionId, sessionId, StringComparison.Ordinal)
             || !(new UiObservationReport(request.ViewInstanceId, request.ContextStamp,
                 request.Platform, request.MountedControlIds, request.ControlStates, request.CurrentNavigationId, request.CompletedControlIds)
-                { ValidationInputIds = request.ValidationInputIds }).IsValid())
+                { ValidationInputIds = request.ValidationInputIds, InputStates = request.InputStates }).IsValid())
         {
             return Task.FromResult(Results.Problem(
                 statusCode: StatusCodes.Status400BadRequest,
@@ -659,7 +659,7 @@ public static class EllaiEndpoints
                 .Where(id => !string.IsNullOrWhiteSpace(id))
                 .Select(id => id.Trim())
                 .ToList(),
-            DateTimeOffset.UtcNow, request.ControlStates, request.CurrentNavigationId, request.CompletedControlIds, request.ValidationInputIds), cancellationToken);
+            DateTimeOffset.UtcNow, request.ControlStates, request.CurrentNavigationId, request.CompletedControlIds, request.ValidationInputIds, request.InputStates), cancellationToken);
         return accepted
             ? Results.Json(true, statusCode: StatusCodes.Status200OK)
             : Results.Conflict();
@@ -853,7 +853,8 @@ public sealed record ReportUiObservationApiRequest(
     IReadOnlyList<UiControlState>? ControlStates = null,
     string? CurrentNavigationId = null,
     IReadOnlyList<string>? CompletedControlIds = null,
-    IReadOnlyList<string>? ValidationInputIds = null);
+    IReadOnlyList<string>? ValidationInputIds = null,
+    IReadOnlyList<UiInputState>? InputStates = null);
 
 /// <summary>Review registration for a validated pending plan: binds the
 /// dialog instance to one server-tracked review (duplicate ids focus it).

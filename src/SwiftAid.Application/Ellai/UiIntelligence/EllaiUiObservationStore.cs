@@ -14,7 +14,8 @@ public sealed record StoredUiObservationReport(
     IReadOnlyList<UiControlState>? ControlStates = null,
     string? CurrentNavigationId = null,
     IReadOnlyList<string>? CompletedControlIds = null,
-    IReadOnlyList<string>? ValidationInputIds = null);
+    IReadOnlyList<string>? ValidationInputIds = null,
+    IReadOnlyList<UiInputState>? InputStates = null);
 
 public interface IEllaiUiObservationStore
 {
@@ -43,7 +44,7 @@ public sealed class InMemoryEllaiUiObservationStore : IEllaiUiObservationStore
         ct.ThrowIfCancellationRequested();
         if (!(new UiObservationReport(report.ViewInstanceId, report.ContextStamp, report.Platform,
                 report.MountedControlIds, report.ControlStates, report.CurrentNavigationId, report.CompletedControlIds)
-                { ValidationInputIds = report.ValidationInputIds }).IsValid())
+                { ValidationInputIds = report.ValidationInputIds, InputStates = report.InputStates }).IsValid())
             throw new ArgumentException("Invalid UI observation report.", nameof(report));
         var cleaned = report.MountedControlIds
             .Where(id => !string.IsNullOrWhiteSpace(id))
@@ -64,7 +65,8 @@ public sealed class InMemoryEllaiUiObservationStore : IEllaiUiObservationStore
                 MountedControlIds = cleaned.AsReadOnly(),
                 ControlStates = report.ControlStates?.ToList().AsReadOnly(),
                 CompletedControlIds = report.CompletedControlIds?.ToList().AsReadOnly(),
-                ValidationInputIds = report.ValidationInputIds?.ToList().AsReadOnly()
+                ValidationInputIds = report.ValidationInputIds?.ToList().AsReadOnly(),
+                InputStates = report.InputStates?.ToList().AsReadOnly()
             };
         }
 

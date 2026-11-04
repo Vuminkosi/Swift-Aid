@@ -220,6 +220,32 @@ public sealed class EllaiUiToolTests
     }
 
     [Fact]
+    public async Task ObserveFiltersInputStatesByDescriptorVisibilityAndFreshness()
+    {
+        var registry = SeededRegistry();
+        EllaiReportGuidanceDescriptors.RegisterAll(registry);
+        var store = new InMemoryEllaiUiObservationStore();
+        await store.RecordAsync(new StoredUiObservationReport("session-1", "view-9", "ctx-9", "web",
+            ["report.narrative", "report.time-location"], DateTimeOffset.UtcNow,
+            [new("report.narrative", UiObservationState.Ready), new("report.time-location", UiObservationState.Hidden)],
+            InputStates: [new("report.narrative", "report.original-statement", UiInputPresence.Entered),
+                new("report.narrative", "report.forged", UiInputPresence.Entered),
+                new("report.time-location", "report.occurrence-date", UiInputPresence.Invalid)]), default);
+        var broker = GrantedBroker(registry, store);
+        var context = Context with { FeatureId = "public.product-help", ResourceId = null };
+        var result = await broker.InvokeAsync(context, new(EllaiToolNames.UiObserve,
+            Args(("controls", "report.narrative,report.time-location"), ("view", "view-9"))), default);
+
+        Assert.Contains("input report.original-statement: Entered", result.ResultSummary);
+        Assert.Contains("does not prove a draft was saved or submitted", result.ResultSummary);
+        Assert.DoesNotContain("report.forged", result.ResultSummary);
+        Assert.DoesNotContain("input report.occurrence-date", result.ResultSummary);
+        var stale = await broker.InvokeAsync(context, new(EllaiToolNames.UiObserve,
+            Args(("controls", "report.narrative"), ("view", "different-view"))), default);
+        Assert.DoesNotContain("input report.original-statement", stale.ResultSummary);
+    }
+
+    [Fact]
     public async Task ObserveNotesViewMismatchHonestly()
     {
         var store = new InMemoryEllaiUiObservationStore();

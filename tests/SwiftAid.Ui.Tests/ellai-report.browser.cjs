@@ -43,6 +43,8 @@ const { chromium } = require(process.env.SWIFTAID_PLAYWRIGHT_PACKAGE || 'playwri
             await page.getByRole('radio', { name: 'Human health — a person or people' }).check();
             await page.getByRole('button', { name: 'Continue to details', exact: true }).click();
             await accepted('report.subject');
+            await page.waitForFunction(() => window.fixtureObservations.collect().inputStates?.some(input =>
+                input.inputId === 'report.original-statement' && input.presence === 0));
             assert.equal(await page.locator('[data-ellai-control="report.narrative"]').getByRole('textbox').count(), 1,
                 'Narrative guidance must highlight its editable control');
             await page.getByRole('button', { name: 'Review report', exact: true }).click();
@@ -62,6 +64,10 @@ const { chromium } = require(process.env.SWIFTAID_PLAYWRIGHT_PACKAGE || 'playwri
 
             await page.getByLabel('Describe what happened').fill('SYNTHETIC-PRIVATE observed concern for fixture only.');
             await page.getByLabel('Describe what happened').press('Tab');
+            await page.waitForFunction(() => window.fixtureObservations.collect().inputStates?.some(input =>
+                input.inputId === 'report.original-statement' && input.presence === 1));
+            assert(!JSON.stringify(await collect()).includes('SYNTHETIC-PRIVATE'));
+            assert.deepEqual(await page.evaluate(() => window.fixtureObservations.collect(['cases.filter']).inputStates), []);
             await page.waitForFunction(() => window.fixtureObservations.collect().validationInputIds?.[0] === 'report.occurrence-date');
             await page.getByLabel('Reported date').fill('2026-10-01');
             await page.getByLabel('Reported date').press('Tab');

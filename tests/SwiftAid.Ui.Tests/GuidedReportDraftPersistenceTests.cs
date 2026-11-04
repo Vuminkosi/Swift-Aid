@@ -3,6 +3,7 @@ using System.Reflection;
 using Microsoft.AspNetCore.Components;
 using SwiftAid.Contracts.Geography;
 using SwiftAid.Contracts.Intake;
+using SwiftAid.Contracts.Ellai;
 using SwiftAid.UI.Components.Public;
 using SwiftAid.UI.Components.Public.GuidedReportStepper;
 
@@ -10,6 +11,26 @@ namespace SwiftAid.Ui.Tests;
 
 public sealed partial class GuidedReportDraftPersistenceTests
 {
+    [Fact]
+    public async Task CurrentInputStatesAreValueFreeAndIncludeInvalidPartialDates()
+    {
+        var draft = CreateDraft();
+        draft.Narrative = "SYNTHETIC PRIVATE report text";
+        draft.OccurrencePrecision = ReportedTimePrecision.Exact;
+        draft.OccurrenceDateText = "2026-1";
+        var component = CreateStepper(draft, _ => Task.CompletedTask);
+        component.Countries = [new("SZ", "Eswatini")];
+        component.CountryCatalogueVersion = "test-v1";
+        component.CountryCatalogueIsCurrent = true;
+        await (Task)Invoke(component, "ContinueFromTypeAsync")!;
+
+        var state = component.GetState();
+        Assert.Contains(state.InputStates, input => input.InputId == "report.original-statement" && input.Presence == UiInputPresence.Entered);
+        Assert.Contains(state.InputStates, input => input.InputId == "report.occurrence-date" && input.Presence == UiInputPresence.Invalid);
+        Assert.DoesNotContain("SYNTHETIC PRIVATE", System.Text.Json.JsonSerializer.Serialize(state));
+        draft.OccurrencePrecision = ReportedTimePrecision.Unknown;
+        Assert.DoesNotContain(component.GetState().InputStates, input => input.InputId == "report.occurrence-date");
+    }
     [Fact]
     public void ReviewSummaryOmitsPlaceNamesMarkedUnknown()
     {

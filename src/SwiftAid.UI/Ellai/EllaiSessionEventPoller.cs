@@ -877,7 +877,7 @@ public sealed class EllaiReviewHttpClient(HttpClient http, bool useGuestRoutes =
         {
             using var response = await PostAsJsonAsync(
                 $"{SessionRoute(sessionId)}/ui-observations",
-                new { sessionId, report.ViewInstanceId, report.ContextStamp, report.Platform, report.MountedControlIds, report.ControlStates, report.CurrentNavigationId, report.CompletedControlIds, report.ValidationInputIds },
+                new { sessionId, report.ViewInstanceId, report.ContextStamp, report.Platform, report.MountedControlIds, report.ControlStates, report.CurrentNavigationId, report.CompletedControlIds, report.ValidationInputIds, report.InputStates },
                 cancellationToken).ConfigureAwait(false);
             return response.IsSuccessStatusCode;
         }

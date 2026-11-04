@@ -27,8 +27,52 @@ public partial class GuidedReportStepper
          new("report.submit", _step != 2 ? UiObservationState.Unmounted :
              CanSubmit && !_submitting ? UiObservationState.Ready : UiObservationState.Disabled)])
     {
-        ValidationIssues = GetValidationGuidance()
+        ValidationIssues = GetValidationGuidance(),
+        InputStates = GetInputStates()
     };
+
+    private IReadOnlyList<UiInputState> GetInputStates()
+    {
+        var states = new List<UiInputState>();
+        void Add(string control, string input, UiInputPresence presence) => states.Add(new(control, input, presence));
+        static UiInputPresence TextState(string? value, bool valid) => string.IsNullOrWhiteSpace(value)
+            ? UiInputPresence.NotProvided : valid ? UiInputPresence.Entered : UiInputPresence.Invalid;
+
+        if (_step == 0)
+        {
+            Add("report.subject", "report.subject-kind", _subjectCategory is null ? UiInputPresence.NotProvided : UiInputPresence.Entered);
+            if (_subjectCategory == ReportSubjectCategory.AnimalHealth)
+                Add("report.subject", "report.animal-scope", HasCompleteSubject ? UiInputPresence.Entered : UiInputPresence.NotProvided);
+        }
+        else if (_step == 1)
+        {
+            Add("report.narrative", "report.original-statement", TextState(Draft.Narrative, (Draft.Narrative?.Length ?? 0) <= MaximumNarrativeCharacters));
+            var observations = Draft.GetObservations();
+            Add("report.narrative", "report.other-observations", observations.Count == 0 ? UiInputPresence.NotProvided :
+                observations.Count <= MaximumObservations && observations.All(value => value.Length <= MaximumObservationCharacters) &&
+                (Draft.ObservationsText?.Length ?? 0) <= 20000 ? UiInputPresence.Entered : UiInputPresence.Invalid);
+            if (HasCountryCatalogue)
+            {
+                Add("report.time-location", "report.time-precision", Draft.OccurrencePrecision == ReportedTimePrecision.Unknown ? UiInputPresence.Unknown : UiInputPresence.Entered);
+                if (Draft.OccurrencePrecision != ReportedTimePrecision.Unknown)
+                    Add("report.time-location", "report.occurrence-date", Draft.OccurrenceDate.HasValue ? UiInputPresence.Entered : TextState(Draft.OccurrenceDateText, false));
+                if (Draft.OccurrencePrecision == ReportedTimePrecision.Exact)
+                {
+                    Add("report.time-location", "report.occurrence-time", TextState(Draft.OccurrenceTime, TimeOnly.TryParse(Draft.OccurrenceTime, out _)));
+                    Add("report.time-location", "report.utc-offset", TextState(Draft.OccurrenceOffset, HasValidOccurrenceOffset()));
+                }
+                Add("report.time-location", "report.occurrence-country", TextState(Draft.CountryCode, CanConfirmCountry));
+            }
+        }
+        else if (_step == 2 && HasProcessingPolicy)
+        {
+            Add("report.confirmations", "report.review-confirmed", Draft.ReportReviewConfirmed ? UiInputPresence.Confirmed : UiInputPresence.NotProvided);
+            if (CanConfirmCountry)
+                Add("report.confirmations", "report.country-confirmed", Draft.CountryConfirmed ? UiInputPresence.Confirmed : UiInputPresence.NotProvided);
+            Add("report.confirmations", "report.processing-confirmed", Draft.ProcessingConfirmed ? UiInputPresence.Confirmed : UiInputPresence.NotProvided);
+        }
+        return states;
+    }
 
     private IReadOnlyList<EllaiUiValidationIssue> GetValidationGuidance()
     {

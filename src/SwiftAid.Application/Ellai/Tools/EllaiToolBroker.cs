@@ -1093,6 +1093,10 @@ public sealed class EllaiToolBroker
         var stale = age < TimeSpan.Zero || age > TimeSpan.FromSeconds(45) ||
             !string.Equals(report.ViewInstanceId, view.Trim(), StringComparison.Ordinal);
         var ordered = requested.Select(id => stale ? byId[id] with { State = UiObservationState.Stale } : byId[id]).ToList();
+        var inputLines = stale ? [] : (report.InputStates ?? [])
+            .Where(input => requested.Contains(input.ControlId) && byId[input.ControlId].State == UiObservationState.Ready &&
+                eligible[input.ControlId].Semantics?.Inputs.Any(descriptor => descriptor.InputId == input.InputId) == true)
+            .Select(input => $"input {input.InputId}: {input.Presence}").ToList();
         var lines = ordered.Select(o =>
             $"control {o.ControlId} · {o.State} · view {o.ViewInstanceId} · {o.Platform}" +
             $"; client form validation accepted {!stale && eligible[o.ControlId].ProofPolicyId == "proof-ui-validated" && report.CompletedControlIds?.Contains(o.ControlId) == true}");
@@ -1105,7 +1109,8 @@ public sealed class EllaiToolBroker
                 ? string.Empty
                 : $" Requested view '{view.Trim()}' differs from the latest report.");
         return new EllaiToolResult(request.ToolName, true, null, evidence,
-            header + "\n" + string.Join("\n", lines),
+            header + "\n" + string.Join("\n", lines) +
+            (inputLines.Count == 0 ? string.Empty : "\nInput state is client-reported and does not prove a draft was saved or submitted.\n" + string.Join("\n", inputLines)),
             ordered.Count, false, EllaiToolReasonCodes.Ok);
     }
 
