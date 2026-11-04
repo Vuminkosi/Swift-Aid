@@ -23,6 +23,7 @@ public sealed class EllaiReasoningRegistrationTests
         services.AddSingleton<IEllaiUsageStore, InMemoryEllaiUsageStore>();
         services.AddEllaiReasoningExecutor(new EllaiOptions { Enabled = true, ApiKey = "fixture", ApiUrl = "https://fixture.invalid", ReasoningModel = "fixture" }, selection);
         using var provider = services.BuildServiceProvider();
+        Assert.IsType<EllaiStructuredFrameworkAgentFactory>(provider.GetRequiredService<IEllaiFrameworkAgentFactory>());
         using var scope = provider.CreateScope();
         Assert.IsType<EllaiFrameworkExecutor>(scope.ServiceProvider.GetRequiredService<IEllaiReasoningExecutor>());
     }
@@ -127,6 +128,7 @@ public sealed class EllaiReasoningRegistrationTests
         using var provider = services.BuildServiceProvider();
         using var scope = provider.CreateScope();
         Assert.IsType<EllaiFrameworkExecutor>(scope.ServiceProvider.GetRequiredService<IEllaiReasoningExecutor>());
+        Assert.IsType<EllaiFrameworkAgentFactory>(provider.GetRequiredService<IEllaiFrameworkAgentFactory>());
     }
 
     [Fact]
@@ -142,6 +144,7 @@ public sealed class EllaiReasoningRegistrationTests
         using var provider = services.BuildServiceProvider();
         using var scope = provider.CreateScope();
         Assert.IsType<EllaiFrameworkExecutor>(scope.ServiceProvider.GetRequiredService<IEllaiReasoningExecutor>());
+        Assert.IsType<EllaiFrameworkAgentFactory>(provider.GetRequiredService<IEllaiFrameworkAgentFactory>());
     }
 
     [Fact]

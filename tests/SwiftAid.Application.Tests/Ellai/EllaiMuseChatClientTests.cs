@@ -79,6 +79,41 @@ public sealed class EllaiMuseChatClientTests
         Assert.Equal("Done.", string.Concat(chunks));
     }
 
+    [Fact]
+    public async Task StructuredFrameworkSendsDecisionSchemaWithNativeToolsOnEveryCall()
+    {
+        using var handler = new FragmentedToolHandler();
+        using var http = new HttpClient(handler);
+        using var client = EllaiMuseChatClientFactory.Create(new EllaiOptions
+        {
+            Enabled = true, ApiUrl = "https://fixture.invalid/v1", ApiKey = "fixture-key", ReasoningModel = "fixture-model"
+        }, http);
+        var agent = new EllaiFrameworkAgent(client, new EllaiStructuredFrameworkAgentFactory());
+        var context = new EllaiToolContext("session", "epoch", "cases", null, 4, true,
+            AllowedTools: new HashSet<string> { EllaiToolNames.Now });
+        var answer = await agent.RunAsync(context, "Synthetic policy", [new ChatMessage(ChatRole.User, "time?")], 200,
+            _ => Task.FromResult(true), (_, request, _) => Task.FromResult(
+                new EllaiToolResult(request.ToolName, true, null, [], "Synthetic time", 1, false)),
+            new EllaiFrameworkUsage("session", new EllaiUsageLedger(), new InMemoryEllaiUsageStore()), default,
+            (_, _) => ValueTask.CompletedTask);
+
+        Assert.Equal("Done.", answer?.DisplayText);
+        Assert.Equal(2, handler.Bodies.Count);
+        foreach (var body in handler.Bodies)
+        {
+            using var document = JsonDocument.Parse(body);
+            var format = document.RootElement.GetProperty("response_format");
+            Assert.Equal("json_schema", format.GetProperty("type").GetString());
+            var schema = format.GetProperty("json_schema").GetProperty("schema");
+            Assert.True(schema.GetProperty("properties").TryGetProperty("final_decision", out _));
+            Assert.True(schema.GetProperty("properties").TryGetProperty("stream_segments", out _));
+            Assert.Contains(schema.GetProperty("required").EnumerateArray(), item => item.GetString() == "stream_segments");
+            Assert.Contains("null", schema.GetProperty("properties").GetProperty("stream_segments").GetRawText(), StringComparison.Ordinal);
+        }
+        using var first = JsonDocument.Parse(handler.Bodies[0]);
+        Assert.Equal("ellai_now", first.RootElement.GetProperty("tools")[0].GetProperty("function").GetProperty("name").GetString());
+    }
+
     private sealed class FragmentedToolHandler(bool splitName = false) : HttpMessageHandler
     {
         public int Requests { get; private set; }

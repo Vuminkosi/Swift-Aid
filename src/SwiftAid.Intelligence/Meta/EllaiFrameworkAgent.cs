@@ -123,7 +123,7 @@ public sealed class EllaiFrameworkAgent
             instructions += "\nFor a plain Answer with no UI action or question, put stream_segments first in the final JSON envelope. " +
                 "Each entry is an object with text and claims, where claims use the same GroundedClaim schema and exact evidence as final_decision. " +
                 "Each text is a complete independently supported sentence. The final_decision displayText and spokenText must both equal " +
-                "the segment texts joined by one space. For other decision kinds omit stream_segments. " +
+                "the segment texts joined by one space. For other decision kinds use null or omit stream_segments. " +
                 "Example shape: {\"stream_segments\":[{\"text\":\"Hello.\",\"claims\":[]}],\"final_decision\":{...}}.";
         AIAgent agent = _agentFactory.Create(functionClient, new ChatClientAgentOptions
         {
@@ -543,6 +543,37 @@ public sealed class EllaiFrameworkAgentFactory : IEllaiFrameworkAgentFactory
         ArgumentNullException.ThrowIfNull(client);
         ArgumentNullException.ThrowIfNull(options);
         return client.AsAIAgent(options);
+    }
+}
+
+/// <summary>Requests the final decision schema on the Meta-hosted route while retaining native tools.</summary>
+public sealed class EllaiStructuredFrameworkAgentFactory : IEllaiFrameworkAgentFactory
+{
+    private sealed record StreamSegment(string Text, IReadOnlyList<GroundedClaim> Claims);
+    private sealed record DecisionEnvelope(
+        [property: System.Text.Json.Serialization.JsonPropertyName("stream_segments")] IReadOnlyList<StreamSegment>? StreamSegments,
+        [property: System.Text.Json.Serialization.JsonPropertyName("final_decision")] EllaiDecision FinalDecision);
+
+    private static readonly System.Text.Json.JsonElement Schema = CreateSchema();
+
+    private static System.Text.Json.JsonElement CreateSchema()
+    {
+        var json = new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web)
+        {
+            TypeInfoResolver = new System.Text.Json.Serialization.Metadata.DefaultJsonTypeInfoResolver(),
+            Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter(allowIntegerValues: false) }
+        };
+        var schema = System.Text.Json.Schema.JsonSchemaExporter.GetJsonSchemaAsNode(json, typeof(DecisionEnvelope));
+        return System.Text.Json.JsonSerializer.SerializeToElement(schema);
+    }
+
+    public AIAgent Create(IChatClient client, ChatClientAgentOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        options.ChatOptions ??= new ChatOptions();
+        options.ChatOptions.Instructions += "\nThe response schema requires stream_segments; use null when no verified streaming segments are supplied.";
+        options.ChatOptions.ResponseFormat = ChatResponseFormat.ForJsonSchema(Schema, "ellai_decision");
+        return EllaiFrameworkAgentFactory.Instance.Create(client, options);
     }
 }
 

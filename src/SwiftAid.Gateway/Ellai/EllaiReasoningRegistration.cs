@@ -50,7 +50,10 @@ public static class EllaiReasoningRegistration
             throw new MetaConfigurationException("The Ellai framework path requires a configured Meta reasoning route.");
         else
             services.AddKeyedSingleton<IChatClient>(FrameworkClientKey, (_, _) => EllaiMuseChatClientFactory.Create(options));
-        services.AddSingleton<IEllaiFrameworkAgentFactory, EllaiFrameworkAgentFactory>();
+        if (options.UsesOllamaBackend || options.UsesServerlessBackend)
+            services.AddSingleton<IEllaiFrameworkAgentFactory, EllaiFrameworkAgentFactory>();
+        else
+            services.AddSingleton<IEllaiFrameworkAgentFactory, EllaiStructuredFrameworkAgentFactory>();
         services.AddScoped<IEllaiReasoningExecutor>(sp => new EllaiFrameworkExecutor(
             sp.GetRequiredKeyedService<IChatClient>(FrameworkClientKey), sp.GetRequiredService<EllaiPromptBuilder>(),
             sp.GetRequiredService<EllaiToolBroker>(), sp.GetRequiredService<EllaiUsageLedger>(),
