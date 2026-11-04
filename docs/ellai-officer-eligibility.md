@@ -2,7 +2,7 @@
 
 The officer lookup is disabled by default (`Ellai:Operational:OfficerDirectory:Enabled`).
 It has an authenticated case-scoped candidate endpoint and a separately gated
-designation-change endpoint, but no model tool or assignment action. A designation is a controlled organizational role record,
+designation-change endpoint, but no model tool or public assignment action. A designation is a controlled organizational role record,
 not evidence of professional licensure. The registry is initially empty and its
 versioned rows are append-only; a later version supersedes an earlier one. The
 migration refuses rollback when records exist.
@@ -37,12 +37,22 @@ approval was recorded; execution must separately check expiry, current authority
 case version and officer eligibility. The service has no public or model endpoint;
 any future entry point must establish explicit human review and bind the exact
 reviewed parameters before calling it.
+The separately default-off `Ellai:Operational:OfficerDirectory:EscalationAssignmentsEnabled`
+gate enables internal execution. It requires the original approver's current
+authority and access epoch, an unexpired exact approval, the original case
+version and raised escalation, and an eligible officer under the case write lease.
+It atomically appends a normal case follow-up event and receipt, a follow-up
+projection, outbox entry, and an immutable link to the approved escalation and
+acknowledgment deadline. The existing case owner is unchanged. A deferred check
+revalidates approval and designation expiry at commit. Execution does not notify
+anyone. There is no public or model execution endpoint, no officer acknowledgment
+linkage, reassignment flow, or scheduled supervisor escalation yet; the case
+timeline does not yet present the new escalation-to-follow-up link.
 Availability, workload and category-specific policy are not currently represented,
 and must not be inferred from this lookup. Controlled designation provisioning,
 operator authorization, data stewardship and production database grants remain
 to be completed and independently reviewed before this directory is enabled
-for operational use. Threshold policies and officer assignment are not supplied
-by this slice.
+for operational use. Threshold policies are not supplied by this slice.
 
 An internal designation service additionally requires `Ellai:Operational:OfficerDirectory:AdministrationEnabled`
 and the directory gate, both off by default. It requires a current, separately

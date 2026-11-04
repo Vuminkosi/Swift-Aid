@@ -27,6 +27,7 @@ public sealed class HealthOfficerDirectoryOptions
     public bool Enabled { get; set; }
     public bool AdministrationEnabled { get; set; }
     public bool EscalationApprovalsEnabled { get; set; }
+    public bool EscalationAssignmentsEnabled { get; set; }
 }
 
 public sealed class EligibleHealthOfficerQuery(IEligibleHealthOfficerStore store, ICaseAccessPolicy policy,
