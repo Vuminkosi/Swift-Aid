@@ -106,6 +106,12 @@ builder.Services.AddScoped<SwiftAid.Contracts.Cases.ICaseTimelineClient, SwiftAi
 builder.Services.AddScoped<SwiftAid.Contracts.Cases.IFollowUpRecommendationReviewClient, SwiftAid.Gateway.Cases.FollowUpReviewGatewayClient>();
 builder.Services.AddScoped<SwiftAid.Contracts.Cases.IEligibleHealthOfficerClient, SwiftAid.Gateway.Cases.EligibleHealthOfficerGatewayClient>();
 builder.Services.AddScoped<SwiftAid.Contracts.Cases.IHealthOfficerAdministrationClient, SwiftAid.Gateway.Cases.HealthOfficerAdministrationGatewayClient>();
+if (builder.Configuration.GetValue<bool>("Ellai:Operational:OfficerDirectory:Enabled") &&
+    builder.Configuration.GetValue<bool>("Ellai:Operational:OfficerDirectory:EscalationApprovalsEnabled") &&
+    builder.Configuration.GetValue<bool>("Ellai:Operational:OfficerDirectory:EscalationAssignmentsEnabled"))
+{
+    builder.Services.AddScoped<SwiftAid.Contracts.Cases.IOfficerEscalationReviewClient, SwiftAid.Gateway.Cases.OfficerEscalationReviewGatewayClient>();
+}
 builder.Services.AddScoped<SwiftAid.Contracts.Cases.ICaseCollaboratorCandidatesClient, SwiftAid.Gateway.Cases.CaseCollaboratorCandidatesGatewayClient>();
 builder.Services.AddScoped<SwiftAid.Contracts.Cases.ICaseQueueClient, SwiftAid.Gateway.Cases.CaseQueueGatewayClient>();
 builder.Services.AddScoped<SwiftAid.Contracts.Cases.IMonitoringQueueClient, SwiftAid.Gateway.Cases.MonitoringQueueGatewayClient>();
