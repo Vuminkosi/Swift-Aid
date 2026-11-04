@@ -41,9 +41,15 @@ public sealed class WebPublicIntakeSubmissionClient(WebGuestIntakeService intake
                     "public-intake-submission", "Check the highlighted fields and try again."),
                 "Check the highlighted fields and try again.");
         }
+        catch (IntakeSubmissionException exception) when (exception.Code == IntakeErrorCode.SubmissionConflict)
+        {
+            return new UiCapabilityResult<IntakeSubmissionOutcome>(
+                UiCapabilityResultCode.Conflict, null,
+                UiCapabilityResults.UnavailableMetadata("public-intake-submission", "The report identifier was already used with different details."),
+                "The report identifier was already used with different details.");
+        }
         catch (IntakeSubmissionException exception) when (exception.Code is IntakeErrorCode.RateLimited
-            or IntakeErrorCode.PayloadTooLarge
-            or IntakeErrorCode.SubmissionConflict)
+            or IntakeErrorCode.PayloadTooLarge)
         {
             return new UiCapabilityResult<IntakeSubmissionOutcome>(
                 UiCapabilityResultCode.Retryable,

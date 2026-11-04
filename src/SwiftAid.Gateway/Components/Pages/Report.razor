@@ -39,6 +39,7 @@
 
 @code {
     private IntakeReceipt? _receipt;
+    private readonly Guid _submissionId = Guid.NewGuid();
     private string? _sendError { get; set; }
     private bool _sending;
     private IReadOnlyList<PublicCountryOption> _countries = [];
@@ -183,12 +184,13 @@
         _sending = true;
         try
         {
-            var result = await IntakeSubmissionClient.SubmitAsync(submission);
+            var result = await IntakeSubmissionClient.SubmitAsync(submission with { ClientSubmissionId = _submissionId });
             if (result.Code == UiCapabilityResultCode.Success && result.Value is { } outcome)
             {
                 if (outcome.Kind == IntakeSubmissionOutcomeKind.Received)
                 {
-                    if (outcome.Receipt is { } receipt)
+                    if (outcome.Receipt is { } receipt && receipt.ReceiptId != Guid.Empty &&
+                        receipt.ClientSubmissionId == _submissionId)
                     {
                         _receipt = receipt;
                         _sendError = null;
@@ -197,7 +199,7 @@
                     }
 
                     _receipt = null;
-                    _sendError = "The intake service did not return a receipt, so receipt confirmation is unavailable.";
+                    _sendError = "We could not verify a receipt for this report. Your entries remain on this screen.";
                     _sendErrorIsError = true;
                     return;
                 }
@@ -213,9 +215,9 @@
             _sendError = result.Code switch
             {
                 UiCapabilityResultCode.InvalidRequest => "Your report needs review before it can be sent. Check the highlighted entries and try again.",
-                UiCapabilityResultCode.Conflict => "This report could not be received because its current state changed. Your entries remain on this screen.",
+                UiCapabilityResultCode.Conflict => "An earlier attempt may have been received with different details. Your entries remain here; check its status before sending a changed report.",
                 UiCapabilityResultCode.Retryable => "The report service is temporarily unavailable. Your entries remain on this screen — try again shortly.",
-                UiCapabilityResultCode.Cancelled => "The report was not sent. Your entries remain on this screen.",
+                UiCapabilityResultCode.Cancelled => "We could not confirm whether the report was received. Your entries remain on this screen.",
                 UiCapabilityResultCode.Denied => "Report submission is unavailable for this request. Your entries remain on this screen.",
                 UiCapabilityResultCode.Success => "We couldn’t confirm your report. Check its status before trying again.",
                 _ => "Report submission is unavailable in this environment. Your entries remain on this screen."
@@ -224,13 +226,13 @@
         catch (OperationCanceledException)
         {
             _receipt = null;
-            _sendError = "The report request was cancelled. Your entries remain on this screen.";
+            _sendError = "The request was interrupted, so we could not confirm whether the report was received. Your entries remain on this screen.";
             _sendErrorIsError = true;
         }
         catch
         {
             _receipt = null;
-            _sendError = "Your report could not be sent. Your entries remain on this screen.";
+            _sendError = "We could not confirm whether the report was received. Your entries remain on this screen.";
             _sendErrorIsError = true;
         }
         finally

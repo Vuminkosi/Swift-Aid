@@ -3,11 +3,25 @@ using Microsoft.Extensions.DependencyInjection;
 using SwiftAid.Contracts.Geography;
 using SwiftAid.Contracts.Intake;
 using SwiftAid.Gateway.Intake;
+using SwiftAid.Gateway.Presentation;
+using SwiftAid.Client.Presentation;
 
 namespace SwiftAid.Integration.Tests;
 
 public sealed class WebGuestIntakeServiceTests
 {
+    [Fact]
+    public async Task ConflictingSubmissionIsNotReportedAsTransientFailure()
+    {
+        var intake = new FakeIntakeService { Submit = (_, _) => throw new IntakeSubmissionException(IntakeErrorCode.SubmissionConflict) };
+        var client = new WebPublicIntakeSubmissionClient(new WebGuestIntakeService(new FakeSessionEndpointService(), intake));
+
+        var result = await client.SubmitAsync(GuestSubmissionSamples.Human());
+
+        Assert.Equal(UiCapabilityResultCode.Conflict, result.Code);
+        Assert.Null(result.Value);
+        Assert.Equal(1, intake.SubmitCalls);
+    }
     private sealed class ScopedLifetime : IDisposable
     {
         public bool Disposed { get; private set; }
