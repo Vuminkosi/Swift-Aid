@@ -4,7 +4,7 @@ namespace SwiftAid.Application.Ellai.Specialists;
 
 /// <summary>A server-owned profile. A profile does not itself grant access to any tool.</summary>
 public sealed record EllaiSpecialistProfile(string AgentId, int Version, string FeatureFlag,
-    IReadOnlySet<string> ToolAllowlist, int MaxToolCalls = 2, int MaxModelCalls = 3);
+    IReadOnlySet<string> ToolAllowlist, int MaxToolCalls = 2, int MaxModelCalls = 3, int TimeoutSeconds = 90);
 
 /// <summary>Initial registry for bounded, read-only specialist work.</summary>
 public static class EllaiSpecialistRegistry

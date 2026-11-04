@@ -51,12 +51,12 @@ public sealed class EllaiFrameworkAgent
         LastFrameworkSessionJson = null;
         LastRepairUsed = false;
         LastModelCallCount = 0;
-        var staleCaseDelegation = 0;
+        var invalidDelegation = 0;
         async Task<bool> Current(CancellationToken token)
         {
             try
             {
-                var allowed = Volatile.Read(ref staleCaseDelegation) == 0 && await isCurrent(token).ConfigureAwait(false);
+                var allowed = Volatile.Read(ref invalidDelegation) == 0 && await isCurrent(token).ConfigureAwait(false);
                 token.ThrowIfCancellationRequested();
                 return allowed;
             }
@@ -138,16 +138,21 @@ public sealed class EllaiFrameworkAgent
                 token.ThrowIfCancellationRequested();
                 if (Interlocked.Increment(ref delegationCount) != 1)
                     return "Knowledge delegation limit reached.";
+                using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
+                deadline.CancelAfter(TimeSpan.FromSeconds(SwiftAid.Application.Ellai.Specialists.EllaiSpecialistRegistry.TryGet(
+                    SwiftAid.Application.Ellai.Specialists.EllaiSpecialistRegistry.Knowledge, out var profile) ? profile.TimeoutSeconds : 1));
                 try
                 {
                     var result = await new EllaiKnowledgeSpecialist(_client, _agentFactory).RunAsync(task,
-                        instructions, true, context, usage, Current, InvokeGuardedTool, token,
+                        instructions, true, context, usage, Current, InvokeGuardedTool, deadline.Token,
                         calls => Interlocked.Add(ref delegatedModelCalls, calls)).ConfigureAwait(false);
                     if (result.Outcome != EllaiSpecialistOutcome.Completed || result.Decision is null)
                         return "Knowledge specialist could not verify an answer.";
                     var json = System.Text.Json.JsonSerializer.Serialize(result.Decision);
                     return json.Length <= 12000 ? json : "Knowledge specialist result exceeded its limit.";
                 }
+                catch (OperationCanceledException) when (!token.IsCancellationRequested && deadline.IsCancellationRequested)
+                { Interlocked.Exchange(ref invalidDelegation, 1); return "Knowledge specialist timed out."; }
                 catch (EllaiFrameworkFailureException)
                 {
                     return "Knowledge specialist could not complete the request.";
@@ -166,14 +171,17 @@ public sealed class EllaiFrameworkAgent
                 token.ThrowIfCancellationRequested();
                 if (Interlocked.Increment(ref delegationCount) != 1)
                     return "Case delegation limit reached.";
+                using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
+                deadline.CancelAfter(TimeSpan.FromSeconds(SwiftAid.Application.Ellai.Specialists.EllaiSpecialistRegistry.TryGet(
+                    SwiftAid.Application.Ellai.Specialists.EllaiSpecialistRegistry.Case, out var profile) ? profile.TimeoutSeconds : 1));
                 try
                 {
                     var result = await new EllaiCaseSpecialist(_client, _agentFactory).RunAsync(task,
-                        instructions, true, context, usage, Current, InvokeGuardedTool, token,
+                        instructions, true, context, usage, Current, InvokeGuardedTool, deadline.Token,
                         calls => Interlocked.Add(ref delegatedModelCalls, calls), revalidateTool ?? invoke).ConfigureAwait(false);
                     if (result.Outcome == EllaiSpecialistOutcome.Stale)
                     {
-                        Interlocked.Exchange(ref staleCaseDelegation, 1);
+                        Interlocked.Exchange(ref invalidDelegation, 1);
                         return "Case data changed while it was being checked.";
                     }
                     if (result.Outcome != EllaiSpecialistOutcome.Completed || result.Decision is null)
@@ -181,6 +189,8 @@ public sealed class EllaiFrameworkAgent
                     var json = System.Text.Json.JsonSerializer.Serialize(result.Decision);
                     return json.Length <= 12000 ? json : "Case specialist result exceeded its limit.";
                 }
+                catch (OperationCanceledException) when (!token.IsCancellationRequested && deadline.IsCancellationRequested)
+                { Interlocked.Exchange(ref invalidDelegation, 1); return "Case specialist timed out."; }
                 catch (EllaiFrameworkFailureException error) when (error.Code != EllaiToolReasonCodes.DeniedByPolicy)
                 {
                     return "Case specialist could not complete the request.";
@@ -198,16 +208,21 @@ public sealed class EllaiFrameworkAgent
                 token.ThrowIfCancellationRequested();
                 if (Interlocked.Increment(ref delegationCount) != 1)
                     return "Analytics delegation limit reached.";
+                using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
+                deadline.CancelAfter(TimeSpan.FromSeconds(SwiftAid.Application.Ellai.Specialists.EllaiSpecialistRegistry.TryGet(
+                    SwiftAid.Application.Ellai.Specialists.EllaiSpecialistRegistry.Analytics, out var profile) ? profile.TimeoutSeconds : 1));
                 try
                 {
                     var result = await new EllaiAnalyticsSpecialist(_client, _agentFactory).RunAsync(task,
-                        instructions, true, context, usage, Current, InvokeGuardedTool, revalidateTool ?? invoke, token,
+                        instructions, true, context, usage, Current, InvokeGuardedTool, revalidateTool ?? invoke, deadline.Token,
                         calls => Interlocked.Add(ref delegatedModelCalls, calls)).ConfigureAwait(false);
                     if (result.Outcome != EllaiSpecialistOutcome.Completed || result.Decision is null)
                         return "Analytics specialist could not verify an answer.";
                     var json = System.Text.Json.JsonSerializer.Serialize(result.Decision);
                     return json.Length <= 12000 ? json : "Analytics specialist result exceeded its limit.";
                 }
+                catch (OperationCanceledException) when (!token.IsCancellationRequested && deadline.IsCancellationRequested)
+                { Interlocked.Exchange(ref invalidDelegation, 1); return "Analytics specialist timed out."; }
                 catch (EllaiFrameworkFailureException)
                 {
                     return "Analytics specialist could not complete the request.";
@@ -318,7 +333,7 @@ public sealed class EllaiFrameworkAgent
             }
         }
         finally { LastModelCallCount = guardedClient.CallSequence + Volatile.Read(ref delegatedModelCalls); }
-        if (Volatile.Read(ref staleCaseDelegation) != 0) { LastFailureCode = EllaiToolReasonCodes.DeniedByPolicy; return null; }
+        if (Volatile.Read(ref invalidDelegation) != 0) { LastFailureCode = EllaiToolReasonCodes.DeniedByPolicy; return null; }
         EllaiDecision? decision = null;
         if (guard.FailureCode is not null) { LastFailureCode = guard.FailureCode; return null; }
         while (countResult is null && emptyQueueResult is null)

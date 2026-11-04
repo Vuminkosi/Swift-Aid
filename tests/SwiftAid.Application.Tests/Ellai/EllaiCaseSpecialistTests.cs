@@ -9,6 +9,47 @@ namespace SwiftAid.Application.Tests.Ellai;
 
 public sealed class EllaiCaseSpecialistTests
 {
+    [SpecialistDeadlineFact]
+    public async Task SpecialistDeadlineCancelsProviderAndWithholdsResponse()
+    {
+        using var model = new HangingSpecialistClient();
+        var agent = new EllaiFrameworkAgent(model);
+        var error = await Assert.ThrowsAsync<EllaiFrameworkFailureException>(() => agent.RunAsync(Context(), "policy", [new ChatMessage(ChatRole.User, "history")], 512,
+            _ => Task.FromResult(true), (_, _, _) => throw new InvalidOperationException(), Usage(), default,
+            enableCaseSpecialist: true));
+        Assert.True(model.CancellationObserved);
+        Assert.Equal(EllaiToolReasonCodes.DeniedByPolicy, error.Code);
+    }
+
+    private sealed class SpecialistDeadlineFactAttribute : FactAttribute
+    {
+        public SpecialistDeadlineFactAttribute()
+        {
+            if (Environment.GetEnvironmentVariable("SWIFTAID_RUN_SPECIALIST_DEADLINE") != "1")
+                Skip = "Opt in to the 90-second specialist deadline verification.";
+        }
+    }
+
+    private sealed class HangingSpecialistClient : IChatClient
+    {
+        private int _calls;
+        public bool CancellationObserved { get; private set; }
+        public async Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null,
+            CancellationToken cancellationToken = default)
+        {
+            if (Interlocked.Increment(ref _calls) == 1)
+                return new ChatResponse(new ChatMessage(ChatRole.Assistant,
+                    [new FunctionCallContent("delegate", "ellai_delegate_case", new Dictionary<string, object?> { ["task"] = "Read case history" })]));
+            try { await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken); }
+            catch (OperationCanceledException) { CancellationObserved = true; throw; }
+            throw new InvalidOperationException();
+        }
+        public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+        public void Dispose() { }
+    }
+
     [Fact]
     public async Task SupervisorDelegationKeepsCaseScopeAndObservedEvidence()
     {
