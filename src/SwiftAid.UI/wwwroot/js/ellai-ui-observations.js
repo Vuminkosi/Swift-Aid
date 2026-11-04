@@ -4,6 +4,17 @@
 // never authorization; the Gateway filters these IDs against trusted descriptors.
 const semanticId = /^[a-z][a-z0-9.-]{0,119}$/;
 
+function isVisible(element) {
+    const style = getComputedStyle(element);
+    return element.getClientRects().length > 0 && style.visibility === "visible" &&
+        (!element.checkVisibility || element.checkVisibility({ opacityProperty: true, visibilityProperty: true })) &&
+        !element.closest('[hidden], [aria-hidden="true"], [inert]');
+}
+
+function isDisabled(element) {
+    return element.matches(':disabled') || element.closest('[disabled], [aria-disabled="true"]') !== null;
+}
+
 // Value-only snapshots, keyed by a disposable component instance token.
 // No .NET component references, callbacks, field values or labels are retained.
 const components = new Map();
@@ -50,17 +61,11 @@ export function collect(requestedControls = null) {
     // Bound the wire snapshot, retaining every duplicate for ambiguity detection.
     for (const [controlId, elements] of [...registrations.entries()].sort(([a], [b]) =>
         Number(a.startsWith('navigation.')) - Number(b.startsWith('navigation.')) || a.localeCompare(b)).slice(0, 20)) {
+        const visibleElements = elements.filter(isVisible);
         let state = 4; // UiObservationState.Ready
-        if (elements.length !== 1) state = 5; // UiObservationState.Ambiguous
-        else {
-            const element = elements[0];
-            const style = getComputedStyle(element);
-            if (!element.getClientRects().length || style.visibility !== "visible" ||
-                (element.checkVisibility && !element.checkVisibility({ opacityProperty: true, visibilityProperty: true })) ||
-                element.closest('[hidden], [aria-hidden="true"], [inert]')) state = 2; // Hidden
-            else if (element.matches(':disabled') ||
-                element.closest('[disabled], [aria-disabled="true"]')) state = 3; // Disabled
-        }
+        if (visibleElements.length > 1) state = 5; // Multiple visible targets are ambiguous.
+        else if (visibleElements.length === 0) state = 2; // Hidden duplicates do not block a visible responsive copy.
+        else if (isDisabled(visibleElements[0])) state = 3; // Disabled
         const semanticStates = [...components.values()]
             .filter(component => component.path === location.pathname)
             .flatMap(component => component.controls.filter(control => control.controlId === controlId));
