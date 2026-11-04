@@ -270,6 +270,11 @@ builder.Services.Configure<SwiftAid.Gateway.Ellai.EllaiOrganizationScheduleOptio
 builder.Services.AddScoped<SwiftAid.Infrastructure.Classification.EllaiOrganizationWork>();
 builder.Services.AddScoped<SwiftAid.Gateway.Ellai.EllaiOrganizationSweep>();
 builder.Services.AddHostedService<SwiftAid.Gateway.Ellai.EllaiOrganizationScheduleWorker>();
+builder.Services.Configure<SwiftAid.Infrastructure.Classification.EllaiCorrelationOptions>(builder.Configuration.GetSection("Ellai:Operational:Correlation"));
+builder.Services.Configure<SwiftAid.Gateway.Ellai.EllaiCorrelationScheduleOptions>(builder.Configuration.GetSection("Ellai:Operational:Correlation"));
+builder.Services.AddScoped<SwiftAid.Infrastructure.Classification.EllaiCorrelationWork>();
+builder.Services.AddScoped<SwiftAid.Gateway.Ellai.EllaiCorrelationSweep>();
+builder.Services.AddHostedService<SwiftAid.Gateway.Ellai.EllaiCorrelationScheduleWorker>();
 builder.Services.Configure<SwiftAid.Infrastructure.Classification.TranslationOptions>(builder.Configuration.GetSection("ExperimentalMultilingualIntelligence"));
 builder.Services.AddScoped<SwiftAid.Infrastructure.Classification.TranslationRegistry>();
 builder.Services.AddScoped<SwiftAid.Infrastructure.Classification.CaseTranslationService>();
