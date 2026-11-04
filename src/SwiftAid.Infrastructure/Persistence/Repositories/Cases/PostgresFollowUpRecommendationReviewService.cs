@@ -26,9 +26,14 @@ public sealed class PostgresFollowUpRecommendationReviewService(
             var decision = await policy.AuthorizeAllAsync(actor, caseId,
                 [CaseOperation.ReadCase, CaseOperation.ManageFollowUp], ct).ConfigureAwait(false);
             if (!decision.IsAllowed) return FollowUpRecommendationReviewOutcome.NotFoundOrNotAuthorized;
+            var commandLock = $"ellai-follow-up-review:{commandId:D}";
+            await db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({commandLock}, 0))", ct).ConfigureAwait(false);
             var previous = await db.Database.SqlQuery<ReviewRow>($"""
                 SELECT recommendation_id AS "RecommendationId", case_id AS "CaseId", actor_id AS "ActorId"
                 FROM ellai_follow_up_reviews WHERE command_id = {commandId}
+                UNION ALL
+                SELECT recommendation_id AS "RecommendationId", case_id AS "CaseId", actor_id AS "ActorId"
+                FROM ellai_clarification_reviews WHERE command_id = {commandId}
                 """).SingleOrDefaultAsync(ct).ConfigureAwait(false);
             if (previous is not null && (previous.RecommendationId != recommendationId || previous.CaseId != caseId || previous.ActorId != actor.ActorId))
                 return FollowUpRecommendationReviewOutcome.Conflict;
@@ -36,7 +41,29 @@ public sealed class PostgresFollowUpRecommendationReviewService(
                 SELECT recommendation_kind AS "Value" FROM ellai_follow_up_recommendations
                 WHERE activity_id = {recommendationId} AND case_id = {caseId}
                 """).SingleOrDefaultAsync(ct).ConfigureAwait(false);
-            if (kind is null) return FollowUpRecommendationReviewOutcome.NotFoundOrNotAuthorized;
+            if (kind is null)
+            {
+                var clarification = await db.Database.SqlQuery<RecommendationRow>($"""
+                    SELECT (c.report_revision = source.report_revision AND c.workflow <> 'Resolved') AS "IsCurrent",
+                        EXISTS (SELECT 1 FROM ellai_clarification_reviews review WHERE review.recommendation_id = p.activity_id) AS "IsReviewed"
+                    FROM ellai_clarification_proposals p
+                    JOIN managed_cases c ON c.case_id = p.case_id
+                    JOIN case_events source ON source.event_id = p.source_event_id AND source.case_id = p.case_id
+                    WHERE p.activity_id = {recommendationId} AND p.case_id = {caseId}
+                    """).SingleOrDefaultAsync(ct).ConfigureAwait(false);
+                if (clarification is null) return FollowUpRecommendationReviewOutcome.NotFoundOrNotAuthorized;
+                if (previous is not null) return FollowUpRecommendationReviewOutcome.Replayed;
+                if (clarification.IsReviewed) return FollowUpRecommendationReviewOutcome.AlreadyReviewed;
+                if (!clarification.IsCurrent) return FollowUpRecommendationReviewOutcome.Stale;
+                var added = await db.Database.ExecuteSqlInterpolatedAsync($"""
+                    INSERT INTO ellai_clarification_reviews (recommendation_id, case_id, command_id, actor_id, recorded_at_utc)
+                    VALUES ({recommendationId}, {caseId}, {commandId}, {actor.ActorId}, clock_timestamp())
+                    ON CONFLICT DO NOTHING
+                    """, ct).ConfigureAwait(false);
+                if (added == 0) return FollowUpRecommendationReviewOutcome.Conflict;
+                await lease.CommitAsync(ct).ConfigureAwait(false);
+                return FollowUpRecommendationReviewOutcome.Recorded;
+            }
             if (kind == "OfficerAcknowledgementDue")
             {
                 var officerDecision = await policy.AuthorizeAllAsync(actor, caseId,
