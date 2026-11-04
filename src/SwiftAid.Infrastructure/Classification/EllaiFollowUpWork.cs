@@ -36,6 +36,16 @@ public sealed class EllaiFollowUpWork(SwiftAidDbContext db, IOptions<EllaiFollow
         var schedule = new PostgresEllaiOperationalScheduleStore(db);
         return await schedule.ExecuteFencedAsync(lease, async (_, _, token) =>
         {
+            var hasScopedCases = await db.ManagedCases.AsNoTracking().AnyAsync(c =>
+                c.WorkspaceId == lease.WorkspaceId && options.Organizations.Contains(c.OrganizationId), token)
+                .ConfigureAwait(false);
+            if (hasScopedCases && !await db.WorkspaceOrganizations.AsNoTracking().AnyAsync(link =>
+                link.WorkspaceId == lease.WorkspaceId && options.Organizations.Contains(link.OrganizationId) &&
+                link.Status == PersistentResourceStatus.Active &&
+                db.Workspaces.Any(w => w.WorkspaceId == link.WorkspaceId && w.Status == PersistentResourceStatus.Active) &&
+                db.Organizations.Any(o => o.OrganizationId == link.OrganizationId && o.Status == PersistentResourceStatus.Active), token)
+                .ConfigureAwait(false)) throw new UnauthorizedAccessException();
+
             var acknowledgement = await db.Database.SqlQuery<FollowUpCandidate>($"""
                 SELECT c.case_id AS "CaseId", c.organization_id AS "OrganizationId",
                     c.aggregate_version AS "CaseVersion", f.follow_up_id AS "FollowUpId",
@@ -43,6 +53,10 @@ public sealed class EllaiFollowUpWork(SwiftAidDbContext db, IOptions<EllaiFollow
                     a.acknowledgement_due_utc AS "DueAtUtc", a.assignment_id AS "AssignmentId"
                 FROM health_officer_escalation_assignments a
                 JOIN managed_cases c ON c.case_id = a.case_id
+                JOIN workspaces w ON w.workspace_id = c.workspace_id AND w.status = 'Active'
+                JOIN organizations o ON o.organization_id = c.organization_id AND o.status = 'Active'
+                JOIN workspace_organizations wo ON wo.workspace_id = c.workspace_id
+                    AND wo.organization_id = c.organization_id AND wo.status = 'Active'
                 JOIN managed_case_follow_ups f ON f.follow_up_id = a.follow_up_id AND f.case_id = a.case_id
                 JOIN managed_case_escalations e ON e.escalation_id = a.escalation_id AND e.case_id = a.case_id
                 WHERE c.workspace_id = {lease.WorkspaceId} AND c.organization_id = ANY({options.Organizations})
@@ -74,6 +88,10 @@ public sealed class EllaiFollowUpWork(SwiftAidDbContext db, IOptions<EllaiFollow
                     f.due_at_utc AS "DueAtUtc", NULL::uuid AS "AssignmentId"
                 FROM managed_case_follow_ups f
                 JOIN managed_cases c ON c.case_id = f.case_id
+                JOIN workspaces w ON w.workspace_id = c.workspace_id AND w.status = 'Active'
+                JOIN organizations o ON o.organization_id = c.organization_id AND o.status = 'Active'
+                JOIN workspace_organizations wo ON wo.workspace_id = c.workspace_id
+                    AND wo.organization_id = c.organization_id AND wo.status = 'Active'
                 JOIN case_events e ON e.event_id = f.current_schedule_event_id AND e.case_id = c.case_id
                     AND e.aggregate_version = f.current_schedule_version
                     AND e.event_type IN ('CaseFollowUpScheduled', 'CaseFollowUpOutcomeRecorded')
