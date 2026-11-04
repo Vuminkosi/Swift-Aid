@@ -222,6 +222,7 @@ public sealed class DemoDataTests : IAsyncDisposable
                 lock_token SMALLINT NOT NULL DEFAULT 0);
             CREATE TABLE organizations (
                 organization_id TEXT NOT NULL PRIMARY KEY,
+                owner_actor_id TEXT,
                 status TEXT NOT NULL,
                 created_at_utc TEXT NOT NULL,
                 updated_at_utc TEXT NOT NULL,
