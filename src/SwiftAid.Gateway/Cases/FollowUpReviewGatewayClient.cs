@@ -17,7 +17,8 @@ public sealed class FollowUpReviewGatewayClient(AuthenticationStateProvider auth
         try
         {
             var actor = ActorContext.FromValidatedPrincipal(principal);
-            var service = services.GetService<IFollowUpRecommendationReviewService>();
+            await using var scope = services.CreateAsyncScope();
+            var service = scope.ServiceProvider.GetService<IFollowUpRecommendationReviewService>();
             if (service is null) return new(FollowUpReviewStatus.Unavailable);
             var result = await service.ReviewAsync(actor, caseId, recommendationId, commandId, cancellationToken).ConfigureAwait(false);
             return new(Map(result));
