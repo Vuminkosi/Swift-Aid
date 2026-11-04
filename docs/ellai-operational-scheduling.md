@@ -1,7 +1,7 @@
 # Ellai operational scheduling
 
-The schedule store is a disabled-by-default coordination foundation. No rows are
-created automatically and no worker or specialist is started by this change.
+The schedule store is a disabled-by-default coordination foundation. The quality
+worker creates rows only for explicitly configured and authorized workspaces.
 It accepts only the six operational role IDs and four- or eight-hour cadences.
 Workspace and role form the schedule identity; policy version is captured in
 each lease. A database-clock lease, unique lease ID and increasing fencing token
@@ -16,9 +16,9 @@ sweep. The migration refuses rollback while schedule rows exist.
 The intended starting cadences from the design are four hours for enrichment,
 quality and follow-up; eight hours for organization, correlation and spatial
 analysis. These are not enabled defaults. Authorized workspace provisioning,
-role-specific batch capacities, jitter, retry limits, worker identity, case
-authorization, work-turn sessions, telemetry, model-cost ceilings and role
-handlers remain to be implemented. Trusted database-only handlers may use
+role-specific handlers beyond quality, retry limits, durable operational metrics,
+model-cost ceilings and complete scheduling policy remain to be implemented.
+Trusted database-only handlers may use
 the fenced transaction boundary, which rechecks lease expiry before commit and
 rolls back no-change work. They must use the supplied transaction and enforce
 domain authorization; the schedule lease itself grants no case access and does
@@ -35,12 +35,27 @@ Ellai activity together under the schedule fence. It does not invoke inference,
 send messages or create a background conversation. The existing case timeline
 shows the activity beneath its source report event; Ellai re-reads the authorized
 timeline before replaying an answer so added activity invalidates stale history.
-The handler is not yet registered or invoked by a scheduled worker. Changing a
-schedule policy alone does not re-run an unchanged quality-rules version; policy
-change invalidation and affected-stage reprocessing remain outstanding.
+The default-off Gateway quality worker can be enabled through
+`Ellai:Operational:Quality` with `Enabled`, `Workspaces` (a bounded explicit
+array), and `PolicyVersion`. `BatchSize` defaults to 10 (maximum 100), and
+`PollSeconds` defaults to 60 (30-3600). It also requires Ellai framework and
+classification to be enabled, with the classification worker credential and
+organization scope configured. It checks the active workspace/organization link
+before creating a schedule; protected payload access rechecks and locks authority
+inside every fenced work transaction. New schedules have a stable 0-299 second
+workspace offset, use UTC and run every four hours. Each work turn opens a fresh
+in-memory Microsoft Agent Framework session, invokes no model, discards session
+context afterward, and emits bounded run outcomes to the configured logs. A
+batch that reaches its limit releases the lease without advancing the due cursor;
+the next poll resumes it. A drained sweep advances beyond missed intervals. A
+policy mismatch releases the lease without changing data or the cursor and needs
+operator reconciliation. Changing a schedule policy alone does not re-run an
+unchanged quality-rules version; policy change invalidation and affected-stage
+reprocessing remain outstanding. Logs need an operator-configured retention
+policy; this worker does not create durable run-metrics records.
 
 Disposable PostgreSQL coverage exercises concurrent claims, workspace scoping,
 expiry and replacement, stale-fence refusal, renewal deadline, abandon/reclaim,
 four- and eight-hour cursor advancement and rollback refusal. Production role
-grants, deployment, long-running workers and cross-replica end-to-end behavior
+grants, deployment, long-running worker behavior and cross-replica deployment
 remain unverified.
