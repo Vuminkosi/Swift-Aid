@@ -170,6 +170,16 @@ provider and `dotnet test tests/SwiftAid.Integration.Tests/SwiftAid.Integration.
 --no-restore -m:1 -nr:false -p:WasmBuildNative=false` with the corresponding
 worker test filters. They do not establish deployed behavior or reliable tool
 selection for every analytics question.
+Output translation previously introduced another authority gap: the runner
+rechecked the session and prior history after translation, but not the current
+turn's observations. A disposable PostgreSQL test reproduced completion after
+the count grant expired during a synthetic translation. The runner now
+revalidates current-turn provenance after output translation and denies the
+answer if provenance is missing or no longer authorized. The authorized and
+revoked PostgreSQL cases passed 2/2 before and after commit; the focused runner
+and framework contract filter passed 155/155. Translation in this test is a
+synthetic client, not NLLB, and revalidation is not atomic with persistence.
+Translated tool answers whose provenance cannot be replayed fail closed.
 
 ## Provider observations and open checks
 
