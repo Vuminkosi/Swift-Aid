@@ -80,6 +80,7 @@ public static class CaseAgentActivityPresentation
     public static string ActivityLabel(string? roleId, string? recommendationKind = null) => (roleId, recommendationKind) switch
     {
         ("ops.quality", _) => "Reported-data quality assessed",
+        ("ops.enrichment", "ClassificationReused") => "Existing classification attached to the case",
         ("ops.enrichment", _) => "Classification processing completed",
         ("ops.followup", "OfficerAcknowledgementDue") => "Overdue officer acknowledgment review recommended",
         ("ops.followup", _) => "Overdue follow-up review recommended",

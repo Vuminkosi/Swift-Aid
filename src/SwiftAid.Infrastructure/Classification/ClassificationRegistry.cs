@@ -138,6 +138,7 @@ public sealed class ClassificationRegistry(
         inbox.ResultId = result.Id;
         inbox.UpdatedAtUtc = now;
         var association = await db.Set<ClassificationAssociationEntity>().FindAsync([header.CaseId, notice.ReportRevision, config], ct);
+        var associatedByThisClaim = association is null;
         if (association is null)
         {
             db.Add(new ClassificationAssociationEntity { CaseId = header.CaseId, ReportRevision = notice.ReportRevision,
@@ -169,6 +170,29 @@ public sealed class ClassificationRegistry(
             response = new("Leased", new(result.Id, result.LeaseId.Value, config, fingerprint, result.LeaseUntilUtc.Value, text, profile));
         }
         await db.SaveChangesAsync(ct);
+        if (backfillJobId is { } reuseJob && associatedByThisClaim && !created && result.State != "Failed")
+        {
+            // The scheduled turn created this case-to-result association. Record
+            // it atomically; the timeline exposes it only if the result completes.
+            var recorded = await db.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO ellai_enrichment_reuses (activity_id, job_id, source_event_id, result_id, recorded_at_utc)
+                SELECT gen_random_uuid(), j.job_id, item."SourceEventId", r."Id", {now}
+                FROM ellai_enrichment_jobs j
+                JOIN swiftaid_classification.backfills job ON job."Id" = j.job_id
+                JOIN swiftaid_classification.backfill_items item ON item."JobId" = j.job_id
+                JOIN swiftaid_classification.results r ON r."Id" = {result.Id}
+                WHERE j.job_id = {reuseJob} AND item."SourceEventId" = {source.EventId}
+                    AND item."State" = 'Pending' AND job."State" = 'Running'
+                    AND job."WorkerId" = {Options.WorkerId} AND job."WorkspaceId" = {header.WorkspaceId}
+                    AND job."OrganizationId" = {header.OrganizationId} AND job."ConfigurationHash" = {Options.Profile.Hash}
+                    AND r."State" <> 'Failed'
+                ON CONFLICT (source_event_id, result_id) DO NOTHING
+                """, ct).ConfigureAwait(false);
+            if (recorded == 0 && await db.Database.SqlQuery<int>($"""
+                SELECT count(*)::int AS "Value" FROM ellai_enrichment_jobs WHERE job_id = {reuseJob}
+                """).SingleAsync(ct).ConfigureAwait(false) != 0)
+                throw new InvalidOperationException("Scheduled enrichment reuse could not be attributed.");
+        }
         if (backfillJobId is { } jobId && response.Lease is { } scheduledLease)
         {
             // Attribution is committed with the result lease, before the worker

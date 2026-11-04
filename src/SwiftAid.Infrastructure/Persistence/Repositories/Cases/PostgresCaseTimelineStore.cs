@@ -149,6 +149,21 @@ public sealed class PostgresCaseTimelineStore(SwiftAidDbContext dbContext) : ICa
                     WHERE claim.source_event_id = ANY({ids}) AND r."State" = 'Completed' AND r."CompletedAtUtc" IS NOT NULL
                         AND r."PredictionsJson" ->> 'leaseId' = claim.lease_id::text
                     UNION ALL
+                    SELECT reuse.source_event_id, reuse.activity_id, 'ops.enrichment', r."ConfigurationId",
+                        GREATEST(reuse.recorded_at_utc, r."CompletedAtUtc"),
+                        NULL::uuid, NULL::boolean, NULL::timestamptz, NULL::timestamptz, 'ClassificationReused'
+                    FROM ellai_enrichment_reuses reuse
+                    JOIN case_events source ON source.event_id = reuse.source_event_id AND source.case_id = {caseId}
+                    JOIN swiftaid_classification.associations association
+                        ON association."SourceEventId" = reuse.source_event_id AND association."ResultId" = reuse.result_id
+                    JOIN swiftaid_classification.results r ON r."Id" = reuse.result_id
+                    WHERE reuse.source_event_id = ANY({ids}) AND r."State" = 'Completed' AND r."CompletedAtUtc" IS NOT NULL
+                      AND NOT EXISTS (
+                        SELECT 1 FROM ellai_enrichment_claims claim
+                        WHERE claim.source_event_id = reuse.source_event_id AND claim.result_id = reuse.result_id
+                          AND r."PredictionsJson" ->> 'leaseId' = claim.lease_id::text
+                      )
+                    UNION ALL
                     SELECT r.source_event_id, r.activity_id, 'ops.followup', r.policy_version, r.recorded_at_utc,
                         r.follow_up_id, CASE WHEN r.recommendation_kind = 'OfficerAcknowledgementDue' THEN
                             (f.assignee_actor_id = a.officer_actor_id AND f.status = 'Scheduled'
