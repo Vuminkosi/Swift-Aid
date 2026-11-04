@@ -178,6 +178,21 @@ public sealed class WebGuestIntakeServiceTests
         Assert.Null(result.Value);
         Assert.Equal(1, intake.SubmitCalls);
     }
+
+    [Fact]
+    public async Task UnclassifiedValidationDoesNotClaimAFieldWasHighlighted()
+    {
+        var intake = new FakeIntakeService { Submit = (_, _) => throw new IntakeSubmissionException(IntakeErrorCode.InvalidReport) };
+        var client = new WebPublicIntakeSubmissionClient(new WebGuestIntakeService(new FakeSessionEndpointService(), intake));
+
+        var result = await client.SubmitAsync(GuestSubmissionSamples.Human());
+
+        Assert.Equal(UiCapabilityResultCode.InvalidRequest, result.Code);
+        Assert.Null(result.Value);
+        Assert.Contains("did not identify a field", result.Message);
+        Assert.Equal(result.Message, result.Metadata.Notice);
+        Assert.Equal(1, intake.SubmitCalls);
+    }
     private sealed class ScopedLifetime : IDisposable
     {
         public bool Disposed { get; private set; }

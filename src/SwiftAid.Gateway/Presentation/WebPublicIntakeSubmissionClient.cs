@@ -38,8 +38,8 @@ public sealed class WebPublicIntakeSubmissionClient(WebGuestIntakeService intake
                 UiCapabilityResultCode.InvalidRequest,
                 null,
                 UiCapabilityResults.UnavailableMetadata(
-                    "public-intake-submission", "Check the highlighted fields and try again."),
-                "Check the highlighted fields and try again.");
+                    "public-intake-submission", "The report was rejected, but the service did not identify a field. Review the details and try again."),
+                "The report was rejected, but the service did not identify a field. Review the details and try again.");
         }
         catch (IntakeSubmissionException exception) when (exception.Code == IntakeErrorCode.SubmissionConflict)
         {
