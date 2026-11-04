@@ -148,7 +148,7 @@ public sealed class EllaiMuseChatClientTests
         Assert.Equal("ellai_now", first.RootElement.GetProperty("tools")[0].GetProperty("function").GetProperty("name").GetString());
     }
 
-    private sealed class FragmentedToolHandler(bool splitName = false) : HttpMessageHandler
+    private sealed class FragmentedToolHandler(bool splitName = false, bool malformedArguments = false, bool maliciousSuffix = false) : HttpMessageHandler
     {
         public int Requests { get; private set; }
         public List<string> Bodies { get; } = [];
