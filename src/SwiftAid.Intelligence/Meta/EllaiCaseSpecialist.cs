@@ -77,6 +77,8 @@ public sealed class EllaiCaseSpecialist(IChatClient client, IEllaiFrameworkAgent
             decision?.DisplayText == "No matching cases were found in your current owned-case queue." &&
             decision.SpokenText == decision.DisplayText;
         if (revalidationFailed) return new(EllaiSpecialistOutcome.Stale, null);
+        if (EllaiSpecialistGrounding.IsFrameworkVerifiedDeterministic(decision, observations))
+            return new(EllaiSpecialistOutcome.Completed, decision);
         if (decision is null || decision.Kind != DecisionKind.Answer || decision.Claims.Count == 0 && !verifiedEmpty ||
             decision.UiIntents.Count != 0 || decision.PlanProposal is not null ||
             decision.Claims.Any(claim => claim.Kind != ClaimKind.Observed || claim.Evidence.Count == 0))

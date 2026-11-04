@@ -186,7 +186,7 @@ public sealed class EllaiFrameworkAgent
                 }
             }
             tools.Add(AIFunctionFactory.Create(DelegateKnowledge, name: "ellai_delegate_knowledge",
-                description: "Delegate one bounded question about approved documentation to the knowledge specialist."));
+                description: "Delegate a question about approved documentation or other admitted SwiftAid information to the knowledge specialist."));
         }
         if (enableCaseSpecialist && context.Actor is not null &&
             (context.AllowedTools?.Contains(EllaiToolNames.CaseTimeline) == true ||
@@ -268,7 +268,7 @@ public sealed class EllaiFrameworkAgent
                 }
             }
             tools.Add(AIFunctionFactory.Create(DelegateAnalytics, name: "ellai_delegate_analytics",
-                description: "Delegate one authorized owned-case count with an explicit 1 to 365 day window."));
+                description: "Delegate an authorized owned-case count with an explicit 1 to 365 day window, or another admitted SwiftAid read."));
         }
         if (enableHealthResearchSpecialist && context.Actor is not null && context.AllowedTools?.Contains(EllaiToolNames.ApprovedHealthSources) == true)
         {

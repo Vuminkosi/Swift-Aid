@@ -28,24 +28,46 @@ public sealed class EllaiAnalyticsSpecialist(IChatClient client, IEllaiFramework
             return new(EllaiSpecialistOutcome.Denied, null);
 
         if (!EllaiSpecialistRegistry.TryGet(EllaiSpecialistRegistry.Analytics, out var profile)) return new(EllaiSpecialistOutcome.Denied, null);
+        var observations = new List<(EllaiToolRequest Request, EllaiToolResult Result)>();
+        async Task<EllaiToolResult> Read(EllaiToolContext child, EllaiToolRequest request, CancellationToken token)
+        {
+            var result = await invoke(child, request, token).ConfigureAwait(false);
+            if (result.Allowed) observations.Add((request, result));
+            return result;
+        }
         var agent = new EllaiFrameworkAgent(client, agentFactory);
         EllaiDecision? decision;
         try
         {
             decision = await agent.RunAsync(context, trustedPolicy +
                 "\nYou are the analytics specialist, not the supervisor. Delegation is unavailable here. " +
-                "Use only the authorized owned-case count tool with an explicitly requested 1 to 365 day window. " +
+                "Use the authorized owned-case count tool for count questions with an explicitly requested 1 to 365 day window, and any other admitted read tool when relevant to the user's SwiftAid question. " +
                 "Do not infer a window, calculate counts from samples, infer incidence, or invent evidence. " +
-                "If the window is missing, return a question instead of calling a tool.",
-                [new ChatMessage(ChatRole.User, task)], 1024, isCurrent, invoke, usage, ct,
+                "If the count window is missing, ask for it. For other reads, each claim must exactly match a returned source line and cite its evidence; join claim texts with newlines for displayText and spokenText.",
+                [new ChatMessage(ChatRole.User, task)], 1024, isCurrent, Read, usage, ct,
                 revalidateTool: revalidate, maxModelCalls: profile.MaxModelCalls).ConfigureAwait(false);
         }
         finally { onModelCalls?.Invoke(agent.LastModelCallCount); }
-        if (decision is null || decision.Kind != DecisionKind.Answer || decision.Claims.Count != 1 ||
+        if (EllaiSpecialistGrounding.IsFrameworkVerifiedDeterministic(decision, observations))
+            return new(EllaiSpecialistOutcome.Completed, decision);
+        if (decision is null || decision.Kind != DecisionKind.Answer || decision.Claims.Count == 0 ||
             decision.UiIntents.Count != 0 || decision.PlanProposal is not null ||
-            decision.Claims[0].Kind != ClaimKind.Observed || decision.Claims[0].Evidence.Count != 1 ||
-            decision.Claims[0].Evidence[0].SourceKind != "DashboardAggregate")
+            decision.Claims.Any(claim => claim.Kind != ClaimKind.Observed || claim.Evidence.Count == 0))
             return new(EllaiSpecialistOutcome.Unverified, null);
+        foreach (var (request, original) in observations)
+        {
+            if (!await isCurrent(ct).ConfigureAwait(false)) return new(EllaiSpecialistOutcome.Stale, null);
+            EllaiToolResult fresh;
+            try { fresh = await revalidate(context, request, ct).ConfigureAwait(false); }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+            catch (Exception error) when (error is not OutOfMemoryException) { return new(EllaiSpecialistOutcome.Stale, null); }
+            if (!fresh.Allowed || fresh.Truncated != original.Truncated || fresh.ToolName != original.ToolName ||
+                fresh.ItemCount != original.ItemCount || fresh.ResultSummary != original.ResultSummary ||
+                !fresh.Evidence.SequenceEqual(original.Evidence) || fresh.CaseTimelineReplayScope != original.CaseTimelineReplayScope ||
+                fresh.UiCatalogueReplayScope != original.UiCatalogueReplayScope || fresh.UiObservationReplayScope != original.UiObservationReplayScope ||
+                !await isCurrent(ct).ConfigureAwait(false)) return new(EllaiSpecialistOutcome.Stale, null);
+        }
+        if (!EllaiSpecialistGrounding.IsGrounded(decision, observations)) return new(EllaiSpecialistOutcome.Unverified, null);
         return new(EllaiSpecialistOutcome.Completed, decision);
     }
 }

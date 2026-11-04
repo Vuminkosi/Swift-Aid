@@ -46,9 +46,11 @@ public sealed class EllaiCommunitySessionsSpecialist(IChatClient client, IEllaiF
                 "Each claim text must exactly match a returned source line and cite its evidence. For an empty session search, use the exact returned search message and cite its PublicSessionSearch evidence. " +
                 "Set displayText and spokenText to claim texts joined by a newline, with no other prose.",
                 [new ChatMessage(ChatRole.User, task)], 2048, isCurrent, Read, usage, ct,
-                maxModelCalls: profile.MaxModelCalls).ConfigureAwait(false);
+                revalidateTool: revalidate, maxModelCalls: profile.MaxModelCalls).ConfigureAwait(false);
         }
         finally { onModelCalls?.Invoke(agent.LastModelCallCount); }
+        if (EllaiSpecialistGrounding.IsFrameworkVerifiedDeterministic(decision, observations))
+            return new(EllaiSpecialistOutcome.Completed, decision);
         if (decision is null || decision.Kind != DecisionKind.Answer || decision.Claims.Count == 0 ||
             decision.UiIntents.Count != 0 || decision.PlanProposal is not null ||
             decision.Claims.Any(claim => claim.Kind != ClaimKind.Observed || claim.Evidence.Count == 0))

@@ -36,9 +36,11 @@ public sealed class EllaiUiSpecialist(IChatClient client, IEllaiFrameworkAgentFa
                 "Do not invent controls, routes, screen state, navigation, tour steps or completed actions. " +
                 "Return only a grounded Answer in the required final_decision JSON schema. For answers using other admitted tools, each claim must exactly match a returned source line and cite its evidence; set displayText and spokenText to the claim texts joined by a newline. " +
                 "Do not propose UI intents or actions; the supervisor handles validated guidance.",
-                [new ChatMessage(ChatRole.User, task)], 2048, isCurrent, Read, usage, ct, maxModelCalls: profile.MaxModelCalls).ConfigureAwait(false);
+                [new ChatMessage(ChatRole.User, task)], 2048, isCurrent, Read, usage, ct, revalidateTool: revalidate, maxModelCalls: profile.MaxModelCalls).ConfigureAwait(false);
         }
         finally { onModelCalls?.Invoke(agent.LastModelCallCount); }
+        if (EllaiSpecialistGrounding.IsFrameworkVerifiedDeterministic(decision, observations))
+            return new(EllaiSpecialistOutcome.Completed, decision);
         if (decision is null || decision.Kind != DecisionKind.Answer || decision.Claims.Count == 0 ||
             decision.UiIntents.Count != 0 || decision.PlanProposal is not null ||
             decision.Claims.Any(claim => claim.Kind != ClaimKind.Observed || claim.Evidence.Count == 0))

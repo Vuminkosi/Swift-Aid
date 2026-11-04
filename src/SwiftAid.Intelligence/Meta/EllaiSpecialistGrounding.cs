@@ -6,6 +6,26 @@ namespace SwiftAid.Intelligence.Meta;
 /// <summary>Checks that a read-only specialist answer is built from observed result lines.</summary>
 internal static class EllaiSpecialistGrounding
 {
+    // These results are built and revalidated by EllaiFrameworkAgent itself;
+    // their fresh evidence can differ from the original tool observation.
+    public static bool IsFrameworkVerifiedDeterministic(EllaiDecision? decision,
+        IReadOnlyList<(EllaiToolRequest Request, EllaiToolResult Result)> observations)
+    {
+        if (decision is not { Kind: DecisionKind.Answer, Claims.Count: 1 } || observations.Count != 1 ||
+            decision.UiIntents.Count != 0 || decision.PlanProposal is not null || decision.Claims[0].Evidence.Count != 1)
+            return false;
+        var expected = observations[0].Request.ToolName switch
+        {
+            EllaiToolNames.OwnedCaseCount => "DashboardAggregate",
+            EllaiToolNames.OwnedRegionCounts => "SpatialAggregate",
+            EllaiToolNames.ApprovedHealthSources => "HealthSourceRegistry",
+            _ => null
+        };
+        return expected is not null && decision.Claims[0].Kind == ClaimKind.Observed &&
+            decision.Claims[0].Evidence[0].SourceKind == expected &&
+            decision.Claims[0].Text == decision.DisplayText && decision.SpokenText == decision.DisplayText;
+    }
+
     public static bool IsGrounded(EllaiDecision decision, IEnumerable<(EllaiToolRequest Request, EllaiToolResult Result)> observations)
     {
         var observed = observations.ToArray();

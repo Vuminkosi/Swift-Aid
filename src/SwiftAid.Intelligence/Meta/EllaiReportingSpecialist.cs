@@ -38,9 +38,11 @@ public sealed class EllaiReportingSpecialist(IChatClient client, IEllaiFramework
                 "controls or actions. Return an Answer with observed claims, each exactly matching one returned source line " +
                 "and citing that line's evidence. Set displayText and spokenText to the claim texts joined by a newline. " +
                 "Do not propose UI intents or actions; the supervisor and form handle guidance and explicit confirmation.",
-                [new ChatMessage(ChatRole.User, task)], 2048, isCurrent, Read, usage, ct, maxModelCalls: profile.MaxModelCalls).ConfigureAwait(false);
+                [new ChatMessage(ChatRole.User, task)], 2048, isCurrent, Read, usage, ct, revalidateTool: revalidate, maxModelCalls: profile.MaxModelCalls).ConfigureAwait(false);
         }
         finally { onModelCalls?.Invoke(agent.LastModelCallCount); }
+        if (EllaiSpecialistGrounding.IsFrameworkVerifiedDeterministic(decision, observations))
+            return new(EllaiSpecialistOutcome.Completed, decision);
         if (decision is null || decision.Kind != DecisionKind.Answer || decision.Claims.Count == 0 ||
             decision.UiIntents.Count != 0 || decision.PlanProposal is not null ||
             decision.Claims.Any(claim => claim.Kind != ClaimKind.Observed || claim.Evidence.Count == 0))

@@ -49,9 +49,11 @@ public sealed class EllaiGeospatialSpecialist(IChatClient client, IEllaiFramewor
                 "For place-only answers join claim texts by a comma and one space; otherwise join them by a newline. Set displayText and spokenText to that text, with no other prose. " +
                 "When a search has multiple matches, include a clarifying question asking the user to select a place.",
                 [new ChatMessage(ChatRole.User, task)], 2048, isCurrent, Read, usage, ct,
-                maxModelCalls: profile.MaxModelCalls).ConfigureAwait(false);
+                revalidateTool: revalidate, maxModelCalls: profile.MaxModelCalls).ConfigureAwait(false);
         }
         finally { onModelCalls?.Invoke(agent.LastModelCallCount); }
+        if (EllaiSpecialistGrounding.IsFrameworkVerifiedDeterministic(decision, observations))
+            return new(EllaiSpecialistOutcome.Completed, decision);
         if (decision is null || decision.Kind != DecisionKind.Answer || decision.Claims.Count == 0 ||
             decision.UiIntents.Count != 0 || decision.PlanProposal is not null ||
             decision.Claims.Any(claim => claim.Kind != ClaimKind.Observed || claim.Evidence.Count == 0))

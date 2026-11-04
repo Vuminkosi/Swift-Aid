@@ -46,9 +46,11 @@ public sealed class EllaiSurveillanceSpecialist(IChatClient client, IEllaiFramew
                 "Each claim must exactly match one returned record line and cite its matching evidence. " +
                 "Set displayText and spokenText to the claim texts joined by a newline, with no other prose.",
                 [new ChatMessage(ChatRole.User, task)], 2048, isCurrent, Read, usage, ct,
-                maxModelCalls: profile.MaxModelCalls).ConfigureAwait(false);
+                revalidateTool: revalidate, maxModelCalls: profile.MaxModelCalls).ConfigureAwait(false);
         }
         finally { onModelCalls?.Invoke(agent.LastModelCallCount); }
+        if (EllaiSpecialistGrounding.IsFrameworkVerifiedDeterministic(decision, observations))
+            return new(EllaiSpecialistOutcome.Completed, decision);
         if (decision is null || decision.Kind != DecisionKind.Answer || decision.Claims.Count == 0 ||
             decision.UiIntents.Count != 0 || decision.PlanProposal is not null ||
             decision.Claims.Any(claim => claim.Kind != ClaimKind.Observed || claim.Evidence.Count == 0))
