@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using SwiftAid.Application.Identity;
 using SwiftAid.Infrastructure.Identity;
 using SwiftAid.Infrastructure.Persistence;
 
@@ -20,6 +21,7 @@ public sealed class OrganizationInvitationServiceTests : IAsyncDisposable
         services.AddLogging();
         services.AddSingleton<TimeProvider>(_timeProvider);
         services.AddDbContext<SwiftAidDbContext>(options => options.UseSqlite("DataSource=:memory:"));
+        services.AddScoped<IOrganizationOwnerAuthorizer, PostgresOrganizationOwnerAuthorizer>();
         services.AddScoped<IOrganizationMembershipService, OrganizationMembershipService>();
         services.AddScoped<IOrganizationInvitationService, OrganizationInvitationService>();
         _provider = services.BuildServiceProvider();
@@ -151,10 +153,20 @@ public sealed class OrganizationInvitationServiceTests : IAsyncDisposable
             );
             CREATE TABLE organizations (
                 organization_id TEXT NOT NULL PRIMARY KEY,
+                owner_actor_id TEXT,
                 status TEXT NOT NULL,
                 created_at_utc TEXT NOT NULL,
                 updated_at_utc TEXT NOT NULL,
                 lock_token SMALLINT NOT NULL DEFAULT 0
+            );
+            CREATE TABLE organization_owners (
+                owner_assignment_id TEXT NOT NULL PRIMARY KEY,
+                organization_id TEXT NOT NULL REFERENCES organizations (organization_id),
+                actor_id TEXT NOT NULL REFERENCES actors (actor_id),
+                assigned_at_utc TEXT NOT NULL,
+                assigned_by_actor_id TEXT NOT NULL,
+                revoked_at_utc TEXT,
+                revoked_by_actor_id TEXT
             );
             CREATE TABLE workspaces (
                 workspace_id TEXT NOT NULL PRIMARY KEY,
