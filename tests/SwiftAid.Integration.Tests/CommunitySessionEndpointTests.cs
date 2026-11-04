@@ -117,7 +117,7 @@ public sealed class CommunitySessionEndpointTests
                 "/api/v1/sessions", StringComparison.Ordinal))
             .ToArray();
 
-        Assert.Equal(6, routes.Length);
+        Assert.Equal(7, routes.Length);
         foreach (var route in routes)
         {
             var authorization = Assert.Single(route.Metadata.GetOrderedMetadata<IAuthorizeData>());
@@ -145,6 +145,20 @@ public sealed class CommunitySessionEndpointTests
         foreach (var route in routes)
         {
             Assert.NotEmpty(route.Metadata.GetOrderedMetadata<IAllowAnonymous>());
+        }
+    }
+
+    [Fact]
+    public async Task StaffHistoryIsDeniedWithoutSessionScopedAuthorization()
+    {
+        await using var host = await TestSessionHost.StartAsync();
+        foreach (var id in new[] { KnownSessionId, Guid.NewGuid() })
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, $"/api/v1/sessions/{id:D}/history");
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", TestAuthenticationHandler.BearerToken);
+            using var response = await host.Client.SendAsync(request);
+            Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+            Assert.True(response.Headers.CacheControl?.NoStore);
         }
     }
 

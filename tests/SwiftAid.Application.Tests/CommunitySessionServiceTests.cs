@@ -628,6 +628,9 @@ public sealed class CommunitySessionServiceTests
         private readonly Dictionary<Guid, DomainSessions.CommunitySession> _sessions = new();
         private readonly Dictionary<Guid, long> _versions = new();
 
+        public Task<IReadOnlyList<SessionHistoryEntry>> ReadHistoryAsync(Guid sessionId, long? beforeVersion, int take, CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<SessionHistoryEntry>>([]);
+
         public SessionReminderSync LastSync { get; private set; } = SessionReminderSync.None;
         public SessionRevisionAction LastAction { get; private set; }
         public DateTimeOffset? PreviousStartUtc { get; private set; }

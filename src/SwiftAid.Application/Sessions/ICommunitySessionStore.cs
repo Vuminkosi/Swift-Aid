@@ -73,6 +73,9 @@ public interface ICommunitySessionStore
 
     Task<int> CountRevisionsAsync(Guid sessionId, CancellationToken ct);
 
+    /// <summary>Reads staff-only revision metadata; callers must authorize the session first.</summary>
+    Task<IReadOnlyList<SessionHistoryEntry>> ReadHistoryAsync(Guid sessionId, long? beforeVersion, int take, CancellationToken ct);
+
     Task<int> CountPendingRemindersAsync(Guid sessionId, CancellationToken ct);
 
     Task<int> CountSuppressedRemindersAsync(Guid sessionId, CancellationToken ct);

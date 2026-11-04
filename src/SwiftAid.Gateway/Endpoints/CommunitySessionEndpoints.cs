@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection;
 using OpenIddict.Validation.AspNetCore;
 using SwiftAid.Application.Authorization;
+using SwiftAid.Application.Sessions;
 using SwiftAid.Contracts.Sessions;
 
 namespace SwiftAid.Gateway.Endpoints;
@@ -43,6 +44,7 @@ public static class CommunitySessionEndpoints
             if (context.HttpContext.GetEndpoint()?.Metadata
                 .GetMetadata<CommunitySessionScopedAuthorizationRequiredMetadata>() is not null)
             {
+                context.HttpContext.Response.Headers.CacheControl = "no-store";
                 // Authentication alone does not establish officer authority.
                 // Return the same generic denial regardless of session identity.
                 return Results.NotFound();
@@ -50,6 +52,14 @@ public static class CommunitySessionEndpoints
 
             return await next(context);
         });
+        group.MapGet("/{sessionId:guid}/history", HistoryAsync)
+            .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = schemes })
+            .WithMetadata(new CommunitySessionScopedAuthorizationRequiredMetadata())
+            .WithName("GetCommunitySessionHistory")
+            .Produces<SessionHistoryPage>(StatusCodes.Status200OK)
+            .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
+            .Produces<ProblemDetails>(StatusCodes.Status401Unauthorized)
+            .Produces<ProblemDetails>(StatusCodes.Status404NotFound);
         group.MapPost("/", CreateDraftAsync)
             .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = schemes })
             .WithMetadata(new CommunitySessionScopedAuthorizationRequiredMetadata())
@@ -122,6 +132,22 @@ public static class CommunitySessionEndpoints
             .Produces<ProblemDetails>(StatusCodes.Status404NotFound)
             .Produces<ProblemDetails>(StatusCodes.Status409Conflict)
             .Produces<ProblemDetails>(StatusCodes.Status422UnprocessableEntity);
+    }
+
+    private static async Task<IResult> HistoryAsync(HttpContext context, Guid sessionId, long? beforeVersion, int? limit, CancellationToken cancellationToken)
+    {
+        var actor = TryGetActor(context);
+        var reader = context.RequestServices.GetService<ICommunitySessionHistoryReader>();
+        if (actor is null || reader is null) return Results.NotFound();
+        try
+        {
+            var page = await reader.ReadAsync(sessionId, actor.ActorId, beforeVersion, limit ?? 25, cancellationToken).ConfigureAwait(false);
+            return page is null ? Results.NotFound() : Results.Json(page, options: JsonOptions);
+        }
+        catch (ArgumentException)
+        {
+            return Results.Problem(statusCode: StatusCodes.Status400BadRequest, title: "The history request is invalid.");
+        }
     }
 
     /// <summary>Maps a session command outcome to HTTP.</summary>

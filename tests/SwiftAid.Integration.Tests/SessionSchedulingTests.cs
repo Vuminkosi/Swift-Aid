@@ -28,6 +28,54 @@ namespace SwiftAid.Integration.Tests;
 public sealed class SessionSchedulingTests
 {
     [IntakePostgresFact]
+    public async Task StaffHistoryRequiresCurrentAuthorizationAndPagesStoredRevisions()
+    {
+        var id = Guid.NewGuid();
+        await using var db = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
+        var store = new PostgresCommunitySessionStore(db);
+        var sessions = new CommunitySessionService(store, new FixtureMaterialEligibility());
+        try
+        {
+            await sessions.ExecuteAsync(CreateDraft(id, "officer-1"), "officer-1", CancellationToken.None);
+            await sessions.ExecuteAsync(new ReviewSessionCommand(id, 1, false, "review", DateTimeOffset.UtcNow), "officer-2", CancellationToken.None);
+            await sessions.ExecuteAsync(new ScheduleSessionCommand(id, 2, "publish", DateTimeOffset.UtcNow), "officer-2", CancellationToken.None);
+            var originalStart = (await sessions.GetStaffAsync(id, "officer-1", CancellationToken.None))!.StartUtc;
+            await sessions.ExecuteAsync(UpdateDraft(id, 3, "Malaria prevention talk") with { DurationMinutes = 60 }, "officer-2", CancellationToken.None);
+
+            Assert.Null(await new CommunitySessionHistoryReader(store).ReadAsync(id, "officer-1", null, 2, CancellationToken.None));
+            var authorization = new HistoryAuthorizer(id, "officer-1");
+            var reader = new CommunitySessionHistoryReader(store, authorization);
+            Assert.Null(await reader.ReadAsync(id, "another-officer", null, 2, CancellationToken.None));
+            Assert.Null(await reader.ReadAsync(Guid.NewGuid(), "officer-1", null, 2, CancellationToken.None));
+            await Assert.ThrowsAsync<ArgumentException>(() => reader.ReadAsync(id, "officer-1", 0, 2, CancellationToken.None));
+            await Assert.ThrowsAsync<ArgumentException>(() => reader.ReadAsync(id, "officer-1", null, 101, CancellationToken.None));
+            var first = Assert.IsType<SessionHistoryPage>(await reader.ReadAsync(id, "officer-1", null, 2, CancellationToken.None));
+            Assert.Equal(new long[] { 4, 3 }, first.Items.Select(item => item.Version));
+            Assert.Equal("Rescheduled", first.Items[0].Action);
+            Assert.Equal(originalStart, first.Items[0].PreviousStartUtc);
+            Assert.Equal(3, first.BeforeVersion);
+            var second = Assert.IsType<SessionHistoryPage>(await reader.ReadAsync(id, "officer-1", first.BeforeVersion, 2, CancellationToken.None));
+            Assert.Equal(new long[] { 2, 1 }, second.Items.Select(item => item.Version));
+            Assert.Null(second.BeforeVersion);
+
+            // Simulate a pre-metadata snapshot in this disposable database.
+            await db.Set<CommunitySessionRevisionEntity>().Where(row => row.SessionId == id && row.Version == 1)
+                .ExecuteUpdateAsync(update => update.SetProperty(row => row.SnapshotJson, "{\"Status\":\"Draft\"}"));
+            var legacy = Assert.IsType<SessionHistoryPage>(await reader.ReadAsync(id, "officer-1", 2, 1, CancellationToken.None));
+            Assert.Null(Assert.Single(legacy.Items).Action);
+            Assert.Null(legacy.Items[0].PreviousStartUtc);
+            Assert.Equal("Draft", legacy.Items[0].Status);
+
+            authorization.RevokeAfterNextCheck = true;
+            Assert.Null(await reader.ReadAsync(id, "officer-1", null, 2, CancellationToken.None));
+        }
+        finally
+        {
+            await CleanupAsync(id);
+        }
+    }
+
+    [IntakePostgresFact]
     public async Task PublicDiscoveryAndAuthenticatedSubscriptionFollowRevisionAndCancellation()
     {
         var id = Guid.NewGuid();
@@ -1345,6 +1393,22 @@ public sealed class SessionSchedulingTests
     }
 
     // Synthetic fixture only: production does not have an eligibility authority wired.
+    private sealed class HistoryAuthorizer(Guid allowedSession, string allowedActor) : ICommunitySessionHistoryAuthorizer
+    {
+        public bool RevokeAfterNextCheck { get; set; }
+        private bool _revoked;
+        public Task<bool> CanReadAsync(string actorId, Guid sessionId, CancellationToken cancellationToken)
+        {
+            var allowed = !_revoked && sessionId == allowedSession && actorId == allowedActor;
+            if (RevokeAfterNextCheck)
+            {
+                _revoked = true;
+                RevokeAfterNextCheck = false;
+            }
+            return Task.FromResult(allowed);
+        }
+    }
+
     private sealed class TestClock(DateTimeOffset utcNow) : TimeProvider
     {
         public DateTimeOffset UtcNow { get; set; } = utcNow;

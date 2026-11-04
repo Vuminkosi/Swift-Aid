@@ -169,6 +169,39 @@ public sealed class PostgresCommunitySessionStore(SwiftAidDbContext dbContext) :
     public Task<int> CountRevisionsAsync(Guid sessionId, CancellationToken ct) =>
         _dbContext.Set<CommunitySessionRevisionEntity>().CountAsync(item => item.SessionId == sessionId, ct);
 
+    public async Task<IReadOnlyList<SwiftAid.Contracts.Sessions.SessionHistoryEntry>> ReadHistoryAsync(
+        Guid sessionId, long? beforeVersion, int take, CancellationToken ct)
+    {
+        if (sessionId == Guid.Empty || beforeVersion is <= 0 || take is < 1 or > 101)
+            throw new ArgumentException("A valid session, cursor and page size are required.");
+        var query = _dbContext.Set<CommunitySessionRevisionEntity>().AsNoTracking()
+            .Where(item => item.SessionId == sessionId);
+        if (beforeVersion is { } before) query = query.Where(item => item.Version < before);
+        var rows = await query.OrderByDescending(item => item.Version).Take(take).ToListAsync(ct).ConfigureAwait(false);
+        return rows.Select(ToHistoryEntry).ToArray();
+    }
+
+    private static SwiftAid.Contracts.Sessions.SessionHistoryEntry ToHistoryEntry(CommunitySessionRevisionEntity row)
+    {
+        using var snapshot = JsonDocument.Parse(row.SnapshotJson);
+        var root = snapshot.RootElement;
+        if (root.ValueKind != JsonValueKind.Object)
+            return new(row.Version, row.ActorId, row.Reason, row.RecordedAtUtc, null, null, null, null);
+        var action = root.TryGetProperty("Action", out var actionValue) && actionValue.ValueKind == JsonValueKind.String &&
+            Enum.TryParse<SessionRevisionAction>(actionValue.GetString(), out var parsedAction) &&
+            string.Equals(parsedAction.ToString(), actionValue.GetString(), StringComparison.Ordinal) && Enum.IsDefined(parsedAction)
+                ? parsedAction.ToString() : null;
+        var status = root.TryGetProperty("Status", out var statusValue) && statusValue.ValueKind == JsonValueKind.String &&
+            Enum.TryParse<CommunitySessionStatus>(statusValue.GetString(), out var parsedStatus) &&
+            string.Equals(parsedStatus.ToString(), statusValue.GetString(), StringComparison.Ordinal) && Enum.IsDefined(parsedStatus)
+                ? parsedStatus.ToString() : null;
+        static DateTimeOffset? ReadDate(JsonElement root, string name) =>
+            root.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String && value.TryGetDateTimeOffset(out var date)
+                ? date : null;
+        return new(row.Version, row.ActorId, row.Reason, row.RecordedAtUtc, action, status,
+            ReadDate(root, "StartUtc"), ReadDate(root, "PreviousStartUtc"));
+    }
+
     public Task<int> CountPendingRemindersAsync(Guid sessionId, CancellationToken ct) =>
         _dbContext.Set<SessionReminderOccurrenceEntity>()
             .CountAsync(item => item.SessionId == sessionId && item.Status == "Pending", ct);
