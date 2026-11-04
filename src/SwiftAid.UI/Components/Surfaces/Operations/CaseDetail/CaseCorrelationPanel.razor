@@ -5,6 +5,10 @@
 <section class="case-detail__section" aria-labelledby="correlation-heading">
     <MudText Typo="Typo.subtitle1" HtmlTag="h2" id="correlation-heading">Possible related cases</MudText>
     <MudText Typo="Typo.body2">Suggestions are unconfirmed. Shared details do not establish identity or causation.</MudText>
+    @if (_decisionMessage is not null)
+    {
+        <MudAlert Severity="@(_decisionError ? Severity.Warning : Severity.Success)" role="status">@_decisionMessage</MudAlert>
+    }
     @if (_loading)
     {
         <MudText Typo="Typo.body2" role="status">Checking suggestions…</MudText>
@@ -31,10 +35,25 @@
                     <MudLink Href="@($"/case/{candidate.RelatedCaseId:D}")">View related case</MudLink>
                     <span> · @string.Join(", ", candidate.Reasons.Select(ReasonLabel))</span>
                     <time datetime="@candidate.RecordedAtUtc.ToString("O")"> · @candidate.RecordedAtUtc.ToLocalTime().ToString("g")</time>
+                    @if (candidate.Decision is { } recorded)
+                    {
+                        <span> · @(recorded == OrganizationDecision.Accept ? "Suggestion accepted" : "Suggestion rejected")</span>
+                    }
+                    else if (_reviewingId != candidate.CandidateId)
+                    {
+                        <MudButton Variant="Variant.Text" OnClick="@(() => OpenReview(candidate.CandidateId))">Review suggestion</MudButton>
+                    }
+                    else
+                    {
+                        <MudTextField T="string" @bind-Value="_rationale" Label="Reason for your decision" Required="true" MaxLength="500" Lines="2" />
+                        <MudButton Variant="Variant.Text" Color="Color.Primary" Disabled="@_submitting" OnClick="@(() => DecideAsync(OrganizationDecision.Accept))">Accept suggestion</MudButton>
+                        <MudButton Variant="Variant.Text" Disabled="@_submitting" OnClick="@(() => DecideAsync(OrganizationDecision.Reject))">Reject suggestion</MudButton>
+                        <MudButton Variant="Variant.Text" Disabled="@_submitting" OnClick="@(() => _reviewingId = null)">Cancel</MudButton>
+                    }
                 </li>
             }
         </ul>
-        <MudText Typo="Typo.caption">Only the most recent 100 candidate records are checked. No case relationship has been confirmed.</MudText>
+        <MudText Typo="Typo.caption">Only the most recent 100 candidate records are checked. A review decision does not merge or change either case.</MudText>
     }
 </section>
 
@@ -44,10 +63,72 @@
     private long _generation;
     private bool _loading;
     private CaseCorrelationReadResult? _result;
+    private Guid? _reviewingId;
+    private string _rationale = "";
+    private bool _submitting;
+    private OrganizationDecisionRequest? _pending;
+    private string? _decisionMessage;
+    private bool _decisionError;
+
+    private void OpenReview(Guid candidateId)
+    {
+        _reviewingId = candidateId;
+        _rationale = "";
+        _pending = null;
+        _decisionMessage = null;
+    }
+
+    private async Task DecideAsync(OrganizationDecision decision)
+    {
+        if (_submitting || _reviewingId is not { } candidateId || Services.GetService<ICaseCorrelationClient>() is not { } client) return;
+        var rationale = _rationale.Trim();
+        if (rationale.Length is < 1 or > 500)
+        {
+            _decisionError = true;
+            _decisionMessage = "Enter a reason of up to 500 characters.";
+            return;
+        }
+        var caseId = CaseId;
+        if (_pending is null || _pending.Decision != decision || _pending.Rationale != rationale)
+            _pending = new(Guid.NewGuid(), decision, rationale);
+        _submitting = true;
+        try
+        {
+            var result = await client.DecideAsync(caseId, candidateId, _pending);
+            if (caseId != CaseId) return;
+            _decisionError = result.Status is not (OrganizationDecisionOutcome.Recorded or OrganizationDecisionOutcome.Replayed or OrganizationDecisionOutcome.AlreadyDecided);
+            _decisionMessage = result.Status switch
+            {
+                OrganizationDecisionOutcome.Recorded or OrganizationDecisionOutcome.Replayed => "Decision recorded. Neither case was merged or reassigned.",
+                OrganizationDecisionOutcome.AlreadyDecided => "This suggestion already has a recorded decision.",
+                OrganizationDecisionOutcome.Stale => "The cases changed; refresh before reviewing this suggestion.",
+                OrganizationDecisionOutcome.NotFoundOrNotAuthorized => "The suggestion is unavailable or you cannot review both cases.",
+                OrganizationDecisionOutcome.Invalid => "Enter a valid decision and reason.",
+                OrganizationDecisionOutcome.Conflict => "The request conflicts with an earlier decision.",
+                _ => "We couldn't confirm the decision. Try again when connected."
+            };
+            if (result.Status != OrganizationDecisionOutcome.Unavailable)
+            {
+                _reviewingId = null;
+                _pending = null;
+                await LoadAsync();
+            }
+        }
+        catch (Exception error) when (error is not OutOfMemoryException)
+        { if (CaseId == caseId) { _decisionError = true; _decisionMessage = "We couldn't confirm the decision. Try again when connected."; } }
+        finally { _submitting = false; }
+    }
 
     protected override async Task OnParametersSetAsync()
     {
-        if (_loadedCaseId != CaseId) { _loadedCaseId = CaseId; await LoadAsync(); }
+        if (_loadedCaseId != CaseId)
+        {
+            _loadedCaseId = CaseId;
+            _reviewingId = null;
+            _pending = null;
+            _decisionMessage = null;
+            await LoadAsync();
+        }
     }
 
     private async Task LoadAsync()

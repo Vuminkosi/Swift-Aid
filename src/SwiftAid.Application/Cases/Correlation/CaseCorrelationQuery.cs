@@ -6,7 +6,7 @@ using SwiftAid.Contracts.Cases;
 namespace SwiftAid.Application.Cases.Correlation;
 
 public sealed record StoredCorrelationCandidate(Guid CandidateId, Guid FirstCaseId, Guid SecondCaseId,
-    long FirstRevision, long SecondRevision, DateTimeOffset RecordedAtUtc, string[] Reasons);
+    long FirstRevision, long SecondRevision, DateTimeOffset RecordedAtUtc, string[] Reasons, string? Decision = null);
 
 public interface ICaseCorrelationStore
 {
@@ -45,7 +45,8 @@ public sealed class CaseCorrelationQuery(ICaseCorrelationStore store, ICaseComma
                     if (!(await scope.Policy.AuthorizeAsync(actor, other, CaseOperation.ReadCase, ct)).IsAllowed ||
                         !await store.AreCurrentAsync(candidate, ct)) continue;
                     visible.Add(new(candidate.CandidateId, other, candidate.RecordedAtUtc, candidate.Reasons,
-                        "Possible relationship only; shared attributes do not establish identity or causation."));
+                        "Possible relationship only; shared attributes do not establish identity or causation.",
+                        Enum.TryParse<OrganizationDecision>(candidate.Decision, false, out var reviewed) && Enum.IsDefined(reviewed) ? reviewed : null));
                     await target.CommitAsync(ct);
                 }
             }

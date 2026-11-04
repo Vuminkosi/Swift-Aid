@@ -10,11 +10,12 @@ public sealed class PostgresCaseCorrelationStore(SwiftAidDbContext db) : ICaseCo
     {
         if (caseId == Guid.Empty || limit is < 1 or > 100) throw new ArgumentOutOfRangeException(nameof(limit));
         return await db.Database.SqlQuery<StoredCorrelationCandidate>($"""
-            SELECT candidate_id AS "CandidateId", first_case_id AS "FirstCaseId", second_case_id AS "SecondCaseId",
-                first_report_revision AS "FirstRevision", second_report_revision AS "SecondRevision",
-                recorded_at_utc AS "RecordedAtUtc", reason_codes AS "Reasons"
-            FROM ellai_correlation_candidates WHERE first_case_id = {caseId} OR second_case_id = {caseId}
-            ORDER BY recorded_at_utc DESC, candidate_id DESC LIMIT {limit}
+            SELECT p.candidate_id AS "CandidateId", p.first_case_id AS "FirstCaseId", p.second_case_id AS "SecondCaseId",
+                p.first_report_revision AS "FirstRevision", p.second_report_revision AS "SecondRevision",
+                p.recorded_at_utc AS "RecordedAtUtc", p.reason_codes AS "Reasons", d.decision AS "Decision"
+            FROM ellai_correlation_candidates p LEFT JOIN ellai_correlation_decisions d ON d.candidate_id = p.candidate_id
+            WHERE p.first_case_id = {caseId} OR p.second_case_id = {caseId}
+            ORDER BY p.recorded_at_utc DESC, p.candidate_id DESC LIMIT {limit}
             """).ToArrayAsync(ct).ConfigureAwait(false);
     }
 

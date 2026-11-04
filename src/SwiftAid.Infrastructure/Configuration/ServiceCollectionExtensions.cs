@@ -405,6 +405,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ICaseTimelineStore, PostgresCaseTimelineStore>();
         services.AddScoped<ICaseCorrelationStore, PostgresCaseCorrelationStore>();
         services.AddScoped<CaseCorrelationQuery>();
+        services.AddScoped<ICaseCorrelationDecisionService, PostgresCaseCorrelationDecisionService>();
         services.AddScoped<ICaseTimelineQuery, CaseTimelineQuery>();
         services.AddScoped<IFollowUpRecommendationReviewService, PostgresFollowUpRecommendationReviewService>();
         services.AddScoped<IOrganizationSuggestionDecisionService, PostgresOrganizationSuggestionDecisionService>();

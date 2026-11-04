@@ -6,7 +6,7 @@ public sealed record OrganizationDecisionRequest(
     [property: System.Text.Json.Serialization.JsonRequired] Guid CommandId,
     [property: System.Text.Json.Serialization.JsonRequired] OrganizationDecision Decision,
     [property: System.Text.Json.Serialization.JsonRequired] string Rationale);
-public sealed record OrganizationDecisionResult(OrganizationDecisionOutcome Status);
+public sealed record OrganizationDecisionResult([property: System.Text.Json.Serialization.JsonRequired] OrganizationDecisionOutcome Status);
 
 /// <summary>Records a review decision only; it does not assign a case.</summary>
 public interface IOrganizationSuggestionDecisionClient
