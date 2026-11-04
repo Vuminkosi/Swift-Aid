@@ -461,6 +461,14 @@ public sealed class SessionSchedulingTests
                 "officer-2", CancellationToken.None);
             Assert.Equal("Scheduled", scheduled.Status);
             Assert.Equal(5, await service.StoreCountRevisionsAsync(sessionId, CancellationToken.None));
+            var history = await db.Set<CommunitySessionRevisionEntity>().AsNoTracking()
+                .Where(row => row.SessionId == sessionId).OrderBy(row => row.Version).ToListAsync();
+            var actions = history.Select(row =>
+            {
+                using var snapshot = JsonDocument.Parse(row.SnapshotJson);
+                return snapshot.RootElement.GetProperty("Action").GetString();
+            }).ToArray();
+            Assert.Equal(new[] { "Created", "Reviewed", "Updated", "Reviewed", "Scheduled" }, actions);
         }
         finally
         {

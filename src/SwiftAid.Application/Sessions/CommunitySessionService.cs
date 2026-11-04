@@ -59,7 +59,7 @@ public sealed class CommunitySessionService(ICommunitySessionStore store, ISessi
                     ToContractVisibility(session.Visibility), session.Language, ct).ConfigureAwait(false);
                 session.Review(actorId, review.AcknowledgeSelfReview, review.RecordedAtUtc);
                 await _store.UpdateAsync(session, command.ExpectedVersion, actorId, command.Reason,
-                    command.RecordedAtUtc, SessionReminderSync.None, null, ct).ConfigureAwait(false);
+                    command.RecordedAtUtc, SessionReminderSync.None, null, SessionRevisionAction.Reviewed, ct).ConfigureAwait(false);
                 break;
             case ScheduleSessionCommand:
                 await RequireEligibleMaterialsAsync(session, session.Materials.Select(ToContractMaterial).ToArray(),
@@ -67,7 +67,7 @@ public sealed class CommunitySessionService(ICommunitySessionStore store, ISessi
                 session.Schedule(actorId, command.RecordedAtUtc);
                 await _store.UpdateAsync(session, command.ExpectedVersion, actorId, command.Reason,
                     command.RecordedAtUtc, SessionReminderSync.Recompute,
-                    session.ComputeReminderOccurrences(session.ScheduledAtUtc!.Value), ct).ConfigureAwait(false);
+                    session.ComputeReminderOccurrences(session.ScheduledAtUtc!.Value), SessionRevisionAction.Scheduled, ct).ConfigureAwait(false);
                 break;
             case UpdateSessionCommand update:
                 var materialSnapshot = update.Materials?.ToArray() ?? throw new ArgumentException("Materials are required.", nameof(update));
@@ -87,17 +87,17 @@ public sealed class CommunitySessionService(ICommunitySessionStore store, ISessi
                     ? session.ComputeReminderOccurrences(command.RecordedAtUtc)
                     : null;
                 await _store.UpdateAsync(session, command.ExpectedVersion, actorId, command.Reason,
-                    command.RecordedAtUtc, sync, occurrences, ct).ConfigureAwait(false);
+                    command.RecordedAtUtc, sync, occurrences, SessionRevisionAction.Updated, ct).ConfigureAwait(false);
                 break;
             case CancelSessionCommand cancel:
                 session.Cancel(cancel.CancellationReason, actorId, command.RecordedAtUtc);
                 await _store.UpdateAsync(session, command.ExpectedVersion, actorId, command.Reason,
-                    command.RecordedAtUtc, SessionReminderSync.SuppressPending, null, ct).ConfigureAwait(false);
+                    command.RecordedAtUtc, SessionReminderSync.SuppressPending, null, SessionRevisionAction.Cancelled, ct).ConfigureAwait(false);
                 break;
             case CompleteSessionCommand:
                 session.Complete(actorId, command.RecordedAtUtc);
                 await _store.UpdateAsync(session, command.ExpectedVersion, actorId, command.Reason,
-                    command.RecordedAtUtc, SessionReminderSync.SuppressPending, null, ct).ConfigureAwait(false);
+                    command.RecordedAtUtc, SessionReminderSync.SuppressPending, null, SessionRevisionAction.Completed, ct).ConfigureAwait(false);
                 break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(command), "An unsupported session command was supplied.");
@@ -320,7 +320,7 @@ public sealed class CommunitySessionService(ICommunitySessionStore store, ISessi
             command.Materials.Select(ToDomainMaterial).ToArray(),
             ToDomainVisibility(command.Visibility), ToDomainChannel(command.ChannelType),
             command.ChannelLink, command.ReminderLeadHours, actorId, command.RecordedAtUtc);
-        await _store.InsertAsync(session, actorId, command.Reason, command.RecordedAtUtc, ct).ConfigureAwait(false);
+        await _store.InsertAsync(session, actorId, command.Reason, command.RecordedAtUtc, SessionRevisionAction.Created, ct).ConfigureAwait(false);
         return new SessionCommandResult(session.SessionId, session.Version, session.Status.ToString());
     }
 

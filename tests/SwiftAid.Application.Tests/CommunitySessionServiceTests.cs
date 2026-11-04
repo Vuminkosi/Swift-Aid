@@ -616,7 +616,7 @@ public sealed class CommunitySessionServiceTests
         public Task<DomainSessions.CommunitySession?> LoadAsync(Guid sessionId, CancellationToken ct) =>
             Task.FromResult(_sessions.TryGetValue(sessionId, out var session) ? session : null);
 
-        public Task InsertAsync(DomainSessions.CommunitySession session, string actorId, string reason, DateTimeOffset recordedAtUtc, CancellationToken ct)
+        public Task InsertAsync(DomainSessions.CommunitySession session, string actorId, string reason, DateTimeOffset recordedAtUtc, SessionRevisionAction action, CancellationToken ct)
         {
             _sessions.Add(session.SessionId, session);
             _versions[session.SessionId] = session.Version;
@@ -632,6 +632,7 @@ public sealed class CommunitySessionServiceTests
             DateTimeOffset recordedAtUtc,
             SessionReminderSync reminderSync,
             IReadOnlyList<DomainSessions.SessionReminderOccurrence>? occurrences,
+            SessionRevisionAction action,
             CancellationToken ct)
         {
             if (!_versions.TryGetValue(session.SessionId, out var current) || current != expectedVersion)

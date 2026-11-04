@@ -3,6 +3,17 @@ using SwiftAid.Contracts.Sessions;
 
 namespace SwiftAid.Application.Sessions;
 
+/// <summary>Accepted lifecycle action recorded with a session revision.</summary>
+public enum SessionRevisionAction
+{
+    Created,
+    Reviewed,
+    Scheduled,
+    Updated,
+    Cancelled,
+    Completed
+}
+
 /// <summary>
 /// How the store should synchronize reminder occurrences after a session change.
 /// Dispatch/execution of reminders is explicitly OUT of scope (deferred to the
@@ -39,6 +50,7 @@ public interface ICommunitySessionStore
         string actorId,
         string reason,
         DateTimeOffset recordedAtUtc,
+        SessionRevisionAction action,
         CancellationToken ct);
 
     Task UpdateAsync(
@@ -49,6 +61,7 @@ public interface ICommunitySessionStore
         DateTimeOffset recordedAtUtc,
         SessionReminderSync reminderSync,
         IReadOnlyList<SessionReminderOccurrence>? occurrences,
+        SessionRevisionAction action,
         CancellationToken ct);
 
     Task<IReadOnlyList<CommunitySession>> ListPublicAsync(int take, CancellationToken ct);
