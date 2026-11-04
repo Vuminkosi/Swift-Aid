@@ -14,6 +14,7 @@ public static class EllaiSpecialistRegistry
     public const string Analytics = "core.analytics";
     public const string Ui = "core.ui";
     public const string Geospatial = "core.geospatial";
+    public const string Workflow = "core.workflow";
 
     private static readonly FrozenDictionary<string, EllaiSpecialistProfile> Profiles =
         new[]
@@ -27,7 +28,9 @@ public static class EllaiSpecialistRegistry
             new EllaiSpecialistProfile(Ui, 1, "Ellai:Specialists:Ui:Enabled",
                 new[] { EllaiToolNames.UiCatalogue, EllaiToolNames.UiObserve }.ToFrozenSet(StringComparer.Ordinal)),
             new EllaiSpecialistProfile(Geospatial, 1, "Ellai:Specialists:Geospatial:Enabled",
-                new[] { EllaiToolNames.Locations }.ToFrozenSet(StringComparer.Ordinal))
+                new[] { EllaiToolNames.Locations }.ToFrozenSet(StringComparer.Ordinal)),
+            new EllaiSpecialistProfile(Workflow, 1, "Ellai:Specialists:Workflow:Enabled",
+                new[] { EllaiToolNames.Receipts }.ToFrozenSet(StringComparer.Ordinal))
         }.ToFrozenDictionary(profile => profile.AgentId, StringComparer.Ordinal);
 
     public static bool TryGet(string agentId, out EllaiSpecialistProfile profile)

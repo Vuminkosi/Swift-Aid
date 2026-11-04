@@ -58,7 +58,8 @@ public static class EllaiReasoningRegistration
             sp.GetRequiredService<IEllaiUsageStore>(), agentFactory: sp.GetRequiredService<IEllaiFrameworkAgentFactory>(),
             enableKnowledgeSpecialist: enableKnowledgeSpecialist, enableCaseSpecialist: enableCaseSpecialist,
             enableAnalyticsSpecialist: enableAnalyticsSpecialist, enableUiSpecialist: enableUiSpecialist,
-            enableGeospatialSpecialist: sp.GetService<IConfiguration>()?.GetValue<bool>("Ellai:Specialists:Geospatial:Enabled") == true));
+            enableGeospatialSpecialist: sp.GetService<IConfiguration>()?.GetValue<bool>("Ellai:Specialists:Geospatial:Enabled") == true,
+            enableWorkflowSpecialist: sp.GetService<IConfiguration>()?.GetValue<bool>("Ellai:Specialists:Workflow:Enabled") == true));
         return services;
     }
 }

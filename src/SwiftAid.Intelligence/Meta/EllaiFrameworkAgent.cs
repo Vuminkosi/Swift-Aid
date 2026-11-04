@@ -35,7 +35,8 @@ public sealed class EllaiFrameworkAgent
         Func<CancellationToken, Task<bool>>? revalidateStreamObservations = null,
         string? frameworkSessionJson = null, int maxModelCalls = int.MaxValue,
         bool enableKnowledgeSpecialist = false, bool enableCaseSpecialist = false, bool enableAnalyticsSpecialist = false,
-        bool allowEmptyCaseQueue = false, bool enableUiSpecialist = false, bool enableGeospatialSpecialist = false)
+        bool allowEmptyCaseQueue = false, bool enableUiSpecialist = false, bool enableGeospatialSpecialist = false,
+        bool enableWorkflowSpecialist = false)
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentException.ThrowIfNullOrWhiteSpace(instructions);
@@ -305,6 +306,39 @@ public sealed class EllaiFrameworkAgent
             }
             tools.Add(AIFunctionFactory.Create(DelegateGeospatial, name: "ellai_delegate_geospatial",
                 description: "Find registry-backed place candidates; does not perform case mapping or spatial analysis."));
+        }
+        if (enableWorkflowSpecialist && context.AllowedTools?.Contains(EllaiToolNames.Receipts) == true)
+        {
+            var delegationCount = 0;
+            async Task<string> DelegateWorkflow(string task, CancellationToken token)
+            {
+                token.ThrowIfCancellationRequested();
+                if (Interlocked.Increment(ref delegationCount) != 1) return "Workflow delegation limit reached.";
+                using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
+                deadline.CancelAfter(TimeSpan.FromSeconds(SwiftAid.Application.Ellai.Specialists.EllaiSpecialistRegistry.TryGet(
+                    SwiftAid.Application.Ellai.Specialists.EllaiSpecialistRegistry.Workflow, out var profile) ? profile.TimeoutSeconds : 1));
+                try
+                {
+                    var result = await new EllaiWorkflowSpecialist(_client, _agentFactory).RunAsync(task, instructions, context,
+                        usage, Current, InvokeGuardedTool, revalidateTool ?? invoke, deadline.Token,
+                        calls => Interlocked.Add(ref delegatedModelCalls, calls)).ConfigureAwait(false);
+                    if (result.Outcome != EllaiSpecialistOutcome.Completed || result.Decision is null)
+                    {
+                        Interlocked.Exchange(ref invalidDelegation, 1);
+                        return "Workflow specialist could not verify an answer.";
+                    }
+                    var json = System.Text.Json.JsonSerializer.Serialize(result.Decision);
+                    if (json.Length <= 12000) return json;
+                    Interlocked.Exchange(ref invalidDelegation, 1);
+                    return "Workflow specialist result exceeded its limit.";
+                }
+                catch (OperationCanceledException) when (!token.IsCancellationRequested && deadline.IsCancellationRequested)
+                { Interlocked.Exchange(ref invalidDelegation, 1); return "Workflow specialist timed out."; }
+                catch (EllaiFrameworkFailureException)
+                { Interlocked.Exchange(ref invalidDelegation, 1); return "Workflow specialist could not complete the request."; }
+            }
+            tools.Add(AIFunctionFactory.Create(DelegateWorkflow, name: "ellai_delegate_workflow",
+                description: "Read current-session action receipt status; cannot approve or execute actions."));
         }
         var guardedClient = new ModelCallGuard(_client, Current, usage, maxModelCalls);
         var functionClient = new FunctionInvokingChatClient(guardedClient)

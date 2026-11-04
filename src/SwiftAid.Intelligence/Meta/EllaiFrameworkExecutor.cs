@@ -9,7 +9,7 @@ public sealed class EllaiFrameworkExecutor(
     EllaiUsageLedger ledger, IEllaiUsageStore usageStore, TimeSpan? toolTimeout = null,
     IEllaiFrameworkAgentFactory? agentFactory = null, bool enableKnowledgeSpecialist = false,
     bool enableCaseSpecialist = false, bool enableAnalyticsSpecialist = false, bool enableUiSpecialist = false,
-    bool enableGeospatialSpecialist = false) : IEllaiReasoningExecutor, IEllaiHistoryAuthorizationRequired
+    bool enableGeospatialSpecialist = false, bool enableWorkflowSpecialist = false) : IEllaiReasoningExecutor, IEllaiHistoryAuthorizationRequired
 {
     private static readonly System.Text.Json.JsonSerializerOptions CompactTraceJson = new()
     {
@@ -183,7 +183,8 @@ public sealed class EllaiFrameworkExecutor(
                             await request.RevalidateStreamObservations(observations.ToArray(), token).ConfigureAwait(false),
                     request.FrameworkSessionJson, enableKnowledgeSpecialist: enableKnowledgeSpecialist,
                     enableCaseSpecialist: enableCaseSpecialist, enableAnalyticsSpecialist: enableAnalyticsSpecialist,
-                    enableUiSpecialist: enableUiSpecialist, enableGeospatialSpecialist: enableGeospatialSpecialist).ConfigureAwait(false);
+                    enableUiSpecialist: enableUiSpecialist, enableGeospatialSpecialist: enableGeospatialSpecialist,
+                    enableWorkflowSpecialist: enableWorkflowSpecialist).ConfigureAwait(false);
             }
             catch (EllaiFrameworkFailureException failure) when (failure.Code is not ("ProviderUnavailable" or "UsageUnavailable"))
             {
