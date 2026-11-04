@@ -90,14 +90,15 @@
                                     @if (OpenCalendarAsync is not null)
                                     {
                                         <MudButton Variant="Variant.Text" Color="Color.Primary" StartIcon="@Icons.Material.Filled.CalendarMonth"
-                                                   OnClick="() => OpenCalendarFileAsync(session)">
-                                            @(IsCancelled(session) ? "Open cancellation file" : "Open calendar file")
+                                                   OnClick="() => OpenCalendarFileAsync(session)" Disabled="@(_openingCalendarId is not null)"
+                                                   aria-label="@CalendarActionLabel(session)">
+                                            @(_openingCalendarId == session.SessionId ? "Opening…" : IsCancelled(session) ? "Open cancellation file" : "Open calendar file")
                                         </MudButton>
                                     }
                                     else if (!string.IsNullOrWhiteSpace(PublicBasePath))
                                     {
                                         <a class="session-public-list__mobile-action" href="@CalendarHref(session.SessionId)"
-                                           download="@($"session-{session.SessionId:D}.ics")">
+                                           download="@($"session-{session.SessionId:D}.ics")" aria-label="@CalendarActionLabel(session)">
                                             <MudIcon Icon="@Icons.Material.Filled.CalendarMonth" aria-hidden="true" />
                                             @(IsCancelled(session) ? "Download cancellation" : "Add to calendar")
                                         </a>
@@ -187,15 +188,16 @@
                             </a>
                             @if (OpenCalendarAsync is not null)
                             {
-                                <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.CalendarMonth" OnClick="() => OpenCalendarFileAsync(session)">
-                                    @(IsCancelled(session) ? "Open cancellation file" : "Open calendar file")
+                                <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.CalendarMonth" OnClick="() => OpenCalendarFileAsync(session)"
+                                           Disabled="@(_openingCalendarId is not null)" aria-label="@CalendarActionLabel(session)">
+                                    @(_openingCalendarId == session.SessionId ? "Opening…" : IsCancelled(session) ? "Open cancellation file" : "Open calendar file")
                                 </MudButton>
                             }
                             else if (!string.IsNullOrWhiteSpace(PublicBasePath))
                             {
                                 <a class="mud-button-root mud-button mud-button-text mud-button-text-default mud-button-text-size-medium mud-ripple"
                                    href="@CalendarHref(session.SessionId)"
-                                   download="@($"session-{session.SessionId:D}.ics")">
+                                   download="@($"session-{session.SessionId:D}.ics")" aria-label="@CalendarActionLabel(session)">
                                     <span class="mud-button-label">@(IsCancelled(session) ? "Download cancellation" : "Download calendar file")</span>
                                 </a>
                             }
@@ -288,18 +290,28 @@
     private long _shareRequestVersion;
     private Guid? _calendarErrorId;
     private string? _calendarError;
+    private Guid? _openingCalendarId;
+
+    private string CalendarActionLabel(PublicSessionView session) =>
+        $"{(OpenCalendarAsync is null ? "Download" : "Open")} {(IsCancelled(session) ? "cancellation calendar file" : "calendar file")} for {session.Title}";
 
     private async Task OpenCalendarFileAsync(PublicSessionView session)
     {
+        if (_openingCalendarId is not null || OpenCalendarAsync is null) return;
+        _openingCalendarId = session.SessionId;
         _calendarErrorId = null;
         _calendarError = null;
         try
         {
-            if (OpenCalendarAsync is not null && await OpenCalendarAsync(session.SessionId)) return;
+            if (await OpenCalendarAsync(session.SessionId)) return;
         }
         catch (Exception)
         {
             // The device may have no application able to open calendar files.
+        }
+        finally
+        {
+            _openingCalendarId = null;
         }
         _calendarErrorId = session.SessionId;
         _calendarError = "The calendar file could not be opened. Check your connection and calendar app, then try again.";

@@ -567,6 +567,26 @@ public sealed class PublicSessionQueryStateTests
         Assert.Null(type.GetField("_calendarErrorId", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(list));
     }
 
+    [Fact]
+    public async Task NativeCalendarOpeningDoesNotStartOverlappingRequests()
+    {
+        var session = Session(Guid.NewGuid());
+        var list = new PublicSessionList();
+        var type = typeof(PublicSessionList);
+        var pending = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var calls = 0;
+        type.GetProperty(nameof(list.OpenCalendarAsync))!.SetValue(list, (Func<Guid, Task<bool>>)(_ => { calls++; return pending.Task; }));
+        var open = type.GetMethod("OpenCalendarFileAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        var first = (Task)open.Invoke(list, [session])!;
+        await (Task)open.Invoke(list, [session])!;
+        Assert.Equal(1, calls);
+        pending.SetResult(true);
+        await first;
+        Assert.Null(type.GetField("_openingCalendarId", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(list));
+        var label = (string)type.GetMethod("CalendarActionLabel", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(list, [session])!;
+        Assert.Contains(session.Title, label, StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
