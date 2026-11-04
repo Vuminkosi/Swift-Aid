@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using SwiftAid.Contracts.Ellai;
+using SwiftAid.Contracts.Intake;
 
 namespace SwiftAid.UI.Ellai.Guidance;
 
@@ -12,12 +13,14 @@ public sealed class EllaiPublicReportDraftContext
     private Func<string, bool>? _addObservation;
     private Func<string, bool>? _setLocality;
     private Func<string, bool>? _appendNarrative;
+    private Func<ReportedGender, bool>? _setGender;
+    private Func<bool>? _revertAge;
     private readonly List<PendingEdit> _pending = [];
     private DateTimeOffset _captureExpiresAt;
     private bool _captureActive;
 
-    private enum PendingEditKind { Age, Observation, Locality, Narrative }
-    private sealed record PendingEdit(PendingEditKind Kind, int? Age = null, string? Text = null);
+    private enum PendingEditKind { Age, AgeRevert, Gender, Observation, Locality, Narrative }
+    private sealed record PendingEdit(PendingEditKind Kind, int? Age = null, ReportedGender? Gender = null, string? Text = null);
 
     public void BeginReportCapture()
     {
@@ -30,7 +33,8 @@ public sealed class EllaiPublicReportDraftContext
     }
 
     public void Register(object owner, Func<int, bool> setAge, Func<string, bool> addObservation,
-        Func<string, bool>? setLocality = null, Func<string, bool>? appendNarrative = null)
+        Func<string, bool>? setLocality = null, Func<string, bool>? appendNarrative = null,
+        Func<ReportedGender, bool>? setGender = null, Func<bool>? revertAge = null)
     {
         lock (_gate)
         {
@@ -39,6 +43,8 @@ public sealed class EllaiPublicReportDraftContext
             _addObservation = addObservation;
             _setLocality = setLocality ?? (_ => false);
             _appendNarrative = appendNarrative ?? (_ => false);
+            _setGender = setGender ?? (_ => false);
+            _revertAge = revertAge ?? (() => false);
         }
     }
 
@@ -75,6 +81,8 @@ public sealed class EllaiPublicReportDraftContext
                 _addObservation = null;
                 _setLocality = null;
                 _appendNarrative = null;
+                _setGender = null;
+                _revertAge = null;
                 _pending.Clear();
                 _captureActive = false;
             }
@@ -82,17 +90,46 @@ public sealed class EllaiPublicReportDraftContext
 
     public bool ApplyAgeCorrection(string? utterance)
     {
-        if (utterance is null) return false;
+        if (utterance is null || utterance.Length > 200 || utterance.Contains('\r') || utterance.Contains('\n')) return false;
         const RegexOptions options = RegexOptions.IgnoreCase | RegexOptions.CultureInvariant;
+        if (Regex.IsMatch(utterance, @"^\s*(?:wait[, ]+)?(?:the\s+)?age\s+was\s+(?:correct|right)\s+the\s+first\s+time[.!?]?\s*$", options))
+            return Apply(new(PendingEditKind.AgeRevert));
+
         var match = Regex.Match(utterance, @"^\s*(?:change|correct|update|set)\s+(?:(?:her|his|the patient's|patient's)\s+)?age\s+(?:to|is)\s+(\d{1,10})\s*[.!?]?\s*$", options);
         if (!match.Success)
-            match = Regex.Match(utterance, @"^\s*(?:(?:the\s+)?patient|she|he)\s+(?:is\s+)?(\d{1,10})\s+years?\s+old\s*[.!?]?\s*$", options);
+            match = Regex.Match(utterance, @"^\s*(?:(?:the\s+)?patient|she|he)\s+(?:is\s+)?(?:actually\s+)?(\d{1,10})(?:\s+years?\s+old)?\s*[.!?]?\s*$", options);
         if (!match.Success)
-            match = Regex.Match(utterance, @"^\s*(\d{1,10})[- ]year[- ]old\s+(?:patient|woman|man|girl|boy)\s*[.!?]?\s*$", options);
+            match = Regex.Match(utterance, @"^\s*(?:(?:create|make|start|open)\s+(?:a\s+)?(?:report|draft)\s+for\s+(?:(?:a|the)\s+)?)?(\d{1,10})[- ]year[- ]old\s+(patient|woman|man|girl|boy)\s*[.!?]?\s*$", options);
         if (!match.Success || !int.TryParse(match.Groups[1].Value, System.Globalization.NumberStyles.None,
                 System.Globalization.CultureInfo.InvariantCulture, out var age)) return false;
-        return Apply(new(PendingEditKind.Age, Age: age));
+        var applied = Apply(new(PendingEditKind.Age, Age: age));
+        var reportedGender = match.Groups.Count > 2 ? GenderForDescriptor(match.Groups[2].Value) : null;
+        return applied && (reportedGender is null || Apply(new(PendingEditKind.Gender, Gender: reportedGender)));
     }
+
+    public bool ApplyReportedGender(string? utterance)
+    {
+        if (utterance is null || utterance.Length > 200 || utterance.Contains('\r') || utterance.Contains('\n')) return false;
+        const RegexOptions options = RegexOptions.IgnoreCase | RegexOptions.CultureInvariant;
+        var match = Regex.Match(utterance,
+            @"^\s*(?:(?:the\s+)?patient|she|he)\s+(?:is|was)\s+(female|male|other)\s*[.!?]?\s*$", options);
+        if (!match.Success) return false;
+        var gender = match.Groups[1].Value.ToLowerInvariant() switch
+        {
+            "female" => ReportedGender.Female,
+            "male" => ReportedGender.Male,
+            "other" => ReportedGender.Other,
+            _ => (ReportedGender?)null
+        };
+        return gender is { } value && Apply(new(PendingEditKind.Gender, Gender: value));
+    }
+
+    private static ReportedGender? GenderForDescriptor(string descriptor) => descriptor.ToLowerInvariant() switch
+    {
+        "woman" or "girl" => ReportedGender.Female,
+        "man" or "boy" => ReportedGender.Male,
+        _ => null
+    };
 
     public bool ApplyReportedObservation(string? utterance)
     {
@@ -133,6 +170,8 @@ public sealed class EllaiPublicReportDraftContext
             apply = edit.Kind switch
             {
                 PendingEditKind.Age when _setAge is { } setAge => () => setAge(edit.Age!.Value),
+                PendingEditKind.AgeRevert when _revertAge is { } revertAge => revertAge,
+                PendingEditKind.Gender when _setGender is { } setGender => () => setGender(edit.Gender!.Value),
                 PendingEditKind.Observation when _addObservation is { } addObservation => () => addObservation(edit.Text!),
                 PendingEditKind.Locality when _setLocality is { } setLocality => () => setLocality(edit.Text!),
                 PendingEditKind.Narrative when _appendNarrative is { } appendNarrative => () => appendNarrative(edit.Text!),

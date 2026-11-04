@@ -42,6 +42,8 @@ public partial class GuidedReportStepper
         if (_step == 0)
         {
             Add("report.subject", "report.subject-kind", _subjectCategory is null ? UiInputPresence.NotProvided : UiInputPresence.Entered);
+            if (_subjectCategory == ReportSubjectCategory.HumanHealth)
+                Add("report.subject", "report.gender", Draft.Gender is null ? UiInputPresence.NotProvided : UiInputPresence.Entered);
             if (_subjectCategory == ReportSubjectCategory.AnimalHealth)
                 Add("report.subject", "report.animal-scope", HasCompleteSubject ? UiInputPresence.Entered : UiInputPresence.NotProvided);
         }

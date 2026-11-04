@@ -18,7 +18,13 @@ public sealed record IntakeSubmission(
     /// <summary>Age in completed years as reported for a human subject; null means unknown.</summary>
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public int? AgeYears { get; init; }
+
+    /// <summary>Gender as explicitly reported for a human subject; null means not provided or unknown.</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public ReportedGender? Gender { get; init; }
 }
+
+public enum ReportedGender { Female, Male, Other }
 
 public enum IntakeSubjectScope
 {

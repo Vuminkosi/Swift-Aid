@@ -38,8 +38,10 @@ public static class IntakePromotionMapper
         ArgumentNullException.ThrowIfNull(submission);
         if (reportId == Guid.Empty || string.IsNullOrWhiteSpace(sourcePrefix) || sourcePrefix.Length > 400)
             throw new ArgumentException("A stable report and source reference are required.");
-        if (submission.AgeYears < 0 || submission.AgeYears.HasValue && submission.SubjectScope != IntakeSubjectScope.Human)
-            throw new ArgumentException("The reported age is invalid for this subject.", nameof(submission));
+        if (submission.AgeYears < 0 ||
+            (submission.AgeYears.HasValue && submission.SubjectScope != IntakeSubjectScope.Human) ||
+            (submission.Gender is { } gender && (!Enum.IsDefined(gender) || submission.SubjectScope != IntakeSubjectScope.Human)))
+            throw new ArgumentException("A reported demographic detail is invalid for this subject.", nameof(submission));
         var context = new ReportContext(
             ToOccurrenceFact(sourcePrefix, submission.Occurrence),
             submission.CapturedAt.Value?.ToUniversalTime(),
@@ -119,7 +121,9 @@ public static class IntakePromotionMapper
             .Select((text, index) => new ReportedText(
                 text,
                 new ReportProvenance(ReportSourceKind.ReporterObservation, $"{sourcePrefix}:observation:{index}")))
-            .ToArray();
+            .ToList();
+        if (submission.Gender is { } gender)
+            observations.Add(new ReportedText($"Reported gender: {gender}", ReporterProvenance(sourcePrefix, "gender")));
         ReportEvidenceReference? originalAudio = submission.OriginalAudioAttachmentIds.Count == 0
             ? null
             : new ReportEvidenceReference(

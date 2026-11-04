@@ -55,6 +55,7 @@ public sealed class PublicReportDraft : IValidatableObject
             };
             if (snapshot.SchemaVersion >= 2) expected.Add(nameof(OccurrenceDateText));
             if (snapshot.SchemaVersion >= 3) expected.Add(nameof(AgeYearsText));
+            if (snapshot.SchemaVersion >= 4) expected.Add(nameof(Gender));
             var names = document.RootElement.EnumerateObject().Select(property => property.Name).ToArray();
             if (names.Length != expected.Count || names.Distinct(StringComparer.Ordinal).Count() != names.Length ||
                 names.Any(name => !expected.Contains(name)))
@@ -84,6 +85,8 @@ public sealed class PublicReportDraft : IValidatableObject
     public IntakeSubjectScope? SubjectScope { get; set; }
 
     public string? AgeYearsText { get; set; }
+
+    public ReportedGender? Gender { get; set; }
 
     public bool HasValidAge() => string.IsNullOrWhiteSpace(AgeYearsText) ||
         int.TryParse(AgeYearsText, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out _);
@@ -175,6 +178,7 @@ public sealed class PublicReportDraft : IValidatableObject
         {
             SubjectScope = submission.SubjectScope,
             AgeYearsText = submission.AgeYears?.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            Gender = submission.Gender,
             Narrative = submission.Narrative,
             ObservationsText = string.Join(Environment.NewLine, submission.Observations),
             OccurrencePrecision = occurrence.Precision,
@@ -336,7 +340,8 @@ public sealed class PublicReportDraft : IValidatableObject
             confirmations)
         {
             AgeYears = SubjectScope == IntakeSubjectScope.Human && !string.IsNullOrWhiteSpace(AgeYearsText)
-                ? int.Parse(AgeYearsText, System.Globalization.CultureInfo.InvariantCulture) : null
+                ? int.Parse(AgeYearsText, System.Globalization.CultureInfo.InvariantCulture) : null,
+            Gender = SubjectScope == IntakeSubjectScope.Human ? Gender : null
         };
     }
 

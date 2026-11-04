@@ -14,7 +14,8 @@ public static class IntakeSubmissionRules
         limits.Validate();
         if (submission.SchemaVersion != 1 || submission.ClientSubmissionId == Guid.Empty ||
             !Enum.IsDefined(submission.SubjectScope) || submission.AgeYears < 0 ||
-            submission.AgeYears.HasValue && submission.SubjectScope != IntakeSubjectScope.Human)
+            (submission.AgeYears.HasValue && submission.SubjectScope != IntakeSubjectScope.Human) ||
+            (submission.Gender is { } gender && (!Enum.IsDefined(gender) || submission.SubjectScope != IntakeSubjectScope.Human)))
         {
             throw new ArgumentException("The intake report is invalid.", nameof(submission));
         }

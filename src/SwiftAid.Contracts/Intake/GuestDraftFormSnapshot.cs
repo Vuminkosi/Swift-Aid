@@ -5,12 +5,12 @@ namespace SwiftAid.Contracts.Intake;
 /// <summary>Private editable form state inside the protected local envelope. It is never sent to intake.</summary>
 public sealed record GuestDraftFormSnapshot(int SchemaVersion, string Json)
 {
-    public const int CurrentSchemaVersion = 3;
+    public const int CurrentSchemaVersion = 4;
     public const int MaximumJsonCharacters = 131072;
 
     public bool IsValid()
     {
-        if (SchemaVersion is not (1 or 2 or CurrentSchemaVersion) || string.IsNullOrWhiteSpace(Json) || Json.Length > MaximumJsonCharacters)
+        if (SchemaVersion is not (1 or 2 or 3 or CurrentSchemaVersion) || string.IsNullOrWhiteSpace(Json) || Json.Length > MaximumJsonCharacters)
             return false;
         try
         {

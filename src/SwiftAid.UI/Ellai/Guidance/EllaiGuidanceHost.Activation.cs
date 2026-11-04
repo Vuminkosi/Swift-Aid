@@ -111,7 +111,7 @@ public partial class EllaiGuidanceHost
         if (draftEdits.Length > 0)
         {
             if (draftEdits.Length == 1 && newlyCompleted && draftEdits[0].ProposalId != _lastReportDraftEditProposalId &&
-                draftEdits[0].Proposal is { FeatureId: "report", ResourceId: null, ControlId: "report.age-years" or "report.other-observations" or "report.locality" or "report.original-statement", Arguments.Count: 0 } &&
+                draftEdits[0].Proposal is { FeatureId: "report", ResourceId: null, ControlId: "report.age-years" or "report.gender" or "report.other-observations" or "report.locality" or "report.original-statement", Arguments.Count: 0 } &&
                 turn.UserText is { } userText)
             {
                 _lastReportDraftEditProposalId = draftEdits[0].ProposalId;
@@ -119,26 +119,32 @@ public partial class EllaiGuidanceHost
                 var controlId = draftEdits[0].Proposal.ControlId;
                 var applied = controlId == "report.age-years"
                     ? context?.ApplyAgeCorrection(userText) == true
-                    : controlId == "report.other-observations"
-                        ? context?.ApplyReportedObservation(userText) == true
-                        : controlId == "report.locality"
-                            ? context?.ApplyReportedLocality(userText) == true
-                            : context?.ApplyReportNarrativeStatement(userText) == true;
+                    : controlId == "report.gender"
+                        ? context?.ApplyReportedGender(userText) == true
+                        : controlId == "report.other-observations"
+                            ? context?.ApplyReportedObservation(userText) == true
+                            : controlId == "report.locality"
+                                ? context?.ApplyReportedLocality(userText) == true
+                                : context?.ApplyReportNarrativeStatement(userText) == true;
                 _guidanceNotice = applied
                     ? controlId == "report.age-years"
                         ? "Updated the reported age in the open report draft. Review it before submitting."
-                        : controlId == "report.other-observations"
-                            ? "Added your reported observation to the open report draft. Review it before submitting."
-                            : controlId == "report.locality"
-                                ? "Added the reported locality to the open report draft. Review it before submitting."
-                                : "Added your reported statement to the open report draft. Review it before submitting."
+                        : controlId == "report.gender"
+                            ? "Updated the explicitly reported gender in the open report draft. Review it before submitting."
+                            : controlId == "report.other-observations"
+                                ? "Added your reported observation to the open report draft. Review it before submitting."
+                                : controlId == "report.locality"
+                                    ? "Added the reported locality to the open report draft. Review it before submitting."
+                                    : "Added your reported statement to the open report draft. Review it before submitting."
                     : controlId == "report.age-years"
                         ? "I could not update the age. Open the report details and enter it there."
-                        : controlId == "report.other-observations"
-                            ? "I could not add that statement as an observation. Enter it in the report details instead."
-                            : controlId == "report.locality"
-                                ? "I could not add that locality. Enter it in the report details instead."
-                                : "I could not add that statement to the report details.";
+                        : controlId == "report.gender"
+                            ? "I could not update gender from that statement. Enter the explicitly reported value in the report instead."
+                            : controlId == "report.other-observations"
+                                ? "I could not add that statement as an observation. Enter it in the report details instead."
+                                : controlId == "report.locality"
+                                    ? "I could not add that locality. Enter it in the report details instead."
+                                    : "I could not add that statement to the report details.";
             }
             return;
         }
@@ -211,7 +217,12 @@ public partial class EllaiGuidanceHost
         {
             var reportDraft = Services.GetService(typeof(EllaiPublicReportDraftContext)) as EllaiPublicReportDraftContext;
             reportDraft?.BeginReportCapture();
-            if (turn.UserText is { } reportRequest) reportDraft?.ApplyReportNarrativeStatement(reportRequest);
+            if (turn.UserText is { } reportRequest)
+            {
+                reportDraft?.ApplyReportNarrativeStatement(reportRequest);
+                reportDraft?.ApplyAgeCorrection(reportRequest);
+                reportDraft?.ApplyReportedGender(reportRequest);
+            }
         }
         // Conversation restoration offers an explicit action; only the currently awaited turn auto-starts.
         if (newlyCompleted) _ = StartProposedGuidanceAsync();

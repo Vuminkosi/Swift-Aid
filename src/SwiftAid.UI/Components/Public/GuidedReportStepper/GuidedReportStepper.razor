@@ -80,6 +80,20 @@
                     </MudRadioGroup>
                     </div>
                 </div>
+                @if (_subjectCategory == ReportSubjectCategory.HumanHealth)
+                {
+                    <div class="guided-report__animal-scope-group" data-bonboarding-anchor="ellai-report-gender">
+                        <MudText Typo="Typo.body2" id="reported-gender-label">Reported gender (optional)</MudText>
+                        <MudRadioGroup T="ReportedGender?" Value="Draft.Gender" ValueChanged="ReportedGenderChangedAsync" aria-labelledby="reported-gender-label">
+                            <div class="guided-report__animal-scope-options">
+                                <MudRadio T="ReportedGender?" Value="@((ReportedGender?)ReportedGender.Female)" Color="Color.Primary">Female</MudRadio>
+                                <MudRadio T="ReportedGender?" Value="@((ReportedGender?)ReportedGender.Male)" Color="Color.Primary">Male</MudRadio>
+                                <MudRadio T="ReportedGender?" Value="@((ReportedGender?)ReportedGender.Other)" Color="Color.Primary">Other</MudRadio>
+                                <MudRadio T="ReportedGender?" Value="@((ReportedGender?)null)" Color="Color.Primary">Unknown / not provided</MudRadio>
+                            </div>
+                        </MudRadioGroup>
+                    </div>
+                }
                 @if (_subjectCategory == ReportSubjectCategory.AnimalHealth)
                 {
                     <div class="guided-report__animal-scope-group" data-bonboarding-anchor="ellai-report-animal-scope">
@@ -335,6 +349,7 @@
                     <div><dt>Subject</dt><dd>@SubjectLabel</dd></div>
                     @if (Draft.SubjectScope == IntakeSubjectScope.Human)
                     {
+                        <div><dt>Reported gender</dt><dd>@GenderSummary</dd></div>
                         <div><dt>Reported age in years</dt><dd>@UnknownIfEmpty(Draft.AgeYearsText)</dd></div>
                     }
                     <div><dt>Original statement</dt><dd>@UnknownIfEmpty(Draft.Narrative)</dd><dd class="guided-report__provenance">Your words, shown as entered</dd></div>
@@ -512,6 +527,7 @@
     private bool _submitting;
     private DraftSaveState _saveState = DraftSaveState.Unsaved;
     private ReportSubjectCategory? _subjectCategory;
+    private readonly List<int> _previousAges = [];
 
     private sealed record ObservationGroup(string Heading, IReadOnlyList<string> Choices);
     private sealed record PendingDraftRefresh(Guid? SourceDraftId, PublicReportDraft SavedDraft, PublicReportDraft SourceDraft,
@@ -739,6 +755,7 @@
             if (_editContext is not null) _editContext.OnFieldChanged -= HandleFieldChanged;
             _observedDraft = Draft;
             _observedDraftId = CurrentDraftId;
+            _previousAges.Clear();
             _editContext = new EditContext(Draft);
             _messageStore = new ValidationMessageStore(_editContext);
             _editContext.OnFieldChanged += HandleFieldChanged;
@@ -770,7 +787,7 @@
         EllaiDraftContext.Register(this, age =>
         {
             if (Draft.SubjectScope is not (null or IntakeSubjectScope.Human)) return false;
-            Draft.AgeYearsText = age.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            SetReportedAge(age);
             _editContext.NotifyFieldChanged(new FieldIdentifier(Draft, nameof(Draft.AgeYearsText)));
             return true;
         }, observation =>
@@ -803,6 +820,23 @@
             Draft.Narrative = updated;
             _editContext.NotifyFieldChanged(new FieldIdentifier(Draft, nameof(Draft.Narrative)));
             return true;
+        }, gender =>
+        {
+            if (Draft.SubjectScope is not (null or IntakeSubjectScope.Human)) return false;
+            Draft.SubjectScope = IntakeSubjectScope.Human;
+            _subjectCategory = ReportSubjectCategory.HumanHealth;
+            Draft.Gender = gender;
+            _editContext.NotifyFieldChanged(new FieldIdentifier(Draft, nameof(Draft.SubjectScope)));
+            _editContext.NotifyFieldChanged(new FieldIdentifier(Draft, nameof(Draft.Gender)));
+            return true;
+        }, () =>
+        {
+            if (_previousAges.Count == 0) return false;
+            var previousAge = _previousAges[^1];
+            _previousAges.RemoveAt(_previousAges.Count - 1);
+            Draft.AgeYearsText = previousAge.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            _editContext.NotifyFieldChanged(new FieldIdentifier(Draft, nameof(Draft.AgeYearsText)));
+            return true;
         });
         if (!EllaiDraftContext.FlushPending(this))
             _stepError = "Some details from this Ellai report conversation could not fit the form. Review the report and add those details manually.";
@@ -817,6 +851,25 @@
         IntakeSubjectScope.OtherGroup => "Animal health — other group",
         _ => "Unknown"
     };
+
+    private string GenderSummary => Draft.Gender switch
+    {
+        ReportedGender.Female => "Female",
+        ReportedGender.Male => "Male",
+        ReportedGender.Other => "Other",
+        _ => "Unknown"
+    };
+
+    private void SetReportedAge(int age)
+    {
+        if (int.TryParse(Draft.AgeYearsText, System.Globalization.NumberStyles.None,
+                System.Globalization.CultureInfo.InvariantCulture, out var previousAge) && previousAge != age)
+        {
+            _previousAges.Add(previousAge);
+            if (_previousAges.Count > 10) _previousAges.RemoveAt(0);
+        }
+        Draft.AgeYearsText = age.ToString(System.Globalization.CultureInfo.InvariantCulture);
+    }
 
     private string ObservationSummary
     {
@@ -914,7 +967,21 @@
                 IntakeSubjectScope.Herd or IntakeSubjectScope.Flock or IntakeSubjectScope.OtherGroup => previousScope,
             _ => null
         };
+        if (Draft.SubjectScope != IntakeSubjectScope.Human)
+        {
+            Draft.Gender = null;
+            _previousAges.Clear();
+        }
         NotifySubjectScopeChanged();
+        return Task.CompletedTask;
+    }
+
+    private Task ReportedGenderChangedAsync(ReportedGender? gender)
+    {
+        if (Draft.SubjectScope != IntakeSubjectScope.Human || gender is { } value && !Enum.IsDefined(value))
+            return Task.CompletedTask;
+        Draft.Gender = gender;
+        _editContext.NotifyFieldChanged(new FieldIdentifier(Draft, nameof(Draft.Gender)));
         return Task.CompletedTask;
     }
 
@@ -1504,6 +1571,7 @@
     private static bool DraftMatches(PublicReportDraft actual, PublicReportDraft expected) =>
         actual.SubjectScope == expected.SubjectScope &&
         actual.AgeYearsText == expected.AgeYearsText &&
+        actual.Gender == expected.Gender &&
         actual.Narrative == expected.Narrative &&
         actual.ObservationsText == expected.ObservationsText &&
         actual.OccurrencePrecision == expected.OccurrencePrecision &&
