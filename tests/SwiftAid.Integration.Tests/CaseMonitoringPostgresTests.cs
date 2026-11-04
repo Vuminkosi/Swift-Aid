@@ -223,6 +223,27 @@ public sealed class CaseMonitoringPostgresTests
         Assert.Contains("Overdue follow-up review recommended", after.ResultSummary, StringComparison.Ordinal);
         Assert.Contains("recommendation is current", after.ResultSummary, StringComparison.Ordinal);
         Assert.NotEqual(before.CaseTimelineReplayScope, after.CaseTimelineReplayScope);
+        var reviewer = new PostgresFollowUpRecommendationReviewService(db, unit, policy);
+        var commandId = Guid.NewGuid();
+        Assert.Equal(FollowUpRecommendationReviewOutcome.NotFoundOrNotAuthorized,
+            await reviewer.ReviewAsync(CreateOfficer("unknown-" + Guid.NewGuid()), caseId, activity.ActivityId, commandId, default));
+        await using var reviewerDb = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
+        var reviewerUnit = new PostgresCaseCommandUnitOfWork(reviewerDb);
+        var reviewerPolicy = new CaseAccessPolicy(new PostgresCurrentAccessGrantStore(reviewerDb, reviewerUnit),
+            new PostgresCaseAccessDescriptorStore(reviewerDb, reviewerUnit));
+        var secondReviewer = new PostgresFollowUpRecommendationReviewService(reviewerDb, reviewerUnit, reviewerPolicy);
+        var reviews = await Task.WhenAll(reviewer.ReviewAsync(actor, caseId, activity.ActivityId, commandId, default),
+            secondReviewer.ReviewAsync(actor, caseId, activity.ActivityId, commandId, default));
+        Assert.Single(reviews, outcome => outcome == FollowUpRecommendationReviewOutcome.Recorded);
+        Assert.Single(reviews, outcome => outcome == FollowUpRecommendationReviewOutcome.Replayed);
+        Assert.Equal(FollowUpRecommendationReviewOutcome.Replayed, await reviewer.ReviewAsync(actor, caseId, activity.ActivityId, commandId, default));
+        Assert.Equal(FollowUpRecommendationReviewOutcome.Conflict, await reviewer.ReviewAsync(actor, caseId, Guid.NewGuid(), commandId, default));
+        Assert.Equal(FollowUpRecommendationReviewOutcome.AlreadyReviewed, await reviewer.ReviewAsync(actor, caseId, activity.ActivityId, Guid.NewGuid(), default));
+        var reviewed = await broker.InvokeAsync(context, request, default);
+        Assert.Contains("Staff review recorded", reviewed.ResultSummary, StringComparison.Ordinal);
+        Assert.NotEqual(after.CaseTimelineReplayScope, reviewed.CaseTimelineReplayScope);
+        await Assert.ThrowsAsync<Npgsql.PostgresException>(() => db.Database.ExecuteSqlInterpolatedAsync(
+            $"UPDATE ellai_follow_up_reviews SET actor_id = 'changed' WHERE recommendation_id = {activity.ActivityId}"));
         var inaccessible = await broker.InvokeAsync(context with { Actor = CreateOfficer("unknown-" + Guid.NewGuid()) }, request, default);
         Assert.False(inaccessible.Allowed);
         Assert.Empty(inaccessible.Evidence);
@@ -238,7 +259,22 @@ public sealed class CaseMonitoringPostgresTests
         Assert.False(historical.FollowUpIsCurrent);
         var afterReschedule = await broker.InvokeAsync(context, request, default);
         Assert.Contains("recommendation is historical", afterReschedule.ResultSummary, StringComparison.Ordinal);
-        Assert.NotEqual(after.CaseTimelineReplayScope, afterReschedule.CaseTimelineReplayScope);
+        Assert.NotEqual(reviewed.CaseTimelineReplayScope, afterReschedule.CaseTimelineReplayScope);
+        var staleFollowUpId = Guid.NewGuid();
+        var scheduledAgain = await ProcessCommandAsync(db, actor, caseId,
+            new ScheduleFollowUpCommand(Guid.NewGuid(), 4, staleFollowUpId, "synthetic", "officer-1",
+                FirstDueAtUtc, "staff scheduled", null, DateTimeOffset.UtcNow), keyRing.CreateOptions(), provider);
+        Assert.Equal(CaseCommandProcessingStatus.Accepted, scheduledAgain.Status);
+        Assert.Equal(EllaiFencedWorkOutcome.Committed, await work.RunOneAsync(lease, run, Guid.NewGuid(), default));
+        var staleTimeline = await timelineQuery.GetAsync(actor, caseId, 20, default);
+        var staleActivity = Assert.Single(staleTimeline.Timeline!.Entries.SelectMany(entry => entry.AgentActivities),
+            candidate => candidate.FollowUpId == staleFollowUpId);
+        var completed = await ProcessCommandAsync(db, actor, caseId,
+            new RecordFollowUpOutcomeCommand(Guid.NewGuid(), 5, staleFollowUpId, FollowUpOutcome.Completed,
+                "staff recorded outcome", null, "completed", null, DateTimeOffset.UtcNow), keyRing.CreateOptions(), provider);
+        Assert.Equal(CaseCommandProcessingStatus.Accepted, completed.Status);
+        Assert.Equal(FollowUpRecommendationReviewOutcome.Stale,
+            await reviewer.ReviewAsync(actor, caseId, staleActivity.ActivityId, Guid.NewGuid(), default));
         await Assert.ThrowsAsync<Npgsql.PostgresException>(() => db.Database.ExecuteSqlInterpolatedAsync(
             $"UPDATE ellai_follow_up_recommendations SET policy_version = 'changed' WHERE follow_up_id = {followUpId}"));
         await Assert.ThrowsAsync<Npgsql.PostgresException>(() => db.GetService<IMigrator>().MigrateAsync("20261104110000_EllaiQualityActivity"));

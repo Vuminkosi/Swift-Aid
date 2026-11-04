@@ -128,19 +128,21 @@ public sealed class PostgresCaseTimelineStore(SwiftAidDbContext dbContext) : ICa
         var ids = eventIds.ToArray();
         return await _dbContext.Database.SqlQuery<CaseAgentActivityRow>($"""
             SELECT "SourceEventId", "ActivityId", "RoleId", "Version", "RecordedAtUtc",
-                "FollowUpId", "FollowUpIsCurrent", "FollowUpDueAtUtc" FROM (
+                "FollowUpId", "FollowUpIsCurrent", "FollowUpDueAtUtc", "FollowUpReviewedAtUtc" FROM (
                 SELECT *, row_number() OVER (PARTITION BY "SourceEventId"
                     ORDER BY "RecordedAtUtc" DESC, "ActivityId" DESC) AS position FROM (
                     SELECT source_event_id AS "SourceEventId", activity_id AS "ActivityId", role_id AS "RoleId",
                         quality_version AS "Version", recorded_at_utc AS "RecordedAtUtc",
-                        NULL::uuid AS "FollowUpId", NULL::boolean AS "FollowUpIsCurrent", NULL::timestamptz AS "FollowUpDueAtUtc"
+                        NULL::uuid AS "FollowUpId", NULL::boolean AS "FollowUpIsCurrent", NULL::timestamptz AS "FollowUpDueAtUtc",
+                        NULL::timestamptz AS "FollowUpReviewedAtUtc"
                     FROM ellai_case_quality_activity WHERE case_id = {caseId} AND source_event_id = ANY({ids})
                     UNION ALL
                     SELECT r.source_event_id, r.activity_id, 'ops.followup', r.policy_version, r.recorded_at_utc,
                         r.follow_up_id, (f.current_schedule_version = r.schedule_version AND
                             f.current_schedule_event_id = r.source_event_id AND f.due_at_utc = r.due_at_utc AND
-                            f.status IN ('Scheduled', 'Acknowledged') AND c.workflow <> 'Resolved'), r.due_at_utc
+                            f.status IN ('Scheduled', 'Acknowledged') AND c.workflow <> 'Resolved'), r.due_at_utc, review.recorded_at_utc
                     FROM ellai_follow_up_recommendations r
+                    LEFT JOIN ellai_follow_up_reviews review ON review.recommendation_id = r.activity_id
                     JOIN managed_case_follow_ups f ON f.follow_up_id = r.follow_up_id AND f.case_id = r.case_id
                     JOIN managed_cases c ON c.case_id = r.case_id
                     WHERE r.case_id = {caseId} AND r.source_event_id = ANY({ids})

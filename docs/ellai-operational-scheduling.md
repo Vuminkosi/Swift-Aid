@@ -98,6 +98,11 @@ that historical recommendation. It is not a current
 approval, a notification, an officer assignment, a clinical priority, or a new
 due date. The new migration refuses rollback when recommendations exist.
 
-A dedicated recommendation disposition workflow and durable operational metrics remain outstanding.
+A case-authorized review service records one immutable staff review against an
+exact current recommendation; retries with the same command ID replay and changed
+or completed schedules are rejected. The review records no clinical decision or
+follow-up action. Timeline and Ellai history show the review time and refresh
+the replay digest. The service is registered internally but is not yet exposed
+through an endpoint or review button. Durable operational metrics remain outstanding.
 Production grants, migration deployment, rendered UI and deployed worker operation
 are not verified. No user or officer messages are sent by this work unit.

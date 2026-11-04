@@ -19,7 +19,8 @@ public sealed record CaseTimelineRow(
 
 public sealed record CaseAgentActivityRow(Guid SourceEventId, Guid ActivityId, string RoleId,
     string Version, DateTimeOffset RecordedAtUtc, Guid? FollowUpId = null,
-    bool? FollowUpIsCurrent = null, DateTimeOffset? FollowUpDueAtUtc = null);
+    bool? FollowUpIsCurrent = null, DateTimeOffset? FollowUpDueAtUtc = null,
+    DateTimeOffset? FollowUpReviewedAtUtc = null);
 
 /// <summary>Persistence port for the authorized timeline read. Cursor pages arrive newest-first.</summary>
 public interface ICaseTimelineStore
@@ -161,7 +162,8 @@ public sealed class CaseTimelineQuery(
                     {
                         FollowUpId = activity.FollowUpId,
                         FollowUpIsCurrent = activity.FollowUpIsCurrent,
-                        FollowUpDueAtUtc = activity.FollowUpDueAtUtc
+                        FollowUpDueAtUtc = activity.FollowUpDueAtUtc,
+                        FollowUpReviewedAtUtc = activity.FollowUpReviewedAtUtc
                     }).ToArray(),
                     AgentActivitiesTruncated = activities.Length > 20
                 };

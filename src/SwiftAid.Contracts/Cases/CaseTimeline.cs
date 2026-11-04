@@ -51,6 +51,7 @@ public sealed record CaseAgentActivity(Guid ActivityId, string RoleId, string La
     public Guid? FollowUpId { get; init; }
     public bool? FollowUpIsCurrent { get; init; }
     public DateTimeOffset? FollowUpDueAtUtc { get; init; }
+    public DateTimeOffset? FollowUpReviewedAtUtc { get; init; }
 }
 
 /// <summary>Closed, non-model-authored activity labels shared by timeline clients and Ellai.</summary>

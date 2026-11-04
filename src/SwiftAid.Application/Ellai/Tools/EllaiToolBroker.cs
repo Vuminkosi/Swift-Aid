@@ -471,7 +471,8 @@ public sealed class EllaiToolBroker
                         true => " This recommendation is current at the time of this read.",
                         false => " This recommendation is historical; the follow-up has changed.",
                         _ => " Current follow-up status is unavailable."
-                    } : ""))));
+                    } : "") +
+                    (activity.FollowUpReviewedAtUtc is { } reviewedAt ? $" Staff review recorded at {reviewedAt:O}." : ""))));
         var id = caseId.ToString("D");
         var evidence = new EvidenceRef("CaseQueue", id,
             timeline.Header.AggregateVersion.ToString(CultureInfo.InvariantCulture), null, id);

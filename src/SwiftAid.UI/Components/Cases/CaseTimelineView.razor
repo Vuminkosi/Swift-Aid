@@ -98,6 +98,10 @@
                                         {
                                             <li>Ellai - @CaseAgentActivityPresentation.RoleLabel(activity.RoleId): @CaseAgentActivityPresentation.ActivityLabel(activity.RoleId)
                                                 <time datetime="@activity.RecordedAtUtc.ToString("O")">@activity.RecordedAtUtc.ToLocalTime().ToString("g")</time>
+                                                @if (activity.FollowUpReviewedAtUtc is { } reviewedAt)
+                                                {
+                                                    <span>Staff review recorded <time datetime="@reviewedAt.ToString("O")">@reviewedAt.ToLocalTime().ToString("g")</time>.</span>
+                                                }
                                                 @if (activity.RoleId == "ops.followup" && activity.FollowUpIsCurrent == false)
                                                 {
                                                     <span>Historical recommendation; the follow-up has changed.</span>
