@@ -2359,6 +2359,10 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Entities.Cases.ManagedCaseFollowUpEntity", b =>
                 {
+                    b.Property<long?>("AcknowledgedVersion")
+                        .HasColumnType("bigint")
+                        .HasColumnName("acknowledged_version");
+
                     b.Property<Guid>("FollowUpId")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid")
@@ -2413,6 +2417,8 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
 
                     b.ToTable("managed_case_follow_ups", null, t =>
                         {
+                            t.HasCheckConstraint("ck_managed_case_follow_ups_ack_version", "acknowledged_version IS NULL OR acknowledged_version >= 0");
+
                             t.HasCheckConstraint("ck_managed_case_follow_ups_status", "status IN ('Scheduled', 'Completed', 'Missed', 'Unreachable', 'Cancelled', 'Acknowledged')");
 
                             t.HasCheckConstraint("ck_managed_case_follow_ups_text", "length(btrim(purpose)) > 0 AND length(btrim(assignee_actor_id)) > 0");

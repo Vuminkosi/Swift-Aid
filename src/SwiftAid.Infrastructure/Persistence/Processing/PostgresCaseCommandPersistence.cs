@@ -617,6 +617,7 @@ public sealed partial class PostgresCaseCommandPersistence : ICaseCommandPersist
                         !string.Equals(acknowledgedFollowUp.AssigneeActorId, acknowledgement.ActorId, StringComparison.Ordinal))
                         throw InvalidJournal();
                     acknowledgedFollowUp.Status = FollowUpStatus.Acknowledged;
+                    acknowledgedFollowUp.AcknowledgedVersion = acknowledgement.AggregateVersion;
                     break;
                 case ActionOwnerChanged ownerChange when ownerChange.ActionKind == ActionOwnerKind.FollowUp:
                     var transferredFollowUp = await _dbContext.ManagedCaseFollowUps
@@ -627,6 +628,9 @@ public sealed partial class PostgresCaseCommandPersistence : ICaseCommandPersist
                         !string.Equals(transferredFollowUp.AssigneeActorId, ownerChange.PreviousOwnerId, StringComparison.Ordinal))
                         throw InvalidJournal();
                     transferredFollowUp.AssigneeActorId = ownerChange.NewOwnerId;
+                    // Zero marks a transfer so an inherited Acknowledged status cannot
+                    // be attributed to the new owner. A later acknowledgment replaces it.
+                    transferredFollowUp.AcknowledgedVersion = 0;
                     break;
                 case CaseFollowUpOutcomeRecorded outcome:
                     var followUp = await _dbContext.ManagedCaseFollowUps

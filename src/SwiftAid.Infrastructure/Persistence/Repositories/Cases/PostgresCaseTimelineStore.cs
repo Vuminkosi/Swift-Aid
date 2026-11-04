@@ -178,7 +178,8 @@ public sealed class PostgresCaseTimelineStore(SwiftAidDbContext dbContext) : ICa
                     AND e.status <> 'Closed' AND c.workflow <> 'Resolved') AS "IsCurrent",
                 CASE WHEN f.assignee_actor_id = a.officer_actor_id AND f.status IN ('Scheduled', 'Acknowledged')
                     AND e.status <> 'Closed' AND c.workflow <> 'Resolved' THEN
-                        CASE WHEN f.status = 'Acknowledged' THEN true
+                        CASE WHEN f.acknowledged_version = 0 THEN NULL
+                            WHEN f.status = 'Acknowledged' OR f.acknowledged_version > a.aggregate_version THEN true
                             WHEN f.current_schedule_version = a.aggregate_version THEN false ELSE NULL END
                     ELSE NULL END AS "FollowUpAcknowledged"
             FROM health_officer_escalation_assignments a

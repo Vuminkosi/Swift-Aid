@@ -14,5 +14,6 @@ public sealed class ManagedCaseFollowUpEntity
     public long ScheduledVersion { get; set; }
     public long CurrentScheduleVersion { get; set; }
     public Guid CurrentScheduleEventId { get; set; }
+    public long? AcknowledgedVersion { get; set; }
     public long? OutcomeVersion { get; set; }
 }

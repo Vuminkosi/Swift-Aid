@@ -13,6 +13,7 @@ public sealed class ManagedCaseFollowUpEntityConfiguration : IEntityTypeConfigur
             table.HasCheckConstraint("ck_managed_case_follow_ups_status", "status IN ('Scheduled', 'Completed', 'Missed', 'Unreachable', 'Cancelled', 'Acknowledged')");
             table.HasCheckConstraint("ck_managed_case_follow_ups_text", "length(btrim(purpose)) > 0 AND length(btrim(assignee_actor_id)) > 0");
             table.HasCheckConstraint("ck_managed_case_follow_ups_versions", "scheduled_version > 0 AND current_schedule_version > 0 AND (outcome_version IS NULL OR outcome_version > 0)");
+            table.HasCheckConstraint("ck_managed_case_follow_ups_ack_version", "acknowledged_version IS NULL OR acknowledged_version >= 0");
         });
         builder.HasKey(item => item.FollowUpId).HasName("pk_managed_case_follow_ups");
         builder.Property(item => item.FollowUpId).HasColumnName("follow_up_id").HasColumnType("uuid");
@@ -24,6 +25,7 @@ public sealed class ManagedCaseFollowUpEntityConfiguration : IEntityTypeConfigur
         builder.Property(item => item.ScheduledVersion).HasColumnName("scheduled_version").HasColumnType("bigint").IsRequired();
         builder.Property(item => item.CurrentScheduleVersion).HasColumnName("current_schedule_version").HasColumnType("bigint").IsRequired();
         builder.Property(item => item.CurrentScheduleEventId).HasColumnName("current_schedule_event_id").HasColumnType("uuid").IsRequired();
+        builder.Property(item => item.AcknowledgedVersion).HasColumnName("acknowledged_version").HasColumnType("bigint");
         builder.HasOne<CaseEventEntity>().WithMany().HasForeignKey(item => item.CurrentScheduleEventId)
             .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_managed_case_follow_ups_current_schedule_event");
         builder.Property(item => item.OutcomeVersion).HasColumnName("outcome_version").HasColumnType("bigint");
