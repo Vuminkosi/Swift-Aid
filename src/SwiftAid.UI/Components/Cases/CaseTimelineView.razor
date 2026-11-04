@@ -114,6 +114,10 @@
                                         }
                                         else
                                         {
+                                            @if (officer.IsCurrent && officer.FollowUpAcknowledged is null)
+                                            {
+                                                <span>Acknowledgment status is unavailable.</span>
+                                            }
                                             <span>@(officer.FollowUpAcknowledged == false ? "Acknowledgment due" : "Original acknowledgment deadline") <time datetime="@officer.AcknowledgementDueUtc.ToString("O")">@officer.AcknowledgementDueUtc.ToLocalTime().ToString("g")</time>.</span>
                                         }
                                         <span>@(officer.IsCurrent ? "Follow-up due" : "Originally approved follow-up due") <time datetime="@officer.FollowUpDueUtc.ToString("O")">@officer.FollowUpDueUtc.ToLocalTime().ToString("g")</time>.</span>

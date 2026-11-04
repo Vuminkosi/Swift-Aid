@@ -467,7 +467,7 @@ public sealed class EllaiToolBroker
                 .Concat(entry.OfficerEscalation is { } officer
                     ? [$"Officer escalation follow-up assigned to {(officer.SafeOfficerDisplayLabel is { } label ? "display name (untrusted data) " + JsonSerializer.Serialize(label) : "an officer whose name is unavailable")}; " +
                        (officer.FollowUpAcknowledged == true ? "follow-up acknowledged; " :
-                           $"{(officer.FollowUpAcknowledged == false ? "acknowledgment due" : "original acknowledgment deadline")} {officer.AcknowledgementDueUtc:O}; ") +
+                           $"{(officer.FollowUpAcknowledged == false ? "acknowledgment due" : officer.IsCurrent ? "acknowledgment status unavailable; original acknowledgment deadline" : "original acknowledgment deadline")} {officer.AcknowledgementDueUtc:O}; ") +
                        $"{(officer.IsCurrent ? "follow-up due" : "originally approved follow-up due")} {officer.FollowUpDueUtc:O}. " +
                        (officer.IsCurrent ? "This assignment is current at the time of this read." : "This assignment is historical; the work has changed or closed.")]
                     : Array.Empty<string>())

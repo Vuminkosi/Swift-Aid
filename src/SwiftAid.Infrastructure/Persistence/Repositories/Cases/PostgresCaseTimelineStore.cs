@@ -141,7 +141,7 @@ public sealed class PostgresCaseTimelineStore(SwiftAidDbContext dbContext) : ICa
                     UNION ALL
                     SELECT r.source_event_id, r.activity_id, 'ops.followup', r.policy_version, r.recorded_at_utc,
                         r.follow_up_id, CASE WHEN r.recommendation_kind = 'OfficerAcknowledgementDue' THEN
-                            (f.assignee_actor_id = a.officer_actor_id AND f.status = 'Scheduled' AND e.status <> 'Closed' AND c.workflow <> 'Resolved')
+                            (f.assignee_actor_id = a.officer_actor_id AND f.status = 'Scheduled' AND f.current_schedule_version = a.aggregate_version AND e.status <> 'Closed' AND c.workflow <> 'Resolved')
                         ELSE (f.current_schedule_version = r.schedule_version AND
                             f.current_schedule_event_id = r.source_event_id AND f.due_at_utc = r.due_at_utc AND
                             f.status IN ('Scheduled', 'Acknowledged') AND c.workflow <> 'Resolved') END,
@@ -177,7 +177,10 @@ public sealed class PostgresCaseTimelineStore(SwiftAidDbContext dbContext) : ICa
                 (f.assignee_actor_id = a.officer_actor_id AND f.status IN ('Scheduled', 'Acknowledged')
                     AND e.status <> 'Closed' AND c.workflow <> 'Resolved') AS "IsCurrent",
                 CASE WHEN f.assignee_actor_id = a.officer_actor_id AND f.status IN ('Scheduled', 'Acknowledged')
-                    AND e.status <> 'Closed' AND c.workflow <> 'Resolved' THEN f.status = 'Acknowledged' ELSE NULL END AS "FollowUpAcknowledged"
+                    AND e.status <> 'Closed' AND c.workflow <> 'Resolved' THEN
+                        CASE WHEN f.status = 'Acknowledged' THEN true
+                            WHEN f.current_schedule_version = a.aggregate_version THEN false ELSE NULL END
+                    ELSE NULL END AS "FollowUpAcknowledged"
             FROM health_officer_escalation_assignments a
             JOIN health_officer_escalation_approvals approval ON approval.approval_id = a.approval_id
             JOIN managed_case_follow_ups f ON f.follow_up_id = a.follow_up_id AND f.case_id = a.case_id

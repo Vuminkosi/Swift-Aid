@@ -6,6 +6,7 @@ using SwiftAid.Application.Cases;
 using SwiftAid.Application.Cases.Commands;
 using SwiftAid.Application.Serialization;
 using SwiftAid.Contracts.Commands;
+using SwiftAid.Domain.Cases;
 using SwiftAid.Infrastructure.Authorization;
 using SwiftAid.Infrastructure.Classification;
 using SwiftAid.Infrastructure.Persistence;
@@ -103,6 +104,13 @@ public sealed partial class CaseCommandProcessingPostgresTests
             new AcknowledgeFollowUpCommand(Guid.NewGuid(), 4, approval.FollowUpId, null, DateTimeOffset.UtcNow), keyRing.CreateOptions(), provider)).Status);
         var historical = await query.GetAsync(fixture.CreateActor(), fixture.CaseId, 20, default);
         Assert.False(Assert.Single(historical.Timeline!.Entries.SelectMany(entry => entry.AgentActivities)).FollowUpIsCurrent);
+        Assert.Equal(CaseCommandProcessingStatus.Accepted, (await ProcessCommandAsync(fixture, officer,
+            new RecordFollowUpOutcomeCommand(Guid.NewGuid(), 5, approval.FollowUpId, FollowUpOutcome.Rescheduled,
+                "synthetic", DateTimeOffset.UtcNow.AddDays(2), "synthetic", null, DateTimeOffset.UtcNow), keyRing.CreateOptions(), provider)).Status);
+        var rescheduled = await query.GetAsync(fixture.CreateActor(), fixture.CaseId, 20, default);
+        var assignment = Assert.Single(rescheduled.Timeline!.Entries, entry => entry.OfficerEscalation is not null).OfficerEscalation!;
+        Assert.Null(assignment.FollowUpAcknowledged);
+        Assert.False(Assert.Single(rescheduled.Timeline.Entries.SelectMany(entry => entry.AgentActivities)).FollowUpIsCurrent);
         Assert.Equal(EllaiFencedWorkOutcome.NoChange, await worker.RunOneAsync(lease, Guid.NewGuid(), Guid.NewGuid(), default));
     }
 }

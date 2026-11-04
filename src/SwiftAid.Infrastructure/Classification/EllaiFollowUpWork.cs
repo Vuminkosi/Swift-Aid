@@ -47,6 +47,7 @@ public sealed class EllaiFollowUpWork(SwiftAidDbContext db, IOptions<EllaiFollow
                 JOIN managed_case_escalations e ON e.escalation_id = a.escalation_id AND e.case_id = a.case_id
                 WHERE c.workspace_id = {lease.WorkspaceId} AND c.organization_id = ANY({options.Organizations})
                     AND c.workflow <> 'Resolved' AND e.status <> 'Closed' AND f.status = 'Scheduled'
+                    AND f.current_schedule_version = a.aggregate_version
                     AND f.assignee_actor_id = a.officer_actor_id AND a.acknowledgement_due_utc < clock_timestamp()
                     AND NOT EXISTS (SELECT 1 FROM ellai_follow_up_recommendations r
                         WHERE r.officer_assignment_id = a.assignment_id AND r.recommendation_kind = 'OfficerAcknowledgementDue')
