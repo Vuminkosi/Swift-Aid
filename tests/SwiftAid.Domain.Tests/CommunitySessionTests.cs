@@ -346,6 +346,7 @@ public sealed class CommunitySessionTests
         IReadOnlyList<int>? reminderLeadHours = null) =>
         CommunitySession.Create(
             Guid.NewGuid(),
+            "org-1",
             "Dry-season holding hygiene",
             "Practical steps for clean holding areas.",
             "Livestock keepers near Harare showgrounds",
