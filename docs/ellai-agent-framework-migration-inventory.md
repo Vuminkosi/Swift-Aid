@@ -225,6 +225,12 @@ application suite passed 1,234 with 19 skipped, and the four new framework
 cases passed again after commit. Exact evidence identity does not prove that a
 proposal's rationale is semantically supported or confer approval authority;
 independent security review and live-provider plan behavior remain unverified.
+The existing exact-line misattribution check now also examines action
+rationales. A synthetic test demonstrated that an exact product fact cited
+only to another observed fact was accepted before the change; that case now
+repairs, while the correctly cited control passes. The framework contract
+suite passed 144/144 and six proposal cases passed after commit. This bounded
+check does not establish support for paraphrases or arbitrary rationale text.
 
 ## Provider observations and open checks
 
