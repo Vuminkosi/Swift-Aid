@@ -239,6 +239,8 @@ public static class MauiProgram
                 sp.GetRequiredService<IHttpClientFactory>().CreateClient("SwiftAid.NotificationApi")));
         builder.Services.AddTransient<SwiftAid.Contracts.Cases.IOrganizationSuggestionDecisionClient>(sp => new SwiftAid.Client.Cases.OrganizationDecisionHttpClient(
                 sp.GetRequiredService<IHttpClientFactory>().CreateClient("SwiftAid.NotificationApi")));
+        builder.Services.AddTransient<SwiftAid.Contracts.Cases.ICaseCorrelationClient>(sp => new SwiftAid.Client.Cases.CaseCorrelationHttpClient(
+                sp.GetRequiredService<IHttpClientFactory>().CreateClient("SwiftAid.NotificationApi")));
         builder.Services.AddTransient<SwiftAid.Contracts.Cases.IEligibleHealthOfficerClient>(sp => new SwiftAid.Client.Cases.EligibleHealthOfficerHttpClient(
                 sp.GetRequiredService<IHttpClientFactory>().CreateClient("SwiftAid.NotificationApi")));
         builder.Services.AddTransient<SwiftAid.Contracts.Cases.ICaseCollaboratorCandidatesClient>(sp => new SwiftAid.Client.Cases.CaseCollaboratorCandidatesHttpClient(

@@ -62,6 +62,7 @@
                 <CaseDetailUnavailable State="state" Title="@(PanelTitle(state, "Case summary"))" Description="@(PanelDescription(state, "case summary"))" OnRetry="OnRefreshOverview" />
             }
             <CaseClassificationPanel CaseId="CaseId" />
+            <CaseCorrelationPanel CaseId="CaseId" />
             <CaseCollaboratorsPanel CaseId="CaseId" />
             <EligibleHealthOfficersPanel CaseId="CaseId" />
             <OfficerEscalationReviewPanel CaseId="CaseId" OnAssigned="RefreshAfterOfficerAssignmentAsync" />

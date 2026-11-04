@@ -1,0 +1,78 @@
+@using SwiftAid.Contracts.Cases
+@using Microsoft.Extensions.DependencyInjection
+@inject IServiceProvider Services
+
+<section class="case-detail__section" aria-labelledby="correlation-heading">
+    <MudText Typo="Typo.subtitle1" HtmlTag="h2" id="correlation-heading">Possible related cases</MudText>
+    <MudText Typo="Typo.body2">Suggestions are unconfirmed. Shared details do not establish identity or causation.</MudText>
+    @if (_loading)
+    {
+        <MudText Typo="Typo.body2" role="status">Checking suggestions…</MudText>
+    }
+    else if (_result is null)
+    {
+        <MudText Typo="Typo.body2" role="status">Suggestions are unavailable.</MudText>
+        <MudButton Variant="Variant.Text" OnClick="LoadAsync">Retry</MudButton>
+    }
+    else if (!_result.Allowed)
+    {
+        <MudText Typo="Typo.body2">Suggestions are unavailable for this case.</MudText>
+    }
+    else if (_result.Candidates.Count == 0)
+    {
+        <MudText Typo="Typo.body2">No accessible suggestions are available.</MudText>
+    }
+    else
+    {
+        <ul>
+            @foreach (var candidate in _result.Candidates)
+            {
+                <li>
+                    <MudLink Href="@($"/case/{candidate.RelatedCaseId:D}")">View related case</MudLink>
+                    <span> · @string.Join(", ", candidate.Reasons.Select(ReasonLabel))</span>
+                    <time datetime="@candidate.RecordedAtUtc.ToString("O")"> · @candidate.RecordedAtUtc.ToLocalTime().ToString("g")</time>
+                </li>
+            }
+        </ul>
+        <MudText Typo="Typo.caption">Only the most recent 100 candidate records are checked. No case relationship has been confirmed.</MudText>
+    }
+</section>
+
+@code {
+    [Parameter, EditorRequired] public Guid CaseId { get; set; }
+    private Guid _loadedCaseId;
+    private long _generation;
+    private bool _loading;
+    private CaseCorrelationReadResult? _result;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loadedCaseId != CaseId) { _loadedCaseId = CaseId; await LoadAsync(); }
+    }
+
+    private async Task LoadAsync()
+    {
+        var generation = ++_generation;
+        var caseId = CaseId;
+        _loading = true;
+        _result = null;
+        try
+        {
+            var client = Services.GetService<ICaseCorrelationClient>();
+            var result = client is null || caseId == Guid.Empty ? null : await client.GetAsync(caseId);
+            if (generation == _generation && caseId == CaseId) _result = result;
+        }
+        catch (Exception error) when (error is not OutOfMemoryException) { }
+        finally { if (generation == _generation) _loading = false; }
+    }
+
+    private static string ReasonLabel(string reason) => reason switch
+    {
+        "SameSourceIdentifier" => "same source identifier",
+        "SameSector" => "same sector",
+        "SharedRegion" => "shared region",
+        "ReportsCloseInTime" => "reports close in time",
+        "SemanticCandidate" => "similarity signal",
+        _ => "matching information"
+    };
+}

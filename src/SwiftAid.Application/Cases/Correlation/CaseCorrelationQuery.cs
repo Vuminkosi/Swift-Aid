@@ -1,12 +1,10 @@
 using System.Collections.Immutable;
 using SwiftAid.Application.Authorization;
 using SwiftAid.Application.Cases.Commands;
+using SwiftAid.Contracts.Cases;
 
 namespace SwiftAid.Application.Cases.Correlation;
 
-public sealed record CaseCorrelationView(Guid CandidateId, Guid RelatedCaseId, DateTimeOffset RecordedAtUtc,
-    IReadOnlyList<string> Reasons, string Limitation);
-public sealed record CaseCorrelationReadResult(bool Allowed, IReadOnlyList<CaseCorrelationView> Candidates);
 public sealed record StoredCorrelationCandidate(Guid CandidateId, Guid FirstCaseId, Guid SecondCaseId,
     long FirstRevision, long SecondRevision, DateTimeOffset RecordedAtUtc, string[] Reasons);
 
