@@ -601,6 +601,13 @@ before commit and once after commit against disposable PostGIS. It uses a
 scripted reasoning model and invokes classification directly; it does not
 establish JetStream delivery, live Muse interpretation, clinical validity or
 deployed behavior.
+The fixture was extended with live Muse: after real BART inference and
+PostgreSQL persistence, Muse invoked the authorized classification tool and
+received its result ID without the synthetic source text or lease ID. The live
+and scripted cases passed 2/2 together, and the live case passed 1/1 after
+commit. This demonstrates tool selection and delivery for that synthetic
+request; it does not validate the model's interpretation, clinical safety,
+JetStream delivery or deployed Gateway behavior.
 The `ClassificationRegistryTests` filter also passed 10/10 against the same
 fixture using `--no-build --no-restore` and the same test-project options.
 
