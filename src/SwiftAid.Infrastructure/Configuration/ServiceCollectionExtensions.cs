@@ -22,6 +22,7 @@ using SwiftAid.Application.Attachments;
 using SwiftAid.Application.Authorization;
 using SwiftAid.Application.Cases;
 using SwiftAid.Application.Cases.Correlation;
+using SwiftAid.Application.Cases.Spatial;
 using SwiftAid.Application.Demo;
 using SwiftAid.Application.Cases.Commands;
 using SwiftAid.Application.Cases.Registration;
@@ -437,6 +438,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ICaseQueueQuery, CaseQueueQuery>();
         services.AddScoped<IMapAggregateStore, PostgresMapAggregateStore>();
         services.AddScoped<IMapAggregateQuery, SurveillanceMapAggregateQuery>();
+        services.AddScoped<OwnedCaseSpatialAnalysis>();
         services.AddScoped<IDashboardAggregateStore, PostgresDashboardAggregateStore>();
         services.AddScoped<IDashboardAggregateQuery, DashboardAggregateQuery>();
         services.AddScoped<ICaseSummaryStore, PostgresCaseSummaryStore>();

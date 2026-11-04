@@ -330,6 +330,7 @@ app.MapHealthOfficerDesignationEndpoints();
 app.MapFollowUpReviewEndpoints();
 app.MapOrganizationDecisionEndpoints();
 app.MapCaseCorrelationEndpoints();
+app.MapSpatialAnalysisEndpoints();
 app.MapCorrelationDecisionEndpoints();
 app.MapCaseDetailEndpoints();
 app.MapCaseQueueEndpoints();
