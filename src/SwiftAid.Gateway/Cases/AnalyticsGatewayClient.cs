@@ -110,12 +110,12 @@ public sealed class AnalyticsGatewayClient(
             {
                 metrics.Add(new AnalyticsMetric(
                     "due-follow-ups",
-                    "Due follow-ups assigned to you",
+                    "Due follow-ups assigned to you (all regions and sectors)",
                     followUps.Count,
                     "follow-ups"));
                 metrics.Add(new AnalyticsMetric(
                     "overdue-follow-ups",
-                    "Overdue follow-ups assigned to you",
+                    "Overdue follow-ups assigned to you (all regions and sectors)",
                     followUps.Count(item => item.IsOverdue),
                     "follow-ups"));
             }

@@ -200,6 +200,8 @@ public sealed class DashboardAggregateClientTests
             services.BuildServiceProvider());
 
         var metrics = await client.GetAsync(new AnalyticsQuery(new PageRequest(1, 25)));
+        var human = await client.GetAsync(new AnalyticsQuery(new PageRequest(1, 25), WorkType: "human"));
+        var animal = await client.GetAsync(new AnalyticsQuery(new PageRequest(1, 25), WorkType: "animal"));
         var invalid = await client.GetAsync(new AnalyticsQuery(new PageRequest(1, 25), Period: "9"));
         var denied = await new AnalyticsGatewayClient(
             new SignedOutAuthStateProvider(),
@@ -209,6 +211,11 @@ public sealed class DashboardAggregateClientTests
         Assert.Equal(UiCapabilityResultCode.Success, metrics.Code);
         Assert.NotNull(metrics.Value);
         Assert.NotEmpty(metrics.Value.Items);
+        Assert.Equal(UiCapabilityResultCode.Success, human.Code);
+        Assert.Equal(1, Assert.Single(human.Value!.Items, item => item.Id == "new-owned-cases").Value);
+        Assert.Equal(UiCapabilityResultCode.Success, animal.Code);
+        Assert.Equal(0, Assert.Single(animal.Value!.Items, item => item.Id == "new-owned-cases").Value);
+        Assert.Contains(human.Value.Items, item => item.Id == "due-follow-ups" && item.Label.Contains("all regions and sectors"));
         Assert.All(metrics.Value.Items, metric =>
         {
             Assert.False(string.IsNullOrWhiteSpace(metric.Label));
