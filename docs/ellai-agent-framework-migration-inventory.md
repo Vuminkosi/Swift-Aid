@@ -216,6 +216,15 @@ and empty speech remains accepted. The full application suite passed 1,229 with
 19 skipped after the validator change, and the five focused negative and
 positive cases passed before and after commit. These are scripted model checks;
 they do not prove every provider output is semantically grounded.
+Further review found that proposed administrative action obligations and
+evidence were not compared to tool observations, and null actions passed the
+plan shape check. The framework now rejects invalid plans and requires each
+action's obligation and evidence references to have been observed in this
+turn. The focused contract and approval filter passed 23/23, the full
+application suite passed 1,234 with 19 skipped, and the four new framework
+cases passed again after commit. Exact evidence identity does not prove that a
+proposal's rationale is semantically supported or confer approval authority;
+independent security review and live-provider plan behavior remain unverified.
 
 ## Provider observations and open checks
 
