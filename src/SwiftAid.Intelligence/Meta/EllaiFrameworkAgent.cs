@@ -270,6 +270,29 @@ public sealed class EllaiFrameworkAgent
             tools.Add(AIFunctionFactory.Create(DelegateAnalytics, name: "ellai_delegate_analytics",
                 description: "Delegate an authorized owned-case count with an explicit 1 to 365 day window, or another admitted SwiftAid read."));
         }
+        async Task<string> DelegateMvpRead(string agentId, string task, CancellationToken token)
+        {
+            token.ThrowIfCancellationRequested();
+            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
+            deadline.CancelAfter(TimeSpan.FromSeconds(SwiftAid.Application.Ellai.Specialists.EllaiSpecialistRegistry.TryGet(agentId, out var profile)
+                ? profile.TimeoutSeconds : 1));
+            try
+            {
+                var result = await new EllaiMvpReadSpecialist(_client, _agentFactory).RunAsync(agentId, task, instructions,
+                    context, usage, Current, InvokeGuardedTool, revalidateTool ?? invoke, deadline.Token,
+                    calls => Interlocked.Add(ref delegatedModelCalls, calls)).ConfigureAwait(false);
+                if (result.Outcome != EllaiSpecialistOutcome.Completed || result.Decision is null)
+                { Interlocked.Exchange(ref invalidDelegation, 1); return "Specialist could not verify an answer."; }
+                var json = System.Text.Json.JsonSerializer.Serialize(result.Decision);
+                if (json.Length <= 12000) return json;
+                Interlocked.Exchange(ref invalidDelegation, 1);
+                return "Specialist result exceeded its limit.";
+            }
+            catch (OperationCanceledException) when (!token.IsCancellationRequested && deadline.IsCancellationRequested)
+            { Interlocked.Exchange(ref invalidDelegation, 1); return "Specialist timed out."; }
+            catch (EllaiFrameworkFailureException)
+            { Interlocked.Exchange(ref invalidDelegation, 1); return "Specialist could not complete the request."; }
+        }
         if (enableHealthResearchSpecialist && context.Actor is not null && context.AllowedTools?.Contains(EllaiToolNames.ApprovedHealthSources) == true)
         {
             var delegationCount = 0;
@@ -298,6 +321,12 @@ public sealed class EllaiFrameworkAgent
             }
             tools.Add(AIFunctionFactory.Create(DelegateHealthResearch, name: "ellai_delegate_health_research",
                 description: "List approved source references for an exact topic, jurisdiction, and language. Do not generate advice or health education."));
+            var generalDelegations = 0;
+            Task<string> DelegateHealthRead(string task, CancellationToken token) => Interlocked.Increment(ref generalDelegations) == 1
+                ? DelegateMvpRead(SwiftAid.Application.Ellai.Specialists.EllaiSpecialistRegistry.HealthResearch, task, token)
+                : Task.FromResult("Health-research read delegation limit reached.");
+            tools.Add(AIFunctionFactory.Create(DelegateHealthRead, name: "ellai_delegate_health_research_read",
+                description: "Ask the health-research specialist a SwiftAid question using the session's admitted reads."));
         }
         if (enableSpatialSpecialist && context.Actor is not null && context.AllowedTools?.Contains(EllaiToolNames.OwnedRegionCounts) == true)
         {
@@ -327,6 +356,12 @@ public sealed class EllaiFrameworkAgent
             }
             tools.Add(AIFunctionFactory.Create(DelegateSpatial, name: "ellai_delegate_spatial",
                 description: "Delegate a bounded count of the current officer's readable cases by region over the last 30 days; not a hotspot or incidence estimate."));
+            var generalDelegations = 0;
+            Task<string> DelegateSpatialRead(string task, CancellationToken token) => Interlocked.Increment(ref generalDelegations) == 1
+                ? DelegateMvpRead(SwiftAid.Application.Ellai.Specialists.EllaiSpecialistRegistry.Spatial, task, token)
+                : Task.FromResult("Spatial read delegation limit reached.");
+            tools.Add(AIFunctionFactory.Create(DelegateSpatialRead, name: "ellai_delegate_spatial_read",
+                description: "Ask the spatial specialist a SwiftAid question using the session's admitted reads."));
         }
         if (enableUiSpecialist && context.AllowedTools is { } uiTools &&
             (uiTools.Contains(EllaiToolNames.UiCatalogue) || uiTools.Contains(EllaiToolNames.UiObserve)))
