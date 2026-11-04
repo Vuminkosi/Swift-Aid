@@ -373,7 +373,7 @@ public static class MauiProgram
 #endif
         builder.Services.AddSingleton<EllaiLauncher>();
         builder.Services.AddSingleton<EllaiEventPoller>();
-        builder.Services.AddSingleton<IEllaiGuidanceControl, UnavailableMobileEllaiGuidanceControl>();
+        builder.Services.AddSingleton<IEllaiGuidanceControl, SharedEllaiGuidanceControl>();
 
         var offlineDbFactory = new SwiftAidOfflineDbContextFactory(
             FileSystem.AppDataDirectory,
