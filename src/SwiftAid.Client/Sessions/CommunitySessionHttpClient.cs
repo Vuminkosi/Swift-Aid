@@ -37,7 +37,7 @@ public sealed class CommunitySessionHttpClient(HttpClient httpClient)
             if (response.StatusCode != HttpStatusCode.OK)
                 return UiCapabilityResults.Unavailable<PublicSessionView>("public-community-sessions");
             var session = await response.Content.ReadFromJsonAsync<PublicSessionView>(JsonOptions, cancellationToken).ConfigureAwait(false);
-            return session is null ? UiCapabilityResults.Unavailable<PublicSessionView>("public-community-sessions")
+            return !IsValidPublicSession(session) || session!.SessionId != sessionId ? UiCapabilityResults.Unavailable<PublicSessionView>("public-community-sessions")
                 : Success(session, "public-community-sessions");
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -96,7 +96,8 @@ public sealed class CommunitySessionHttpClient(HttpClient httpClient)
                 return UiCapabilityResults.Unavailable<PublicSessionPage>("public-community-session-status-filter");
             }
             var page = await response.Content.ReadFromJsonAsync<PublicSessionPage>(JsonOptions, cancellationToken).ConfigureAwait(false);
-            return page is null ? UiCapabilityResults.Unavailable<PublicSessionPage>("public-community-sessions")
+            return page?.Items is null || page.Items.Any(item => !IsValidPublicSession(item))
+                ? UiCapabilityResults.Unavailable<PublicSessionPage>("public-community-sessions")
                 : Success(page, "public-community-sessions");
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -128,7 +129,9 @@ public sealed class CommunitySessionHttpClient(HttpClient httpClient)
                 return UiCapabilityResults.Unavailable<IReadOnlyList<PublicSessionView>>("public-community-sessions");
             var sessions = await response.Content.ReadFromJsonAsync<IReadOnlyList<PublicSessionView>>(JsonOptions, cancellationToken)
                 .ConfigureAwait(false);
-            return Success<IReadOnlyList<PublicSessionView>>(sessions ?? [], "public-community-sessions");
+            return sessions is null || sessions.Any(item => !IsValidPublicSession(item))
+                ? UiCapabilityResults.Unavailable<IReadOnlyList<PublicSessionView>>("public-community-sessions")
+                : Success<IReadOnlyList<PublicSessionView>>(sessions, "public-community-sessions");
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -188,70 +191,16 @@ public sealed class CommunitySessionHttpClient(HttpClient httpClient)
     public async Task<IReadOnlyList<PublicSessionView>> ListPublicAsync(
         int? limit, CancellationToken cancellationToken = default)
     {
-        if (httpClient.BaseAddress is null)
-        {
-            return [];
-        }
-
-        var address = "public/v1/sessions";
-        if (limit.HasValue)
-        {
-            address += $"?limit={limit.Value}";
-        }
-
-        try
-        {
-            using var response = await httpClient.GetAsync(address, cancellationToken).ConfigureAwait(false);
-            if (response.StatusCode != HttpStatusCode.OK)
-            {
-                return [];
-            }
-
-            var sessions = await response.Content
-                .ReadFromJsonAsync<IReadOnlyList<PublicSessionView>>(JsonOptions, cancellationToken)
-                .ConfigureAwait(false);
-            return sessions ?? [];
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception)
-        {
-            return [];
-        }
+        var result = await ListPublicResultAsync(limit, cancellationToken).ConfigureAwait(false);
+        return result.Succeeded ? result.Value ?? [] : [];
     }
 
     /// <summary>Reads one published session; null when missing, unpublished, or unavailable.</summary>
     public async Task<PublicSessionView?> GetPublicAsync(
         Guid sessionId, CancellationToken cancellationToken = default)
     {
-        if (httpClient.BaseAddress is null)
-        {
-            return null;
-        }
-
-        try
-        {
-            using var response = await httpClient.GetAsync(
-                $"public/v1/sessions/{sessionId:D}", cancellationToken).ConfigureAwait(false);
-            if (response.StatusCode != HttpStatusCode.OK)
-            {
-                return null;
-            }
-
-            return await response.Content
-                .ReadFromJsonAsync<PublicSessionView>(JsonOptions, cancellationToken)
-                .ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception)
-        {
-            return null;
-        }
+        var result = await GetPublicResultAsync(sessionId, cancellationToken).ConfigureAwait(false);
+        return result.Succeeded ? result.Value : null;
     }
 
     /// <summary>Reads the plain-text invitation logistics; null when unavailable.</summary>
@@ -330,6 +279,19 @@ public sealed class CommunitySessionHttpClient(HttpClient httpClient)
         UiCapabilityResultCode.Success,
         value,
         LiveMetadata(capability));
+
+    private static bool IsValidPublicSession(PublicSessionView? session) => session is
+    {
+        SessionId: var sessionId,
+        Version: > 0,
+        TopicTags: not null,
+        Materials: not null,
+        DurationMinutes: > 0 and <= 1440
+    } && sessionId != Guid.Empty && session.StartUtc != default &&
+        !string.IsNullOrWhiteSpace(session.Title) && !string.IsNullOrWhiteSpace(session.TimeZoneId) &&
+        (string.Equals(session.Status, "Scheduled", StringComparison.OrdinalIgnoreCase) ||
+         string.Equals(session.Status, "Cancelled", StringComparison.OrdinalIgnoreCase) ||
+         string.Equals(session.Status, "Completed", StringComparison.OrdinalIgnoreCase));
 
     private static UiCapabilityMetadata LiveMetadata(string capability) => new(
         capability,

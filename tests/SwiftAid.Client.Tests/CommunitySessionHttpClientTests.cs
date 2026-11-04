@@ -39,6 +39,33 @@ public sealed class CommunitySessionHttpClientTests
     }
 
     [Fact]
+    public async Task PublicClientRejectsMismatchedDetailAndUnpublishedRecords()
+    {
+        var wrong = Create(JsonResponse(HttpStatusCode.OK, PublishedView() with { SessionId = Guid.NewGuid() }));
+        var mismatch = await wrong.GetPublicResultAsync(KnownSessionId);
+        Assert.False(mismatch.Succeeded);
+        Assert.Null(mismatch.Value);
+
+        var draft = PublishedView() with { Status = "Draft" };
+        var list = Create(JsonResponse(HttpStatusCode.OK, new[] { draft }));
+        Assert.False((await list.ListPublicResultAsync(null)).Succeeded);
+        var query = Create(JsonResponse(HttpStatusCode.OK, new PublicSessionPage([draft], null)));
+        Assert.False((await query.QueryPublicResultAsync(new PublicSessionQuery())).Succeeded);
+    }
+
+    [Fact]
+    public async Task NullListIsUnavailableRatherThanAnEmptyCollection()
+    {
+        var client = Create(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("null", Encoding.UTF8, "application/json")
+        });
+        var result = await client.ListPublicResultAsync(null);
+        Assert.False(result.Succeeded);
+        Assert.Null(result.Value);
+    }
+
+    [Fact]
     public async Task QueryPublic_EncodesSearchAndReturnsContinuation()
     {
         var view = PublishedView();
