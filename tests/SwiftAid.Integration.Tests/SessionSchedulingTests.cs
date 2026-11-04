@@ -1,10 +1,17 @@
 using Microsoft.EntityFrameworkCore;
 using System.Net;
+using System.Net.Http.Headers;
+using System.Net.Http.Json;
 using System.Text.Json;
+using Microsoft.AspNetCore.Antiforgery;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
+using OpenIddict.Validation.AspNetCore;
 using SwiftAid.Application.Sessions;
 using SwiftAid.Contracts.Sessions;
 using SwiftAid.Gateway.Endpoints;
@@ -20,6 +27,113 @@ namespace SwiftAid.Integration.Tests;
 [Collection(IntakePostgresCollection.Name)]
 public sealed class SessionSchedulingTests
 {
+    [IntakePostgresFact]
+    public async Task PublicDiscoveryAndAuthenticatedSubscriptionFollowRevisionAndCancellation()
+    {
+        var id = Guid.NewGuid();
+        const string account = "actor-1";
+        await using var db = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
+        var sessionStore = new PostgresCommunitySessionStore(db);
+        var sessions = new CommunitySessionService(sessionStore, new FixtureMaterialEligibility());
+        var subscriptions = new EventSubscriptionService(new PostgresEventSubscriptionStore(db), sessions, TimeProvider.System);
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseTestServer();
+        builder.Services.AddAntiforgery(options => options.HeaderName = "X-Test-CSRF");
+        builder.Services.AddAuthentication(options =>
+        {
+            options.DefaultAuthenticateScheme = OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme;
+            options.DefaultChallengeScheme = OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme;
+        })
+            .AddScheme<AuthenticationSchemeOptions, TestAuthenticationHandler>(IdentityConstants.ApplicationScheme, _ => { })
+            .AddScheme<AuthenticationSchemeOptions, TestAuthenticationHandler>(OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme, _ => { });
+        builder.Services.AddAuthorization();
+        builder.Services.AddSingleton<ICommunitySessionService>(sessions);
+        builder.Services.AddSingleton<IEventSubscriptionService>(subscriptions);
+        await using var app = builder.Build();
+        app.UseAuthentication();
+        app.UseAuthorization();
+        app.MapPublicSessionEndpoints();
+        app.MapEventSubscriptionEndpoints();
+        app.MapGet("/fixture/antiforgery", (HttpContext context, IAntiforgery antiforgery) =>
+            antiforgery.GetAndStoreTokens(context).RequestToken!);
+        await app.StartAsync();
+        using var client = app.GetTestClient();
+        try
+        {
+            await CreateActiveActorAsync(db, account);
+            await sessions.ExecuteAsync(CreateDraft(id, "officer-1"), "officer-1", CancellationToken.None);
+            await sessions.ExecuteAsync(new ReviewSessionCommand(id, 1, false, "fixture review", DateTimeOffset.UtcNow), "officer-2", CancellationToken.None);
+            await sessions.ExecuteAsync(new ScheduleSessionCommand(id, 2, "fixture publish", DateTimeOffset.UtcNow), "officer-2", CancellationToken.None);
+
+            using var publicResponse = await client.GetAsync($"/public/v1/sessions/{id:D}");
+            Assert.Equal(HttpStatusCode.OK, publicResponse.StatusCode);
+            var publicSession = Assert.IsType<PublicSessionView>(await publicResponse.Content.ReadFromJsonAsync<PublicSessionView>());
+            Assert.Equal(3, publicSession.Version);
+            var firstCalendar = await client.GetStringAsync($"/public/v1/sessions/{id:D}/calendar");
+            Assert.Contains($"UID:swiftaid-community-session-{id:D}", firstCalendar, StringComparison.Ordinal);
+            Assert.Contains("SEQUENCE:0", firstCalendar, StringComparison.Ordinal);
+            Assert.DoesNotContain(account, firstCalendar, StringComparison.Ordinal);
+            var invitation = await client.GetStringAsync($"/public/v1/sessions/{id:D}/invitation?version=3");
+            Assert.Contains(publicSession.Title, invitation, StringComparison.Ordinal);
+            using var anonymous = await client.GetAsync($"/api/v1/sessions/{id:D}/subscription");
+            Assert.Equal(HttpStatusCode.Unauthorized, anonymous.StatusCode);
+
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", TestAuthenticationHandler.BearerToken);
+            using var tokenResponse = await client.GetAsync("/fixture/antiforgery");
+            tokenResponse.EnsureSuccessStatusCode();
+            var token = await tokenResponse.Content.ReadAsStringAsync();
+            var cookie = tokenResponse.Headers.GetValues("Set-Cookie").Single().Split(';')[0];
+            client.DefaultRequestHeaders.TryAddWithoutValidation("Cookie", cookie);
+            client.DefaultRequestHeaders.Add("X-Test-CSRF", token);
+            var options = await client.GetFromJsonAsync<EventSubscriptionOptions>($"/api/v1/sessions/{id:D}/subscription/options");
+            Assert.NotNull(options);
+            using var subscribedResponse = await client.PostAsJsonAsync($"/api/v1/sessions/{id:D}/subscription",
+                new { sessionVersion = options.SessionVersion, consentReference = options.ConsentReference, channel = "Email" });
+            Assert.Equal(HttpStatusCode.OK, subscribedResponse.StatusCode);
+            var subscribed = Assert.IsType<EventSubscription>(await subscribedResponse.Content.ReadFromJsonAsync<EventSubscription>());
+            Assert.Equal(account, subscribed.AccountId);
+            Assert.Equal(EventSubscriptionStatus.Active, subscribed.Status);
+            Assert.True(await subscriptions.CanDispatchReminderAsync(id, account, options.SessionVersion, options.ConsentReference, "Email", CancellationToken.None));
+            using var replayResponse = await client.PostAsJsonAsync($"/api/v1/sessions/{id:D}/subscription",
+                new { sessionVersion = options.SessionVersion, consentReference = options.ConsentReference, channel = "Email" });
+            Assert.Equal(HttpStatusCode.OK, replayResponse.StatusCode);
+            Assert.Equal(subscribed.Version, (await replayResponse.Content.ReadFromJsonAsync<EventSubscription>())!.Version);
+
+            await sessions.ExecuteAsync(UpdateDraft(id, 3, "Malaria prevention talk") with { DurationMinutes = 60 }, "officer-2", CancellationToken.None);
+            Assert.False(await subscriptions.CanDispatchReminderAsync(id, account, options.SessionVersion, options.ConsentReference, "Email", CancellationToken.None));
+            var stale = await client.GetFromJsonAsync<EventSubscription>($"/api/v1/sessions/{id:D}/subscription");
+            Assert.NotNull(stale);
+            Assert.Equal(EventSubscriptionStatus.Unsubscribed, stale.Status);
+            Assert.True(stale.HasInactiveStoredConsent);
+            var revisedCalendar = await client.GetStringAsync($"/public/v1/sessions/{id:D}/calendar");
+            Assert.Contains($"UID:swiftaid-community-session-{id:D}", revisedCalendar, StringComparison.Ordinal);
+            Assert.Contains("SEQUENCE:1", revisedCalendar, StringComparison.Ordinal);
+            var revisedOptions = await client.GetFromJsonAsync<EventSubscriptionOptions>($"/api/v1/sessions/{id:D}/subscription/options");
+            Assert.NotNull(revisedOptions);
+            using var renewedResponse = await client.PostAsJsonAsync($"/api/v1/sessions/{id:D}/subscription",
+                new { sessionVersion = revisedOptions.SessionVersion, consentReference = revisedOptions.ConsentReference, channel = "Email" });
+            Assert.Equal(HttpStatusCode.OK, renewedResponse.StatusCode);
+            var renewed = Assert.IsType<EventSubscription>(await renewedResponse.Content.ReadFromJsonAsync<EventSubscription>());
+            Assert.True(renewed.Version > subscribed.Version);
+            Assert.True(await subscriptions.CanDispatchReminderAsync(id, account, revisedOptions.SessionVersion, revisedOptions.ConsentReference, "Email", CancellationToken.None));
+
+            await sessions.ExecuteAsync(new CancelSessionCommand(id, 4, "fixture cancellation", "cancel", DateTimeOffset.UtcNow), "officer-2", CancellationToken.None);
+            using var cancelledResponse = await client.GetAsync($"/public/v1/sessions/{id:D}/calendar");
+            Assert.Equal(HttpStatusCode.OK, cancelledResponse.StatusCode);
+            Assert.Contains("STATUS:CANCELLED", await cancelledResponse.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+            Assert.DoesNotContain("fixture cancellation", await cancelledResponse.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+            Assert.False(await subscriptions.CanDispatchReminderAsync(id, account, revisedOptions.SessionVersion, revisedOptions.ConsentReference, "Email", CancellationToken.None));
+            using var unsubscribedResponse = await client.PostAsJsonAsync($"/api/v1/sessions/{id:D}/subscription/unsubscribe", new { expectedVersion = renewed.Version });
+            Assert.Equal(HttpStatusCode.OK, unsubscribedResponse.StatusCode);
+            Assert.Equal(EventSubscriptionStatus.Unsubscribed, (await unsubscribedResponse.Content.ReadFromJsonAsync<EventSubscription>())!.Status);
+        }
+        finally
+        {
+            await CleanupAsync(id);
+            await CleanupActorAsync(account);
+        }
+    }
+
     [IntakePostgresFact]
     public async Task ReschedulingDoesNotPersistPastReminderOccurrences()
     {
