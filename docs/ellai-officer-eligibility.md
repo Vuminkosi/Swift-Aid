@@ -22,6 +22,11 @@ are limited to 20 with an explicit `HasMore` indicator.
 A result is a momentary selection candidate, not assignment authority. Any
 future approval and assignment must recheck designation, target actor, membership,
 grant, coverage, case version and approver authority under appropriate locks.
+The internal assignment eligibility recheck now requires the target in the active
+case write lease and locks the selected designation scope until that transaction
+ends. It checks the exact designation ID and version against the same eligibility
+rules as the list. This recheck alone does not authorize an approver, enforce the
+feature gate, create an assignment or schedule follow-up.
 Availability, workload and category-specific policy are not currently represented,
 and must not be inferred from this lookup. Controlled designation provisioning,
 operator authorization, data stewardship and production database grants remain

@@ -10,6 +10,10 @@ public sealed record EligibleHealthOfficerPage(IReadOnlyList<EligibleHealthOffic
 public interface IEligibleHealthOfficerStore
 {
     Task<EligibleHealthOfficerPage> GetAsync(Guid caseId, int limit, CancellationToken ct);
+
+    /// <summary>Rechecks the exact designation while holding the assignment's write lease and target authority locks.
+    /// The caller must independently enforce the feature gate, case authorization, policy and human approval.</summary>
+    Task<bool> IsEligibleForAssignmentAsync(ICaseCommandLease lease, string targetActorId, Guid designationId, long designationVersion, CancellationToken ct);
 }
 
 public interface IEligibleHealthOfficerQuery

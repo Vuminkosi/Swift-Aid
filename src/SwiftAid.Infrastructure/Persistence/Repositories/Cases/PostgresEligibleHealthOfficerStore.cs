@@ -15,6 +15,31 @@ public sealed class PostgresEligibleHealthOfficerStore(SwiftAidDbContext db, ICa
         var lease = PostgresLeaseGuard.RequireCurrent(db, leases, caseId);
         if (lease.Mode != CaseLeaseMode.Read)
             throw new InvalidOperationException("An active case read lease is required to look up officers.");
+        return await QueryAsync(caseId, limit, "", ct).ConfigureAwait(false);
+    }
+
+    public async Task<bool> IsEligibleForAssignmentAsync(ICaseCommandLease lease, string targetActorId, Guid designationId, long designationVersion, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(lease);
+        if (!PostgresOfficerDesignationAuthority.Identifier(targetActorId) || designationId == Guid.Empty || designationVersion < 1)
+            throw new ArgumentException("A canonical target and designation version are required.");
+        var current = PostgresLeaseGuard.RequireCurrent(db, leases, lease.CaseId);
+        if (!ReferenceEquals(current, lease) || lease.Mode != CaseLeaseMode.Write ||
+            !lease.LockedActorIds.Contains(targetActorId, StringComparer.Ordinal))
+            throw new InvalidOperationException("The target must be included in the active case write lease.");
+        // The version-guard trigger takes this same lock for designation changes.
+        // Hold it until the case transaction completes, including any assignment write.
+        await db.Database.ExecuteSqlInterpolatedAsync($"""
+            SELECT pg_advisory_xact_lock(hashtextextended('officer-designation:' ||
+                jsonb_build_array({targetActorId}, c.organization_id, c.country_code, c.sector)::text, 0))
+            FROM managed_cases c WHERE c.case_id = {lease.CaseId}
+            """, ct).ConfigureAwait(false);
+        var page = await QueryAsync(lease.CaseId, 1, targetActorId, ct).ConfigureAwait(false);
+        return page.Items.Any(item => item.DesignationId == designationId && item.DesignationVersion == designationVersion);
+    }
+
+    private async Task<EligibleHealthOfficerPage> QueryAsync(Guid caseId, int limit, string targetActorId, CancellationToken ct)
+    {
         var take = limit + 1;
         var rows = await db.Database.SqlQuery<OfficerRow>($"""
             SELECT DISTINCT ON (officer.actor_id) officer.designation_id AS "DesignationId",
@@ -44,6 +69,7 @@ public sealed class PostgresEligibleHealthOfficerStore(SwiftAidDbContext db, ICa
                 AND grant_group.can_access_jurisdictional_cases
             LEFT JOIN swiftaid_identity.user_profiles profile ON profile.user_id = actor.actor_id
             WHERE c.case_id = {caseId} AND c.workflow <> 'Resolved'
+                AND ({targetActorId} = '' OR officer.actor_id = {targetActorId})
                 AND EXISTS (SELECT 1 FROM managed_case_regions region WHERE region.case_id = c.case_id)
                 AND NOT EXISTS (SELECT 1 FROM managed_case_regions region WHERE region.case_id = c.case_id
                     AND NOT EXISTS (SELECT 1 FROM access_grant_group_regions coverage

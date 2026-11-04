@@ -82,6 +82,36 @@ public sealed partial class CaseCommandProcessingPostgresTests
         Assert.Equal(designationId, officer.DesignationId);
         Assert.Equal(1, officer.DesignationVersion);
         Assert.Null(officer.DisplayLabel);
+        await using (var readLease = await unit.BeginCaseAsync(fixture.CreateActor(), fixture.CaseId, [fixture.NewOwnerActorId], CaseLeaseMode.Read, default))
+        {
+            await Assert.ThrowsAsync<InvalidOperationException>(() => store.IsEligibleForAssignmentAsync(readLease, fixture.NewOwnerActorId, designationId, 1, default));
+        }
+        await using (var missingTarget = await unit.BeginCaseAsync(fixture.CreateActor(), fixture.CaseId, [], CaseLeaseMode.Write, default))
+        {
+            await Assert.ThrowsAsync<InvalidOperationException>(() => store.IsEligibleForAssignmentAsync(missingTarget, fixture.NewOwnerActorId, designationId, 1, default));
+        }
+        await using (var assignmentLease = await unit.BeginCaseAsync(fixture.CreateActor(), fixture.CaseId, [fixture.NewOwnerActorId], CaseLeaseMode.Write, default))
+        {
+            Assert.True(await store.IsEligibleForAssignmentAsync(assignmentLease, fixture.NewOwnerActorId, designationId, 1, default));
+            Assert.False(await store.IsEligibleForAssignmentAsync(assignmentLease, fixture.NewOwnerActorId, designationId, 2, default));
+            Assert.False(await store.IsEligibleForAssignmentAsync(assignmentLease, fixture.NewOwnerActorId, Guid.NewGuid(), 1, default));
+            await using var competing = fixture.CreateDbContext();
+            await using var competingTransaction = await competing.Database.BeginTransactionAsync();
+            var acquired = await competing.Database.SqlQuery<bool>($"""
+                SELECT pg_try_advisory_xact_lock(hashtextextended('officer-designation:' ||
+                    jsonb_build_array({fixture.NewOwnerActorId}, c.organization_id, c.country_code, c.sector)::text, 0)) AS "Value"
+                FROM managed_cases c WHERE c.case_id = {fixture.CaseId}
+                """).SingleAsync();
+            Assert.False(acquired);
+            await competing.Database.ExecuteSqlRawAsync("SET LOCAL lock_timeout = '200ms'");
+            var blockedChange = await Assert.ThrowsAsync<Npgsql.PostgresException>(() => competing.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO health_officer_designations (designation_id, actor_id, organization_id, country_code, sector, status,
+                    valid_from_utc, expires_at_utc, designated_by_actor_id, version, created_at_utc, updated_at_utc)
+                VALUES ({Guid.NewGuid()}, {fixture.NewOwnerActorId}, {fixture.OrganizationId}, 'SZ', 'HumanHealth', 'Revoked',
+                    clock_timestamp() - interval '1 day', clock_timestamp() + interval '1 day', {fixture.ActorId}, 2, clock_timestamp(), clock_timestamp())
+                """));
+            Assert.Equal("55P03", blockedChange.SqlState);
+        }
         await db.Actors.Where(actor => actor.ActorId == fixture.NewOwnerActorId)
             .ExecuteUpdateAsync(update => update.SetProperty(actor => actor.Status, PersistentActorStatus.Suspended));
         Assert.Empty((await query.GetAsync(fixture.CreateActor(), fixture.CaseId, 20, default))!.Items);
@@ -116,6 +146,8 @@ public sealed partial class CaseCommandProcessingPostgresTests
                 clock_timestamp() - interval '1 day', clock_timestamp() + interval '1 day', {fixture.ActorId}, 4, clock_timestamp(), clock_timestamp())
             """);
         Assert.Empty((await query.GetAsync(fixture.CreateActor(), fixture.CaseId, 20, default))!.Items);
+        await using (var assignmentLease = await unit.BeginCaseAsync(fixture.CreateActor(), fixture.CaseId, [fixture.NewOwnerActorId], CaseLeaseMode.Write, default))
+            Assert.False(await store.IsEligibleForAssignmentAsync(assignmentLease, fixture.NewOwnerActorId, designationId, 1, default));
         Assert.Null(await query.GetAsync(CaseRegistrationBackendTests.CreateOfficer("unknown-" + Guid.NewGuid()), fixture.CaseId, 20, default));
         await Assert.ThrowsAsync<InvalidOperationException>(() => store.GetAsync(fixture.CaseId, 20, default));
         await Assert.ThrowsAsync<Npgsql.PostgresException>(() => db.Database.ExecuteSqlInterpolatedAsync(
