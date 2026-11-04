@@ -58,9 +58,14 @@ internal static class EllaiSharedGuidanceTemplates
         if (bytes.Length > 32768) return;
         try
         {
-            var result = await cache.SetAsync(key, bytes, Lifetime, ct).ConfigureAwait(false);
-            if (result is { Status: CacheWriteStatus.Failed, FailureCode: "invalid-key-or-ttl" })
-                await cache.SetAsync(key, bytes, TimeSpan.FromSeconds(1), ct).ConfigureAwait(false);
+            var seconds = (int)Lifetime.TotalSeconds;
+            while (true)
+            {
+                var result = await cache.SetAsync(key, bytes, TimeSpan.FromSeconds(seconds), ct).ConfigureAwait(false);
+                if (result is not { Status: CacheWriteStatus.Failed, FailureCode: "invalid-key-or-ttl" } || seconds == 1)
+                    break;
+                seconds = Math.Max(1, seconds / 2);
+            }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch (Exception error) when (error is not OutOfMemoryException) { /* Cache is optional. */ }
