@@ -38,6 +38,28 @@ public sealed class ClassificationRegistry(
         var header = await db.ManagedCases.AsNoTracking().SingleAsync(c => c.CaseId == notice.SourceId, ct);
         await RequireScopeAsync(header.WorkspaceId, header.OrganizationId, ct);
         await SupersedeOldFactsAsync(header.CaseId, header.ReportRevision, ct);
+        if (notice.ReportRevision < header.ReportRevision)
+        {
+            // Retain a durable terminal inbox record before acknowledging a stale
+            // delivery. Do not decrypt source facts or admit model work for it.
+            var configuration = Options.Profile.Hash;
+            var obsolete = await db.Set<ClassificationInboxEntity>().FindAsync([notice.MessageId, configuration], ct);
+            if (obsolete is not null && obsolete.NoticeHash != noticeHash)
+                throw new ArgumentException("Changed message identity.");
+            if (obsolete is null)
+                db.Add(new ClassificationInboxEntity { MessageId = notice.MessageId, ConfigurationId = configuration,
+                    NoticeHash = noticeHash, State = "Superseded", UpdatedAtUtc = clock.GetUtcNow() });
+            else if (obsolete.State != "Superseded")
+            {
+                obsolete.State = "Superseded";
+                obsolete.UpdatedAtUtc = clock.GetUtcNow();
+            }
+            await db.SaveChangesAsync(ct);
+            await transaction.CommitAsync(ct);
+            return new ClassificationClaim("Superseded", ConfigurationHash: configuration);
+        }
+        if (notice.ReportRevision > header.ReportRevision)
+            throw new InvalidDataException("The source revision is ahead of the case projection.");
         var source = await db.CaseEvents.AsNoTracking().Where(e => e.CaseId == header.CaseId && e.ReportRevision == notice.ReportRevision &&
             (e.EventType == "CaseReported" || e.EventType == "CaseReportCorrected")).OrderByDescending(e => e.AggregateVersion).FirstAsync(ct);
         var sourceLanguage = await ReadImportedLanguageAsync(source, header, ct);

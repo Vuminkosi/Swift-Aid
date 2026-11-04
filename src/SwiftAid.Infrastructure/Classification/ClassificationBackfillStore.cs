@@ -132,13 +132,35 @@ public sealed class ClassificationBackfillStore(SwiftAidDbContext db, IOptions<C
             throw new UnauthorizedAccessException();
     }
 
-    public async Task BindResultAsync(Guid id, Guid sourceEventId, string configuration, CancellationToken ct)
+    public async Task BindResultAsync(Guid id, Guid sourceEventId, string configuration, CancellationToken ct, string? claimState = null)
     {
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         await LockAsync(id, ct);
         var job = await RequireJobAsync(id, ct);
         if (job.ConfigurationHash != options.Value.Profile.Hash) throw new ArgumentException("Backfill configuration changed.");
         var item = await db.Set<ClassificationBackfillItemEntity>().SingleAsync(i => i.JobId == id && i.SourceEventId == sourceEventId, ct);
+        if (claimState == "Superseded")
+        {
+            // Confirm the durable inbox and authoritative current revision under
+            // the job lock; a worker-supplied status alone grants no authority.
+            var obsolete = await (from source in db.CaseEvents.AsNoTracking()
+                join current in db.ManagedCases.AsNoTracking() on source.CaseId equals current.CaseId
+                join inbox in db.Set<ClassificationInboxEntity>().AsNoTracking() on source.EventId equals inbox.MessageId
+                where source.EventId == sourceEventId && current.WorkspaceId == job.WorkspaceId &&
+                    current.OrganizationId == job.OrganizationId && source.ReportRevision < current.ReportRevision &&
+                    inbox.ConfigurationId == configuration && inbox.State == "Superseded"
+                select source.EventId).AnyAsync(ct);
+            if (!obsolete) throw new InvalidOperationException("The superseded result is not current.");
+            if (item.State == "Superseded") return;
+            if (item.State != "Pending") throw new InvalidOperationException("The backfill item is already finalized.");
+            item.State = "Superseded";
+            job.Pending--;
+            job.Superseded++;
+            job.UpdatedAtUtc = clock.GetUtcNow();
+            await db.SaveChangesAsync(ct);
+            await transaction.CommitAsync(ct);
+            return;
+        }
         var resultId = await db.Set<ClassificationAssociationEntity>().Where(a => a.SourceEventId == sourceEventId && a.ConfigurationId == configuration)
             .Select(a => a.ResultId).SingleAsync(ct);
         if (item.ResultId is not null && item.ResultId != resultId) throw new InvalidOperationException("Bound backfill artifact changed.");
@@ -167,7 +189,7 @@ public sealed class ClassificationBackfillStore(SwiftAidDbContext db, IOptions<C
     {
         return Task.FromResult(new ClassificationBackfillStatus(job.Id,
             job.ConfigurationHash == options.Value.Profile.Hash ? job.State : "ConfigurationChanged", job.ConfigurationHash,
-            job.Eligible, job.Pending, job.NewlyClassified, job.Reused, job.Abstained, job.Failed, job.CreatedAtUtc, job.UpdatedAtUtc));
+            job.Eligible, job.Pending, job.NewlyClassified, job.Reused, job.Abstained, job.Failed, job.CreatedAtUtc, job.UpdatedAtUtc, job.Superseded));
     }
 
     private Task<int> LockAsync(Guid id, CancellationToken ct) =>

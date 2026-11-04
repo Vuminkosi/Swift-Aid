@@ -1008,6 +1008,9 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasColumnType("jsonb");
 
+                    b.Property<long>("Superseded")
+                        .HasColumnType("bigint");
+
                     b.Property<long>("Reused")
                         .HasColumnType("bigint");
 
@@ -1032,7 +1035,7 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
 
                     b.ToTable("backfills", "swiftaid_classification", t =>
                         {
-                            t.HasCheckConstraint("ck_backfill_counts", "\"Eligible\" = \"Pending\" + \"NewlyClassified\" + \"Reused\" + \"Abstained\" + \"Failed\" AND LEAST(\"Pending\", \"NewlyClassified\", \"Reused\", \"Abstained\", \"Failed\") >= 0");
+                            t.HasCheckConstraint("ck_backfill_counts", "\"Eligible\" = \"Pending\" + \"NewlyClassified\" + \"Reused\" + \"Abstained\" + \"Failed\" + \"Superseded\" AND LEAST(\"Pending\", \"NewlyClassified\", \"Reused\", \"Abstained\", \"Failed\", \"Superseded\") >= 0");
 
                             t.HasCheckConstraint("ck_backfill_state", "\"State\" IN ('Running','Paused','Completed')");
                         });
@@ -1070,7 +1073,7 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
 
                     b.ToTable("backfill_items", "swiftaid_classification", t =>
                         {
-                            t.HasCheckConstraint("ck_backfill_item_state", "\"State\" IN ('Pending','NewlyClassified','Reused','Abstained','Failed')");
+                            t.HasCheckConstraint("ck_backfill_item_state", "\"State\" IN ('Pending','NewlyClassified','Reused','Abstained','Failed','Superseded')");
                         });
                 });
 
