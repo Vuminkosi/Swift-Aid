@@ -1,5 +1,6 @@
 using SwiftAid.Contracts.Sessions;
 using SwiftAid.Domain.Sessions;
+using SwiftAid.Application.Identity;
 using DomainChannel = SwiftAid.Domain.Sessions.SessionChannelType;
 using DomainMaterial = SwiftAid.Domain.Sessions.SessionMaterialRef;
 using DomainVisibility = SwiftAid.Domain.Sessions.SessionVisibility;
@@ -7,15 +8,14 @@ using DomainVisibility = SwiftAid.Domain.Sessions.SessionVisibility;
 namespace SwiftAid.Application.Sessions;
 
 /// <summary>
-/// Officer community-session service (P10.1). Staff authorization is enforced by the
-/// API layer; the service trusts the passed actorId. Org-scoped session permissions
-/// are a recorded limitation, not enforced here.
+/// Community-session service (P10.1). Every staff operation is authorized against
+/// the session's persisted organization and current owner assignment.
 /// No social-platform API calls anywhere: sharing is copy-text, the native share
 /// sheet, or opening the pasted destination link (AT-29, SA-SES-04).
 /// Reminder dispatch/execution is OUT of scope (P6.3 durable-reminder lane); this
 /// service only (re)computes occurrence rows and suppresses them on cancel.
 /// </summary>
-public sealed class CommunitySessionService(ICommunitySessionStore store, ISessionMaterialEligibility? materialEligibility = null, TimeProvider? timeProvider = null) : ICommunitySessionService
+public sealed class CommunitySessionService(ICommunitySessionStore store, ISessionMaterialEligibility? materialEligibility = null, TimeProvider? timeProvider = null, IOrganizationOwnerAuthorizer? ownerAuthorizer = null) : ICommunitySessionService
 {
     public const int DefaultPublicLimit = 50;
     public const int MaxPublicLimit = 100;
@@ -23,6 +23,7 @@ public sealed class CommunitySessionService(ICommunitySessionStore store, ISessi
     private readonly ICommunitySessionStore _store = store ?? throw new ArgumentNullException(nameof(store));
     private readonly ISessionMaterialEligibility? _materialEligibility = materialEligibility;
     private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
+    private readonly IOrganizationOwnerAuthorizer? _ownerAuthorizer = ownerAuthorizer;
 
     public async Task<SessionCommandResult> ExecuteAsync(SessionCommand command, string actorId, CancellationToken ct)
     {
@@ -47,6 +48,8 @@ public sealed class CommunitySessionService(ICommunitySessionStore store, ISessi
             throw new KeyNotFoundException($"Community session {command.SessionId:D} was not found.");
         }
 
+        await RequireOrganizationOwnerAsync(actorId, session.OrganizationId, ct).ConfigureAwait(false);
+
         if (session.Version != command.ExpectedVersion)
         {
             throw new SessionVersionConflictException(command.SessionId, command.ExpectedVersion, session.Version);
@@ -55,11 +58,10 @@ public sealed class CommunitySessionService(ICommunitySessionStore store, ISessi
         switch (command)
         {
             case ReviewSessionCommand review:
-                await RequireEligibleMaterialsAsync(session, session.Materials.Select(ToContractMaterial).ToArray(),
-                    ToContractVisibility(session.Visibility), session.Language, ct).ConfigureAwait(false);
+                var materialApprovals = BuildMaterialApprovals(session, actorId, command.RecordedAtUtc);
                 session.Review(actorId, review.AcknowledgeSelfReview, review.RecordedAtUtc);
                 await _store.UpdateAsync(session, command.ExpectedVersion, actorId, command.Reason,
-                    command.RecordedAtUtc, SessionReminderSync.None, null, SessionRevisionAction.Reviewed, null, ct).ConfigureAwait(false);
+                    command.RecordedAtUtc, SessionReminderSync.None, null, SessionRevisionAction.Reviewed, null, ct, materialApprovals).ConfigureAwait(false);
                 break;
             case ScheduleSessionCommand:
                 await RequireEligibleMaterialsAsync(session, session.Materials.Select(ToContractMaterial).ToArray(),
@@ -115,14 +117,22 @@ public sealed class CommunitySessionService(ICommunitySessionStore store, ISessi
         Contracts.Sessions.SessionVisibility visibility, string language, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-        var request = new SessionMaterialEligibilityRequest(session.CountryCode, session.RegionId, session.Sector,
+        var request = new SessionMaterialEligibilityRequest(session.OrganizationId, session.CountryCode, session.RegionId, session.Sector,
             language, visibility, Array.AsReadOnly(materials.ToArray()));
         if (_materialEligibility is null || !await _materialEligibility.AreEligibleAsync(request, ct).ConfigureAwait(false))
             throw new InvalidOperationException("Current approval and reuse rights for session materials could not be confirmed.");
     }
 
     private static Contracts.Sessions.SessionMaterialRef ToContractMaterial(DomainMaterial material) =>
-        new(material.MaterialId, material.SourceVersion);
+        new(material.MaterialId, material.SourceVersion, material.RightsEvidence);
+
+    private static IReadOnlyList<SessionMaterialApproval> BuildMaterialApprovals(CommunitySession session, string actorId, DateTimeOffset approvedAtUtc)
+    {
+        if (session.Materials.Any(material => string.IsNullOrWhiteSpace(material.RightsEvidence)))
+            throw new InvalidOperationException("Each material requires a source and reuse-rights basis before an owner can approve it.");
+        return session.Materials.Select(material => new SessionMaterialApproval(session.OrganizationId,
+            material.MaterialId, material.SourceVersion, material.RightsEvidence!, actorId, approvedAtUtc)).ToArray();
+    }
 
     public async Task<CommunitySessionView?> GetStaffAsync(Guid sessionId, string actorId, CancellationToken ct)
     {
@@ -132,6 +142,8 @@ public sealed class CommunitySessionService(ICommunitySessionStore store, ISessi
         }
 
         var session = await _store.LoadAsync(sessionId, ct).ConfigureAwait(false);
+        if (session is not null && !await IsOrganizationOwnerAsync(actorId, session.OrganizationId, ct).ConfigureAwait(false))
+            return null;
         return session is null ? null : ToStaffView(session);
     }
 
@@ -144,13 +156,14 @@ public sealed class CommunitySessionService(ICommunitySessionStore store, ISessi
         }
 
         var sessions = await _store.ListPublicAsync(take, ct).ConfigureAwait(false);
-        return sessions
+        var result = new List<PublicSessionView>(take);
+        foreach (var session in sessions
             .Where(IsListedPublicly)
             .OrderBy(item => item.StartUtc)
             .ThenBy(item => item.SessionId)
-            .Take(take)
-            .Select(ToPublicView)
-            .ToList();
+            .Take(take))
+            result.Add(await ToPublicViewAsync(session, ct).ConfigureAwait(false));
+        return result;
     }
 
     public async Task<PublicSessionPage> QueryPublicAsync(PublicSessionQuery query, CancellationToken ct)
@@ -202,7 +215,7 @@ public sealed class CommunitySessionService(ICommunitySessionStore store, ISessi
                     var last = items[^1];
                     return new PublicSessionPage(items, new PublicSessionPosition(last.StartUtc, last.SessionId));
                 }
-                items.Add(ToPublicView(candidate));
+                items.Add(await ToPublicViewAsync(candidate, ct).ConfigureAwait(false));
             }
 
             if (!hasMoreCandidates || lastScanned is null)
@@ -249,7 +262,7 @@ public sealed class CommunitySessionService(ICommunitySessionStore store, ISessi
     {
         var session = await _store.LoadAsync(sessionId, ct).ConfigureAwait(false);
         return session is not null && IsPublic(session) && IsPublished(session)
-            ? ToPublicView(session)
+            ? await ToPublicViewAsync(session, ct).ConfigureAwait(false)
             : null;
     }
 
@@ -303,6 +316,7 @@ public sealed class CommunitySessionService(ICommunitySessionStore store, ISessi
     private async Task<SessionCommandResult> ExecuteCreateAsync(
         CreateSessionDraftCommand command, string actorId, CancellationToken ct)
     {
+        await RequireOrganizationOwnerAsync(actorId, command.OrganizationId, ct).ConfigureAwait(false);
         if (command.ExpectedVersion != 0)
         {
             var existing = await _store.LoadAsync(command.SessionId, ct).ConfigureAwait(false);
@@ -317,7 +331,7 @@ public sealed class CommunitySessionService(ICommunitySessionStore store, ISessi
         }
 
         var session = CommunitySession.Create(
-            command.SessionId, command.Title, command.Summary, command.AudienceDescription,
+            command.SessionId, command.OrganizationId, command.Title, command.Summary, command.AudienceDescription,
             command.TopicTags, command.CountryCode, command.RegionId, command.Sector,
             command.Presenter, command.Language, command.StartUtc, command.TimeZoneId,
             command.DurationMinutes, command.Capacity,
@@ -327,6 +341,17 @@ public sealed class CommunitySessionService(ICommunitySessionStore store, ISessi
         await _store.InsertAsync(session, actorId, command.Reason, command.RecordedAtUtc, SessionRevisionAction.Created, ct).ConfigureAwait(false);
         return new SessionCommandResult(session.SessionId, session.Version, session.Status.ToString());
     }
+
+    private async Task RequireOrganizationOwnerAsync(string actorId, string organizationId, CancellationToken ct)
+    {
+        if (!await IsOrganizationOwnerAsync(actorId, organizationId, ct).ConfigureAwait(false))
+            throw new UnauthorizedAccessException();
+    }
+
+    private Task<bool> IsOrganizationOwnerAsync(string actorId, string organizationId, CancellationToken ct) =>
+        !string.IsNullOrWhiteSpace(organizationId) && _ownerAuthorizer is not null
+            ? _ownerAuthorizer.IsActiveOwnerAsync(actorId, organizationId, ct)
+            : Task.FromResult(false);
 
     private static bool IsPublic(CommunitySession session) =>
         session.Visibility == DomainVisibility.Public;
@@ -342,24 +367,36 @@ public sealed class CommunitySessionService(ICommunitySessionStore store, ISessi
             or CommunitySessionStatus.Completed;
 
     private static CommunitySessionView ToStaffView(CommunitySession session) => new(
-        session.SessionId, session.Version, session.Title, session.Summary,
+        session.SessionId, session.OrganizationId, session.Version, session.Title, session.Summary,
         session.AudienceDescription, session.TopicTags.ToArray(),
         session.CountryCode, session.RegionId, session.Sector, session.Presenter, session.Language,
         session.StartUtc, session.TimeZoneId, session.DurationMinutes, session.Capacity,
-        session.Materials.Select(ToStoredMaterial).ToArray(),
+        session.Materials.Select(ToContractMaterial).ToArray(),
         ToContractVisibility(session.Visibility), ToContractChannel(session.ChannelType),
         session.ChannelLink, session.ReminderLeadHours.ToArray(),
         session.Status.ToString(), session.CreatedByActorId, session.ReviewedByActorId,
         session.SelfReviewAcknowledged, session.IcsSequence, session.CancellationReason);
 
-    private static PublicSessionView ToPublicView(CommunitySession session) => new(
+    private async Task<PublicSessionView> ToPublicViewAsync(CommunitySession session, CancellationToken ct)
+    {
+        IReadOnlyList<StoredSessionMaterial> materials = [];
+        if (_materialEligibility is not null && session.Materials.Count > 0)
+        {
+            var eligibility = new SessionMaterialEligibilityRequest(session.OrganizationId, session.CountryCode,
+                session.RegionId, session.Sector, session.Language, ToContractVisibility(session.Visibility),
+                session.Materials.Select(ToContractMaterial).ToArray());
+            if (await _materialEligibility.AreEligibleAsync(eligibility, ct).ConfigureAwait(false))
+                materials = session.Materials.Select(ToStoredMaterial).ToArray();
+        }
+        return ToPublicView(session, materials);
+    }
+
+    private static PublicSessionView ToPublicView(CommunitySession session, IReadOnlyList<StoredSessionMaterial> materials) => new(
         session.SessionId, session.Version, session.Title, session.Summary,
         session.AudienceDescription, session.TopicTags.ToArray(),
         session.CountryCode, session.RegionId, session.Sector, session.Presenter, session.Language,
         session.StartUtc, session.TimeZoneId, session.DurationMinutes, session.Capacity,
-        // No authoritative public-rights and withdrawal lookup is wired here.
-        // Preserve staff references, but do not serialize unverified references publicly.
-        Array.Empty<StoredSessionMaterial>(),
+        materials,
         ToContractChannel(session.ChannelType),
         session.Status == CommunitySessionStatus.Scheduled ? session.PublicChannelLink : null,
         session.Status.ToString(), null, session.IcsSequence);
@@ -383,7 +420,7 @@ public sealed class CommunitySessionService(ICommunitySessionStore store, ISessi
         };
 
     private static DomainMaterial ToDomainMaterial(Contracts.Sessions.SessionMaterialRef material) =>
-        new(material.MaterialId, material.SourceVersion);
+        new(material.MaterialId, material.SourceVersion, material.RightsEvidence);
 
     private static Contracts.Sessions.SessionVisibility ToContractVisibility(DomainVisibility visibility) =>
         visibility switch

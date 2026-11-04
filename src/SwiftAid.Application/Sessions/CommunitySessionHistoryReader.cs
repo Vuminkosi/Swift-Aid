@@ -2,7 +2,7 @@ using SwiftAid.Contracts.Sessions;
 
 namespace SwiftAid.Application.Sessions;
 
-/// <summary>Current, action-specific authorization for staff history; absent providers deny access.</summary>
+/// <summary>Current organization-owner authorization for staff history; absent providers deny access.</summary>
 public interface ICommunitySessionHistoryAuthorizer
 {
     Task<bool> CanReadAsync(string actorId, Guid sessionId, CancellationToken cancellationToken);

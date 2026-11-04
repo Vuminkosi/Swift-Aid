@@ -4,6 +4,7 @@ namespace SwiftAid.Infrastructure.Persistence.Sessions;
 public sealed class CommunitySessionEntity
 {
     public Guid SessionId { get; set; }
+    public string? OrganizationId { get; set; }
     public long Version { get; set; }
     public string Title { get; set; } = "";
     public string Summary { get; set; } = "";

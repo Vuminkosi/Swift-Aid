@@ -62,6 +62,7 @@ public sealed class SwiftAidDbContext(DbContextOptions<SwiftAidDbContext> option
     public DbSet<ManagedCaseAssistanceEntity> ManagedCaseAssistance => Set<ManagedCaseAssistanceEntity>();
     public DbSet<ManagedCaseEscalationEntity> ManagedCaseEscalations => Set<ManagedCaseEscalationEntity>();
     public DbSet<CommunitySessionEntity> CommunitySessions => Set<CommunitySessionEntity>();
+    public DbSet<Sessions.SessionMaterialApprovalEntity> SessionMaterialApprovals => Set<Sessions.SessionMaterialApprovalEntity>();
     public DbSet<CommunitySessionRevisionEntity> CommunitySessionRevisions => Set<CommunitySessionRevisionEntity>();
     public DbSet<SessionReminderOccurrenceEntity> SessionReminderOccurrences => Set<SessionReminderOccurrenceEntity>();
     public DbSet<SessionReminderDeliveryEntity> SessionReminderDeliveries => Set<SessionReminderDeliveryEntity>();
@@ -135,6 +136,7 @@ public sealed class SwiftAidDbContext(DbContextOptions<SwiftAidDbContext> option
         modelBuilder.ApplyConfiguration(new ManagedCaseAssistanceEntityConfiguration());
         modelBuilder.ApplyConfiguration(new ManagedCaseEscalationEntityConfiguration());
         modelBuilder.ApplyConfiguration(new CommunitySessionEntityConfiguration());
+        modelBuilder.ApplyConfiguration(new Sessions.SessionMaterialApprovalEntityConfiguration());
         modelBuilder.ApplyConfiguration(new CommunitySessionRevisionEntityConfiguration());
         modelBuilder.ApplyConfiguration(new SessionReminderOccurrenceEntityConfiguration());
         modelBuilder.ApplyConfiguration(new SessionReminderDeliveryEntityConfiguration());

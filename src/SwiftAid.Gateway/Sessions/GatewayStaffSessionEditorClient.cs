@@ -4,15 +4,16 @@ using SwiftAid.Contracts.Sessions;
 namespace SwiftAid.Gateway.Sessions;
 
 /// <summary>Presentation adapter over the authenticated Gateway session editor.</summary>
-public sealed class GatewayStaffSessionEditorClient(SessionGatewayClient gatewayClient) : IStaffSessionEditorClient
+public sealed class GatewayStaffSessionEditorClient(SessionGatewayClient gatewayClient, IOrganizationMembershipClient membershipClient) : IStaffSessionEditorClient
 {
     private const string Capability = "community-session-editor";
+    private readonly IOrganizationMembershipClient _membershipClient = membershipClient ?? throw new ArgumentNullException(nameof(membershipClient));
 
     public async Task<UiCapabilityResult<string>> GetCurrentActorIdAsync(CancellationToken cancellationToken = default)
     {
         var actorId = await gatewayClient.GetCurrentActorIdAsync(cancellationToken).ConfigureAwait(false);
         return actorId is null
-            ? Result<string>(UiCapabilityResultCode.Denied, null, "Sign in with an authorized staff account to manage sessions.", available: true)
+            ? Result<string>(UiCapabilityResultCode.Denied, null, "Sign in with an active organization owner account to manage sessions.", available: true)
             : Result(UiCapabilityResultCode.Success, actorId, null, available: true);
     }
 
@@ -31,19 +32,33 @@ public sealed class GatewayStaffSessionEditorClient(SessionGatewayClient gateway
                 available: true);
         }
 
-        // The current Gateway session service exposes no authoritative per-action authorization query.
-        // Authentication alone does not establish permission to create or manage sessions.
-        return new UiCapabilityResult<StaffSessionManagementCapabilities>(
-            UiCapabilityResultCode.Unavailable,
-            null,
-            new UiCapabilityMetadata(
-                Capability,
-                UiCapabilityResults.ContractVersion,
-                UiCapabilityProvenance.LiveService,
-                DateTimeOffset.UtcNow,
-                IsAvailable: false,
-                "Session management access could not be confirmed."),
-            "Session management access could not be confirmed.");
+        var membershipResult = await _membershipClient.GetMineAsync(cancellationToken).ConfigureAwait(false);
+        if (!membershipResult.Succeeded || membershipResult.Value is null)
+            return Result<StaffSessionManagementCapabilities>(UiCapabilityResultCode.Unavailable, null,
+                "Organization ownership could not be confirmed.", available: false);
+
+        var ownerOrganizations = membershipResult.Value.Where(item => item.IsOwner &&
+                item.MembershipStatus == "Active" && item.OrganizationStatus == "Active")
+            .Select(item => item.OrganizationId).Distinct(StringComparer.Ordinal).ToArray();
+        if (sessionId is null)
+        {
+            var create = new StaffSessionManagementCapabilities(ownerOrganizations.Length > 0, false, false, false,
+                false, false, null, null, null, true, OwnerOrganizationIds: ownerOrganizations);
+            return Result(UiCapabilityResultCode.Success, create, null, available: true);
+        }
+
+        var session = await gatewayClient.GetStaffAsync(sessionId.Value, cancellationToken).ConfigureAwait(false);
+        if (session is null)
+            return Result<StaffSessionManagementCapabilities>(UiCapabilityResultCode.Denied, null,
+                "The session is not available to this account.", available: true);
+        var current = expectedVersion == session.Version;
+        var canEdit = current && session.Status is "Draft" or "Reviewed" or "Scheduled";
+        var caps = new StaffSessionManagementCapabilities(false, canEdit, current && session.Status == "Draft",
+            current && session.Status == "Reviewed", current && session.Status is "Reviewed" or "Scheduled",
+            current && session.Status == "Scheduled" && session.StartUtc <= DateTimeOffset.UtcNow,
+            session.SessionId, session.Version, session.Status, current, CanViewHistory: true,
+            OwnerOrganizationIds: ownerOrganizations);
+        return Result(UiCapabilityResultCode.Success, caps, null, available: true);
     }
 
     public async Task<UiCapabilityResult<CommunitySessionView>> GetStaffAsync(

@@ -10,6 +10,7 @@ public abstract record SessionCommand(
 /// <summary>Creates a draft. The start may be tentative; scheduling validates it is future.</summary>
 public sealed record CreateSessionDraftCommand(
     Guid SessionId,
+    string OrganizationId,
     string Title,
     string Summary,
     string AudienceDescription,
@@ -83,7 +84,15 @@ public sealed record CompleteSessionCommand(
     DateTimeOffset RecordedAtUtc) : SessionCommand(SessionId, ExpectedVersion, Reason, RecordedAtUtc);
 
 /// <summary>Opaque source-card reference bound to the session.</summary>
-public sealed record SessionMaterialRef(string MaterialId, string SourceVersion);
+public sealed record SessionMaterialRef(string MaterialId, string SourceVersion, string? RightsEvidence = null);
+
+public sealed record SessionMaterialApproval(
+    string OrganizationId,
+    string MaterialId,
+    string SourceVersion,
+    string RightsEvidence,
+    string ApprovedByActorId,
+    DateTimeOffset ApprovedAtUtc);
 
 public enum SessionVisibility
 {
@@ -105,6 +114,7 @@ public sealed record StoredSessionMaterial(string MaterialId, string SourceVersi
 /// <summary>Staff full view. Internal notes stay out of public DTOs.</summary>
 public sealed record CommunitySessionView(
     Guid SessionId,
+    string OrganizationId,
     long Version,
     string Title,
     string Summary,
@@ -119,7 +129,7 @@ public sealed record CommunitySessionView(
     string TimeZoneId,
     int DurationMinutes,
     int? Capacity,
-    IReadOnlyList<StoredSessionMaterial> Materials,
+    IReadOnlyList<SessionMaterialRef> Materials,
     SessionVisibility Visibility,
     SessionChannelType ChannelType,
     string? ChannelLink,
@@ -131,7 +141,7 @@ public sealed record CommunitySessionView(
     long IcsSequence,
     string? CancellationReason);
 
-/// <summary>Public-safe projection. No attendee data or internal audit fields; material references remain empty until public rights and withdrawal can be verified.</summary>
+/// <summary>Public-safe projection. No attendee data or internal audit fields; material references include only currently owner-approved, non-withdrawn source versions.</summary>
 public sealed record PublicSessionView(
     Guid SessionId,
     long Version,

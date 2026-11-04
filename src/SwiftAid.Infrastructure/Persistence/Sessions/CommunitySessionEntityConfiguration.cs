@@ -24,6 +24,11 @@ public sealed class CommunitySessionEntityConfiguration : IEntityTypeConfigurati
         builder.HasIndex(entity => new { entity.Visibility, entity.Status, entity.StartUtc })
             .HasDatabaseName("ix_community_sessions_public_listing");
         builder.Property(entity => entity.SessionId).HasColumnName("session_id").HasColumnType("uuid");
+        builder.Property(entity => entity.OrganizationId).HasColumnName("organization_id").HasColumnType("text");
+        builder.HasIndex(entity => new { entity.OrganizationId, entity.StartUtc }).HasDatabaseName("ix_community_sessions_organization_schedule");
+        builder.HasOne<OrganizationEntity>().WithMany().HasForeignKey(entity => entity.OrganizationId)
+            .HasPrincipalKey(organization => organization.OrganizationId).OnDelete(DeleteBehavior.Restrict)
+            .HasConstraintName("fk_community_sessions_organization");
         builder.Property(entity => entity.Version).HasColumnName("version").IsConcurrencyToken();
         builder.Property(entity => entity.Title).HasColumnName("title").HasColumnType("text");
         builder.Property(entity => entity.Summary).HasColumnName("summary").HasColumnType("text");
