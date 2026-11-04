@@ -4590,3 +4590,9 @@ PASS: Gateway build after source commit (`dotnet build src/SwiftAid.Gateway/Swif
 The reasoning prompt now distinguishes authorized case retrieval and administrative grouping from surveillance analysis. It explicitly says the current tool path cannot calculate radii, validate spatial clusters, provide a historical baseline or denominator, or confirm an outbreak. It directs Ellai to state missing evidence and prevents treating reported counts or a synthetic detector candidate as incidence or laboratory confirmation. No gated detector or signal-review action was exposed.
 
 PASS: Gateway build (`dotnet build src/SwiftAid.Gateway/SwiftAid.Gateway.csproj --no-restore -m:1 -nr:false -p:WasmBuildNative=false --verbosity quiet`, 0 warnings, 0 errors). PASS: `git diff --check`. No tests added or run, per user instruction. NOT VERIFIED: live provider behavior, seeded surveillance conversations, or browser rendering.
+
+### Interactive Ellai server-validation recovery - 2026-11-04
+
+When submission is rejected without a field identifier, returning from Review to Details now runs the existing trusted detail validator. Its ordered value-free validation issues feed Ellai's existing first-issue narration and dynamic highlight; each correction recomputes the remaining issues. This does not claim to identify server-only constraints that the server does not return as field errors.
+
+PASS: `dotnet build src/SwiftAid.Gateway/SwiftAid.Gateway.csproj --no-restore -m:1 -nr:false -p:WasmBuildNative=false --verbosity quiet` completed with 0 warnings and 0 errors; `git diff --check` passed. Tests were not added or run, per user instruction. Live provider and browser narration/highlight behavior remain NOT VERIFIED.

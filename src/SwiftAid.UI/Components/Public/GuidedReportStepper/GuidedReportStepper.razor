@@ -1470,6 +1470,14 @@
             _step--;
             _stepError = null;
             _focusStepHeadingAfterRender = true;
+            if (_step == 1 && ServerValidationRevision > 0 &&
+                ServerValidationRevision != _dismissedServerValidationRevision)
+            {
+                // A server rejection may not identify its field. Re-run the trusted
+                // client checks so Ellai can guide the reporter through known issues
+                // in order instead of leaving the generic rejection on the review page.
+                ValidateDetails();
+            }
         }
     }
 
