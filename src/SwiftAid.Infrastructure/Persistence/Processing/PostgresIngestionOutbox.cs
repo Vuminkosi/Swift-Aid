@@ -47,7 +47,7 @@ public sealed class PostgresIngestionOutbox(SwiftAidDbContext db) : IIngestionOu
                   AND (o.lease_until_utc IS NULL OR o.lease_until_utc <= @now)
                   AND o.{shape.Attempts} < {MaximumAttempts}
                   AND NOT EXISTS ({shape.Predecessor})
-                ORDER BY o.available_at_utc, o.created_at_utc, o.outbox_id
+                ORDER BY {shape.OrderBy}
                 LIMIT @batch FOR UPDATE OF o SKIP LOCKED
             ), claimed AS (
                 UPDATE {shape.Table} o SET {shape.Attempts} = o.{shape.Attempts} + 1,
@@ -60,6 +60,7 @@ public sealed class PostgresIngestionOutbox(SwiftAidDbContext db) : IIngestionOu
                 {shape.Version} AS "SourceVersion", {shape.Revision} AS "ReportRevision",
                 {shape.EventType} AS "EventType", o.created_at_utc AS "RecordedAtUtc"
             FROM claimed o {shape.Join}
+            ORDER BY {shape.OrderBy}
             """, new NpgsqlParameter("now", now), new NpgsqlParameter("until", now + leaseDuration),
             new NpgsqlParameter("batch", batchSize)).ToListAsync(cancellationToken).ConfigureAwait(false);
 
@@ -106,16 +107,18 @@ public sealed class PostgresIngestionOutbox(SwiftAidDbContext db) : IIngestionOu
         [new("id", lease.OutboxId), new("lease", lease.LeaseId), new("now", now.ToUniversalTime())];
 
     private sealed record Shape(string Table, string Attempts, string Join, string Predecessor,
-        string MessageId, string SourceId, string Version, string Revision, string EventType)
+        string MessageId, string SourceId, string Version, string Revision, string EventType, string OrderBy)
     {
         public static Shape For(string kind) => kind switch
         {
             "intake" => new("swiftaid_intake.intake_outbox", "attempts", "",
                 "SELECT 1 FROM swiftaid_intake.intake_outbox p WHERE p.receipt_id = o.receipt_id AND p.revision < o.revision AND p.published_at_utc IS NULL",
-                "o.outbox_id", "o.receipt_id", "o.revision", "o.revision", "o.event_type"),
-            "case" => new("public.domain_outbox", "attempt_count", "JOIN public.case_events e ON e.event_id = o.event_id",
+                "o.outbox_id", "o.receipt_id", "o.revision", "o.revision", "o.event_type",
+                "o.available_at_utc, o.created_at_utc, o.outbox_id"),
+            "case" => new("public.domain_outbox", "attempt_count", "JOIN public.case_events e ON e.event_id = o.event_id JOIN public.managed_cases c ON c.case_id = e.case_id",
                 "SELECT 1 FROM public.domain_outbox p JOIN public.case_events pe ON pe.event_id = p.event_id WHERE pe.case_id = e.case_id AND pe.aggregate_version < e.aggregate_version AND p.published_at_utc IS NULL",
-                "o.event_id", "e.case_id", "e.aggregate_version", "e.report_revision", "e.event_type"),
+                "o.event_id", "e.case_id", "e.aggregate_version", "e.report_revision", "e.event_type",
+                "c.created_at_utc DESC, c.case_id, o.available_at_utc, o.created_at_utc, o.outbox_id"),
             _ => throw new ArgumentException("Unknown ingestion source kind.", nameof(kind))
         };
     }
