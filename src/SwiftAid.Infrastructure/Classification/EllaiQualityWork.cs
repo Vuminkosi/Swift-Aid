@@ -28,7 +28,8 @@ public sealed class EllaiQualityWork(SwiftAidDbContext db, PostgresProtectedCase
         if (!options.Enabled) throw new InvalidOperationException("The scoped classification worker is disabled.");
         options.Validate();
         var schedule = new PostgresEllaiOperationalScheduleStore(db);
-        return await schedule.ExecuteFencedAsync(lease, async (_, _, token) =>
+        var concurrentInsert = false;
+        var result = await schedule.ExecuteFencedAsync(lease, async (_, _, token) =>
         {
             // The source case stays locked while its current facts revision is assessed.
             // Previously assessed revisions are excluded before unprotecting evidence.
@@ -71,7 +72,13 @@ public sealed class EllaiQualityWork(SwiftAidDbContext db, PostgresProtectedCase
                     {JsonSerializer.Serialize(quality, Json)}::jsonb, clock_timestamp())
                 ON CONFLICT ("SourceEventId", "Version") DO NOTHING
                 """, token).ConfigureAwait(false);
-            if (inserted == 0) return false;
+            if (inserted == 0)
+            {
+                // Another classifier won this source revision after candidate selection.
+                // It is not evidence that the workspace has no other due work.
+                concurrentInsert = true;
+                return false;
+            }
             var fingerprint = ClassificationFingerprint.Hash($"{source.EventId:D}:{source.ReportRevision}:{ReportQualityRules.Version}");
             var activityId = Guid.NewGuid();
             await db.Database.ExecuteSqlInterpolatedAsync($"""
@@ -83,6 +90,8 @@ public sealed class EllaiQualityWork(SwiftAidDbContext db, PostgresProtectedCase
                 """, token).ConfigureAwait(false);
             return true;
         }, ct).ConfigureAwait(false);
+        return result == EllaiFencedWorkOutcome.NoChange && concurrentInsert
+            ? EllaiFencedWorkOutcome.Retry : result;
     }
 
     private sealed class QualityCandidate

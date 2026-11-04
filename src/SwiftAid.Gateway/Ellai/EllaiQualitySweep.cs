@@ -83,6 +83,9 @@ public sealed class EllaiQualitySweep(SwiftAidDbContext db, EllaiQualityWork wor
                     GC.KeepAlive(session);
                 }
                 if (outcome == EllaiFencedWorkOutcome.StaleLease) return "stale-lease";
+                // A concurrent classifier won this item; spend only this bounded turn,
+                // then scan again without advancing the schedule cursor.
+                if (outcome == EllaiFencedWorkOutcome.Retry) continue;
                 if (outcome == EllaiFencedWorkOutcome.NoChange)
                 {
                     finished = await schedule.CompleteAsync(lease, ct);

@@ -1,4 +1,9 @@
 using System.Runtime.CompilerServices;
+using System.Data.Common;
+using Microsoft.EntityFrameworkCore.Diagnostics;
+using OpenIddict.EntityFrameworkCore;
+using SwiftAid.Application.Classification;
+using SwiftAid.Infrastructure.Persistence;
 using Microsoft.Agents.AI;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.AI;
@@ -127,6 +132,74 @@ public sealed class EllaiQualitySweepPostgresTests
         Assert.Equal(1, retry.ChangesCommitted);
         Assert.Equal(2, retry.WorkTurns);
         Assert.Equal(0, client.Calls);
+    }
+
+    [IntakePostgresFact]
+    public async Task ConcurrentClassifierWinnerDoesNotEndSweepBeforeRemainingCase()
+    {
+        await using var fixture = await CaseImportPostgresTests.Fixture.CreateAsync();
+        var scope = await fixture.CreateIsolatedWorkspaceAsync();
+        var caseIds = new List<Guid>();
+        for (var index = 0; index < 2; index++)
+        {
+            var imported = await fixture.Service.ProcessAsync(CaseImportPostgresTests.Actor, Guid.NewGuid(), scope,
+                1, true, new StringReader(CaseImportPostgresTests.Csv(Guid.NewGuid())), default);
+            caseIds.Add(Assert.Single(imported.Rows).CaseId!.Value);
+        }
+        fixture.Db.ChangeTracker.Clear();
+        var firstCaseId = caseIds.OrderBy(id => id).First();
+        var source = await fixture.Db.CaseEvents.AsNoTracking().SingleAsync(e => e.CaseId == firstCaseId && e.EventType == "CaseReported");
+        var schedules = new PostgresEllaiOperationalScheduleStore(fixture.Db);
+        Assert.True(await schedules.CreateAsync(scope.WorkspaceId, "ops.quality", 4, "policy/1", DateTimeOffset.UtcNow.AddMinutes(-1), default));
+        var barrier = new QualityInsertBarrier();
+        var dbOptions = new DbContextOptionsBuilder<SwiftAidDbContext>().UseNpgsql(fixture.Db.Database.GetConnectionString())
+            .UseOpenIddict().AddInterceptors(barrier).Options;
+        await using var workerDb = new SwiftAidDbContext(dbOptions);
+        var settings = Options.Create(new ClassificationOptions { Enabled = true, WorkerTokenSha256 = new string('a', 64), Organizations = ["org-zw-1"] });
+        var worker = new EllaiQualitySweep(workerDb,
+            new EllaiQualityWork(workerDb, fixture.ClassificationPayloadStore(workerDb), settings), settings);
+        var config = new EllaiQualityScheduleOptions { Enabled = true, Workspaces = [scope.WorkspaceId], PolicyVersion = "policy/1", BatchSize = 3 };
+        using var client = new NoInferenceClient();
+        var agent = EllaiFrameworkAgentFactory.Instance.Create(client, new ChatClientAgentOptions { Name = "test", UseProvidedChatClientAsIs = true });
+        async Task<AgentSession> Open(CancellationToken ct) => await agent.CreateSessionAsync(cancellationToken: ct);
+        var progress = new EllaiQualitySweepProgress();
+        var pending = worker.RunAsync(scope.WorkspaceId, config, Open, progress, default);
+        try
+        {
+            await barrier.Reached.Task.WaitAsync(TimeSpan.FromSeconds(15));
+            const string emptyAssessment = "{}";
+            await fixture.Db.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO swiftaid_classification.quality_assessments
+                    ("SourceEventId", "Version", "CaseId", "ReportRevision", "AssessmentJson", "CreatedAtUtc")
+                VALUES ({source.EventId}, {ReportQualityRules.Version}, {source.CaseId}, {source.ReportRevision}, {emptyAssessment}::jsonb, clock_timestamp())
+                """);
+        }
+        finally { barrier.Release.TrySetResult(); }
+        Assert.Equal("complete", await pending.WaitAsync(TimeSpan.FromSeconds(15)));
+        Assert.Equal(3, progress.WorkTurns);
+        Assert.Equal(1, progress.ChangesCommitted);
+        Assert.Equal(2, await fixture.Db.Set<ReportQualityEntity>().AsNoTracking().CountAsync(item => caseIds.Contains(item.CaseId)));
+        Assert.Equal(1, await fixture.Db.Database.SqlQuery<int>($"SELECT count(*)::int AS \"Value\" FROM ellai_case_quality_activity WHERE run_id = {progress.RunId}").SingleAsync());
+        Assert.Equal(0, client.Calls);
+    }
+
+    private sealed class QualityInsertBarrier : DbCommandInterceptor
+    {
+        public TaskCompletionSource Reached { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _waited;
+
+        public override async ValueTask<InterceptionResult<int>> NonQueryExecutingAsync(DbCommand command,
+            CommandEventData eventData, InterceptionResult<int> result, CancellationToken cancellationToken = default)
+        {
+            if (command.CommandText.Contains("INSERT INTO swiftaid_classification.quality_assessments", StringComparison.Ordinal) &&
+                Interlocked.Exchange(ref _waited, 1) == 0)
+            {
+                Reached.TrySetResult();
+                await Release.Task.WaitAsync(cancellationToken);
+            }
+            return result;
+        }
     }
 
     private sealed class NoInferenceClient : IChatClient

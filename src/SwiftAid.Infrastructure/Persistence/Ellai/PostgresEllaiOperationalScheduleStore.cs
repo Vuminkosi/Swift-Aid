@@ -8,7 +8,7 @@ namespace SwiftAid.Infrastructure.Persistence.Ellai;
 public sealed record EllaiOperationalLease(string WorkspaceId, string RoleId, Guid LeaseId,
     long FencingToken, DateTimeOffset DueAtUtc, DateTimeOffset LeaseUntilUtc, string PolicyVersion);
 
-public enum EllaiFencedWorkOutcome { Committed, NoChange, StaleLease }
+public enum EllaiFencedWorkOutcome { Committed, NoChange, StaleLease, Retry }
 
 /// <summary>Durable scoped schedule and lease coordination. This store does not start work
 /// or grant a worker access to any case; the caller must supply trusted scope and authorization.</summary>

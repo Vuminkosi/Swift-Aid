@@ -47,7 +47,10 @@ workspace offset, use UTC and run every four hours. Each work turn opens a fresh
 in-memory Microsoft Agent Framework session, invokes no model, discards session
 context afterward, and emits bounded run outcomes to the configured logs. A
 batch that reaches its limit releases the lease without advancing the due cursor;
-the next poll resumes it. A drained sweep advances beyond missed intervals. A
+the next poll resumes it. If another classifier inserts an assessment after
+candidate selection, that conflict consumes one bounded turn and the sweep
+continues; it is not treated as proof that the workspace has drained. A drained
+sweep advances beyond missed intervals. A
 policy mismatch releases the lease without changing data or the cursor and needs
 operator reconciliation. Changing a schedule policy alone does not re-run an
 unchanged quality-rules version; policy change invalidation and affected-stage
