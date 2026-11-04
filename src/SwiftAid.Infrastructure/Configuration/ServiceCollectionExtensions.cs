@@ -12,6 +12,7 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.DataProtection;
+using SwiftAid.Application.Identity;
 using OpenIddict.EntityFrameworkCore;
 using Minio;
 using NATS.Client.Core;
@@ -523,6 +524,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IUserProfileService, UserProfileService>();
         services.AddScoped<IProfileAvatarService, ProfileAvatarService>();
         services.AddScoped<IOrganizationMembershipService, OrganizationMembershipService>();
+        services.AddScoped<IOrganizationOwnerAuthorizer, PostgresOrganizationOwnerAuthorizer>();
         services.AddScoped<IOrganizationInvitationService, OrganizationInvitationService>();
         services.AddScoped<INotificationPreferenceService, NotificationPreferenceService>();
         services.AddSingleton<OrganizationSsoRegistry>();
