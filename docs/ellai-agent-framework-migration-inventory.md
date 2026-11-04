@@ -209,6 +209,13 @@ index-read count still assumed the old two-fence behavior; the final publication
 fence now causes a third read. After correcting that test expectation, the four
 recall variants passed and the complete application rerun passed. Skips and
 earlier intermittent integration failures remain part of the acceptance limit.
+Subsequent decision-contract tests found that undefined decision kinds, null
+speech, malformed clarifying questions and null topic references could pass the
+final validator. These shapes now require repair; a valid question with choices
+and empty speech remains accepted. The full application suite passed 1,229 with
+19 skipped after the validator change, and the five focused negative and
+positive cases passed before and after commit. These are scripted model checks;
+they do not prove every provider output is semantically grounded.
 
 ## Provider observations and open checks
 
