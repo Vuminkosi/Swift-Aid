@@ -592,6 +592,15 @@ persisted result ID through the framework function result, without the source
 narrative or worker lease ID; the fixture also checks foreign and absent actor
 denial at the broker. It uses synthetic persisted classifications, not live
 BART inference, a live model or deployed Gateway.
+An additional opt-in test now runs the pinned BART classifier on a synthetic
+lease in a task-owned container with networking disabled and the existing
+model volume mounted read-only. It persists the real inference through the
+classification registry, then reads it through the authorized framework tool
+and runner without exposing the source text or lease ID. The test passed twice
+before commit and once after commit against disposable PostGIS. It uses a
+scripted reasoning model and invokes classification directly; it does not
+establish JetStream delivery, live Muse interpretation, clinical validity or
+deployed behavior.
 The `ClassificationRegistryTests` filter also passed 10/10 against the same
 fixture using `--no-build --no-restore` and the same test-project options.
 
