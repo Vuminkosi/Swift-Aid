@@ -10,7 +10,7 @@ public sealed class ReportVoiceAssistantContextTests
     public async Task EndingAssistanceCancelsPendingCaptureStartup()
     {
         var context = new EllaiPublicReportDraftContext();
-        context.Register(new object(), _ => true, () => null, _ => true, _ => true, _ => true, new object());
+        context.Register(new object(), _ => true, _ => true, reportIdentity: new object());
         var pending = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         CancellationToken token = default;
         context.RegisterVoiceController(new object(), (_, ct) => { token = ct; return pending.Task; }, () => Task.CompletedTask);
@@ -27,8 +27,8 @@ public sealed class ReportVoiceAssistantContextTests
         var context = new EllaiPublicReportDraftContext();
         var draft = new SwiftAid.UI.Components.Public.PublicReportDraft { SubjectScope = IntakeSubjectScope.Human };
         var applied = new List<string>();
-        context.Register(new object(), _ => true, () => null, _ => true, _ => true, _ => true, draft,
-            (suggestion, transcript) =>
+        context.Register(new object(), _ => true, _ => true, reportIdentity: draft,
+            autoFillVoice: (suggestion, transcript) =>
             {
                 if (!SwiftAid.UI.Components.Public.ReportVoiceAutofill.CanApply(suggestion, transcript, draft, _ => false)) return false;
                 applied.Add(suggestion.Field);
@@ -56,7 +56,7 @@ public sealed class ReportVoiceAssistantContextTests
         var pending = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         string? capture = null;
         CancellationToken token = default;
-        context.Register(owner, _ => true, () => null, _ => true, _ => true, _ => true, new object());
+        context.Register(owner, _ => true, _ => true, reportIdentity: new object());
         context.RegisterVoiceController(new object(), _ => Task.FromResult(false), () => Task.CompletedTask,
             (_, id, ct) => { capture = id; token = ct; return pending.Task; });
         var processing = context.TranscribeSavedVoiceAsync(_ => Task.FromResult(Array.Empty<byte>()));
@@ -72,8 +72,8 @@ public sealed class ReportVoiceAssistantContextTests
     {
         var context = new EllaiPublicReportDraftContext();
         var applied = 0;
-        context.Register(new object(), _ => true, () => null, _ => true, _ => true, _ => true,
-            new object(), (_, _) => { applied++; return true; });
+        context.Register(new object(), _ => true, _ => true,
+            reportIdentity: new object(), autoFillVoice: (_, _) => { applied++; return true; });
         context.RegisterVoiceController(new object(), _ =>
         {
             context.BindVoiceCapture("capture");
@@ -96,7 +96,7 @@ public sealed class ReportVoiceAssistantContextTests
         var owner = new object();
         var starting = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         var stopped = false;
-        context.Register(owner, _ => true, () => null, _ => true, _ => true, _ => true, new object());
+        context.Register(owner, _ => true, _ => true, reportIdentity: new object());
         context.RegisterVoiceController(new object(), _ => starting.Task,
             () => { stopped = true; return Task.CompletedTask; });
 
@@ -115,8 +115,8 @@ public sealed class ReportVoiceAssistantContextTests
         var firstDraft = new object();
         var transcript = string.Empty;
         var stopped = false;
-        context.Register(new object(), _ => true, () => null, _ => true, _ => true,
-            text => { transcript += text; return true; }, firstDraft);
+        context.Register(new object(), _ => true, _ => true,
+            appendNarrative: text => { transcript += text; return true; }, reportIdentity: firstDraft);
         context.RegisterVoiceController(new object(), _ =>
         {
             context.BindVoiceCapture("report-capture");
@@ -131,7 +131,7 @@ public sealed class ReportVoiceAssistantContextTests
         Assert.True(context.AppendVoiceTranscript(generation.Generation, "No fever."));
         Assert.Equal("No fever.", transcript);
 
-        context.Register(new object(), _ => true, () => null, _ => true, _ => true, _ => true, new object());
+        context.Register(new object(), _ => true, _ => true, reportIdentity: new object());
         Assert.True(stopped);
         context.CompleteVoiceTurn(generation.Generation, "No fever.", new("Ready", [new("observation", "fever", "No fever")]));
         Assert.Empty(context.VoiceSuggestions);
@@ -144,8 +144,7 @@ public sealed class ReportVoiceAssistantContextTests
     {
         var context = new EllaiPublicReportDraftContext();
         string? observation = null;
-        context.Register(new object(), _ => true, () => null, text => { observation = text; return true; },
-            _ => true, _ => true, new object());
+        context.Register(new object(), _ => true, text => { observation = text; return true; }, reportIdentity: new object());
         context.RegisterVoiceController(new object(), _ =>
         {
             context.BindVoiceCapture("capture");

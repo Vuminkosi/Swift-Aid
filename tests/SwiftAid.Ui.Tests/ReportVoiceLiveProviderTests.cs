@@ -50,9 +50,9 @@ public sealed class ReportVoiceLiveProviderTests
             Assert.Equal("35", draft.AgeYearsText);
             var locality = result.Fields.SingleOrDefault(field => field.Field == "locality");
             Assert.NotNull(locality);
-            Assert.True(string.Equals(locality.Value, draft.Locality, StringComparison.OrdinalIgnoreCase));
+            Assert.Equal(locality.Value, draft.Locality, ignoreCase: true);
             Assert.True(transcript.Contains(draft.Locality!, StringComparison.Ordinal));
-            Assert.True(string.Equals(transcript, draft.Narrative, StringComparison.Ordinal));
+            Assert.Equal(transcript, draft.Narrative);
             Assert.False(draft.CountryConfirmed);
         }
     }

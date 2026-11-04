@@ -26,7 +26,7 @@ async function main() {
         const report = page.getByTestId('guided-report-fixture');
         await page.waitForFunction(() => [...document.querySelectorAll('[data-testid="guided-report-fixture"] button')]
             .some(button => [...button.attributes].some(attribute => attribute.name.startsWith('_bl_'))));
-        await report.getByRole('radio', { name: 'Human health — a person or people' }).check();
+        await report.getByRole('radio', { name: /Human health/ }).check();
         await report.getByRole('radio', { name: 'Female' }).check();
         await report.getByRole('radio', { name: 'Yes' }).check();
         await report.getByRole('button', { name: 'Continue to details' }).click();
@@ -35,15 +35,20 @@ async function main() {
         await page.getByRole('option', { name: 'Zimbabwe' }).click();
         await report.getByRole('combobox', { name: 'When did this happen?' }).click();
         await page.getByRole('option', { name: 'Date only' }).click();
-        const date = report.locator('input[type=date]');
-        await date.fill('2026-10-30');
+        const date = report.getByLabel('Reported date', { exact: true });
+        await date.click();
+        await page.locator('.mud-picker-calendar:visible').locator('button.mud-picker-calendar-day:not(.mud-adjacent-month)').filter({ hasText: /^1$/ }).click();
+        await page.keyboard.press('Escape');
         await date.blur();
         await report.getByRole('button', { name: 'Review report' }).click();
         if (await report.locator('.guided-report__validation').innerText())
             console.log('Validation:', await report.locator('.guided-report__validation').innerText());
         await report.getByRole('heading', { name: 'Review your report' }).waitFor({ timeout: 5000 });
-        assert.match(await report.locator('.guided-report__summary').innerText(), /10\/30\/2026|30\/10\/2026|2026-10-30/);
-        assert.match(await report.locator('.guided-report__summary').innerText(), /Gender\s+Female[\s\S]*Death related\s+Yes/);
+        const now = new Date();
+        const year = now.getFullYear(), month = now.getMonth() + 1;
+        const selectedDate = new RegExp(`0?${month}/0?1/${year}|0?1/0?${month}/${year}|${year}-${String(month).padStart(2, '0')}-01`);
+        assert.match(await report.locator('.guided-report__summary').innerText(), selectedDate);
+        assert.match(await report.locator('.guided-report__summary').innerText(), /Reported gender\s+Female[\s\S]*Death related\s+Yes/);
         await report.getByRole('checkbox', { name: /I reviewed the original statement/ }).check();
         await report.getByRole('checkbox', { name: 'I confirm the selected event country.' }).check();
         await report.getByRole('checkbox', { name: /I have reviewed the report-handling information/ }).check();
@@ -55,7 +60,7 @@ async function main() {
         await animalPage.waitForFunction(() => [...document.querySelectorAll('[data-testid="guided-report-fixture"] button')]
             .some(button => [...button.attributes].some(attribute => attribute.name.startsWith('_bl_'))));
         const animal = animalPage.getByTestId('guided-report-fixture');
-        await animal.getByRole('radio', { name: 'Animal health — an animal or group of animals' }).check();
+        await animal.getByRole('radio', { name: /Animal health/ }).check();
         await animal.getByRole('radio', { name: 'Herd', exact: true }).check();
         await animal.getByRole('radio', { name: 'No', exact: true }).check();
         assert.equal(await animal.getByRole('radio', { name: 'Female' }).count(), 0);
@@ -63,15 +68,22 @@ async function main() {
         await animal.getByLabel('Describe what happened').fill('Synthetic animal concern');
         await animal.getByRole('combobox', { name: 'When did this happen?' }).click();
         await animalPage.getByRole('option', { name: 'Approximate date' }).click();
-        await animal.locator('input[type=date]').fill('2026-10-29');
-        await animal.locator('input[type=date]').blur();
+        await animal.getByLabel('Reported date', { exact: true }).click();
+        await animalPage.locator('.mud-picker-calendar:visible').locator('button.mud-picker-calendar-day:not(.mud-adjacent-month)').filter({ hasText: /^1$/ }).click();
+        await animalPage.keyboard.press('Escape');
+        await animal.getByLabel('Reported date', { exact: true }).blur();
         await animal.getByRole('button', { name: 'Review report' }).click();
         await animal.getByRole('heading', { name: 'Review your report' }).waitFor({ timeout: 5000 });
         assert.match(await animal.locator('.guided-report__summary').innerText(), /Death related\s+No/);
         console.log('PASS: human date and choices reach submit callback; animal approximate date and death choice reach review (synthetic component fixture).');
+    } catch (error) {
+        console.error(error);
+        if (browser?.contexts()[0]?.pages()[0])
+            await browser.contexts()[0].pages()[0].screenshot({ path: 'artifacts/report-date-browser-failure.png' });
+        throw error;
     } finally {
-        if (browser) await browser.close();
+        if (browser) await Promise.race([browser.close(), new Promise(resolve => setTimeout(resolve, 3000))]);
         host.kill();
     }
 }
-main().catch(error => { console.error(error); process.exitCode = 1; });
+main().then(() => process.exit(0)).catch(error => { console.error(error); process.exit(1); });

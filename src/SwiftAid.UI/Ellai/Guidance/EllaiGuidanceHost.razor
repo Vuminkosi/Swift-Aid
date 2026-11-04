@@ -93,6 +93,10 @@
             <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small"
                            OnClick='@(() => ControlGeneratedTourAsync("cancel"))' aria-label="Cancel guidance" />
         </header>
+        @if (_validationGuidanceText is null && _reportInputText is not null)
+        {
+            <p role="status" class="ellai-guided-conversation__input">@_reportInputText</p>
+        }
         @if (_validationGuidanceText is not null)
         {
             <p role="status" class="ellai-guided-conversation__validation">@_validationGuidanceText</p>

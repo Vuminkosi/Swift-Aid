@@ -1592,7 +1592,8 @@ public sealed class EllaiPostgresTests : IAsyncLifetime
     }
 
     private static async Task RunFrameworkWorkerAsync(string sessionId, string turnId, IChatClient model, ICacheStore? cache,
-        TimeSpan? executionTimeout = null, EllaiUiRegistry? registry = null)
+        TimeSpan? executionTimeout = null, EllaiUiRegistry? registry = null, bool stateQueue = false,
+        DbCommandInterceptor? interceptor = null, TimeSpan? snapshotTransactionLimit = null, TimeSpan? toolTimeout = null)
     {
         var consent = new EllaiConsentService();
         var services = new ServiceCollection();
@@ -1606,7 +1607,10 @@ public sealed class EllaiPostgresTests : IAsyncLifetime
         services.AddEllaiUsageAccounting(new EllaiOptions { SpendingCapDollars = 70m,
             PricingInputPer1KTokens = 0.001m, PricingOutputPer1KTokens = 0.002m });
         services.AddSingleton(new EllaiSessionResponseStore());
-        services.AddScoped(_ => new EllaiToolBroker(new EllaiPolicyService(), consent, uiRegistry: registry));
+        services.AddScoped(sp => new EllaiToolBroker(new EllaiPolicyService(), consent,
+            queue: stateQueue ? new EmptyStateQueue() : null,
+            topics: stateQueue ? new EllaiTopicService(new PostgresEllaiTopicStore(sp.GetRequiredService<SwiftAidDbContext>())) : null,
+            uiRegistry: registry));
         services.AddScoped(_ => new EllaiPromptBuilder("Synthetic test policy", "fixture"));
         services.AddEllaiReasoningExecutor(new EllaiOptions
         {

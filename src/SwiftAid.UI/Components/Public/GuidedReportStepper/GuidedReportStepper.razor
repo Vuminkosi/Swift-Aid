@@ -114,7 +114,7 @@
                 {
                     <div class="guided-report__animal-scope-group">
                         <MudText Typo="Typo.body2" id="report-death-label">Is this concern related to a death?</MudText>
-                        <MudRadioGroup T="bool?" @bind-Value="Draft.DeathRelated" aria-labelledby="report-death-label">
+                        <MudRadioGroup T="bool?" @bind-Value="Draft.DeathRelated" aria-labelledby="report-death-label" data-bonboarding-anchor="ellai-report-death-related">
                             <MudRadio T="bool?" Value="@((bool?)true)" Color="Color.Primary">Yes</MudRadio>
                             <MudRadio T="bool?" Value="@((bool?)false)" Color="Color.Primary">No</MudRadio>
                             <MudRadio T="bool?" Value="@((bool?)null)" Color="Color.Primary">Unknown</MudRadio>
@@ -134,7 +134,7 @@
                     <MudText Color="Color.Error" Typo="Typo.body2" role="alert">@_stepError</MudText>
                 }
                 <div class="guided-report__actions">
-                    <MudButton ButtonType="ButtonType.Button" Color="Color.Primary" Variant="Variant.Filled" Disabled="@(!HasCompleteSubject)" OnClick="ContinueFromTypeAsync" StartIcon="@Icons.Material.Filled.ArrowForward">
+                    <MudButton data-bonboarding-anchor="ellai-report-continue-details" ButtonType="ButtonType.Button" Color="Color.Primary" Variant="Variant.Filled" Disabled="@(!HasCompleteSubject)" OnClick="ContinueFromTypeAsync" StartIcon="@Icons.Material.Filled.ArrowForward">
                         Continue to details
                     </MudButton>
                     @if (OnSaveDraft.HasDelegate)
@@ -176,7 +176,7 @@
                         <div class="guided-report__observation-groups" aria-labelledby="reported-observations-heading">
                             @foreach (var group in HumanObservationGroups)
                             {
-                                <details class="guided-report__observation-group" open="@(group.Heading == "Core symptoms")">
+                                <details data-bonboarding-anchor="@($"ellai-report-{group.Heading.ToLowerInvariant().Replace(' ', '-')}")" class="guided-report__observation-group" open="@(group.Heading == "Core symptoms")">
                                     <summary>@group.Heading</summary>
                                     <div class="guided-report__observation-choices" role="group" aria-label="@group.Heading">
                                         @foreach (var observation in group.Choices)
@@ -202,7 +202,7 @@
                         <div class="guided-report__observation-groups" aria-labelledby="reported-observations-heading">
                             @foreach (var group in AnimalObservationGroups)
                             {
-                                <details class="guided-report__observation-group" open="@(group.Heading == "Eating and activity")">
+                                <details data-bonboarding-anchor="@($"ellai-report-{group.Heading.ToLowerInvariant().Replace(' ', '-')}")" class="guided-report__observation-group" open="@(group.Heading == "Eating and activity")">
                                     <summary>@group.Heading</summary>
                                     <div class="guided-report__observation-choices" role="group" aria-label="@group.Heading">
                                         @foreach (var observation in group.Choices)
@@ -242,12 +242,14 @@
                               For="@(() => Draft.ObservationsText)" />
                 </div>
 
+                <div data-bonboarding-anchor="ellai-report-onset-precision">
                 <MudSelect T="ReportedTimePrecision" Label="When did symptoms or signs start?" Variant="Variant.Outlined" @bind-Value="Draft.OnsetPrecision">
                     <MudSelectItem Value="ReportedTimePrecision.Unknown">Unknown</MudSelectItem>
                     <MudSelectItem Value="ReportedTimePrecision.Approximate">Approximate date</MudSelectItem>
                     <MudSelectItem Value="ReportedTimePrecision.DateOnly">Date only</MudSelectItem>
                     <MudSelectItem Value="ReportedTimePrecision.Exact">Exact time</MudSelectItem>
                 </MudSelect>
+                </div>
                 @if (Draft.OnsetPrecision != ReportedTimePrecision.Unknown)
                 {
                     <div data-bonboarding-anchor="ellai-report-onset-date">
@@ -274,12 +276,14 @@
                     </div>
                 }
 
+                <div data-bonboarding-anchor="ellai-report-time-precision">
                 <MudSelect T="ReportedTimePrecision" Label="When did this happen?" Variant="Variant.Outlined" @bind-Value="Draft.OccurrencePrecision" For="@(() => Draft.OccurrencePrecision)">
                     <MudSelectItem Value="ReportedTimePrecision.Unknown">Unknown</MudSelectItem>
                     <MudSelectItem Value="ReportedTimePrecision.Approximate">Approximate date</MudSelectItem>
                     <MudSelectItem Value="ReportedTimePrecision.DateOnly">Date only</MudSelectItem>
                     <MudSelectItem Value="ReportedTimePrecision.Exact">Exact time</MudSelectItem>
                 </MudSelect>
+                </div>
                 @if (Draft.OccurrencePrecision != ReportedTimePrecision.Unknown)
                 {
                     <div data-bonboarding-anchor="ellai-report-occurrence-date">
@@ -332,7 +336,7 @@
                 }
                 @if (ShowRegistryPicker)
                 {
-                    <SwiftAidLocationPicker Label="Search for the place"
+                    <SwiftAidLocationPicker Label="Search for the place" ReportGuidanceAnchors="true"
                                             HelperText="Type a town, village, or area. The region is filled in for you."
                                             SearchFunc="PlaceSearchFunc!"
                                             ChildrenFunc="PlaceChildrenFunc!"
@@ -371,7 +375,7 @@
             </section>
             <div class="guided-report__actions">
                 <MudButton ButtonType="ButtonType.Button" Variant="Variant.Text" OnClick="GoBack" StartIcon="@Icons.Material.Filled.ArrowBack">Back</MudButton>
-                <MudButton ButtonType="ButtonType.Button" Color="Color.Primary" Variant="Variant.Text" OnClick="ContinueToReviewAsync" StartIcon="@Icons.Material.Filled.FactCheck">
+                <MudButton data-bonboarding-anchor="ellai-report-open-review" ButtonType="ButtonType.Button" Color="Color.Primary" Variant="Variant.Text" OnClick="ContinueToReviewAsync" StartIcon="@Icons.Material.Filled.FactCheck">
                     Review report
                 </MudButton>
                 @if (OnSaveDraft.HasDelegate)

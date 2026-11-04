@@ -20,6 +20,7 @@ public partial class EllaiGuidanceHost
 
     private void BeginGuidanceCountdown(long sequence)
     {
+        if (HasReportInputSequence) return;
         if (_generatedTour is not { Status: BonboardingTourStatus.Running } tour ||
             _guidanceNarrationEventId is not { } eventId || sequence != _latestResponseSequence ||
             _isPlayingResponse || _validationGuidanceText is not null || !string.IsNullOrWhiteSpace(InputText)) return;

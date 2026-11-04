@@ -11,7 +11,9 @@ public sealed class EllaiUtteranceWorker(
     ILogger<EllaiUtteranceWorker> logger,
     TimeSpan? leaseRenewalInterval = null) : BackgroundService
 {
-    public const int MaxTokensPerTurn = 2048;
+    // Structured guided plans include controls, preconditions and completion rules.
+    // Keep enough output capacity for a complete plan; usage accounting still bounds each run.
+    public const int MaxTokensPerTurn = 8192;
     private static readonly TimeSpan ClaimLease = TimeSpan.FromMinutes(10);
     private static readonly TimeSpan IdlePollDelay = TimeSpan.FromSeconds(1);
     private static readonly EllaiIsolatedToolCalls ToolCalls = new();

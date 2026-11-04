@@ -78,9 +78,15 @@ builder.Services.AddScoped<IAiInvestigationClient, SwiftAid.Gateway.Ellai.Invest
 builder.Services.AddScoped<OrganizationManagementContext>();
 builder.Services.AddScoped<IOrganizationManagementClient, OrganizationManagementGatewayClient>();
 if (builder.Configuration.GetValue<bool>("Identity:Enabled") || builder.Configuration.GetValue<bool>("Federation:Enabled"))
+{
     builder.Services.AddScoped<IAccountPresentationClient, GatewayAccountPresentationClient>();
+    builder.Services.AddScoped<IOrganizationMembershipClient, GatewayOrganizationMembershipClient>();
+}
 else
+{
     builder.Services.AddScoped<IAccountPresentationClient, UnavailableAccountPresentationClient>();
+    builder.Services.AddScoped<IOrganizationMembershipClient, UnavailableOrganizationMembershipClient>();
+}
 builder.Services.AddScoped<IWorkspaceAccessClient, GatewayWorkspaceAccessClient>();
 builder.Services.AddScoped<IStaffSessionEditorClient, GatewayStaffSessionEditorClient>();
 builder.Services.AddScoped<IStaffSessionHistoryClient, GatewayStaffSessionHistoryClient>();

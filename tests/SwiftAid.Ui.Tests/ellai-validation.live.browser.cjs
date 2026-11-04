@@ -5,7 +5,7 @@ const { chromium } = require(process.env.SWIFTAID_PLAYWRIGHT_PACKAGE);
 
 (async () => {
     const browser = await chromium.launch({ headless: true, executablePath: process.env.SWIFTAID_CHROMIUM_PATH });
-    const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    const page = await browser.newPage({ ignoreHTTPSErrors: process.env.SWIFTAID_ALLOW_LOCAL_TEST_CERT === '1', viewport: { width: 1280, height: 900 } });
     const narration = [], audio = [], errors = [], audioCaptureErrors = [], plans = [];
     let latest;
     await page.exposeFunction('__recordSyntheticAudio', item => audio.push(item));
@@ -75,8 +75,10 @@ const { chromium } = require(process.env.SWIFTAID_PLAYWRIGHT_PACKAGE);
             }, anchor, { timeout: 15000 });
             await waitFor(() => audio.some(item => item.sequence === response.sequence && item.bytes > 0),
                 `No audio delivered for ${inputId}`, 90000);
+            if (process.env.SWIFTAID_GUIDANCE_SCREENSHOT_PREFIX)
+                await page.screenshot({ path: process.env.SWIFTAID_GUIDANCE_SCREENSHOT_PREFIX + '-' + inputId + '.png' });
         };
-        await verifyIssue('report.original-statement', 'ellai-report-original-statement', 'Describe what happened');
+        await verifyIssue('report.original-statement', 'ellai-report-original-statement', 'what happened');
         assert(!narration.some(item => item.inputId === 'report.occurrence-date'), 'Date must not be narrated before the first issue is corrected');
         await page.getByLabel('Describe what happened').fill('Synthetic observation');
         await page.getByLabel('Describe what happened').press('Tab');
@@ -85,6 +87,7 @@ const { chromium } = require(process.env.SWIFTAID_PLAYWRIGHT_PACKAGE);
         console.log('PASS: guidance enabled speech and delivered validation for narrative then date; no report was submitted.');
     } catch (error) {
         console.error('Synthetic validation diagnostics:', JSON.stringify({
+            planStatuses: plans.map(plan => ({ status: plan.status, diagnosticCode: plan.diagnosticCode })),
             narration: narration.map(item => ({ inputId: item.inputId, sequence: item.response.sequence })), audio, audioCaptureErrors, errors
         }));
         throw error;

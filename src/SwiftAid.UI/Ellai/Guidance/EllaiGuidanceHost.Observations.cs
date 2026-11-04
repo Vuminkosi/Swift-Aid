@@ -44,6 +44,7 @@ public partial class EllaiGuidanceHost
         {
             await ReportCurrentUiAsync(token);
             await UpdateValidationGuidanceAsync(token);
+            await InitializeReportInputAsync(token);
             await RetryGuidanceNarrationAsync(token);
             UpdateUnavailableGuidanceTarget();
             await AdvanceValidatedInputAsync(token);
@@ -80,8 +81,13 @@ public partial class EllaiGuidanceHost
             _guidanceAnchors[previous] = descriptor.AnchorBindingKey;
         _validationInputId = nextId;
         _validationGuidanceText = issue?.Message;
+        // A fresh field observation supersedes any notice from the previous
+        // failed advance; otherwise the popover can describe two different fields.
+        _guidanceNotice = null;
         _validationTargetControlId = issue is null ? null : step.ControlId;
         if (issue is not null) _guidanceAnchors[step.ControlId] = issue.Anchor;
+        else if (_reportInputStep == $"{_generatedPlan?.PlanId}:{step.StepKey}" && _reportInputAnchor is not null)
+            _guidanceAnchors[step.ControlId] = _reportInputAnchor;
         CancelGuidanceCountdown();
         // Bit.Bonboarding 10.7 RefreshAsync measures the previously resolved target.
         // Re-enter the same presentation step to resolve its dynamic anchor again;

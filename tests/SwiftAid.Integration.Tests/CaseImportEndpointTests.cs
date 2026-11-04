@@ -37,8 +37,8 @@ public sealed class CaseImportEndpointTests
         var id = Guid.NewGuid();
         Assert.Null(await client.GetAsync(id));
         var serverContext = CaseImportPostgresTests.Context;
-        var scope = Assert.Single((await client.GetWorkspacesAsync()).Where(item =>
-            item.WorkspaceId == serverContext.WorkspaceId && item.CountryCode == "ZW"));
+        var scope = Assert.Single(await client.GetWorkspacesAsync(), item =>
+            item.WorkspaceId == serverContext.WorkspaceId && item.CountryCode == "ZW");
         var context = new WorkspaceImportContext(serverContext.WorkspaceId, serverContext.Confirmations, serverContext.OrganizationId);
         using var reader = new StringReader(CaseImportPostgresTests.Csv(Guid.NewGuid()));
         SwiftAid.Contracts.Intake.Imports.CaseCsvBatch? batch = null;

@@ -75,7 +75,7 @@ public sealed partial class EllaiSurfaceLogicTests
     {
         var admissionStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var admission = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var client = new FakeReviewClient { VoiceConsentHandler = _ => { admissionStarted.TrySetResult(); return admission.Task; } };
+        var client = new FakeReviewClient { VoiceConsentHandler = () => { admissionStarted.TrySetResult(); return admission.Task; } };
         using var host = await CreateHost(client, CreateSession(1), string.Empty);
         var capture = new RecordingJsModule();
         SetField(host, "_captureModule", capture);
@@ -107,8 +107,8 @@ public sealed partial class EllaiSurfaceLogicTests
         using var host = await CreateHost(client, CreateSession(1), string.Empty);
         var context = new EllaiPublicReportDraftContext();
         var transcript = string.Empty;
-        context.Register(new object(), _ => true, () => null, _ => true, _ => true,
-            value => { transcript += value; return true; }, new object());
+        context.Register(new object(), _ => true, _ => true,
+            appendNarrative: value => { transcript += value; return true; }, reportIdentity: new object());
         context.RegisterVoiceController(new object(), async mode =>
         {
             await InvokeAsync(host, "StartVoiceCaptureAsync", mode, true);
@@ -195,8 +195,8 @@ public sealed partial class EllaiSurfaceLogicTests
         using var host = await CreateHost(client, CreateSession(1), "unsent composer draft");
         var context = new EllaiPublicReportDraftContext();
         var transcript = string.Empty;
-        context.Register(new object(), _ => true, () => null, _ => true, _ => true,
-            value => { transcript += value; return true; }, new object());
+        context.Register(new object(), _ => true, _ => true,
+            appendNarrative: value => { transcript += value; return true; }, reportIdentity: new object());
         context.RegisterVoiceController(new object(), _ =>
         {
             context.BindVoiceCapture("report-capture");

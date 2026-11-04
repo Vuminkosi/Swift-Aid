@@ -11,12 +11,12 @@ public sealed class PublicReportCountrySelectionTests
     {
         string[] members = ["AO", "BW", "KM", "CD", "SZ", "LS", "MG", "MW",
             "MU", "MZ", "NA", "SC", "ZA", "TZ", "ZM", "ZW"];
-        var surface = new PublicReportSurface
-        {
-            Draft = new PublicReportDraft { CountryCode = "GB" },
-            Countries = members.Concat(["GB", "US"])
-                .Select(code => new PublicCountryOption(code, code)).ToArray()
-        };
+        var surface = new PublicReportSurface();
+        typeof(PublicReportSurface).GetProperty(nameof(PublicReportSurface.Draft))!
+            .SetValue(surface, new PublicReportDraft { CountryCode = "GB" });
+        typeof(PublicReportSurface).GetProperty(nameof(PublicReportSurface.Countries))!
+            .SetValue(surface, members.Concat(["GB", "US"])
+                .Select(code => new PublicCountryOption(code, code)).ToArray());
 
         var countries = (IReadOnlyList<PublicCountryOption>)typeof(PublicReportSurface)
             .GetProperty("ReportCountries", BindingFlags.Instance | BindingFlags.NonPublic)!

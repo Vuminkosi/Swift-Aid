@@ -36,6 +36,31 @@ public sealed class CaseQueueTests
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     [IntakePostgresFact]
+    public async Task OwnedQueueContinuationReadsEveryCaseWithEqualTimestamps()
+    {
+        await using var db = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
+        var ids = new List<Guid>();
+        for (var index = 0; index < 3; index++)
+            ids.Add(await IntakeDecisionStoreTests.SeedManagedCaseAsync(db));
+        var timestamp = DateTimeOffset.UtcNow.AddMinutes(-1);
+        await db.ManagedCases.Where(item => ids.Contains(item.CaseId))
+            .ExecuteUpdateAsync(update => update.SetProperty(item => item.UpdatedAtUtc, timestamp));
+        var store = new PostgresCaseQueueStore(db);
+        var filter = new CaseQueueFilter(CaseIds: ids);
+        var found = new List<Guid>();
+        CaseQueueContinuation? cursor = null;
+        for (var page = 0; page < 4; page++)
+        {
+            var rows = await store.GetOwnedCasesAfterAsync("officer-1", 1, filter, cursor, CancellationToken.None);
+            if (rows.Count == 0) break;
+            var row = Assert.Single(rows);
+            found.Add(row.CaseId);
+            cursor = new CaseQueueContinuation(row.LastRecordedAtUtc, row.CaseId);
+        }
+        Assert.Equal(ids.Order(), found.Order());
+    }
+
+    [IntakePostgresFact]
     public async Task MapCandidateCountryAndWorkspaceFiltersApplyBeforeLimit()
     {
         await using var db = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();

@@ -91,9 +91,13 @@ public sealed partial class EllaiPublicReportDraftContext
 
     public void Remove(object owner)
     {
+        Func<Task>? stopVoice = null;
         lock (_gate)
             if (ReferenceEquals(_owner, owner))
             {
+                if (_voiceRecording) stopVoice = _stopVoice;
+                ResetVoiceAssistanceLocked();
+                _voiceReportIdentity = null;
                 _owner = null;
                 _setAge = null;
                 _addObservation = null;
@@ -106,6 +110,7 @@ public sealed partial class EllaiPublicReportDraftContext
                 _pending.Clear();
                 _captureActive = false;
             }
+        if (stopVoice is not null) _ = stopVoice();
     }
 
     public bool ApplyAgeCorrection(string? utterance)

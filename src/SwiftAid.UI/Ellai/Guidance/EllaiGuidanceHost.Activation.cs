@@ -76,6 +76,11 @@ public partial class EllaiGuidanceHost
 
     private async Task AdvanceValidatedInputAsync(CancellationToken ct)
     {
+        // Preserve optional field stops while their form section is visible. Once
+        // the reporter explicitly continues to another page, let its existing
+        // validated completion proof advance the tour past the unmounted section.
+        if (HasReportInputSequence && CurrentGuidanceStep is { } inputStep &&
+            _latestGuidanceObservation?.MountedControlIds.Contains(inputStep.ControlId) != false) return;
         if (_guidanceCountdownSeconds is not null || _guidanceNarrationCts is not null || _isPlayingResponse) return;
         var tour = _generatedTour;
         if (_advancingValidatedInput || tour is null || _generatedPlan is null ||
@@ -103,6 +108,7 @@ public partial class EllaiGuidanceHost
         try
         {
             // Bonboarding invokes CanAdvance, which reobserves and commits the existing server proof boundary.
+            if (await MoveReportInputAsync(1, ct)) return;
             await tour.NextAsync(ct);
         }
         finally { _advancingValidatedInput = false; }
@@ -113,7 +119,11 @@ public partial class EllaiGuidanceHost
         CancelGuidanceCountdown();
         if (_advancingValidatedInput || _generatedTour?.Status is not (BonboardingTourStatus.Running or BonboardingTourStatus.Waiting)) return;
         _advancingValidatedInput = true;
-        try { await ControlGeneratedTourAsync(command); }
+        try
+        {
+            if (command == "back" && await MoveReportInputAsync(-1, _uiObservationLifetime.Token)) return;
+            await ControlGeneratedTourAsync(command);
+        }
         finally { _advancingValidatedInput = false; }
     }
 

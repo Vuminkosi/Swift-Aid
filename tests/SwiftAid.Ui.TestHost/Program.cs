@@ -7,6 +7,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 builder.Services.AddMudServices();
+Bit.Bonboarding.BitBonboarding.AddBitBonboardingServices(builder.Services, _ => { });
 builder.Services.AddHttpClient("SwiftAid.NotificationApi", client => client.BaseAddress = new Uri("https://example.test/"));
 builder.Services.AddScoped<ICaseTimelineClient, AssistanceTimelineFixtureClient>();
 builder.Services.AddScoped<SessionHistoryFixture>();
@@ -60,6 +61,7 @@ builder.Services.AddScoped<SwiftAid.Mobile.Services.Sessions.IMobileSessionPlatf
 builder.Services.AddScoped<SwiftAid.UI.Ellai.Guidance.EllaiDisplayedReceiptContext>();
 builder.Services.AddScoped<SwiftAid.UI.Ellai.Guidance.EllaiValidationGuidance>();
 builder.Services.AddScoped<SwiftAid.UI.Ellai.Guidance.EllaiCaseFilterContext>();
+builder.Services.AddScoped<SwiftAid.UI.Ellai.Guidance.EllaiPublicReportDraftContext>();
 
 var app = builder.Build();
 app.UseAntiforgery();

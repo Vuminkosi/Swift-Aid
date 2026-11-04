@@ -1,6 +1,7 @@
 @using SwiftAid.UI.Components.Geography
 
 <div class="geo-picker" data-testid="geo-picker">
+    <div data-bonboarding-anchor="@(ReportGuidanceAnchors ? "ellai-report-place-search" : null)">
     <MudAutocomplete T="GeoPlaceOption"
                      Label="@Label"
                      @bind-Value="_selected"
@@ -30,6 +31,7 @@
             <MudText Typo="Typo.body2">No places found. Check the spelling or browse by area below.</MudText>
         </NoItemsTemplate>
     </MudAutocomplete>
+    </div>
 
     @if (!string.IsNullOrWhiteSpace(_searchError))
     {
@@ -55,9 +57,10 @@
 
     @if (ShowBrowse)
     {
-        <details class="geo-picker__browse">
+        <details class="geo-picker__browse" data-bonboarding-anchor="@(ReportGuidanceAnchors ? "ellai-report-place-browse" : null)">
             <summary>Browse by area</summary>
             <div class="geo-picker__cascade">
+                <div data-bonboarding-anchor="@(ReportGuidanceAnchors ? "ellai-report-place-country" : null)">
                 <MudSelect T="string" Label="Country" Variant="Variant.Outlined" Dense="true"
                            Value="_cascadeCountryCode" ValueChanged="CascadeCountryChangedAsync"
                            Disabled="@(Disabled || Countries.Count == 0)">
@@ -66,6 +69,8 @@
                         <MudSelectItem Value="@country.Code">@country.Name</MudSelectItem>
                     }
                 </MudSelect>
+                </div>
+                <div data-bonboarding-anchor="@(ReportGuidanceAnchors ? "ellai-report-place-region" : null)">
                 <MudSelect T="string" Label="Region or province" Variant="Variant.Outlined" Dense="true"
                            Value="_cascadeAreaId" ValueChanged="CascadeAreaChangedAsync"
                            Disabled="@(Disabled || _cascadeLoading || _cascadeAreas.Count == 0)">
@@ -74,6 +79,8 @@
                         <MudSelectItem Value="@area.Id">@area.Name</MudSelectItem>
                     }
                 </MudSelect>
+                </div>
+                <div data-bonboarding-anchor="@(ReportGuidanceAnchors ? "ellai-report-place-locality" : null)">
                 <MudSelect T="string" Label="Town, village, or locality" Variant="Variant.Outlined" Dense="true"
                            Value="_cascadePlaceId" ValueChanged="CascadePlaceChangedAsync"
                            Disabled="@(Disabled || _cascadeLoading || _cascadePlaces.Count == 0)">
@@ -82,6 +89,7 @@
                         <MudSelectItem Value="@place.Id">@place.Name</MudSelectItem>
                     }
                 </MudSelect>
+                </div>
                 @if (_cascadeLoading)
                 {
                     <MudText Typo="Typo.caption" role="status">Loading areas…</MudText>
@@ -104,6 +112,7 @@
 </div>
 
 @code {
+    [Parameter] public bool ReportGuidanceAnchors { get; set; }
     private GeoPlaceOption? _selected;
     private string? _lastQuery;
     private string? _searchError;

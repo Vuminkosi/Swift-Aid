@@ -4,6 +4,21 @@
 // never authorization; the Gateway filters these IDs against trusted descriptors.
 const semanticId = /^[a-z][a-z0-9.-]{0,119}$/;
 
+// Called only with application-owned report tour anchors. Does not inspect values.
+export async function prepareReportInput(anchor) {
+    if (typeof anchor !== 'string' || !anchor.startsWith('ellai-report-') || !semanticId.test(anchor)) return false;
+    const targets = document.querySelectorAll(`[data-bonboarding-anchor="${anchor}"]`);
+    if (targets.length !== 1) return false;
+    const target = targets[0];
+    const parentGroup = target.parentElement?.closest('details');
+    if (parentGroup && isVisible(parentGroup)) parentGroup.open = true;
+    if (!isVisible(target)) return false;
+    if (target.tagName === 'DETAILS') target.open = true;
+    target.scrollIntoView({ block: 'center', behavior: 'instant' });
+    await new Promise(resolve => requestAnimationFrame(resolve));
+    return isVisible(target);
+}
+
 function isVisible(element) {
     const style = getComputedStyle(element);
     return element.getClientRects().length > 0 && style.visibility === "visible" &&

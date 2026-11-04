@@ -2906,7 +2906,9 @@ public sealed partial class EllaiSurfaceLogicTests
         UiObservationReport Observation(params string[] ids) => new("view", "context", "web", [], []) { ValidationInputIds = ids };
 
         SetField(host, "_latestGuidanceObservation", Observation("untrusted.input", "report.original-statement", "report.occurrence-date"));
+        SetField(host, "_guidanceNotice", "Previous field correction");
         await InvokeAsync(host, "UpdateValidationGuidanceAsync", CancellationToken.None);
+        Assert.Null(GetField<string?>(host, "_guidanceNotice"));
         Assert.Equal("ellai-report-original-statement", anchors["report.narrative"]);
         Assert.Equal(EllaiReportValidationGuidance.Find("report.original-statement")!.Message, GetField<string>(host, "_validationGuidanceText"));
         Assert.Contains("GoToAsync", proxy.Calls);
