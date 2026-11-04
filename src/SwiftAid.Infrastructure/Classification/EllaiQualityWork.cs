@@ -33,6 +33,8 @@ public sealed class EllaiQualityWork(SwiftAidDbContext db, PostgresProtectedCase
         {
             // The source case stays locked while its current facts revision is assessed.
             // Previously assessed revisions are excluded before unprotecting evidence.
+            // Intake receipt time takes precedence over promotion time; directly registered
+            // cases use their registration time. The window never deletes or changes reports.
             var candidates = await db.Database.SqlQuery<QualityCandidate>($"""
                 SELECT c.case_id AS "CaseId", e.event_id AS "EventId", c.aggregate_version AS "CaseVersion"
                 FROM managed_cases c
@@ -47,6 +49,12 @@ public sealed class EllaiQualityWork(SwiftAidDbContext db, PostgresProtectedCase
                     ORDER BY aggregate_version DESC LIMIT 1
                 ) e ON TRUE
                 WHERE c.workspace_id = {lease.WorkspaceId} AND c.organization_id = ANY({options.Organizations})
+                    AND COALESCE((
+                        SELECT report.received_at_utc
+                        FROM swiftaid_intake.intake_promotions promotion
+                        JOIN swiftaid_intake.intake_reports report ON report.receipt_id = promotion.receipt_id
+                        WHERE promotion.case_id = c.case_id
+                    ), c.created_at_utc) BETWEEN clock_timestamp() - interval '30 days' AND clock_timestamp()
                     AND NOT EXISTS (
                         SELECT 1 FROM swiftaid_classification.quality_assessments q
                         WHERE q."SourceEventId" = e.event_id AND q."Version" = {ReportQualityRules.Version})
