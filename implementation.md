@@ -4509,3 +4509,9 @@ Regression before fix: 2 failed, 3 passed. After fix: 25 focused UI tests passed
 `ellai_evidence` can filter the latest or original retained case-result set by the persisted `Classified` or `Unclassified` status. It re-reads those bounded case IDs through the current actor-scoped queue, which reauthorizes each row. The response includes matching case IDs and aggregate versions, not classifier labels or scores. Unknown values are excluded from either result and called out; no classification is inferred and this filter is not a diagnosis. The separate detailed classification-evidence tool remains unavailable under the current reasoning route.
 
 PASS: `dotnet build src/SwiftAid.Application/SwiftAid.Application.csproj --no-restore -m:1 -nr:false` (0 warnings, 0 errors). No tests were added or run. NOT VERIFIED: conversation scenario 1.2 with a live authorized case set, provider tool selection, browser/session restoration, or deployment. No schema change.
+
+### Ellai retained occurrence-place filtering (2026-11-04)
+
+ellai_evidence accepts an exact geographic-registry place_id and matching country to narrow the latest or original retained case set. Each retained case is first re-read through the actor-scoped queue and its protected location is then read through ICaseOccurrenceLocationQuery, which independently enforces current ReadCase authorization. The filter cannot be combined with field or classification filtering. It returns no coordinates; unknown or inaccessible locations are omitted and mark the result incomplete. Filter arguments and result fingerprint are included in retained-result replay validation so history restoration repeats the authorized query.
+
+PASS: Application build and Gateway build (prebuilt project references), zero warnings and errors. No tests added or run. NOT VERIFIED: live case data, Muse tool selection, browser refresh/replay, or deployed behavior. No schema or database changes.

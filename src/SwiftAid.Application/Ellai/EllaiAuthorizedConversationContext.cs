@@ -90,6 +90,8 @@ public static class EllaiAuthorizedConversationContext
                         if (retainedCase.Field is not null) arguments["field"] = retainedCase.Field;
                         if (retainedCase.ClassificationFilter is not null)
                             arguments["classification_filter"] = retainedCase.ClassificationFilter;
+                        if (retainedCase.Country is not null) arguments["country"] = retainedCase.Country;
+                        if (retainedCase.PlaceId is not null) arguments["place_id"] = retainedCase.PlaceId;
                         var current = await invokeTool(toolContext with { RevalidationOnly = true },
                             new EllaiToolRequest(observation.ToolName, arguments), ct).ConfigureAwait(false);
                         ct.ThrowIfCancellationRequested();

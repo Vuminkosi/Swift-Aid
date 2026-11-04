@@ -8,7 +8,8 @@ namespace SwiftAid.Application.Ellai;
 
 /// <summary>Session-local result references. PostgreSQL topics hold no case narratives;
 /// every recall uses the ordinary owner-filtered, per-case authorized query.</summary>
-public sealed class EllaiCaseResultMemory(EllaiTopicService topics, ICaseQueueQuery queue, IEllaiExactReferenceIndex? index = null)
+public sealed class EllaiCaseResultMemory(EllaiTopicService topics, ICaseQueueQuery queue,
+    IEllaiExactReferenceIndex? index = null, ICaseOccurrenceLocationQuery? occurrenceLocations = null)
 {
     public const string Reference = "case-results";
     public const string OriginalReference = "case-results-original";
@@ -68,14 +69,19 @@ public sealed class EllaiCaseResultMemory(EllaiTopicService topics, ICaseQueueQu
 
     public async Task<EllaiToolResult> RecallAsync(
         EllaiToolContext context, CancellationToken ct, string? field = null, string? classificationFilter = null,
-        bool original = false)
+        bool original = false, string? country = null, string? placeId = null)
     {
         ct.ThrowIfCancellationRequested();
         if (field is not null && field is not ("country" or "workflow"))
             return new(EllaiToolNames.Topic, false, "Unsupported case-result field selector.", [], "", 0, false,
                 EllaiToolReasonCodes.InvalidArguments);
-        if (classificationFilter is not null && (classificationFilter is not ("Classified" or "Unclassified") || field is not null))
+        if (classificationFilter is not null && (classificationFilter is not ("Classified" or "Unclassified") || field is not null || placeId is not null))
             return new(EllaiToolNames.Topic, false, "Unsupported case-result classification filter.", [], "", 0, false,
+                EllaiToolReasonCodes.InvalidArguments);
+        if ((country is null) != (placeId is null) ||
+            country is not null && (country.Length != 2 || country.Any(character => character is < 'A' or > 'Z')) ||
+            placeId is not null && (placeId.Length is < 1 or > 120 || placeId != placeId.Trim() || field is not null))
+            return new(EllaiToolNames.Topic, false, "An exact occurrence-place filter requires a country and cannot be combined with a field selector.", [], "", 0, false,
                 EllaiToolReasonCodes.InvalidArguments);
         if (context.Actor is null) return Unavailable();
         EllaiTopicEntry? indexedTopic = null;
@@ -152,9 +158,33 @@ public sealed class EllaiCaseResultMemory(EllaiTopicService topics, ICaseQueueQu
             return classificationFilter == "Unclassified" ? classification == "Unclassified" :
                 classification is not ("Unclassified" or "unknown");
         }).ToArray();
+        var unknownLocations = false;
+        if (placeId is not null)
+        {
+            if (occurrenceLocations is null) return Unavailable();
+            var matched = new List<(CaseReference old, CaseQueueItem row)>();
+            foreach (var pair in rows)
+            {
+                ct.ThrowIfCancellationRequested();
+                var location = await occurrenceLocations.GetLocationAsync(context.Actor, pair.row.CaseId, ct).ConfigureAwait(false);
+                ct.ThrowIfCancellationRequested();
+                if (location.Access == CaseOccurrenceLocationAccess.Unavailable) return Unavailable();
+                if (location.Access != CaseOccurrenceLocationAccess.Allowed || location.Location is not { } recorded)
+                {
+                    unknownLocations = true;
+                    continue;
+                }
+                if (recorded.CountryCode == country &&
+                    (recorded.RegionId == placeId || recorded.AreaId == placeId || recorded.LocalityId == placeId))
+                    matched.Add(pair);
+                else if (recorded.RegionId is null || recorded.AreaId is null || recorded.LocalityId is null)
+                    unknownLocations = true;
+            }
+            rows = matched.ToArray();
+        }
         var evidence = rows.Select(pair => new EvidenceRef("CaseQueue", pair.row.CaseId.ToString("D"),
             pair.row.AggregateVersion.ToString(CultureInfo.InvariantCulture), null, pair.row.CaseId.ToString("D"))).ToArray();
-        var evidenceField = classificationFilter is not null ? "classification" : field;
+        var evidenceField = classificationFilter is not null ? "classification" : placeId is not null ? "place" : field;
         var scopedEvidence = evidenceField is null
             ? evidence
             : evidence.Select(item => item with { FieldPath = evidenceField }).ToArray();
@@ -162,8 +192,10 @@ public sealed class EllaiCaseResultMemory(EllaiTopicService topics, ICaseQueueQu
         var text = completeness + (original ? "Original retained case results" : "Previously retrieved cases") +
             ", checked against current access; this is not a new search. " +
             "Unavailable records are omitted. " +
+            (placeId is null ? "" : $"Filtered to the exact recorded occurrence place {placeId} in {country}. ") +
             (classificationFilter is null ? "" : $"Filtered by recorded case classification status: {classificationFilter}. ") +
             (unknownClassification ? "Cases with unknown classification are excluded. " : "") +
+            (unknownLocations ? "Cases with unknown or unavailable occurrence locations are omitted. " : "") +
             "\n" + string.Join("\n", rows.Select(pair =>
             {
                 var selectedValue = evidenceField switch
@@ -171,13 +203,14 @@ public sealed class EllaiCaseResultMemory(EllaiTopicService topics, ICaseQueueQu
                     "country" => $"country {pair.row.CountryCode}",
                     "workflow" => $"workflow {pair.row.Workflow}",
                     "classification" => $"recorded case classification status {filteredStatus}",
+                    "place" => $"recorded occurrence place {placeId}",
                     _ => $"country {pair.row.CountryCode}; workflow {pair.row.Workflow}"
                 };
                 return $"case {pair.row.CaseId:D}; {selectedValue}; v{pair.row.AggregateVersion}" +
                     (pair.old.Version != pair.row.AggregateVersion ? " (changed since retrieval)" : "");
             }));
         return new EllaiToolResult(EllaiToolNames.Topic, true, null, scopedEvidence, text, rows.Length,
-            incomplete || authorizedRows.Length != snapshot.Cases.Count)
+            incomplete || unknownLocations || authorizedRows.Length != snapshot.Cases.Count)
             { HistoryValidUntilUtc = snapshot.ExpiresAtUtc };
     }
 

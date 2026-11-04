@@ -21,7 +21,7 @@ public static class EllaiToolContractCatalog
             ["limit"] = "Maximum number of returned items, subject to the tool's narrower limit.",
             ["ref"] = "Exact bounded reference or topic text.",
             ["country"] = "Uppercase ISO 3166-1 alpha-2 country code.",
-            ["place_id"] = "Exact selected occurrence-place identifier from the geographic registry; requires country and latest-reported ordering.",
+            ["place_id"] = "Exact selected occurrence-place identifier from the geographic registry; provide the matching country.",
             ["workflow"] = "Recorded case workflow filter.",
             ["sort"] = "Supported queue ordering.",
             ["field"] = "Optional country or workflow field for retained case results.",
@@ -55,7 +55,7 @@ public static class EllaiToolContractCatalog
             [EllaiToolNames.State] = Contract(EllaiToolNames.State,
                 ("projection", false), ("limit", false),
                 ("country", false), ("workflow", false), ("sort", false), ("place_id", false)),
-            [EllaiToolNames.Evidence] = Contract(EllaiToolNames.Evidence, ("ref", true), ("field", false), ("classification_filter", false)),
+            [EllaiToolNames.Evidence] = Contract(EllaiToolNames.Evidence, ("ref", true), ("field", false), ("classification_filter", false), ("country", false), ("place_id", false)),
             [EllaiToolNames.Topic] = Contract(EllaiToolNames.Topic, ("ref", true)),
             [EllaiToolNames.Capabilities] = Contract(EllaiToolNames.Capabilities, ("feature", false)),
             [EllaiToolNames.Receipts] = Contract(EllaiToolNames.Receipts, ("receipt", false)),
@@ -261,7 +261,8 @@ public static class EllaiToolContractCatalog
         (toolName, argumentName) switch
         {
             (EllaiToolNames.State, "projection") => "^(feature|queue)$",
-            (EllaiToolNames.State, "country") or (EllaiToolNames.Locations, "country") or (EllaiToolNames.Imports, "country") => "^[A-Z]{2}$",
+            (EllaiToolNames.State, "country") or (EllaiToolNames.Evidence, "country") or
+                (EllaiToolNames.Locations, "country") or (EllaiToolNames.Imports, "country") => "^[A-Z]{2}$",
             (EllaiToolNames.State, "limit") or (EllaiToolNames.UiCatalogue, "limit") => "^([1-9]|1[0-9]|20)$",
             (EllaiToolNames.DocsSearch, "limit") => "^([1-9]|1[0-9]|20)$",
             (EllaiToolNames.Locations, "limit") => "^([1-9]|10)$",

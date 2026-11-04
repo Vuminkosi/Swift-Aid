@@ -143,29 +143,39 @@ public sealed record EllaiUiObservationReplayScope(string Feature, IReadOnlyList
 }
 
 /// <summary>Bounded arguments and fingerprint for revalidating a partial retained result.</summary>
-public sealed record EllaiRetainedCaseReplay(string Reference, string? Field, string Digest, string? ClassificationFilter = null)
+public sealed record EllaiRetainedCaseReplay(string Reference, string? Field, string Digest,
+    string? ClassificationFilter = null, string? Country = null, string? PlaceId = null)
 {
     public bool IsValid() => Reference is EllaiCaseResultMemory.Reference or EllaiCaseResultMemory.OriginalReference &&
         Field is null or "country" or "workflow" &&
         (ClassificationFilter is null or "Classified" or "Unclassified") &&
-        (ClassificationFilter is null || Field is null) && Digest is { Length: 64 } &&
+        (ClassificationFilter is null || Field is null && PlaceId is null && Country is null) &&
+        ((Country is null) == (PlaceId is null)) &&
+        (Country is null || Country.Length == 2 && Country.All(character => character is >= 'A' and <= 'Z') &&
+            PlaceId is { Length: >= 1 and <= 120 } && PlaceId == PlaceId.Trim() && Field is null) && Digest is { Length: 64 } &&
         Digest.All(character => character is >= '0' and <= '9' or >= 'A' and <= 'F');
 
     public static EllaiRetainedCaseReplay? Create(EllaiToolRequest request, EllaiToolResult result)
     {
         if (request.ToolName is not (EllaiToolNames.Topic or EllaiToolNames.Evidence) ||
             result.ToolName != request.ToolName || !result.Allowed ||
-            (!result.Truncated && !request.Arguments.ContainsKey("classification_filter")) || result.DenialReason is not null ||
+            (!result.Truncated && !request.Arguments.ContainsKey("classification_filter") && !request.Arguments.ContainsKey("place_id")) || result.DenialReason is not null ||
             result.ReasonCode != EllaiToolReasonCodes.Ok || result.HistoryValidUntilUtc is null ||
             result.ItemCount != result.Evidence.Count || result.Evidence.Count > 20 ||
             !request.Arguments.TryGetValue("ref", out var reference) ||
-            request.Arguments.Keys.Any(key => key != "ref" && (request.ToolName != EllaiToolNames.Evidence || key is not ("field" or "classification_filter"))))
+            request.Arguments.Keys.Any(key => key != "ref" && (request.ToolName != EllaiToolNames.Evidence ||
+                key is not ("field" or "classification_filter" or "country" or "place_id"))))
             return null;
         var classificationFilter = request.Arguments.GetValueOrDefault("classification_filter");
         if (classificationFilter is not null && (classificationFilter is not ("Classified" or "Unclassified") ||
-            request.Arguments.GetValueOrDefault("field") is not null)) return null;
+            request.Arguments.GetValueOrDefault("field") is not null || request.Arguments.ContainsKey("place_id"))) return null;
+        var country = request.Arguments.GetValueOrDefault("country");
+        var placeId = request.Arguments.GetValueOrDefault("place_id");
+        if ((country is null) != (placeId is null) || placeId is not null &&
+            (country is not { Length: 2 } || country.Any(character => character is < 'A' or > 'Z') ||
+                placeId.Length is < 1 or > 120 || placeId != placeId.Trim() || request.Arguments.GetValueOrDefault("field") is not null)) return null;
         var candidate = new EllaiRetainedCaseReplay(reference, request.Arguments.GetValueOrDefault("field"),
-            EllaiObservedToolResult.CaseListFingerprint(result), classificationFilter);
+            EllaiObservedToolResult.CaseListFingerprint(result), classificationFilter, country, placeId);
         return candidate.IsValid() ? candidate : null;
     }
 }

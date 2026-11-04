@@ -189,7 +189,7 @@ public sealed class EllaiToolBroker
     private static readonly string[] ToolDescriptions =
     {
         $"{EllaiToolNames.State}(projection=[feature|queue], limit=1..20, country?, workflow?, sort?, place_id?) — permitted feature or owned-case queue. country is an uppercase two-letter code (Zimbabwe=ZW, Eswatini=SZ); workflow is Reported, UnderReview, Active, AwaitingFollowUp or Resolved; sort=latest-reported or latest-updated. For an occurrence-place search, select an exact registry ID using ellai_locations and supply country, place_id and sort=latest-reported; workflow is not supported with place_id. Unknown locations and incomplete scans cannot establish a complete list. Reported is a recorded workflow, not proof that no human reviewed a case. For retained results, use ellai_evidence with classification_filter=Classified or Unclassified to check recorded status; this does not return classifier labels or establish a diagnosis.",
-        $"{EllaiToolNames.Evidence}(ref=[case-results|case-results-original], field=[country|workflow]?, classification_filter=[Classified|Unclassified]?) — re-read the latest or first retained case list under current access. The first retained search can precede an interrupted response or an unrelated discussion; use conversation context or ask which set the user means. It reauthorizes each case and filters only its recorded classification status. Cases with unknown status are excluded from either filter; labels and scores are not returned. This is not a diagnosis.",
+        $"{EllaiToolNames.Evidence}(ref=[case-results|case-results-original], field=[country|workflow]?, classification_filter=[Classified|Unclassified]?, country?, place_id?) — re-read the latest or first retained case list under current access. The first retained search can precede an interrupted response or an unrelated discussion; use conversation context or ask which set the user means. It reauthorizes each case. To filter a retained set to a place, first select the exact ID with ellai_locations, then provide its country and place_id; place filtering cannot be combined with field or classification_filter. Unknown places are omitted and marked incomplete.",
         $"{EllaiToolNames.Topic}(ref) — session topic candidates with checkpoints. Use ref=case-results for the latest retained list or case-results-original for the first retained list; never invent a remembered result set.",
         $"{EllaiToolNames.Capabilities}(feature?) — capability readiness, no credentials.",
         $"{EllaiToolNames.Receipts}(receipt?) — durable receipts, session-bound.",
@@ -511,12 +511,22 @@ public sealed class EllaiToolBroker
             return Deny(request.ToolName, "field must be country or workflow.",
                 EllaiToolReasonCodes.InvalidArguments);
         }
+        var country = request.Arguments.GetValueOrDefault("country");
+        var placeId = request.Arguments.GetValueOrDefault("place_id");
+        var classificationFilter = request.Arguments.GetValueOrDefault("classification_filter");
+        if ((country is null) != (placeId is null) ||
+            placeId is not null && (placeId.Length is < 1 or > 120 || placeId != placeId.Trim() || field is not null || classificationFilter is not null))
+        {
+            return Deny(request.ToolName, "place_id requires country and cannot be combined with field or classification_filter.",
+                EllaiToolReasonCodes.InvalidArguments);
+        }
 
         try
         {
-            var result = await new EllaiCaseResultMemory(_topics, _queue, referenceIndex)
-                .RecallAsync(context, ct, field, request.Arguments.GetValueOrDefault("classification_filter"),
-                    original: request.Arguments["ref"] == EllaiCaseResultMemory.OriginalReference).ConfigureAwait(false);
+            var result = await new EllaiCaseResultMemory(_topics, _queue, referenceIndex, _occurrenceLocations)
+                .RecallAsync(context, ct, field, classificationFilter,
+                    original: request.Arguments["ref"] == EllaiCaseResultMemory.OriginalReference,
+                    country: country, placeId: placeId).ConfigureAwait(false);
             return result with { ToolName = request.ToolName };
         }
         catch (OperationCanceledException)
