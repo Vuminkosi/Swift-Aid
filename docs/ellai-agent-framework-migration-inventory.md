@@ -231,6 +231,14 @@ only to another observed fact was accepted before the change; that case now
 repairs, while the correctly cited control passes. The framework contract
 suite passed 144/144 and six proposal cases passed after commit. This bounded
 check does not establish support for paraphrases or arbitrary rationale text.
+The official chat adapter was also found to collapse duplicate JSON argument
+names before broker validation. A synthetic provider response with conflicting
+`projection` keys invoked the broker before the fix. The framework now checks
+raw non-streamed tool arguments and bounded assembled streaming fragments for
+duplicate keys, rejecting them before invocation. The full application suite
+passed 1,238 with 19 skipped; a post-commit filter covering duplicate arguments,
+split names and interleaved calls passed 4/4. This does not establish live Muse
+behavior for malformed calls or coverage of providers without raw SDK data.
 
 ## Provider observations and open checks
 
