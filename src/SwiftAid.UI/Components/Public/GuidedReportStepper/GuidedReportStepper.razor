@@ -705,12 +705,21 @@
     {
         ArgumentNullException.ThrowIfNull(Draft);
         EllaiDraftContext?.Register(this, age =>
-        {
-            if (Draft.SubjectScope != IntakeSubjectScope.Human) return false;
-            Draft.AgeYearsText = age.ToString(System.Globalization.CultureInfo.InvariantCulture);
-            _editContext.NotifyFieldChanged(new FieldIdentifier(Draft, nameof(Draft.AgeYearsText)));
-            return true;
-        });
+            {
+                if (Draft.SubjectScope != IntakeSubjectScope.Human) return false;
+                Draft.AgeYearsText = age.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                _editContext.NotifyFieldChanged(new FieldIdentifier(Draft, nameof(Draft.AgeYearsText)));
+                return true;
+            }, observation =>
+            {
+                var existing = Draft.GetObservations();
+                if (existing.Contains(observation, StringComparer.Ordinal)) return true;
+                var updated = existing.Append(observation).ToArray();
+                if (!Draft.HasValidObservations(updated, MaximumObservations, MaximumObservationCharacters)) return false;
+                Draft.ObservationsText = string.Join(Environment.NewLine, updated);
+                _editContext.NotifyFieldChanged(new FieldIdentifier(Draft, nameof(Draft.ObservationsText)));
+                return true;
+            });
         if (ReferenceEquals(Draft, _observedDraft) && CurrentDraftId == _observedDraftId)
         {
             if (Draft.SubjectScope is not null)

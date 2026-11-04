@@ -9,15 +9,17 @@ public sealed class EllaiPublicReportDraftContext
     private readonly object _gate = new();
     private object? _owner;
     private Func<int, bool>? _setAge;
+    private Func<string, bool>? _addObservation;
 
-    public void Register(object owner, Func<int, bool> setAge)
+    public void Register(object owner, Func<int, bool> setAge, Func<string, bool> addObservation)
     {
-        lock (_gate) { _owner = owner; _setAge = setAge; }
+        lock (_gate) { _owner = owner; _setAge = setAge; _addObservation = addObservation; }
     }
 
     public void Remove(object owner)
     {
-        lock (_gate) if (ReferenceEquals(_owner, owner)) { _owner = null; _setAge = null; }
+        lock (_gate)
+            if (ReferenceEquals(_owner, owner)) { _owner = null; _setAge = null; _addObservation = null; }
     }
 
     public bool ApplyAgeCorrection(string? utterance)
@@ -34,5 +36,16 @@ public sealed class EllaiPublicReportDraftContext
         Func<int, bool>? setAge;
         lock (_gate) setAge = _setAge;
         return setAge?.Invoke(age) == true;
+    }
+
+    public bool ApplyReportedObservation(string? utterance)
+    {
+        if (utterance is null || utterance.Length > 1000 || utterance.Contains('\r') || utterance.Contains('\n')) return false;
+        const RegexOptions options = RegexOptions.IgnoreCase | RegexOptions.CultureInvariant;
+        if (!Regex.IsMatch(utterance, @"^\s*(?:she|he|the patient)\s+(?:has|reports|is experiencing|experienced)\s+\S.*[.!?]?\s*$", options))
+            return false;
+        Func<string, bool>? addObservation;
+        lock (_gate) addObservation = _addObservation;
+        return addObservation?.Invoke(utterance.Trim()) == true;
     }
 }

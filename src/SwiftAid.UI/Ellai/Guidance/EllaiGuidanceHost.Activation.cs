@@ -111,14 +111,22 @@ public partial class EllaiGuidanceHost
         if (draftEdits.Length > 0)
         {
             if (draftEdits.Length == 1 && newlyCompleted && draftEdits[0].ProposalId != _lastReportDraftEditProposalId &&
-                draftEdits[0].Proposal is { FeatureId: "report", ResourceId: null, ControlId: "report.age-years", Arguments.Count: 0 } &&
+                draftEdits[0].Proposal is { FeatureId: "report", ResourceId: null, ControlId: "report.age-years" or "report.other-observations", Arguments.Count: 0 } &&
                 turn.UserText is { } userText)
             {
                 _lastReportDraftEditProposalId = draftEdits[0].ProposalId;
                 var context = Services.GetService(typeof(EllaiPublicReportDraftContext)) as EllaiPublicReportDraftContext;
-                _guidanceNotice = context?.ApplyAgeCorrection(userText) == true
-                    ? "Updated the reported age in the open report draft. Review it before submitting."
-                    : "I could not update the age. Open the report details and enter it there.";
+                var controlId = draftEdits[0].Proposal.ControlId;
+                var applied = controlId == "report.age-years"
+                    ? context?.ApplyAgeCorrection(userText) == true
+                    : context?.ApplyReportedObservation(userText) == true;
+                _guidanceNotice = applied
+                    ? controlId == "report.age-years"
+                        ? "Updated the reported age in the open report draft. Review it before submitting."
+                        : "Added your reported observation to the open report draft. Review it before submitting."
+                    : controlId == "report.age-years"
+                        ? "I could not update the age. Open the report details and enter it there."
+                        : "I could not add that statement as an observation. Enter it in the report details instead.";
             }
             return;
         }

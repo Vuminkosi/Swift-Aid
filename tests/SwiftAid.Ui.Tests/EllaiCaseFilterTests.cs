@@ -18,7 +18,7 @@ public sealed class EllaiCaseFilterTests
         var context = new EllaiPublicReportDraftContext();
         var owner = new object();
         var applied = -1;
-        context.Register(owner, age => { applied = age; return true; });
+        context.Register(owner, age => { applied = age; return true; }, _ => false);
 
         Assert.True(context.ApplyAgeCorrection(utterance));
         Assert.Equal(expectedAge, applied);
