@@ -9,7 +9,7 @@ namespace SwiftAid.Application.Ellai;
 /// <summary>Short-lived, value-free templates. Cached data never grants access or proves screen state.</summary>
 internal static class EllaiSharedGuidanceTemplates
 {
-    private static readonly TimeSpan Lifetime = TimeSpan.FromHours(4);
+    private static readonly TimeSpan Lifetime = TimeSpan.FromHours(1);
 
     public static string Key(string objective, UiRegistrySnapshot catalogue, EllaiUiEntitlements authority,
         IReadOnlyList<UiControlObservation> observations, bool reportAlreadyReceived)
@@ -56,7 +56,12 @@ internal static class EllaiSharedGuidanceTemplates
         if (safe is null) return;
         var bytes = JsonSerializer.SerializeToUtf8Bytes(safe);
         if (bytes.Length > 32768) return;
-        try { await cache.SetAsync(key, bytes, Lifetime, ct).ConfigureAwait(false); }
+        try
+        {
+            var result = await cache.SetAsync(key, bytes, Lifetime, ct).ConfigureAwait(false);
+            if (result is { Status: CacheWriteStatus.Failed, FailureCode: "invalid-key-or-ttl" })
+                await cache.SetAsync(key, bytes, TimeSpan.FromSeconds(1), ct).ConfigureAwait(false);
+        }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch (Exception error) when (error is not OutOfMemoryException) { /* Cache is optional. */ }
     }
