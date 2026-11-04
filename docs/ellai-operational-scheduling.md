@@ -108,3 +108,11 @@ preserve the command identity on retries. This records review only, not a follow
 outcome or escalation. Durable operational metrics remain outstanding.
 Production grants, migration deployment, rendered UI and deployed worker operation
 are not verified. No user or officer messages are sent by this work unit.
+
+
+The existing case history filter offers user and officer actions, all Ellai
+activity, Ellai enrichment and quality, Ellai follow-ups, and escalations.
+Filters apply only to loaded authorized history; role filters use the activity's
+recorded local date and keep it grouped with its source event. A notice warns
+when loaded activity was truncated. Browser and device interaction are not yet
+verified.

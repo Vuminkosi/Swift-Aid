@@ -52,6 +52,43 @@ public sealed class CaseTimelineEntryFilterTests
         Assert.Empty(result);
     }
 
+    [Fact]
+    public void AgentFilterUsesActivityDateAndShowsOnlyMatchingRoles()
+    {
+        var sourceDay = new DateTime(2026, 10, 30, 12, 0, 0, DateTimeKind.Local);
+        var activityDay = sourceDay.AddDays(2);
+        var entry = Entry("source", sourceDay) with
+        {
+            AgentActivities = [
+                new CaseAgentActivity(Guid.NewGuid(), "ops.quality", "quality", "1", new DateTimeOffset(activityDay).ToUniversalTime()),
+                new CaseAgentActivity(Guid.NewGuid(), "ops.followup", "follow-up", "1", new DateTimeOffset(activityDay).ToUniversalTime()),
+                new CaseAgentActivity(Guid.NewGuid(), "unknown", "other", "1", new DateTimeOffset(activityDay).ToUniversalTime())]
+        };
+        var followUp = Assert.Single(CaseTimelineEntryFilter.Apply([entry], CaseTimelineEntryFilter.EllaiFollowUp, activityDay, activityDay));
+        Assert.Equal("ops.followup", Assert.Single(followUp.AgentActivities).RoleId);
+        var enrichment = Assert.Single(CaseTimelineEntryFilter.Apply([entry], CaseTimelineEntryFilter.EllaiEnrichment, activityDay, activityDay));
+        Assert.Equal("ops.quality", Assert.Single(enrichment.AgentActivities).RoleId);
+        Assert.Equal(3, Assert.Single(CaseTimelineEntryFilter.Apply([entry], CaseTimelineEntryFilter.EllaiActivity, activityDay, activityDay)).AgentActivities.Count);
+        Assert.Empty(CaseTimelineEntryFilter.Apply([entry], CaseTimelineEntryFilter.EllaiFollowUp, sourceDay, sourceDay));
+        Assert.Equal(3, entry.AgentActivities.Count);
+    }
+
+    [Fact]
+    public void StaffFilterHidesAgentActivitiesAndEscalationFilterDoesNotIncludeOtherEvents()
+    {
+        var date = new DateTime(2026, 10, 31, 12, 0, 0, DateTimeKind.Local);
+        var escalation = Entry("escalation", date) with { EventType = "CaseEscalationRaised", AgentActivities = [
+            new CaseAgentActivity(Guid.NewGuid(), "ops.followup", "follow-up", "1", new DateTimeOffset(date).ToUniversalTime())] };
+        var other = Entry("other", date) with { EventType = "CaseObservationRecorded" };
+        var derived = Entry("derived", date, CaseTimelineEntryKind.Derived) with { EventType = "CaseEscalationRaised" };
+        Assert.Equal("escalation", Assert.Single(CaseTimelineEntryFilter.Apply([escalation, derived], CaseTimelineEntryFilter.Escalations, null, null)).Label);
+        var staff = CaseTimelineEntryFilter.Apply([escalation, other], CaseTimelineEntryFilter.StaffActions, null, null);
+        Assert.Equal(2, staff.Count);
+        Assert.All(staff, entry => Assert.Empty(entry.AgentActivities));
+        Assert.Equal("escalation", Assert.Single(CaseTimelineEntryFilter.Apply([escalation, other], CaseTimelineEntryFilter.Escalations, null, null)).Label);
+        Assert.Empty(CaseTimelineEntryFilter.Apply([other], CaseTimelineEntryFilter.EllaiEnrichment, null, null));
+    }
+
     private static CaseTimelineEntry Entry(
         string label,
         DateTime recordedLocal,

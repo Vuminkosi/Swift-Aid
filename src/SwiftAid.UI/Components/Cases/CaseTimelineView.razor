@@ -63,6 +63,12 @@
                 </MudSelect>
             </div>
 
+            @if ((_selectedEventType is CaseTimelineEntryFilter.EllaiActivity or CaseTimelineEntryFilter.EllaiEnrichment or CaseTimelineEntryFilter.EllaiFollowUp) &&
+                _timeline.Entries.Any(entry => entry.AgentActivitiesTruncated))
+            {
+                <MudAlert Severity="Severity.Info" Variant="Variant.Text" role="status">Some Ellai activity is not shown in the loaded history.</MudAlert>
+            }
+
             @if (DateFilterError is { } dateFilterError)
             {
                 <MudAlert Severity="Severity.Warning" Variant="Variant.Text" role="alert">
@@ -79,7 +85,7 @@
             }
             else
             {
-                <MudText Typo="Typo.caption" Color="Color.Secondary">Dates use your local time and filter the history entries currently loaded.</MudText>
+                <MudText Typo="Typo.caption" Color="Color.Secondary">Dates use your local time. Ellai filters use activity dates; other filters use event dates. Only loaded history is shown.</MudText>
                 <MudTimeline TimelinePosition="TimelinePosition.Start" Class="case-timeline__list">
                     @foreach (var entry in FilteredEntries)
                     {
@@ -275,6 +281,14 @@
                 .OrderBy(option => option.Label, StringComparer.CurrentCulture)
                 .ToList();
 
+            options.InsertRange(0,
+            [
+                (CaseTimelineEntryFilter.StaffActions, "User and officer actions"),
+                (CaseTimelineEntryFilter.EllaiActivity, "All Ellai activity"),
+                (CaseTimelineEntryFilter.EllaiEnrichment, "Ellai enrichment and quality"),
+                (CaseTimelineEntryFilter.EllaiFollowUp, "Ellai follow-ups"),
+                (CaseTimelineEntryFilter.Escalations, "Escalations")
+            ]);
             if (_timeline.Entries.Any(entry => entry.Kind == CaseTimelineEntryKind.Derived))
             {
                 options.Insert(0, (RelatedActivityFilter, "Related activity"));
