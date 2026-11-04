@@ -159,6 +159,17 @@ the grant and verifies that no count is delivered or committed. Both passed
 count in the feed; the worker buffers these chunks until durable completion.
 This evidence is local and does not verify deployed Gateway or live-model
 behavior for this worker scenario.
+The same worker fixture subsequently ran with configured live Muse and a
+natural-language 30-day count question. Against synthetic records in disposable
+PostGIS, the live authorized case and the two scripted controls passed 3/3;
+the live authorized case passed again 1/1 after commit. A separate live case
+expired the grant at the worker's third aggregate read and passed 1/1 before
+and after its commit, with no count committed or delivered. These opt-in tests
+used `ELLAI_LIVE=1`, `SWIFTAID_RUN_FRAMEWORK_POSTGRES_FIXTURES=1`, the configured
+provider and `dotnet test tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj
+--no-restore -m:1 -nr:false -p:WasmBuildNative=false` with the corresponding
+worker test filters. They do not establish deployed behavior or reliable tool
+selection for every analytics question.
 
 ## Provider observations and open checks
 
