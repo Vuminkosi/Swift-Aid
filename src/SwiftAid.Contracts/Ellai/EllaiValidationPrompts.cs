@@ -14,6 +14,9 @@ public static class EllaiValidationPrompts
         ["region-required"] = "Enter the region, or mark it unknown.",
         ["area-required"] = "Enter the area or district, or mark it unknown.",
         ["locality-required"] = "Enter the locality, or mark it unknown.",
+        ["region-length"] = "Use no more than 200 characters for the region, or mark it unknown.",
+        ["area-length"] = "Use no more than 200 characters for the area or district, or mark it unknown.",
+        ["locality-length"] = "Use no more than 200 characters for the locality, or mark it unknown.",
         ["location-required"] = "Add a reported place or mark the location unknown."
     };
 
