@@ -501,12 +501,28 @@ public sealed class EllaiPrivilegedRouteAuthorizationTests
             Assert.Equal("Synthetic HTTP answer.", turn.AssistantText);
             return accepted;
         }
-        var first = await SendTurnAsync("http-turn-1", "First question", session, 1);
-        await SendTurnAsync("http-turn-2", "Follow-up question", first, 2);
         var model = app.Services.GetRequiredService<FrameworkHttpClient>();
-        Assert.Contains("First question", model.LastMessages);
+        model.ObserveNext = true;
+        var first = await SendTurnAsync("http-turn-1", "The synthetic patient is 24 years old.", session, 1);
+        var savedSession = (await store.GetAsync(session.SessionId, default))!;
+        var firstTurn = (await store.ReadConversationAsync(session.SessionId, savedSession.OwnerActorId!, default))
+            .Single(turn => turn.ClientUtteranceId == "http-turn-1");
+        Assert.True(EllaiToolTrace.TryRead(firstTurn.ToolTraceJson!, out var firstTrace));
+        Assert.Contains(firstTrace!.Observations, item => item.ToolName == EllaiToolNames.UiObserve &&
+            item.Allowed && item.UiObservationReplayScope is not null);
+        var second = await SendTurnAsync("http-turn-2", "They reported vomiting.", first, 2);
+        Assert.Contains("The synthetic patient is 24 years old.", model.LastMessages);
         Assert.Contains("Synthetic HTTP answer.", model.LastMessages);
-        Assert.Contains("Follow-up question", model.LastMessages);
+        Assert.Contains("They reported vomiting.", model.LastMessages);
+        using (var changed = await PostAsync($"/api/v1/ellai/guest/sessions/{session.SessionId}/ui-observations",
+            observation with { ContextStamp = "changed", ValidationInputIds = [],
+                InputStates = [new("report.narrative", "report.original-statement", UiInputPresence.Entered)] }, token))
+            Assert.Equal(System.Net.HttpStatusCode.OK, changed.StatusCode);
+        await SendTurnAsync("http-turn-3", "Continue after editing", second, 3);
+        Assert.Contains("The synthetic patient is 24 years old.", model.LastMessages);
+        Assert.Contains("They reported vomiting.", model.LastMessages);
+        Assert.DoesNotContain("Synthetic HTTP answer.", model.LastMessages);
+        Assert.Contains(model.LastMessages, text => text.Contains("earlier screen state has changed or expired", StringComparison.Ordinal));
         using var feedRequest = new HttpRequestMessage(HttpMethod.Get, $"/api/v1/ellai/guest/sessions/{session.SessionId}/responses?cursor=0");
         feedRequest.Headers.TryAddWithoutValidation("Cookie", CookieHeader());
         using var feed = await client.SendAsync(feedRequest);
@@ -518,6 +534,7 @@ public sealed class EllaiPrivilegedRouteAuthorizationTests
 
     private sealed class FrameworkHttpClient : IChatClient
     {
+        public bool ObserveNext { get; set; }
         public IReadOnlyList<string> LastMessages { get; private set; } = [];
         public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null,
@@ -527,6 +544,13 @@ public sealed class EllaiPrivilegedRouteAuthorizationTests
             cancellationToken.ThrowIfCancellationRequested();
             LastMessages = messages.Where(message => message.Role == ChatRole.User || message.Role == ChatRole.Assistant)
                 .Select(message => message.Text).ToArray();
+            if (ObserveNext)
+            {
+                ObserveNext = false;
+                yield return new ChatResponseUpdate(ChatRole.Assistant, [new FunctionCallContent("observe", EllaiToolNames.UiObserve,
+                    new Dictionary<string, object?> { ["feature"] = "report", ["controls"] = "report.narrative", ["view"] = "current" })]);
+                yield break;
+            }
             yield return new ChatResponseUpdate(ChatRole.Assistant, """{"final_decision":{"schemaVersion":2,"kind":"Answer","displayText":"Synthetic HTTP answer.","spokenText":"Synthetic HTTP answer.","claims":[],"questions":[],"uiIntents":[],"planProposal":null,"topicRefs":[],"resumeSuggestion":null,"stopReason":null}}""");
             yield return new ChatResponseUpdate(ChatRole.Assistant, [new UsageContent(new UsageDetails { InputTokenCount = 5, OutputTokenCount = 4 })]);
         }
@@ -1300,7 +1324,14 @@ public sealed class EllaiPrivilegedRouteAuthorizationTests
             if (frameworkFixture is null) builder.Services.AddSingleton<IEllaiUsageStore, InMemoryEllaiUsageStore>();
             else builder.Services.AddScoped<IEllaiUsageStore, PostgresEllaiUsageStore>();
             builder.Services.AddScoped(_ => new EllaiPromptBuilder("Synthetic test policy", "fixture"));
-            builder.Services.AddScoped(sp => new EllaiToolBroker(new EllaiPolicyService(), sp.GetRequiredService<EllaiConsentService>()));
+            builder.Services.AddScoped(sp =>
+            {
+                var registry = new EllaiUiRegistry();
+                EllaiReportGuidanceDescriptors.RegisterAll(registry);
+                return new EllaiToolBroker(new EllaiPolicyService(), sp.GetRequiredService<EllaiConsentService>(),
+                    uiRegistry: registry, uiDiscovery: new EllaiUiDiscoveryService(),
+                    uiObservations: sp.GetRequiredService<IEllaiUiObservationStore>());
+            });
             var modelOptions = liveModel ? EllaiOptions.Bind(Environment.GetEnvironmentVariable) : new EllaiOptions
             {
                 Enabled = true, ApiKey = "synthetic", ApiUrl = "https://fixture.invalid", ReasoningModel = "fixture"
