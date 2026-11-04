@@ -608,6 +608,15 @@ and scripted cases passed 2/2 together, and the live case passed 1/1 after
 commit. This demonstrates tool selection and delivery for that synthetic
 request; it does not validate the model's interpretation, clinical safety,
 JetStream delivery or deployed Gateway behavior.
+The opt-in classification live fixture now supports the existing worker image
+and a disposable loopback JetStream endpoint. With synthetic records, it passed
+1/1 before and after commit through JetStream delivery, pinned BART inference,
+the test Gateway's durable completion, redelivery and poison quarantine, and
+an authorized framework read of the persisted result. The model volume was
+mounted read-only. Initial attempts failed before inference because the
+container-to-host HTTP request used an invalid host header; the fixture now
+uses the loopback Gateway authority. The framework reasoning model was scripted;
+this does not establish deployed behavior or clinical validity.
 The `ClassificationRegistryTests` filter also passed 10/10 against the same
 fixture using `--no-build --no-restore` and the same test-project options.
 
