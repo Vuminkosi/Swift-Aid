@@ -9,6 +9,7 @@ using Microsoft.Extensions.DependencyInjection;
 using OpenIddict.Validation.AspNetCore;
 using SwiftAid.Application.Authorization;
 using SwiftAid.Application.Cases;
+using SwiftAid.Client.Cases;
 using SwiftAid.Contracts.Cases;
 using SwiftAid.Gateway.Endpoints;
 
@@ -16,6 +17,40 @@ namespace SwiftAid.Integration.Tests;
 
 public sealed class EligibleHealthOfficerEndpointTests
 {
+    [Fact]
+    public async Task HttpClientUsesCaseRouteAndFailsClosedOnInvalidResults()
+    {
+        var handler = new CandidateHandler();
+        using var http = new HttpClient(handler) { BaseAddress = new Uri("https://fixture.invalid/") };
+        var client = new EligibleHealthOfficerHttpClient(http);
+        var caseId = Guid.NewGuid();
+        var valid = await client.GetAsync(caseId);
+        Assert.Equal(EligibleHealthOfficerLookupStatus.Available, valid.Status);
+        Assert.Equal($"/api/v1/cases/{caseId:D}/eligible-health-officers", handler.Path);
+        Assert.Equal("officer-id", Assert.Single(valid.Page!.Items).ActorId);
+
+        handler.Body = "{}";
+        Assert.Equal(EligibleHealthOfficerLookupStatus.Unavailable, (await client.GetAsync(caseId)).Status);
+        handler.Body = "{\"items\":[]}";
+        Assert.Equal(EligibleHealthOfficerLookupStatus.Unavailable, (await client.GetAsync(caseId)).Status);
+        handler.Body = "{\"items\":[{\"designationId\":\"00000000-0000-0000-0000-000000000000\",\"designationVersion\":1,\"actorId\":\"x\"}],\"hasMore\":false}";
+        Assert.Equal(EligibleHealthOfficerLookupStatus.Unavailable, (await client.GetAsync(caseId)).Status);
+        handler.Status = HttpStatusCode.NotFound;
+        Assert.Equal(EligibleHealthOfficerLookupStatus.Denied, (await client.GetAsync(caseId)).Status);
+    }
+
+    private sealed class CandidateHandler : HttpMessageHandler
+    {
+        public string? Path { get; private set; }
+        public HttpStatusCode Status { get; set; } = HttpStatusCode.OK;
+        public string Body { get; set; } = "{\"items\":[{\"designationId\":\"d2df7b40-00f4-4f63-84a2-7fa45f1cb761\",\"designationVersion\":1,\"actorId\":\"officer-id\",\"displayLabel\":\"Officer\"}],\"hasMore\":false}";
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Path = request.RequestUri!.AbsolutePath;
+            return Task.FromResult(new HttpResponseMessage(Status) { Content = new StringContent(Body, System.Text.Encoding.UTF8, "application/json") });
+        }
+    }
+
     [Fact]
     public async Task EndpointRequiresAuthenticationBoundsAndCurrentCaseAuthority()
     {
