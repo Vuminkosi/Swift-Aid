@@ -427,6 +427,19 @@ network ID when available. The rerun passed and this harness fix was committed
 as `f940985`. The Gateway and database were stopped. Native publish reported
 SQLite WASM0001 varargs warnings; this is not deployed or physical-device
 acceptance. The new publish remains in the previously retained fixture directory.
+At `d1c71339`, the current Debug Gateway was started separately with live Muse,
+a freshly migrated disposable PostGIS database and a task-owned NATS server.
+`node tests/SwiftAid.Ui.Tests/ellai-conversation.browser.cjs` passed in
+headless Chromium: two synthetic turns completed, the follow-up recalled the
+word after refresh, reduced-motion and 390-pixel thinking states passed, no
+page errors were reported, and End returned a cancelled durable session.
+The network timing observer reported the first chunk after the completion
+timestamp, so it is not evidence of model-time streaming. The isolated NATS
+notification consumer reported unavailable; notifications were not verified.
+Startup attempts also exposed a missing policy path, an invalid test key-ring
+location and a service-provider validation failure when NATS was disabled;
+the successful run used the canonical policy, restricted key directory and
+dedicated NATS. This is local Debug evidence, not deployed or device acceptance.
 
 Malformed tool-call recovery was exercised through the framework function
 client: an unknown argument was rejected before broker invocation, the
