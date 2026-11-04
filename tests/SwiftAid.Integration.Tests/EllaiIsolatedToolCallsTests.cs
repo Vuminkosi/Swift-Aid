@@ -108,6 +108,25 @@ public sealed class EllaiIsolatedToolCallsTests
         Assert.Equal(filter, queue.Filter);
     }
 
+    [Fact]
+    public async Task IsolatedSearchForwardsActorFiltersAndBothCursors()
+    {
+        var queue = new CapturingQueue();
+        await using var provider = new ServiceCollection().AddSingleton<ICaseQueueQuery>(queue).BuildServiceProvider();
+        var actor = ActorContext.FromValidatedPrincipal(new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim(ClaimTypes.NameIdentifier, "searcher"), new Claim(ActorContext.AccessEpochClaimType, "1")], "test")));
+        var filter = new CaseQueueFilter("SZ", NewestReportedFirst: true);
+        var result = await new EllaiIsolatedCaseQueueQuery(provider, new EllaiIsolatedToolCalls())
+            .GetSearchableAsync(actor, 50, filter, "previous-page", default);
+        Assert.True(queue.Searched);
+        Assert.Same(actor, queue.Actor);
+        Assert.Equal(50, queue.Limit);
+        Assert.Equal(filter, queue.Filter);
+        Assert.Equal("previous-page", queue.Cursor);
+        Assert.Equal(CaseQueueAccess.Allowed, result.Access);
+        Assert.Equal("following-page", result.NextCursor);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -131,6 +150,13 @@ public sealed class EllaiIsolatedToolCallsTests
 
     private sealed class CapturingQueue : ICaseQueueQuery
     {
+        public bool Searched { get; private set; }
+        public Task<CaseQueueResult> GetSearchableAsync(ActorContext actor, int? limit, CaseQueueFilter? filter, string? cursor, CancellationToken ct)
+        {
+            Searched = true;
+            Actor = actor; Limit = limit; Filter = filter; Cursor = cursor;
+            return Task.FromResult(new CaseQueueResult(CaseQueueAccess.Allowed, [], "following-page"));
+        }
         public ActorContext? Actor { get; private set; }
         public int? Limit { get; private set; }
         public CaseQueueFilter? Filter { get; private set; }
