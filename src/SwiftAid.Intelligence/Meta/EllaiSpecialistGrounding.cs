@@ -6,6 +6,29 @@ namespace SwiftAid.Intelligence.Meta;
 /// <summary>Checks that a read-only specialist answer is built from observed result lines.</summary>
 internal static class EllaiSpecialistGrounding
 {
+    public static async Task<bool> RevalidateAsync(EllaiToolContext context,
+        IReadOnlyList<(EllaiToolRequest Request, EllaiToolResult Result)> observations, bool deniedObservation,
+        Func<CancellationToken, Task<bool>> isCurrent,
+        Func<EllaiToolContext, EllaiToolRequest, CancellationToken, Task<EllaiToolResult>> revalidate,
+        CancellationToken ct)
+    {
+        if (deniedObservation) return false;
+        foreach (var (request, original) in observations)
+        {
+            if (!await isCurrent(ct).ConfigureAwait(false)) return false;
+            EllaiToolResult fresh;
+            try { fresh = await revalidate(context, request, ct).ConfigureAwait(false); }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+            catch (Exception error) when (error is not OutOfMemoryException) { return false; }
+            if (!fresh.Allowed || fresh.ToolName != original.ToolName || fresh.Truncated != original.Truncated ||
+                fresh.ItemCount != original.ItemCount || fresh.ResultSummary != original.ResultSummary ||
+                !fresh.Evidence.SequenceEqual(original.Evidence) || fresh.CaseTimelineReplayScope != original.CaseTimelineReplayScope ||
+                fresh.UiCatalogueReplayScope != original.UiCatalogueReplayScope || fresh.UiObservationReplayScope != original.UiObservationReplayScope)
+                return false;
+        }
+        return await isCurrent(ct).ConfigureAwait(false);
+    }
+
     // These results are built and revalidated by EllaiFrameworkAgent itself;
     // their fresh evidence can differ from the original tool observation.
     public static bool IsFrameworkVerifiedDeterministic(EllaiDecision? decision,

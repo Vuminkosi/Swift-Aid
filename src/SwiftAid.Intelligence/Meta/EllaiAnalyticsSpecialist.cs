@@ -29,10 +29,12 @@ public sealed class EllaiAnalyticsSpecialist(IChatClient client, IEllaiFramework
 
         if (!EllaiSpecialistRegistry.TryGet(EllaiSpecialistRegistry.Analytics, out var profile)) return new(EllaiSpecialistOutcome.Denied, null);
         var observations = new List<(EllaiToolRequest Request, EllaiToolResult Result)>();
+        var deniedObservation = false;
         async Task<EllaiToolResult> Read(EllaiToolContext child, EllaiToolRequest request, CancellationToken token)
         {
             var result = await invoke(child, request, token).ConfigureAwait(false);
             if (result.Allowed) observations.Add((request, result));
+            else deniedObservation = true;
             return result;
         }
         var agent = new EllaiFrameworkAgent(client, agentFactory);
@@ -46,7 +48,9 @@ public sealed class EllaiAnalyticsSpecialist(IChatClient client, IEllaiFramework
                 "If the count window is missing, ask for it. For other reads, each claim must exactly match a returned source line and cite its evidence; join claim texts with newlines for displayText and spokenText. " +
                 "When using a truncated case timeline, include its first line as a claim with the timeline evidence.",
                 [new ChatMessage(ChatRole.User, task)], 1024, isCurrent, Read, usage, ct,
-                revalidateTool: revalidate, maxModelCalls: profile.MaxModelCalls).ConfigureAwait(false);
+                revalidateTool: revalidate, revalidateStreamObservations: token =>
+                    EllaiSpecialistGrounding.RevalidateAsync(context, observations, deniedObservation, isCurrent, revalidate, token),
+                maxModelCalls: profile.MaxModelCalls).ConfigureAwait(false);
         }
         finally { onModelCalls?.Invoke(agent.LastModelCallCount); }
         if (EllaiSpecialistGrounding.IsFrameworkVerifiedDeterministic(decision, observations))

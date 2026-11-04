@@ -21,10 +21,12 @@ public sealed class EllaiUiSpecialist(IChatClient client, IEllaiFrameworkAgentFa
             !EllaiSpecialistRegistry.TryCreateToolContext(EllaiSpecialistRegistry.Ui, true, parent, out var context) ||
             context!.AllowedTools is not { Count: > 0 }) return new(EllaiSpecialistOutcome.Denied, null);
         var observations = new List<(EllaiToolRequest Request, EllaiToolResult Result)>();
+        var deniedObservation = false;
         async Task<EllaiToolResult> Read(EllaiToolContext child, EllaiToolRequest request, CancellationToken token)
         {
             var result = await invoke(child, request, token).ConfigureAwait(false);
             if (result.Allowed) observations.Add((request, result));
+            else deniedObservation = true;
             return result;
         }
         var agent = new EllaiFrameworkAgent(client, agentFactory);
@@ -37,7 +39,9 @@ public sealed class EllaiUiSpecialist(IChatClient client, IEllaiFrameworkAgentFa
                 "Return only a grounded Answer in the required final_decision JSON schema. For answers using other admitted tools, each claim must exactly match a returned source line and cite its evidence; set displayText and spokenText to the claim texts joined by a newline. " +
                 "When using a truncated case timeline, include its first line as a claim with the timeline evidence. " +
                 "Do not propose UI intents or actions; the supervisor handles validated guidance.",
-                [new ChatMessage(ChatRole.User, task)], 2048, isCurrent, Read, usage, ct, revalidateTool: revalidate, maxModelCalls: profile.MaxModelCalls).ConfigureAwait(false);
+                [new ChatMessage(ChatRole.User, task)], 2048, isCurrent, Read, usage, ct, revalidateTool: revalidate,
+                revalidateStreamObservations: token => EllaiSpecialistGrounding.RevalidateAsync(context, observations, deniedObservation, isCurrent, revalidate, token),
+                maxModelCalls: profile.MaxModelCalls).ConfigureAwait(false);
         }
         finally { onModelCalls?.Invoke(agent.LastModelCallCount); }
         if (EllaiSpecialistGrounding.IsFrameworkVerifiedDeterministic(decision, observations))

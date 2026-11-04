@@ -29,10 +29,12 @@ public sealed class EllaiGeospatialSpecialist(IChatClient client, IEllaiFramewor
             context!.AllowedTools is not { Count: > 0 }) return new(EllaiSpecialistOutcome.Denied, null);
 
         var observations = new List<(EllaiToolRequest Request, EllaiToolResult Result)>();
+        var deniedObservation = false;
         async Task<EllaiToolResult> Read(EllaiToolContext child, EllaiToolRequest request, CancellationToken token)
         {
             var result = await invoke(child, request, token).ConfigureAwait(false);
             if (result.Allowed) observations.Add((request, result));
+            else deniedObservation = true;
             return result;
         }
 
@@ -50,7 +52,9 @@ public sealed class EllaiGeospatialSpecialist(IChatClient client, IEllaiFramewor
                 "When using a truncated case timeline, include its first line as a claim with the timeline evidence. " +
                 "When a search has multiple matches, include a clarifying question asking the user to select a place.",
                 [new ChatMessage(ChatRole.User, task)], 2048, isCurrent, Read, usage, ct,
-                revalidateTool: revalidate, maxModelCalls: profile.MaxModelCalls).ConfigureAwait(false);
+                revalidateTool: revalidate, revalidateStreamObservations: token =>
+                    EllaiSpecialistGrounding.RevalidateAsync(context, observations, deniedObservation, isCurrent, revalidate, token),
+                maxModelCalls: profile.MaxModelCalls).ConfigureAwait(false);
         }
         finally { onModelCalls?.Invoke(agent.LastModelCallCount); }
         if (EllaiSpecialistGrounding.IsFrameworkVerifiedDeterministic(decision, observations))

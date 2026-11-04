@@ -41,15 +41,18 @@ public sealed class EllaiKnowledgeSpecialist(IChatClient client, IEllaiFramework
 
         if (!EllaiSpecialistRegistry.TryGet(EllaiSpecialistRegistry.Knowledge, out var profile)) return new(EllaiSpecialistOutcome.Denied, null);
         var observations = new List<(EllaiToolRequest Request, EllaiToolResult Result)>();
+        var deniedObservation = false;
         async Task<EllaiToolResult> InvokeKnowledgeTool(EllaiToolContext child, EllaiToolRequest request, CancellationToken token)
         {
             var result = await invoke(child, request, token).ConfigureAwait(false);
             if (result.Allowed) observations.Add((request, result));
+            else deniedObservation = true;
             return result;
         }
         var revalidationFailed = false;
         async Task<bool> RevalidateObservations(CancellationToken token)
         {
+            if (deniedObservation) { revalidationFailed = true; return false; }
             foreach (var (request, original) in observations)
             {
                 if (!await isCurrent(token).ConfigureAwait(false)) { revalidationFailed = true; return false; }
