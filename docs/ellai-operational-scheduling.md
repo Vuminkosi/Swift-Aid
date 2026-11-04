@@ -109,6 +109,17 @@ outcome or escalation. Durable operational metrics remain outstanding.
 Production grants, migration deployment, rendered UI and deployed worker operation
 are not verified. No user or officer messages are sent by this work unit.
 
+The follow-up sweep also records one review recommendation for a missed officer
+acknowledgment deadline when the original assignment is still current. Its
+assignment identity prevents duplicate recommendations across sweeps. Case
+history and review require case-read, escalation-management and follow-up-management
+permissions in the same grant. Once the officer acknowledges, the recommendation
+is historical. If the follow-up is rescheduled, its current projection cannot prove
+whether the original assignment was acknowledged: the timeline reports the status
+as unavailable and the sweep does not create a new acknowledgment recommendation.
+The system does not send a reminder or execute a supervisor escalation here.
+Recovering authoritative acknowledgment status across rescheduling remains open.
+
 
 The existing case history filter offers user and officer actions, all Ellai
 activity, Ellai enrichment and quality, Ellai follow-ups, and escalations.

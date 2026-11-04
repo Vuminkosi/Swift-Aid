@@ -49,6 +49,11 @@ work from historical assignments. Ellai's case-history tool uses the same
 permission-filtered projection and does not emit opaque officer identifiers.
 There is no HTTP or model execution endpoint, no escalation acknowledgment
 linkage, reassignment flow, or scheduled supervisor escalation yet.
+The linked follow-up can be acknowledged through the existing work-management
+flow. Its overdue acknowledgment can produce a permission-filtered review
+recommendation, but that recommendation does not notify an officer or supervisor.
+After a follow-up reschedule, the current projection cannot establish whether the
+original assignment was acknowledged; the timeline reports that status as unknown.
 An internal review query supplies a bounded list of raised, unassigned
 escalations, the current case version and eligible officers under one authorized
 case read lease. This is a point-in-time review context; approval and execution
