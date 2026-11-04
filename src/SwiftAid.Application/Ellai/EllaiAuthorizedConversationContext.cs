@@ -61,6 +61,16 @@ public static class EllaiAuthorizedConversationContext
             var references = new Dictionary<Guid, long>();
             foreach (var observation in trace.Observations)
             {
+                // Invalid arguments carry no data or authority. Preserve a corrected
+                // turn only when the same still-admitted tool also produced a
+                // successful observation that will be independently revalidated.
+                if (!observation.Allowed && observation.ReasonCode == EllaiToolReasonCodes.InvalidArguments &&
+                    !observation.Truncated && observation.Evidence.Count == 0 &&
+                    toolContext?.AllowedTools?.Contains(observation.ToolName) == true &&
+                    EllaiToolContractCatalog.All.ContainsKey(observation.ToolName) &&
+                    trace.Observations.Any(other => other.ToolName == observation.ToolName && other.Allowed &&
+                        other.ReasonCode == EllaiToolReasonCodes.Ok))
+                    continue;
                 if (!observation.Allowed || (observation.Truncated && observation.ToolName is not (EllaiToolNames.PublicSessions or EllaiToolNames.CaseTimeline)) ||
                     toolContext?.AllowedTools is { } allowedTools && !allowedTools.Contains(observation.ToolName))
                     return decisions[turn.ClientUtteranceId] = false;
