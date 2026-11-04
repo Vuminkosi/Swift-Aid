@@ -33,7 +33,12 @@ namespace SwiftAid.Integration.Tests;
 public sealed class ClassificationLiveTests(ITestOutputHelper output)
 {
     [ClassificationLiveFact]
-    public async Task Real_bart_gateway_commit_jetstream_redelivery_and_poison_quarantine()
+    public Task Real_bart_gateway_commit_jetstream_redelivery_and_poison_quarantine() => RunAsync(liveMuse: false);
+
+    [ClassificationMuseLiveFact]
+    public Task Live_muse_reads_jetstream_delivered_real_bart_evidence() => RunAsync(liveMuse: true);
+
+    private async Task RunAsync(bool liveMuse)
     {
         await using var fixture = await CaseImportPostgresTests.Fixture.CreateAsync();
         var context = await fixture.CreateIsolatedWorkspaceAsync();
@@ -147,18 +152,23 @@ public sealed class ClassificationLiveTests(ITestOutputHelper output)
             var query = new PostgresCaseClassificationQuery(fixture.Db, policy, unit,
                 app.Services.GetRequiredService<IOptions<ClassificationOptions>>());
             var broker = new EllaiToolBroker(new EllaiPolicyService(), new EllaiConsentService(), classification: query);
-            using var model = new FrameworkClassificationClient(caseId);
-            var executor = new EllaiFrameworkExecutor(model, new EllaiPromptBuilder("Synthetic policy", "fixture"),
+            using var scripted = liveMuse ? null : new FrameworkClassificationClient(caseId);
+            using var live = liveMuse ? new LiveClassificationCaptureClient(EllaiMuseChatClientFactory.Create(EllaiOptions.Bind(Environment.GetEnvironmentVariable))) : null;
+            var executor = new EllaiFrameworkExecutor((IChatClient?)live ?? scripted!, new EllaiPromptBuilder("Synthetic policy", "fixture"),
                 broker, new EllaiUsageLedger(), new InMemoryEllaiUsageStore());
-            var work = new EllaiUtteranceWork("live-classification-session", "scope", "Read the classification.",
+            var utterance = liveMuse
+                ? $"Use ellai_classification_evidence with case_id {caseId:D} to read the persisted semantic classification. Explain briefly that it is not a diagnosis."
+                : "Read the classification.";
+            var work = new EllaiUtteranceWork("live-classification-session", "scope", utterance,
                 "public.product-help", null, EllaiMode.Ask, 1, "cycle", CaseImportPostgresTests.Actor, true, "consent/0",
                 EllaiProcessingClassification.UserProvidedNonSensitive, EllaiProcessingClassification.UserProvidedNonSensitive,
                 new HashSet<string> { EllaiToolNames.ClassificationEvidence }, EllaiConsentService.PublicProductHelpPurpose, "turn");
             var turn = await EllaiUtteranceRunner.RunOneAsync(work,
                 new EllaiUtteranceServices(executor, null, null, new EllaiConsentService(), InvokeToolAsync: broker.InvokeAsync), 1024, default);
             Assert.True(turn.Completed, turn.FailureCode);
-            Assert.Contains(result.Id.ToString("D"), model.ToolResultText, StringComparison.OrdinalIgnoreCase);
-            Assert.DoesNotContain("Original supplied concern", model.ToolResultText);
+            var toolResultText = live?.ToolResultText ?? scripted!.ToolResultText;
+            Assert.Contains(result.Id.ToString("D"), toolResultText, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("Original supplied concern", toolResultText);
         }
         finally { File.Delete(path); }
     }
@@ -183,6 +193,19 @@ public sealed class ClassificationLiveTests(ITestOutputHelper output)
         public object? GetService(Type serviceType, object? serviceKey = null) => null;
         public void Dispose() { }
     }
+
+    private sealed class LiveClassificationCaptureClient(IChatClient inner) : DelegatingChatClient(inner)
+    {
+        public string ToolResultText { get; private set; } = string.Empty;
+        public override Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null,
+            CancellationToken cancellationToken = default)
+        {
+            var copied = messages.ToArray();
+            var results = copied.SelectMany(message => message.Contents).OfType<FunctionResultContent>().ToArray();
+            if (results.Length != 0) ToolResultText = JsonSerializer.Serialize(results);
+            return base.GetResponseAsync(copied, options, cancellationToken);
+        }
+    }
 }
 
 public sealed class ClassificationLiveFactAttribute : FactAttribute
@@ -192,5 +215,16 @@ public sealed class ClassificationLiveFactAttribute : FactAttribute
         if (Environment.GetEnvironmentVariable("SWIFTAID_RUN_CLASSIFICATION_LIVE") != "1" ||
             Environment.GetEnvironmentVariable("SWIFTAID_RUN_INTAKE_POSTGRES_FIXTURES") != "1")
             Skip = "Requires explicit opt-in disposable PostgreSQL/NATS and cached pinned BART model.";
+    }
+}
+
+public sealed class ClassificationMuseLiveFactAttribute : FactAttribute
+{
+    public ClassificationMuseLiveFactAttribute()
+    {
+        if (Environment.GetEnvironmentVariable("ELLAI_LIVE") != "1" ||
+            Environment.GetEnvironmentVariable("SWIFTAID_RUN_CLASSIFICATION_LIVE") != "1" ||
+            Environment.GetEnvironmentVariable("SWIFTAID_RUN_INTAKE_POSTGRES_FIXTURES") != "1")
+            Skip = "Requires live Muse and disposable PostgreSQL/NATS with the cached pinned BART model.";
     }
 }
