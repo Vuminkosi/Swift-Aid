@@ -370,7 +370,8 @@ public sealed class EllaiAuthorizedConversationContextTests
             await EllaiAuthorizedConversationContext.BuildAsync(turns, "current", Actor(), null, default,
                 toolContext: current, invokeTool: broker.InvokeAsync);
 
-        Assert.Contains((await Replay(context)).Messages, message => message.Content == "The description is entered.");
+        var original = await Replay(context);
+        Assert.Contains(original.Messages, message => message.Content == "The description is entered.");
         Assert.DoesNotContain((await Replay(context with { AllowedTools = new HashSet<string>() })).Messages,
             message => message.Content == "The description is entered.");
         var staleStore = new InMemoryEllaiUiObservationStore();
@@ -380,9 +381,35 @@ public sealed class EllaiAuthorizedConversationContextTests
         var stale = await EllaiAuthorizedConversationContext.BuildAsync(turns, "current", Actor(), null, default,
             toolContext: context, invokeTool: staleBroker.InvokeAsync);
         Assert.DoesNotContain(stale.Messages, message => message.Content == "The description is entered.");
+        Assert.Contains(stale.Messages, message => message.Content == "What is entered?");
+        Assert.Contains("prior", stale.UserOnlyTurnIds);
         await store.RecordAsync(posted with { ReceivedAtUtc = DateTimeOffset.UtcNow,
             InputStates = [new("report.narrative", "report.original-statement", UiInputPresence.NotProvided)] }, default);
-        Assert.DoesNotContain((await Replay(context)).Messages, message => message.Content == "The description is entered.");
+        var changed = await Replay(context);
+        Assert.DoesNotContain(changed.Messages, message => message.Content == "The description is entered.");
+        Assert.Contains(changed.Messages, message => message.Content == "What is entered?");
+        Assert.Contains("prior", changed.UserOnlyTurnIds);
+        Assert.False(original.IsStillAuthorizedBy(changed));
+        Assert.True(changed.IsStillAuthorizedBy(changed));
+        Assert.True(changed.IsStillAuthorizedBy(original));
+        Assert.True(Assert.Single(changed.InheritedObservations).UiObservationReplayScope!.PresentationMayChange);
+        var mixedTrace = EllaiToolTrace.SerializeFlattened([EllaiObservedToolResult.From(request, observed),
+            new(EllaiToolNames.State, true, EllaiToolReasonCodes.Ok, [], false)], false, []);
+        var mixedTurns = new[] { Turn("prior", 1, "Sensitive follow-up", "Earlier response", mixedTrace),
+            Turn("current", 2, "Continue", null, null) };
+        var mixed = await EllaiAuthorizedConversationContext.BuildAsync(mixedTurns, "current", Actor(), null, default,
+            toolContext: context with { AllowedTools = new HashSet<string> { EllaiToolNames.UiObserve, EllaiToolNames.State } },
+            invokeTool: broker.InvokeAsync);
+        Assert.DoesNotContain(mixed.Messages, message => message.Content == "Sensitive follow-up");
+        var inheritedTrace = EllaiToolTrace.SerializeFlattened([], true, changed.InheritedObservations);
+        var continuedTurns = new[] { Turn("next", 1, "What next?", "Please check the current form.", inheritedTrace),
+            Turn("current", 2, "Continue", null, null) };
+        var continued = await EllaiAuthorizedConversationContext.BuildAsync(continuedTurns, "current", Actor(), null, default,
+            toolContext: context, invokeTool: broker.InvokeAsync);
+        Assert.Contains(continued.Messages, message => message.Content == "Please check the current form.");
+        var revoked = await EllaiAuthorizedConversationContext.BuildAsync(continuedTurns, "current", Actor(), null, default,
+            toolContext: context with { AllowedTools = new HashSet<string>() }, invokeTool: broker.InvokeAsync);
+        Assert.DoesNotContain(revoked.Messages, message => message.Content == "Please check the current form.");
     }
 
     [Theory]

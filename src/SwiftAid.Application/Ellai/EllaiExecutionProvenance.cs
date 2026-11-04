@@ -133,7 +133,8 @@ public sealed record EllaiObservedToolResult(
 }
 
 /// <summary>Bounded references and digest for a fresh UI observation; no entered values are stored.</summary>
-public sealed record EllaiUiObservationReplayScope(string Feature, IReadOnlyList<string> Controls, string Digest)
+public sealed record EllaiUiObservationReplayScope(string Feature, IReadOnlyList<string> Controls, string Digest,
+    bool PresentationMayChange = false)
 {
     public bool IsValid() => !string.IsNullOrWhiteSpace(Feature) && Feature.Length <= 120 &&
         Controls is { Count: > 0 and <= 20 } && Controls.All(id => !string.IsNullOrWhiteSpace(id) && id.Length <= 120) &&
