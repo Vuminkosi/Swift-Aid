@@ -2172,6 +2172,40 @@ public sealed class EllaiAgentFrameworkContractTests
     }
 
     [Theory]
+    [InlineData("unknown")]
+    [InlineData("duplicate")]
+    [InlineData("nested-duplicate")]
+    public async Task AmbiguousProvisionalSegmentIsNotPublished(string defect)
+    {
+        var segment = defect switch
+        {
+            "unknown" => GroundedStreamPrefix.Replace("\"text\":\"Done.\"", "\"extra\":true,\"text\":\"Done.\"", StringComparison.Ordinal),
+            "duplicate" => GroundedStreamPrefix.Replace("\"text\":\"Done.\"", "\"text\":\"Other.\",\"text\":\"Done.\"", StringComparison.Ordinal),
+            "nested-duplicate" => GroundedStreamPrefix.Replace("\"claimId\":\"claim\"", "\"claimId\":\"other\",\"claimId\":\"claim\"", StringComparison.Ordinal),
+            _ => throw new ArgumentOutOfRangeException(nameof(defect))
+        };
+        using var client = new PrivateSegmentStreamingClient(segmentPrefix: segment, finalDecision: GroundedDecision,
+            repairWithSafeDecision: true);
+        var context = new EllaiToolContext("session", "epoch", "cases", null, 4, true,
+            AllowedTools: new HashSet<string> { EllaiToolNames.State });
+        var published = new List<string>();
+        var agent = new EllaiFrameworkAgent(client);
+        var run = agent.RunAsync(context, "Test instructions", [new ChatMessage(ChatRole.User, "test")], 100,
+            _ => Task.FromResult(true), (_, request, _) => Task.FromResult(new EllaiToolResult(request.ToolName,
+                true, null, [StreamEvidence], "Done.", 1, false)),
+            new EllaiFrameworkUsage("session", new EllaiUsageLedger(), new InMemoryEllaiUsageStore()), default,
+            onVerifiedStreamSegment: (text, _) => { published.Add(text); return ValueTask.CompletedTask; },
+            revalidateStreamObservations: _ => Task.FromResult(true));
+        try
+        {
+            await client.SegmentSent.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Empty(published);
+        }
+        finally { client.Release.TrySetResult(); }
+        Assert.Equal("Done.", (await run)?.DisplayText);
+    }
+
+    [Theory]
     [InlineData("ui", true)]
     [InlineData("question", true)]
     [InlineData("plan", true)]
