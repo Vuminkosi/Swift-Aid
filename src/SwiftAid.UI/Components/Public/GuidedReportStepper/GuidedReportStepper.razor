@@ -1849,6 +1849,13 @@
             }
             catch (InvalidOperationException)
             {
+                _saveValidationAttempted = true;
+                _step = 1;
+                if (!EditableDraftSnapshotsSupported)
+                {
+                    _saveState = DraftSaveState.Invalid;
+                    return;
+                }
                 formSnapshot = Draft.ToFormSnapshot();
                 submission = new PublicReportDraft { SubjectScope = Draft.SubjectScope }
                     .ToDraftSubmission(null, null, null, [], false, null);

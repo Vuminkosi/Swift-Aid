@@ -17,6 +17,8 @@ public sealed class PublicReportDraft : IValidatableObject
         foreach (var property in source.RootElement.EnumerateObject())
         {
             if (property.Name == nameof(OnsetDateInterpretedFromCaptureContext)) continue;
+            if (property.Name == nameof(OccurrenceDateText) && string.IsNullOrEmpty(OccurrenceDateText) && OccurrenceDate == restored.OccurrenceDate) continue;
+            if (property.Name == nameof(OnsetDateText) && string.IsNullOrEmpty(OnsetDateText) && OnsetDate == restored.OnsetDate) continue;
             if (!target.RootElement.TryGetProperty(property.Name, out var value)) return false;
             if (IsEmptyText(property.Value) && IsEmptyText(value)) continue;
             if (property.Value.ValueKind != value.ValueKind || property.Value.GetRawText() != value.GetRawText()) return false;
@@ -70,7 +72,11 @@ public sealed class PublicReportDraft : IValidatableObject
                 expected.Add(nameof(OnsetZoneId));
             }
             if (snapshot.SchemaVersion >= 6) expected.Add(nameof(OnsetDateInterpretedFromCaptureContext));
+            if (snapshot.SchemaVersion >= 7) expected.Add(nameof(DeathRelated));
             var names = document.RootElement.EnumerateObject().Select(property => property.Name).ToArray();
+            // Earlier builds wrote this field under version 6 but could not reopen it.
+            if (snapshot.SchemaVersion == 6 && names.Contains(nameof(DeathRelated), StringComparer.Ordinal))
+                expected.Add(nameof(DeathRelated));
             if (names.Length != expected.Count || names.Distinct(StringComparer.Ordinal).Count() != names.Length ||
                 names.Any(name => !expected.Contains(name)))
                 throw new InvalidOperationException("The editable draft fields are incomplete or unsupported.");

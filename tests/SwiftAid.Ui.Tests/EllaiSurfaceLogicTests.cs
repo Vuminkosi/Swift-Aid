@@ -2687,6 +2687,10 @@ public sealed partial class EllaiSurfaceLogicTests
 
         public Exception? RejectionException { get; init; }
 
+        public Func<CancellationToken, Task<bool>>? ReportConsentHandler { get; init; }
+        public Task<bool> GrantReportVoiceConsentAsync(string sessionId, CancellationToken cancellationToken) =>
+            ReportConsentHandler?.Invoke(cancellationToken) ?? Task.FromResult(true);
+
         public Func<Task<bool>>? VoiceConsentHandler { get; init; }
         public Task<bool> GrantVoiceCaptureConsentAsync(string sessionId, CancellationToken cancellationToken) =>
             VoiceConsentHandler?.Invoke() ?? Task.FromResult(true);
@@ -2904,7 +2908,7 @@ public sealed partial class EllaiSurfaceLogicTests
         SetField(host, "_latestGuidanceObservation", Observation("untrusted.input", "report.original-statement", "report.occurrence-date"));
         await InvokeAsync(host, "UpdateValidationGuidanceAsync", CancellationToken.None);
         Assert.Equal("ellai-report-original-statement", anchors["report.narrative"]);
-        Assert.Contains("Describe what happened", GetField<string>(host, "_validationGuidanceText"));
+        Assert.Equal(EllaiReportValidationGuidance.Find("report.original-statement")!.Message, GetField<string>(host, "_validationGuidanceText"));
         Assert.Contains("GoToAsync", proxy.Calls);
         var retries = 0;
         SetField(host, "_narrateValidation", (Func<string?, string?, CancellationToken, Task>)((inputId, context, _) =>

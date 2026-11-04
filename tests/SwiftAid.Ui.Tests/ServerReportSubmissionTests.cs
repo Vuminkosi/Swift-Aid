@@ -1,4 +1,5 @@
 using System.Reflection;
+using SwiftAid.Client.Intake;
 using SwiftAid.Client.Presentation;
 using SwiftAid.Client.Presentation.PublicWorkflows;
 using SwiftAid.Contracts.Intake;
@@ -21,7 +22,7 @@ public sealed class ServerReportSubmissionTests
         client.ReturnForeignReceipt = true;
         await Send(page, submission);
         Assert.Null(Field<IntakeReceipt?>(page, "_receipt"));
-        Assert.Contains("could not verify", (string)typeof(Report).GetProperty("_sendError", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(page)!, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("has not confirmed receiving", (string)typeof(Report).GetProperty("_sendError", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(page)!, StringComparison.OrdinalIgnoreCase);
         client.ReturnForeignReceipt = false;
         await Send(page, submission);
 
@@ -59,7 +60,7 @@ public sealed class ServerReportSubmissionTests
             UiCapabilityResults.UnavailableMetadata("fixture", "Invalid")));
         await pending;
         Assert.Equal(0, Field<long>(page, "_activeServerValidationRevision"));
-        Assert.Contains("did not identify a field", (string)typeof(Report).GetProperty("_sendError", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(page)!);
+        Assert.Contains("did not identify a specific field", (string)typeof(Report).GetProperty("_sendError", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(page)!);
     }
 
     [Fact]
@@ -78,8 +79,56 @@ public sealed class ServerReportSubmissionTests
     private static Report CreatePage(FakeClient client)
     {
         var page = new Report();
-        typeof(Report).GetProperty("IntakeSubmissionClient", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(page, client);
+        var store = DispatchProxy.Create<IGuestSubmissionStore, SubmissionStoreProxy>();
+        var proxy = (SubmissionStoreProxy)(object)store;
+        typeof(Report).GetProperty("SubmissionStore", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(page, store);
+        typeof(Report).GetProperty("SubmissionCoordinator", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .SetValue(page, new Coordinator(proxy, client));
+        foreach (var name in new[] { "_storageAvailable", "_countryCatalogueIsCurrent", "_metadataAvailable", "_processingPolicyIsLive" })
+            typeof(Report).GetField(name, BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(page, true);
+        foreach (var name in new[] { "_privacyNoticeReference", "_privacyNoticeVersion", "_processingPolicyReference", "_processingPolicyVersion" })
+            typeof(Report).GetField(name, BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(page, "synthetic-v1");
         return page;
+    }
+
+    public class SubmissionStoreProxy : DispatchProxy
+    {
+        public IntakeSubmission? Submission;
+        public GuestSubmissionSummary? Summary;
+        protected override object? Invoke(MethodInfo? method, object?[]? args)
+        {
+            switch (method!.Name)
+            {
+                case "CreateDraftAsync":
+                case "CreateRevisionAsync":
+                    Submission = (IntakeSubmission)args![method.Name == "CreateDraftAsync" ? 0 : 1]!;
+                    Summary = new(Submission.ClientSubmissionId, GuestSubmissionLocalState.Draft, DateTimeOffset.UtcNow, null);
+                    return Task.FromResult(Summary);
+                case "QueueAsync":
+                    Summary = Summary! with { State = GuestSubmissionLocalState.Queued };
+                    return Task.FromResult(Summary);
+                case "GetAsync": return Task.FromResult(Summary);
+                case "GetEditableDraftAsync": return Task.FromResult<GuestEditableDraftDetails?>(null);
+                case "GetAllAsync": return Task.FromResult<IReadOnlyList<GuestSubmissionSummary>>(Summary is null ? [] : [Summary]);
+                default: throw new NotSupportedException(method.Name);
+            }
+        }
+    }
+
+    private sealed class Coordinator(SubmissionStoreProxy store, FakeClient client) : IGuestSubmissionCoordinator
+    {
+        public async Task<GuestSyncSummary> SubmitPendingAsync(CancellationToken cancellationToken = default)
+        {
+            var result = await client.SubmitAsync(store.Submission!, cancellationToken);
+            if (result.Code == UiCapabilityResultCode.Cancelled) throw new OperationCanceledException();
+            store.Summary = store.Summary! with
+            {
+                State = result.Code == UiCapabilityResultCode.InvalidRequest ? GuestSubmissionLocalState.NeedsAttention : GuestSubmissionLocalState.Received,
+                Receipt = result.Value?.Receipt
+            };
+            return new(1, 0, 0, 0);
+        }
+        public Task<GuestReceiptRefreshSummary> RefreshReceiptsAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
     }
 
     private static Task Send(Report page, IntakeSubmission submission) =>

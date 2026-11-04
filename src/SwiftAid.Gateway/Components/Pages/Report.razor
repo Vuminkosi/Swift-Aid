@@ -327,6 +327,8 @@
         _sending = true;
         _activeServerValidationRevision = 0;
         _receipt = null;
+        var sourceDraft = _mobileDraft;
+        var sourceSnapshot = System.Text.Json.JsonSerializer.Serialize(sourceDraft);
         try
         {
             var previousEditable = _currentDraftId is { } prior
@@ -359,7 +361,9 @@
 
             if (result?.State == GuestSubmissionLocalState.NeedsAttention)
             {
-                _activeServerValidationRevision = ++_serverValidationSequence;
+                if (ReferenceEquals(_mobileDraft, sourceDraft) &&
+                    System.Text.Json.JsonSerializer.Serialize(_mobileDraft) == sourceSnapshot)
+                    _activeServerValidationRevision = ++_serverValidationSequence;
                 _sendError = "SwiftAid could not confirm this report and did not identify a specific field. Your saved entries remain on this device; return to Details to review the fields Ellai can validate.";
                 _sendErrorIsError = true;
                 await RefreshDraftsSafelyAsync();

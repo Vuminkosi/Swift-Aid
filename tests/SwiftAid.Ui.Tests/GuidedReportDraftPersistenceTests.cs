@@ -1,6 +1,7 @@
 #pragma warning disable BL0005 // Logic tests exercise component save-state transitions directly; production parameters are renderer-owned.
 using System.Reflection;
 using Microsoft.AspNetCore.Components;
+using Microsoft.Extensions.DependencyInjection;
 using SwiftAid.Contracts.Geography;
 using SwiftAid.Contracts.Intake;
 using SwiftAid.Contracts.Ellai;
@@ -209,6 +210,10 @@ public sealed partial class GuidedReportDraftPersistenceTests
         var legacyJson = System.Text.Json.Nodes.JsonNode.Parse(current.Json)!.AsObject();
         Assert.True(legacyJson.Remove(nameof(PublicReportDraft.OccurrenceDateText)));
         Assert.True(legacyJson.Remove(nameof(PublicReportDraft.AgeYearsText)));
+        foreach (var name in new[] { nameof(PublicReportDraft.Gender), nameof(PublicReportDraft.DeathRelated),
+            nameof(PublicReportDraft.OnsetPrecision), nameof(PublicReportDraft.OnsetDate), nameof(PublicReportDraft.OnsetDateText),
+            nameof(PublicReportDraft.OnsetTime), nameof(PublicReportDraft.OnsetOffset), nameof(PublicReportDraft.OnsetZoneId),
+            nameof(PublicReportDraft.OnsetDateInterpretedFromCaptureContext) }) legacyJson.Remove(name);
 
         var restored = PublicReportDraft.FromFormSnapshot(new GuestDraftFormSnapshot(1, legacyJson.ToJsonString()));
 
@@ -244,6 +249,10 @@ public sealed partial class GuidedReportDraftPersistenceTests
         var current = CreateDraft().ToFormSnapshot();
         var json = System.Text.Json.Nodes.JsonNode.Parse(current.Json)!.AsObject();
         Assert.True(json.Remove(nameof(PublicReportDraft.AgeYearsText)));
+        foreach (var name in new[] { nameof(PublicReportDraft.Gender), nameof(PublicReportDraft.DeathRelated),
+            nameof(PublicReportDraft.OnsetPrecision), nameof(PublicReportDraft.OnsetDate), nameof(PublicReportDraft.OnsetDateText),
+            nameof(PublicReportDraft.OnsetTime), nameof(PublicReportDraft.OnsetOffset), nameof(PublicReportDraft.OnsetZoneId),
+            nameof(PublicReportDraft.OnsetDateInterpretedFromCaptureContext) }) json.Remove(name);
         var restored = PublicReportDraft.FromFormSnapshot(new GuestDraftFormSnapshot(2, json.ToJsonString()));
         Assert.Null(restored.AgeYearsText);
         Assert.Equal(GuestDraftFormSnapshot.CurrentSchemaVersion, restored.ToFormSnapshot().SchemaVersion);
@@ -450,7 +459,7 @@ public sealed partial class GuidedReportDraftPersistenceTests
         var component = CreateStepper(draft, request =>
         {
             saves++;
-            request.ConfirmPersisted(Guid.NewGuid());
+            request.ConfirmPersisted(Guid.NewGuid(), formSnapshotPersisted: true);
             return Task.CompletedTask;
         });
 
@@ -469,6 +478,7 @@ public sealed partial class GuidedReportDraftPersistenceTests
         Assert.Equal("report.utc-offset", Assert.Single(component.GetState().ValidationIssues).InputId);
         draft.OccurrenceOffset = "+02:00";
         Assert.Empty(component.GetState().ValidationIssues);
+        component.EditableDraftSnapshotsSupported = true;
         await InvokeSaveDraftAsync(component);
         Assert.Equal(1, saves);
         Assert.Equal("Saved", GetSaveState(component));
@@ -496,22 +506,23 @@ public sealed partial class GuidedReportDraftPersistenceTests
         var draft = CreateDraft();
         draft.CountryCode = "SZ";
         draft.CountryConfirmed = true;
-        IntakeSubmission? saved = null;
+        PublicReportSaveRequest? saved = null;
         var component = CreateStepper(draft, request =>
         {
-            saved = request.Submission;
-            request.ConfirmPersisted(Guid.NewGuid());
+            saved = request;
+            request.ConfirmPersisted(Guid.NewGuid(), formSnapshotPersisted: true);
             return Task.CompletedTask;
         });
+        component.EditableDraftSnapshotsSupported = true;
         component.CountryCatalogueIsCurrent = false;
         component.Countries = [];
         await InvokeSaveDraftAsync(component);
 
         Assert.Equal("Saved", GetSaveState(component));
         Assert.NotNull(saved);
-        Assert.Equal("SZ", saved.Location.CountryCode);
-        Assert.False(saved.Confirmations.OccurrenceCountryConfirmed);
-        Assert.Null(saved.Location.CatalogueVersion);
+        Assert.Equal("SZ", PublicReportDraft.FromFormSnapshot(saved.FormSnapshot!).CountryCode);
+        Assert.False(saved.Submission.Confirmations.OccurrenceCountryConfirmed);
+        Assert.Null(saved.Submission.Location.CatalogueVersion);
         Assert.Equal("SZ", draft.CountryCode);
         Assert.False((bool)typeof(GuidedReportStepper).GetProperty("CanSubmit", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(component)!);
     }
@@ -810,6 +821,8 @@ public sealed partial class GuidedReportDraftPersistenceTests
             OnSaveDraft = EventCallback.Factory.Create<PublicReportSaveRequest>(new object(), save)
         };
 
+        typeof(GuidedReportStepper).GetProperty("Services", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .SetValue(component, new ServiceCollection().BuildServiceProvider());
         InvokeOnParametersSet(component);
         return component;
     }

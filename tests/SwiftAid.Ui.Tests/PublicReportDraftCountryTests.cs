@@ -41,16 +41,11 @@ public sealed class PublicReportDraftCountryTests
             ProcessingConfirmed = true
         };
 
-        var saved = draft.ToSubmission(null, "/synthetic-privacy", "policy-v1", [], false,
-            allowUnverifiedCountryForDraft: true);
-
-        Assert.Equal("ZW", saved.Location.CountryCode);
-        Assert.Null(saved.Location.CatalogueVersion);
-        Assert.Equal("ZW", saved.Confirmations.OccurrenceCountryCode);
-        Assert.Empty(saved.Confirmations.OccurrenceCountryCatalogueVersion);
-        Assert.False(saved.Confirmations.OccurrenceCountryConfirmed);
-        Assert.Equal("ZW", PublicReportDraft.FromSubmission(saved).CountryCode);
-        Assert.False(PublicReportDraft.FromSubmission(saved).CountryConfirmed);
+        var restored = PublicReportDraft.FromFormSnapshot(draft.ToFormSnapshot());
+        Assert.Equal("zw", restored.CountryCode);
+        Assert.False(restored.CountryConfirmed);
+        Assert.False(restored.ReportReviewConfirmed);
+        Assert.False(restored.ProcessingConfirmed);
         Assert.Throws<InvalidOperationException>(() => draft.ToSubmission(null, "/synthetic-privacy", "policy-v1", [], false));
     }
 
@@ -60,8 +55,7 @@ public sealed class PublicReportDraftCountryTests
     public void DraftRejectsMalformedCountryInsteadOfDiscardingIt(string country)
     {
         var draft = new PublicReportDraft { SubjectScope = IntakeSubjectScope.Human, CountryCode = country };
-        Assert.Throws<InvalidOperationException>(() => draft.ToSubmission(null, null, null, [], false,
-            allowUnverifiedCountryForDraft: true));
+        Assert.Throws<InvalidOperationException>(() => draft.ToDraftSubmission(null, null, null, [], false, null));
         Assert.Equal(country, draft.CountryCode);
     }
 
