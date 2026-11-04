@@ -10,6 +10,9 @@ namespace SwiftAid.Application.Ellai;
 internal static class EllaiSharedGuidanceTemplates
 {
     private static readonly TimeSpan Lifetime = TimeSpan.FromHours(1);
+    private const int MemoryLimit = 256;
+    private static readonly object MemoryGate = new();
+    private static readonly Dictionary<string, (byte[] Value, DateTimeOffset Expires)> Memory = new(StringComparer.Ordinal);
 
     public static string Key(string objective, UiRegistrySnapshot catalogue, EllaiUiEntitlements authority,
         IReadOnlyList<UiControlObservation> observations, bool reportAlreadyReceived)
@@ -32,13 +35,28 @@ internal static class EllaiSharedGuidanceTemplates
     public static async Task<EllaiGuidancePlanDraft?> ReadAsync(ICacheStore? cache, string key, string objective,
         UiRegistrySnapshot catalogue, CancellationToken ct)
     {
-        if (cache is null) return null;
-        CacheReadResult read;
-        try { read = await cache.GetAsync(key, ct).ConfigureAwait(false); }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
-        catch (Exception error) when (error is not OutOfMemoryException) { return null; }
         ct.ThrowIfCancellationRequested();
-        if (read.Status != CacheReadStatus.Hit || read.Value is not { Length: > 0 and <= 32768 } bytes) return null;
+        byte[]? bytes = null;
+        lock (MemoryGate)
+        {
+            if (Memory.TryGetValue(key, out var entry))
+            {
+                if (entry.Expires > DateTimeOffset.UtcNow) bytes = entry.Value;
+                else Memory.Remove(key);
+            }
+        }
+        if (bytes is null && cache is not null)
+        {
+            try
+            {
+                var read = await cache.GetAsync(key, ct).ConfigureAwait(false);
+                if (read.Status == CacheReadStatus.Hit) bytes = read.Value;
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+            catch (Exception error) when (error is not OutOfMemoryException) { /* Local cache remains available. */ }
+        }
+        ct.ThrowIfCancellationRequested();
+        if (bytes is not { Length: > 0 and <= 32768 }) return null;
         try
         {
             var draft = JsonSerializer.Deserialize<EllaiGuidancePlanDraft>(bytes);
@@ -51,11 +69,21 @@ internal static class EllaiSharedGuidanceTemplates
     public static async Task WriteAsync(ICacheStore? cache, string key, EllaiGuidancePlanDraft draft,
         UiRegistrySnapshot catalogue, CancellationToken ct)
     {
-        if (cache is null) return;
         var safe = Sanitize(draft, "shared-template", catalogue);
         if (safe is null) return;
         var bytes = JsonSerializer.SerializeToUtf8Bytes(safe);
         if (bytes.Length > 32768) return;
+        ct.ThrowIfCancellationRequested();
+        lock (MemoryGate)
+        {
+            var now = DateTimeOffset.UtcNow;
+            foreach (var expired in Memory.Where(item => item.Value.Expires <= now).Select(item => item.Key).ToArray())
+                Memory.Remove(expired);
+            if (!Memory.ContainsKey(key) && Memory.Count >= MemoryLimit)
+                Memory.Remove(Memory.MinBy(item => item.Value.Expires).Key);
+            Memory[key] = (bytes, now.Add(Lifetime));
+        }
+        if (cache is null) return;
         try
         {
             var seconds = (int)Lifetime.TotalSeconds;
