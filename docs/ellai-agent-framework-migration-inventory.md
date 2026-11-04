@@ -4345,3 +4345,30 @@ PostgreSQL fixture enabled. The TRX is retained under the integration test
 project's `TestResults`, and the disposable database container was removed.
 Custom stores and location seeding still rely on cooperative cancellation;
 these tests do not establish a hard stop for those paths or deployed behavior.
+
+### Initialized location-read cancellation — 2026-11-04
+
+The default geographic registry can seed data on first use, so its complete
+search cannot safely be detached. The concrete registry now exposes a read-only
+search that returns null when no rows exist. The Gateway uses that path in a
+separately scoped, bounded isolation slot only when the broker uses the same
+registered concrete registry. An empty registry falls back to the original
+attached seeding search, and custom registries keep their existing behavior.
+Detached reads can continue until they finish, but cannot perform the seed import.
+
+PASS: `GeographicRegistryTests|EllaiLocationReplayTests|EllaiIsolatedToolCallsTests`
+passed 51, failed 0 and skipped 5 with `dotnet test
+tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj --no-restore
+-m:1 -nr:false -p:WasmBuildNative=false` and `OS=Windows_NT`. A later filter
+passed 43, failed 0 and skipped 2 after the final worker wiring change. The
+fault-injection tests hold an initialized SQLite registry read that ignores
+cancellation; the actual framework worker terminates its timed-out turn before
+the read is released. First-use seeding and custom-registry replay controls pass.
+Four focused tests passed after commit `e0e866af` with `--no-build --no-restore`.
+
+PASS: with the dedicated disposable intake PostGIS 17 fixture, the new isolated
+search observed a changed registry row and the existing replay recheck withheld
+an answer after a registry change; together with the worker timeout and seeding
+controls the filter passed 4/4. The disposable container was removed. Initial
+seeding and custom registry implementations still rely on cooperative cancellation;
+network-partition and deployed Gateway behavior remain unverified.
