@@ -39,6 +39,33 @@ public sealed partial class EllaiSurfaceLogicTests
         Assert.Equal(accepted, GetField<UiObservationReport?>(host, "_latestGuidanceObservation") is not null);
     }
 
+    [Fact]
+    public async Task CurrentReportRemainsObservableWhenAnotherFeatureHasGuidance()
+    {
+        var client = new FakeReviewClient { ObservationHandler = () => Task.FromResult(true) };
+        using var host = await CreateHost(client, CreateSession(1), string.Empty);
+        SetProperty(host, "Navigation", new TabNavigationManager("report"));
+        SetField(host, "_guidanceFeatureId", EllaiNavigationManifest.FeatureId);
+        var tour = DispatchProxy.Create<IBonboardingTourSession, NoOpBonboardingServiceProxy>();
+        var proxy = (NoOpBonboardingServiceProxy)(object)tour;
+        proxy.TourStatus = BonboardingTourStatus.Running;
+        proxy.CurrentStep = new BonboardingStepDefinition { Id = "step" };
+        var step = new GuidancePlanStep("step", "navigation.escalations", "open-escalations", PlanStepBehavior.GuideHuman,
+            null, null, [], [], "Open escalations.", null);
+        SetField(host, "_generatedTour", tour);
+        SetField(host, "_generatedPlan", new ValidatedGuidancePlan("plan", 1, null, "Initial", ["step"], [], [], [step], [], "catalogue", "contract"));
+        var module = new ObservationJsModule();
+        SetField(host, "_uiObservationModule", module);
+
+        await InvokeAsync(host, "ReportCurrentUiAsync", CancellationToken.None);
+
+        Assert.NotNull(module.RequestedControls);
+        Assert.Contains("report.narrative", module.RequestedControls);
+        Assert.Contains("report.time-location", module.RequestedControls);
+        Assert.Contains("navigation.escalations", module.RequestedControls);
+        Assert.True(module.RequestedControls.Length <= 20);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -2323,11 +2350,15 @@ public sealed partial class EllaiSurfaceLogicTests
     private sealed class ObservationJsModule : IJSObjectReference
     {
         public string ControlId { get; init; } = "report.entry";
+        public string[]? RequestedControls { get; private set; }
         public ValueTask<TValue> InvokeAsync<TValue>(string identifier, object?[]? args) =>
             InvokeAsync<TValue>(identifier, CancellationToken.None, args);
-        public ValueTask<TValue> InvokeAsync<TValue>(string identifier, CancellationToken cancellationToken, object?[]? args) =>
-            ValueTask.FromResult((TValue)(object)new UiObservationReport("view", "context", "web", [ControlId],
+        public ValueTask<TValue> InvokeAsync<TValue>(string identifier, CancellationToken cancellationToken, object?[]? args)
+        {
+            RequestedControls = args?.FirstOrDefault() as string[];
+            return ValueTask.FromResult((TValue)(object)new UiObservationReport("view", "context", "web", [ControlId],
                 [new(ControlId, UiObservationState.Ready)]));
+        }
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 

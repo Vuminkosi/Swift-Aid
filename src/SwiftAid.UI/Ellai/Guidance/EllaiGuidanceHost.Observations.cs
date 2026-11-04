@@ -146,9 +146,9 @@ public partial class EllaiGuidanceHost
         StateHasChanged();
     }
 
-    private Task ReportCurrentUiAsync(CancellationToken token) => ReportUiForFeatureAsync(_guidanceFeatureId, token);
+    private Task ReportCurrentUiAsync(CancellationToken token) => ReportUiForFeatureAsync(_guidanceFeatureId, token, includeCurrentReport: true);
 
-    private async Task ReportUiForFeatureAsync(string? featureId, CancellationToken token)
+    private async Task ReportUiForFeatureAsync(string? featureId, CancellationToken token, bool includeCurrentReport = false)
     {
         _latestGuidanceObservation = null;
         if (_sessionView is not { Status: "Active" } session) return;
@@ -175,10 +175,23 @@ public partial class EllaiGuidanceHost
                 EllaiOrganizationUiManifest.FeatureId => EllaiOrganizationUiManifest.Controls.Select(control => control.ControlId).ToArray(),
                 _ => null,
             };
+            var path = "/" + Navigation.ToBaseRelativePath(observedUri).Split('?', '#')[0].TrimEnd('/');
+            if (includeCurrentReport && string.Equals(path, "/report", StringComparison.OrdinalIgnoreCase) &&
+                requestedControls is not null && featureId != EllaiReportUiManifest.FeatureId)
+            {
+                // A previously started tour can belong to another feature. Keep
+                // its current target observable while including the report that
+                // the user is now viewing, within the existing wire bound.
+                var currentControl = CurrentGuidanceStep?.ControlId;
+                requestedControls = EllaiReportUiManifest.All.Select(control => control.ControlId)
+                    .Concat(currentControl is null ? [] : [currentControl])
+                    .Concat(requestedControls)
+                    .Distinct(StringComparer.Ordinal)
+                    .Take(20).ToArray();
+            }
             var report = await _uiObservationModule.InvokeAsync<UiObservationReport>("collect", token,
                 new object?[] { requestedControls });
             if (report is null || !IsCurrent()) return;
-            var path = "/" + Navigation.ToBaseRelativePath(observedUri).Split('?', '#')[0].TrimEnd('/');
             report = report with { CurrentNavigationId = path == "/report" ? EllaiReportUiManifest.NavigationId :
                 EllaiNavigationManifest.ResolveNavigationId(path) };
             report = report with { Platform = OperatingSystem.IsAndroid() ? "android" : OperatingSystem.IsIOS() ? "ios" : "web" };
