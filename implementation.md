@@ -4570,3 +4570,5 @@ Location aggregation emits the supporting case IDs within each group and scans a
 Review-stage age and text-limit errors now tell the user to select Return to details before promising a field highlight. The current review target is the navigation control; after the detail form is active, existing guidance advances to the first invalid input and updates the spotlight one issue at a time.
 
 PASS: `dotnet build src/SwiftAid.Gateway/SwiftAid.Gateway.csproj --no-restore -m:1 -nr:false -p:WasmBuildNative=false --verbosity quiet` (zero warnings, zero errors). PASS: `git diff --check`. No tests added or run, per user instruction. NOT VERIFIED: live browser or device rendering of the review-to-detail focus transition.
+
+When the server rejection does not identify a field, the message now says that explicitly and guides the person back to review visible entries one at a time without implying a specific input was identified.
