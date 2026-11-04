@@ -139,9 +139,15 @@ public sealed class EllaiPublicReportDraftContext
     {
         if (utterance is null || utterance.Length > 1000 || utterance.Contains('\r') || utterance.Contains('\n')) return false;
         const RegexOptions options = RegexOptions.IgnoreCase | RegexOptions.CultureInvariant;
-        if (!Regex.IsMatch(utterance, @"^\s*(?:she|he|the patient)\s+(?:has|reports|is experiencing|experienced)\s+[^.!?\r\n]+[.!?]?\s*$", options))
-            return false;
-        return Apply(new(PendingEditKind.Observation, Text: utterance.Trim()));
+        if (Regex.IsMatch(utterance, @"^\s*(?:she|he|the patient)\s+(?:has|reports|is experiencing|experienced)\s+[^.!?\r\n]+[.!?]?\s*$", options))
+            return Apply(new(PendingEditKind.Observation, Text: utterance.Trim()));
+
+        var addMatch = Regex.Match(utterance,
+            @"^\s*(?:add|include)\s+(?<observation>[\p{L}\p{N}][\p{L}\p{N} '\-]{0,199}?)(?:\s+to\s+(?:the\s+)?(?:report|draft))?[.!?]?\s*$",
+            options);
+        if (!addMatch.Success) return false;
+        var observation = addMatch.Groups["observation"].Value.Trim();
+        return observation.Length is > 0 and <= 200 && Apply(new(PendingEditKind.Observation, Text: observation));
     }
 
     public static bool IsExplicitObservationRemoval(string? utterance) =>

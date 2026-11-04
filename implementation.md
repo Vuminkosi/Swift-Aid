@@ -4614,3 +4614,9 @@ PASS: Gateway build (`dotnet build src/SwiftAid.Gateway/SwiftAid.Gateway.csproj 
 During an active public report workflow, Ellai can now honor a narrowly phrased request to remove one observation recorded incorrectly. The application accepts only an explicit remove/delete statement from the same user turn and removes only one exact matching observation line from the active draft. Partial matches, narrative text, and inferred values remain untouched; the UI reports when the exact observation cannot be identified. This supports report correction in conversation scenarios 2.4 and 7.1 while preserving the existing draft and submission boundary.
 
 PASS: Gateway build (dotnet build src/SwiftAid.Gateway/SwiftAid.Gateway.csproj --no-restore -m:1 -nr:false -p:WasmBuildNative=false --verbosity quiet, 0 warnings, 0 errors); git diff --check. Tests were not added or run, per user instruction. NOT VERIFIED: live model proposal selection, browser draft correction, or end-to-end conversation behavior.
+
+### Ellai explicit report-observation addition - 2026-11-04
+
+The active public report workflow now accepts a direct add/include observation request such as "Add headache." through the existing same-turn, empty-argument draft-edit proposal. The captured observation is the user's exact text after the command; no symptom is inferred, and existing duplicate and length limits still apply. This closes the explicit add step in conversation scenario 2.4.
+
+PASS: Gateway build (dotnet build src/SwiftAid.Gateway/SwiftAid.Gateway.csproj --no-restore -m:1 -nr:false -p:WasmBuildNative=false --verbosity quiet, 0 warnings, 0 errors); git diff --check. Tests were not added or run, per user instruction. NOT VERIFIED: live model proposal selection, browser draft mutation, or end-to-end conversation behavior.
