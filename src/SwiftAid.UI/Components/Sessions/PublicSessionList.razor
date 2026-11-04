@@ -87,7 +87,14 @@
                                             @(IsCopiedVersion(session) ? "Copied" : "Copy invitation")
                                         </MudButton>
                                     }
-                                    @if (!string.IsNullOrWhiteSpace(PublicBasePath))
+                                    @if (OpenCalendarAsync is not null)
+                                    {
+                                        <MudButton Variant="Variant.Text" Color="Color.Primary" StartIcon="@Icons.Material.Filled.CalendarMonth"
+                                                   OnClick="() => OpenCalendarFileAsync(session)">
+                                            @(IsCancelled(session) ? "Open cancellation file" : "Open calendar file")
+                                        </MudButton>
+                                    }
+                                    else if (!string.IsNullOrWhiteSpace(PublicBasePath))
                                     {
                                         <a class="session-public-list__mobile-action" href="@CalendarHref(session.SessionId)"
                                            download="@($"session-{session.SessionId:D}.ics")">
@@ -96,6 +103,11 @@
                                         </a>
                                     }
                                 </div>
+
+                                @if (_calendarErrorId == session.SessionId)
+                                {
+                                    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" role="alert">@_calendarError</MudAlert>
+                                }
 
                                 @if (_shareRequestSessionId == session.SessionId && _shareRequestVersion == session.Version)
                                 {
@@ -173,7 +185,13 @@
                                href="@DetailHref(session.SessionId)" aria-label="@($"View details for {session.Title}")">
                                 <span class="mud-button-label">View details</span>
                             </a>
-                            @if (!string.IsNullOrWhiteSpace(PublicBasePath))
+                            @if (OpenCalendarAsync is not null)
+                            {
+                                <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.CalendarMonth" OnClick="() => OpenCalendarFileAsync(session)">
+                                    @(IsCancelled(session) ? "Open cancellation file" : "Open calendar file")
+                                </MudButton>
+                            }
+                            else if (!string.IsNullOrWhiteSpace(PublicBasePath))
                             {
                                 <a class="mud-button-root mud-button mud-button-text mud-button-text-default mud-button-text-size-medium mud-ripple"
                                    href="@CalendarHref(session.SessionId)"
@@ -197,6 +215,11 @@
                                 }
                             }
                         </div>
+
+                        @if (_calendarErrorId == session.SessionId)
+                        {
+                            <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" role="alert">@_calendarError</MudAlert>
+                        }
 
                         @if (_shareRequestSessionId == session.SessionId && _shareRequestVersion == session.Version)
                         {
@@ -249,6 +272,9 @@
     /// <summary>Opens the device share sheet with the given text. Web hosts leave this unset.</summary>
     [Parameter] public Func<string, Task>? ShareTextAsync { get; set; }
 
+    /// <summary>Opens a current public calendar file on hosts with a native file handler.</summary>
+    [Parameter] public Func<Guid, Task<bool>>? OpenCalendarAsync { get; set; }
+
     /// <summary>Base path of the public session endpoints.</summary>
     [Parameter] public string? PublicBasePath { get; set; } = "/public/v1/sessions";
 
@@ -260,6 +286,24 @@
     private long _copiedSessionVersion;
     private Guid? _shareRequestSessionId;
     private long _shareRequestVersion;
+    private Guid? _calendarErrorId;
+    private string? _calendarError;
+
+    private async Task OpenCalendarFileAsync(PublicSessionView session)
+    {
+        _calendarErrorId = null;
+        _calendarError = null;
+        try
+        {
+            if (OpenCalendarAsync is not null && await OpenCalendarAsync(session.SessionId)) return;
+        }
+        catch (Exception)
+        {
+            // The device may have no application able to open calendar files.
+        }
+        _calendarErrorId = session.SessionId;
+        _calendarError = "The calendar file could not be opened. Check your connection and calendar app, then try again.";
+    }
 
     private bool IsCurrentScheduledVersion(PublicSessionView session) => Sessions.Any(current =>
         current.SessionId == session.SessionId && current.Version == session.Version && IsScheduled(current));

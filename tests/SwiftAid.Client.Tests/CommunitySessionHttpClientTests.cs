@@ -245,6 +245,21 @@ public sealed class CommunitySessionHttpClientTests
         Assert.Null(result);
     }
 
+    [Fact]
+    public async Task GetCalendarFileRejectsUnexpectedTypeAndOversizedContent()
+    {
+        var html = Create(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("<html>error</html>", Encoding.UTF8, "text/html")
+        });
+        Assert.Null(await html.GetCalendarFileAsync(KnownSessionId));
+
+        var oversized = new ByteArrayContent(new byte[256 * 1024 + 1]);
+        oversized.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("text/calendar");
+        var large = Create(new HttpResponseMessage(HttpStatusCode.OK) { Content = oversized });
+        Assert.Null(await large.GetCalendarFileAsync(KnownSessionId));
+    }
+
     private static PublicSessionView PublishedView() => new(
         KnownSessionId,
         3,

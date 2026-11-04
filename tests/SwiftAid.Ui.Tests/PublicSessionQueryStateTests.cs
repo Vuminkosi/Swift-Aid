@@ -551,6 +551,22 @@ public sealed class PublicSessionQueryStateTests
         Assert.Equal("Public invitation", typeof(PublicSessionList).GetField("_openInvitationText", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(list));
     }
 
+    [Fact]
+    public async Task NativeCalendarFailureReportsAnErrorAndCanBeRetried()
+    {
+        var session = Session(Guid.NewGuid());
+        var list = new PublicSessionList();
+        var type = typeof(PublicSessionList);
+        var succeeds = false;
+        type.GetProperty(nameof(list.OpenCalendarAsync))!.SetValue(list, (Func<Guid, Task<bool>>)(_ => Task.FromResult(succeeds)));
+        var open = type.GetMethod("OpenCalendarFileAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        await (Task)open.Invoke(list, [session])!;
+        Assert.Equal(session.SessionId, type.GetField("_calendarErrorId", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(list));
+        succeeds = true;
+        await (Task)open.Invoke(list, [session])!;
+        Assert.Null(type.GetField("_calendarErrorId", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(list));
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

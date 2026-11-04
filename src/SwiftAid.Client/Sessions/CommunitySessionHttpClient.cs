@@ -296,15 +296,25 @@ public sealed class CommunitySessionHttpClient(HttpClient httpClient)
         try
         {
             using var response = await httpClient.GetAsync(
-                $"public/v1/sessions/{sessionId:D}/calendar", cancellationToken).ConfigureAwait(false);
-            if (response.StatusCode != HttpStatusCode.OK)
+                $"public/v1/sessions/{sessionId:D}/calendar", HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+            const int maxCalendarBytes = 256 * 1024;
+            if (response.StatusCode != HttpStatusCode.OK ||
+                !string.Equals(response.Content.Headers.ContentType?.MediaType, "text/calendar", StringComparison.OrdinalIgnoreCase) ||
+                response.Content.Headers.ContentLength > maxCalendarBytes)
             {
                 return null;
             }
 
-            var content = await response.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
-            var contentType = response.Content.Headers.ContentType?.MediaType ?? "text/calendar";
-            return new SessionCalendarFile($"session-{sessionId:D}.ics", contentType, content);
+            await using var source = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+            using var buffer = new MemoryStream();
+            var chunk = new byte[8192];
+            int read;
+            while ((read = await source.ReadAsync(chunk, cancellationToken).ConfigureAwait(false)) > 0)
+            {
+                if (buffer.Length + read > maxCalendarBytes) return null;
+                await buffer.WriteAsync(chunk.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
+            }
+            return buffer.Length == 0 ? null : new SessionCalendarFile($"session-{sessionId:D}.ics", "text/calendar", buffer.ToArray());
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {

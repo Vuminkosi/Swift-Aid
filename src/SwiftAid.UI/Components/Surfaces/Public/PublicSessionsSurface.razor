@@ -250,6 +250,7 @@
                            CanRefresh="@(QuerySessionsAsync is not null || OnRetry.HasDelegate)"
                            PublicBasePath="@PublicSessionBasePath"
                            LoadInvitationTextAsync="LoadInvitationTextAsync"
+                           OpenCalendarAsync="OpenCalendarAsync"
                            ShareTextAsync="ShareTextAsync" />
     }
 
@@ -486,6 +487,7 @@
     [Parameter] public bool InitialCalendarView { get; set; }
     [Parameter] public Func<Guid, long, Task<string?>>? LoadInvitationTextAsync { get; set; }
     [Parameter] public Func<string, Task>? ShareTextAsync { get; set; }
+    [Parameter] public Func<Guid, Task<bool>>? OpenCalendarAsync { get; set; }
     [Parameter] public Func<Guid, Task<SessionSubscriptionPanelState?>>? LoadSubscriptionStateAsync { get; set; }
     [Parameter] public Func<SessionSubscriptionAction, Task<SessionSubscriptionPanelState?>>? ExecuteSubscriptionActionAsync { get; set; }
     [Parameter] public EventCallback<Guid> OnRequestSignIn { get; set; }

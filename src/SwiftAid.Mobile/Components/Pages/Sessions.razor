@@ -8,6 +8,7 @@
 @inject ISubscriptionClient SubscriptionClient
 @inject NavigationManager Navigation
 @inject IHttpClientFactory HttpClientFactory
+@inject SwiftAid.Client.Sessions.CommunitySessionHttpClient CalendarClient
 
 <PageTitle>Community sessions | SwiftAid</PageTitle>
 
@@ -22,6 +23,7 @@
                        PublicSessionBasePath="@CalendarBasePath"
                        QuerySessionsAsync="@(RequestedSessionId is null ? QuerySessionsAsync : null)"
                        LoadInvitationTextAsync="LoadInvitationAsync"
+                       OpenCalendarAsync="OpenCalendarAsync"
                        ShareTextAsync="ShareAsync"
                        LoadSubscriptionStateAsync="LoadSubscriptionStateAsync"
                        ExecuteSubscriptionActionAsync="ExecuteSubscriptionActionAsync"
@@ -255,4 +257,16 @@
 
     private static Task ShareAsync(string text) =>
         Share.Default.RequestAsync(new ShareTextRequest(text, "Community session invitation"));
+
+    private async Task<bool> OpenCalendarAsync(Guid sessionId)
+    {
+        var calendar = await CalendarClient.GetCalendarFileAsync(sessionId);
+        if (calendar is null || calendar.Content.Length == 0 || calendar.Content.Length > 256 * 1024 ||
+            !string.Equals(calendar.ContentType, "text/calendar", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        var path = Path.Combine(FileSystem.CacheDirectory, $"swiftaid-session-{sessionId:N}-{Guid.NewGuid():N}.ics");
+        await File.WriteAllBytesAsync(path, calendar.Content);
+        return await Launcher.Default.OpenAsync(new OpenFileRequest("Open community session calendar", new ReadOnlyFile(path, "text/calendar")));
+    }
 }
