@@ -4455,9 +4455,18 @@ framework. When usage is unavailable at cancellation, existing estimated-usage
 accounting applies; usage reported only after the caller returns is not recorded
 as actual usage by this path. Eight permanently stuck streams can exhaust the
 pool, and cancellation does not prove the remote provider stopped or billing
-ceased. Non-streaming calls remain cooperative: an attempted isolation changed
-reported-usage accounting when cancellation raced a completed response, so it
-was not retained.
+ceased. At that revision non-streaming calls remained cooperative; that statement is
+historical. At `d9c64590`, non-streaming calls also use the same bounded pool.
+A cancelled caller waits up to 100 ms for an already-completing response to
+preserve reported usage, then returns without waiting for a stuck provider.
+The underlying call keeps its pool slot until it exits; eight permanently stuck
+calls can exhaust the shared pool. Usage received after the caller has returned
+is not recorded as actual usage by this path. Cancellation does not prove that
+the remote provider stopped or billing ceased. The existing framework, usage
+and isolation filter passed 172/172 and the full application suite passed 1,336
+with 22 skipped on the combined worktree. A non-streaming provider that ignores
+cancellation has not been independently fault-injected against this change;
+deployed behavior and remote billing remain NOT VERIFIED.
 
 PASS: the focused application framework, usage and isolation filters passed
 166/166 with `dotnet test tests/SwiftAid.Application.Tests/SwiftAid.Application.Tests.csproj
@@ -4471,5 +4480,5 @@ covering cancellation, grounded streaming and brokered streaming passed 3/3
 before the commit, using `ELLAI_LIVE=1`; their TRX is retained under the
 application test project's `TestResults`. The post-commit application suite
 passed 1,268, failed 0 and skipped 19 with `--no-build --no-restore -m:1
--nr:false`. Deployed behavior, non-streaming hard cancellation and independent
-security review remain unverified.
+-nr:false`. Deployed behavior, non-streaming fault injection and independent security
+review remain unverified.
