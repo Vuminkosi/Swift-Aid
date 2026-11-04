@@ -4327,3 +4327,21 @@ FullyQualifiedName~SyntheticSpeechFlowsThroughLiveTranscriptionMuseAndSpeech
 'console;verbosity=normal'` passed. The TRX is retained under the integration
 test project's `TestResults`. Microphone capture, browser or physical playback,
 durable sessions and deployed behavior are not verified by this run.
+
+### Current PostgreSQL queue cancellation boundaries — 2026-11-04
+
+At `31b0ad6c`, the current framework-worker stalled-snapshot, database
+transaction-deadline, reclaimed/cancelled attempt and queue-selection tests
+passed 8/8 against a fresh disposable PostGIS 17 database. The stalled snapshot
+test observed a failed timed-out turn and a following turn completing before
+the held operation was released; the transaction test checked database lock
+release at the injected deadline. The command was `dotnet test
+tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj --no-build
+--no-restore -m:1 -nr:false -p:WasmBuildNative=false --filter
+'FullyQualifiedName~FrameworkWorkerTimesOutStalledSnapshotAndProcessesNextTurn|FullyQualifiedName~SnapshotTransactionDeadlineReleasesSessionLockWhenClientStalls|FullyQualifiedName~FencedQueueSelectionRejectsUnrecognizedShapes|FullyQualifiedName~CaseResultSnapshotRejectsReclaimedOrCancelledAttempts'
+--logger 'trx;LogFileName=ellai-timeout-current-20261104.trx' --logger
+'console;verbosity=normal'`, with `OS=Windows_NT` and the dedicated framework
+PostgreSQL fixture enabled. The TRX is retained under the integration test
+project's `TestResults`, and the disposable database container was removed.
+Custom stores and location seeding still rely on cooperative cancellation;
+these tests do not establish a hard stop for those paths or deployed behavior.
