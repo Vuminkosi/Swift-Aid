@@ -15,8 +15,7 @@ public sealed record CaseTimelineRow(
     string ActorId,
     DateTimeOffset? OccurredAtUtc,
     DateTimeOffset RecordedAtUtc,
-    int SchemaVersion,
-    string? ActorDisplayLabel = null);
+    int SchemaVersion);
 
 /// <summary>Persistence port for the authorized timeline read. Cursor pages arrive newest-first.</summary>
 public interface ICaseTimelineStore
@@ -33,6 +32,10 @@ public interface ICaseTimelineStore
     Task<Guid?> GetPromotingReceiptAsync(Guid caseId, CancellationToken ct);
 
     Task<IReadOnlyList<CaseCollaboratorGrantView>> GetCollaboratorsAsync(Guid caseId, CancellationToken ct);
+
+    /// <summary>Minimum attribution metadata for the original report event; no actor ID or report content.</summary>
+    Task<CaseReportAttributionRow?> GetReportAttributionAsync(Guid caseId, CancellationToken ct) =>
+        Task.FromResult<CaseReportAttributionRow?>(null);
 }
 
 public interface ICaseTimelineQuery
@@ -181,8 +184,7 @@ public sealed class CaseTimelineQuery(
         row.ActorId,
         row.OccurredAtUtc,
         row.RecordedAtUtc,
-        row.SchemaVersion,
-        row.ActorDisplayLabel);
+        row.SchemaVersion);
 
     private static string LabelFor(string eventType, int schemaVersion) => eventType switch
     {

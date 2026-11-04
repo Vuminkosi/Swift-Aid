@@ -239,7 +239,7 @@ public sealed class EllaiToolBroker
     private readonly ICaseQueueQuery? _queue;
     private readonly ICaseOccurrenceLocationQuery? _occurrenceLocations;
     private readonly ICaseReportReadQuery? _caseReports;
-    private readonly ICaseTimelineQuery? _caseTimeline;
+    private readonly ICaseReportAttributionQuery? _caseAttributions;
     private readonly IEllaiApprovalStore? _receipts;
     private readonly EllaiTopicService? _topics;
     private readonly IEllaiExactReferenceIndex? _referenceIndex;
@@ -276,7 +276,7 @@ public sealed class EllaiToolBroker
         SwiftAid.Application.Surveillance.ISignalReviewService? signals = null,
         EllaiUiAuthorityResolver? uiAuthority = null, IEllaiExactReferenceIndex? referenceIndex = null,
         IDashboardAggregateQuery? dashboard = null, ICaseOccurrenceLocationQuery? occurrenceLocations = null,
-        ICaseReportReadQuery? caseReports = null, ICaseTimelineQuery? caseTimeline = null)
+        ICaseReportReadQuery? caseReports = null, ICaseReportAttributionQuery? caseAttributions = null)
     {
         _policy = policy ?? throw new ArgumentNullException(nameof(policy));
         _consent = consent ?? throw new ArgumentNullException(nameof(consent));
@@ -284,7 +284,7 @@ public sealed class EllaiToolBroker
         _queue = queue;
         _occurrenceLocations = occurrenceLocations;
         _caseReports = caseReports;
-        _caseTimeline = caseTimeline;
+        _caseAttributions = caseAttributions;
         _receipts = receipts;
         _topics = topics;
         _referenceIndex = referenceIndex;
@@ -538,13 +538,13 @@ public sealed class EllaiToolBroker
         if (field == "observations" && _caseReports is null)
             return Deny(request.ToolName, "Authorized report observations are unavailable for this session.",
                 EllaiToolReasonCodes.Unavailable);
-        if (field == "submitter" && _caseTimeline is null)
+        if (field == "submitter" && _caseAttributions is null)
             return Deny(request.ToolName, "Authorized case attribution is unavailable for this session.",
                 EllaiToolReasonCodes.Unavailable);
 
         try
         {
-            var result = await new EllaiCaseResultMemory(_topics, _queue, referenceIndex, _occurrenceLocations, _caseReports, _caseTimeline)
+            var result = await new EllaiCaseResultMemory(_topics, _queue, referenceIndex, _occurrenceLocations, _caseReports, _caseAttributions)
                 .RecallAsync(context, ct, field, classificationFilter,
                     original: request.Arguments["ref"] == EllaiCaseResultMemory.OriginalReference,
                     country: country, placeId: placeId, caseId: selectedCaseId).ConfigureAwait(false);

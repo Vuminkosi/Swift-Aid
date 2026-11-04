@@ -10,7 +10,7 @@ namespace SwiftAid.Application.Ellai;
 /// every recall uses the ordinary owner-filtered, per-case authorized query.</summary>
 public sealed class EllaiCaseResultMemory(EllaiTopicService topics, ICaseQueueQuery queue,
     IEllaiExactReferenceIndex? index = null, ICaseOccurrenceLocationQuery? occurrenceLocations = null,
-    ICaseReportReadQuery? caseReports = null, ICaseTimelineQuery? caseTimeline = null)
+    ICaseReportReadQuery? caseReports = null, ICaseReportAttributionQuery? caseAttributions = null)
 {
     public const string Reference = "case-results";
     public const string OriginalReference = "case-results-original";
@@ -225,32 +225,21 @@ public sealed class EllaiCaseResultMemory(EllaiTopicService topics, ICaseQueueQu
         }
         if (field == "submitter")
         {
-            if (caseTimeline is null) return Unavailable();
+            if (caseAttributions is null) return Unavailable();
             var attributions = new List<(Guid CaseId, Guid EventId, long Version, string? DisplayName, bool GuestIntake)>();
             var attributionIncomplete = false;
             foreach (var pair in rows)
             {
                 ct.ThrowIfCancellationRequested();
-                var timeline = await caseTimeline.GetAsync(context.Actor, pair.row.CaseId, 500, ct).ConfigureAwait(false);
+                var attributionResult = await caseAttributions.GetAsync(context.Actor, pair.row.CaseId, ct).ConfigureAwait(false);
                 ct.ThrowIfCancellationRequested();
-                if (timeline.Access != CaseTimelineAccess.Found || timeline.Timeline is not { } currentTimeline)
+                if (attributionResult.Access != CaseReportAttributionAccess.Found || attributionResult.Attribution is not { } attribution)
                 {
                     attributionIncomplete = true;
                     continue;
                 }
-                var reportEvent = currentTimeline.Entries.FirstOrDefault(item => item.Kind == CaseTimelineEntryKind.Authoritative &&
-                    item.EventType == "CaseReported");
-                var guestIntake = currentTimeline.Entries.Any(item => item.Kind == CaseTimelineEntryKind.Derived &&
-                    item.EventType == "IntakePromoted");
-                if (reportEvent is null)
-                {
-                    attributionIncomplete = true;
-                    continue;
-                }
-                if (currentTimeline.HasOlderEntries)
-                    attributionIncomplete = true;
-                attributions.Add((pair.row.CaseId, reportEvent.EventId, reportEvent.AggregateVersion,
-                    reportEvent.SafeActorDisplayLabel, guestIntake));
+                attributions.Add((pair.row.CaseId, attribution.EventId, attribution.AggregateVersion,
+                    attribution.ActorDisplayName, attribution.IsPromotedGuestIntake));
             }
             var attributionEvidence = attributions.Select(item => new EvidenceRef("CaseTimeline", item.CaseId.ToString("D"),
                 item.Version.ToString(CultureInfo.InvariantCulture), "submitter", item.EventId.ToString("D"))).ToArray();

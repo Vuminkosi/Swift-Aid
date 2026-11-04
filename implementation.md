@@ -4533,3 +4533,9 @@ PASS: Application, Infrastructure, and Gateway builds; zero warnings and errors.
 The retained evidence tool accepts field=submitter and a canonical case_id to answer attribution for one case from the retained result set. The broker rejects case IDs outside the supported field contract, and the retained query verifies set membership before reauthorizing the case through ICaseTimelineQuery. The timeline store joins the CaseReported actor to a safe profile display label; the tool never uses the opaque actor ID as a name. For promoted guest intake, the output identifies the accepting staff member separately and states that the original guest submitter identity is unavailable. The reasoning prompt directs Ellai to use this exact case-scoped read and avoid equating the accepting officer with the source submitter. Replay hashes include the safe attribution projection but do not persist the display label in the provenance digest.
 
 PASS: Application, Infrastructure, and Gateway builds; zero warnings and errors. PASS: git diff --check. No tests added or run. NOT VERIFIED: live authorized case attribution, provider selection, browser/session replay, or deployed behavior.
+
+### Retained attribution query minimization (2026-11-04)
+
+The submitter projection now uses ICaseReportAttributionQuery instead of loading a full 500-entry timeline per case. One focused store query returns the CaseReported event ID/version, an allowed display name, and an EXISTS result for intake promotion; the query is wrapped in a current ReadCase lease. Actor IDs and report content are excluded. This reduces unnecessary event reads and keeps attribution-specific data inside the authorized projection.
+
+PASS: Application, Infrastructure, and Gateway builds; zero warnings and errors. PASS: git diff --check. No tests added or run. NOT VERIFIED: live PostgreSQL query plan, live attribution data, browser/provider behavior, or deployment.

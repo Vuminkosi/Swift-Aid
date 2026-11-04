@@ -91,11 +91,11 @@ public sealed class PostgresCaseTimelineStore(SwiftAidDbContext dbContext) : ICa
             events = events.Where(item => item.AggregateVersion < cursor);
         }
 
-        var rows = await (from item in events
-            join profile in _dbContext.UserProfiles.AsNoTracking() on item.ActorId equals profile.UserId into profiles
-            from profile in profiles.DefaultIfEmpty()
-            orderby item.AggregateVersion descending, item.RecordedAtUtc descending
-            select new CaseTimelineRow(
+        var rows = await events
+            .OrderByDescending(item => item.AggregateVersion)
+            .ThenByDescending(item => item.RecordedAtUtc)
+            .Take(limit)
+            .Select(item => new CaseTimelineRow(
                 item.EventId,
                 item.EventType,
                 item.AggregateVersion,
@@ -104,9 +104,7 @@ public sealed class PostgresCaseTimelineStore(SwiftAidDbContext dbContext) : ICa
                 item.ActorId,
                 item.OccurredAtUtc,
                 item.RecordedAtUtc,
-                item.SchemaVersion,
-                item.EventType == "CaseReported" && profile != null ? profile.DisplayName : null))
-            .Take(limit)
+                item.SchemaVersion))
             .ToArrayAsync(ct).ConfigureAwait(false);
         return rows;
     }
@@ -116,4 +114,16 @@ public sealed class PostgresCaseTimelineStore(SwiftAidDbContext dbContext) : ICa
             .Where(item => item.CaseId == caseId)
             .Select(item => (Guid?)item.ReceiptId)
             .SingleOrDefaultAsync(ct);
+
+    public async Task<CaseReportAttributionRow?> GetReportAttributionAsync(Guid caseId, CancellationToken ct)
+    {
+        return await (from item in _dbContext.CaseEvents.AsNoTracking()
+                      where item.CaseId == caseId && item.EventType == "CaseReported"
+                      join profile in _dbContext.UserProfiles.AsNoTracking() on item.ActorId equals profile.UserId into profiles
+                      from profile in profiles.DefaultIfEmpty()
+                      select new CaseReportAttributionRow(item.EventId, item.AggregateVersion,
+                          profile == null ? null : profile.DisplayName,
+                          _dbContext.IntakePromotions.AsNoTracking().Any(promotion => promotion.CaseId == caseId)))
+            .SingleOrDefaultAsync(ct).ConfigureAwait(false);
+    }
 }
