@@ -9,12 +9,17 @@ public sealed record ReportVoiceFieldProposal(string Field, string Value, string
 
 public sealed record ReportVoiceExtractionResult(
     IReadOnlyList<ReportVoiceFieldProposal> Fields,
-    bool Available);
+    bool Available)
+{
+    [JsonIgnore] public int PromptTokens { get; init; }
+    [JsonIgnore] public int CompletionTokens { get; init; }
+}
 
 /// <summary>Extracts bounded, source-grounded report suggestions without changing a report or an Ellai session.</summary>
 public sealed class ReportVoiceExtraction(IEllaiTurnCompletionClient completions)
 {
-    private const int MaximumTranscriptLength = 6000;
+    public const int MaximumTranscriptLength = 6000;
+    public const int MaximumCompletionTokens = 1500;
     private static readonly HashSet<string> SupportedFields = new(StringComparer.Ordinal)
     {
         "subject", "age", "gender", "observation", "time", "locality", "region", "country"
@@ -43,12 +48,19 @@ public sealed class ReportVoiceExtraction(IEllaiTurnCompletionClient completions
                 "or guess missing details. Exclude ambiguous or conflicting details. Return an empty array if none. " +
                 "These are suggestions for a person to review, never confirmed facts."),
             new("user", JsonSerializer.Serialize(new { transcript }, Json))
-        ], 1500, cancellationToken).ConfigureAwait(false);
+        ], MaximumCompletionTokens, cancellationToken).ConfigureAwait(false);
+
+        ReportVoiceExtractionResult Result(IReadOnlyList<ReportVoiceFieldProposal> fields, bool available) =>
+            new(fields, available)
+            {
+                PromptTokens = Math.Max(0, completion.PromptTokens),
+                CompletionTokens = Math.Max(0, completion.CompletionTokens)
+            };
 
         if (completion.Text.Length > 16000 ||
             string.Equals(completion.FinishReason, "length", StringComparison.OrdinalIgnoreCase))
         {
-            return new([], false);
+            return Result([], false);
         }
 
         try
@@ -56,7 +68,7 @@ public sealed class ReportVoiceExtraction(IEllaiTurnCompletionClient completions
             var response = JsonSerializer.Deserialize<ExtractionEnvelope>(completion.Text, Json);
             if (response?.Fields is null || response.Fields.Count > 24)
             {
-                return new([], false);
+                return Result([], false);
             }
 
             var fields = new List<ReportVoiceFieldProposal>();
@@ -68,17 +80,17 @@ public sealed class ReportVoiceExtraction(IEllaiTurnCompletionClient completions
                     !transcript.Contains(item.Evidence, StringComparison.Ordinal) ||
                     !item.Evidence.Contains(item.Value, StringComparison.Ordinal))
                 {
-                    return new([], false);
+                    return Result([], false);
                 }
 
                 fields.Add(new(item.Field, item.Value, item.Evidence));
             }
 
-            return new(fields, true);
+            return Result(fields, true);
         }
         catch (JsonException)
         {
-            return new([], false);
+            return Result([], false);
         }
     }
 
