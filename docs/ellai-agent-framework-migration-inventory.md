@@ -190,6 +190,14 @@ published the translated authorized answer, while withholding the translated
 answer after synthetic grant expiry. This checks the service contract and
 authorization boundary, not translation quality, live Muse in the same run,
 or deployed Gateway behavior.
+The two worker count cases were then run with live Muse and real NLLB together
+against synthetic disposable PostGIS records. Both passed 2/2: the authorized
+translated count was committed and delivered, and the count was withheld when
+its grant expired after translation. The revoked case passed 1/1 again after
+commit. The opt-in command filtered `LiveMuseAndNllbWorker` in the integration
+project with `ELLAI_LIVE=1`, the dedicated PostgreSQL fixture, the configured
+provider and the local language relay. This is local integration evidence,
+not a translation-quality, production deployment or broad reliability test.
 
 ## Provider observations and open checks
 
