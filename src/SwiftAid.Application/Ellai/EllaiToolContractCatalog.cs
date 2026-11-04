@@ -40,6 +40,8 @@ public static class EllaiToolContractCatalog
             ["case_id"] = "Canonical case identifier.",
             ["window_days"] = "Required whole-day lookback window from 1 to 365 days.",
             ["status"] = "Optional public session status: Scheduled, Completed, or Cancelled.",
+            ["jurisdiction"] = "Exact jurisdiction of the approved source.",
+            ["language"] = "Exact language of the approved source.",
         };
 
     private static readonly IReadOnlyDictionary<string, IReadOnlyList<string>> AllowedValues =
@@ -75,6 +77,7 @@ public static class EllaiToolContractCatalog
             [EllaiToolNames.SurveillanceSignals] = Contract(EllaiToolNames.SurveillanceSignals, ("case_id", true)),
             [EllaiToolNames.OwnedCaseCount] = Contract(EllaiToolNames.OwnedCaseCount, ("window_days", true)),
             [EllaiToolNames.OwnedRegionCounts] = Contract(EllaiToolNames.OwnedRegionCounts),
+            [EllaiToolNames.ApprovedHealthSources] = Contract(EllaiToolNames.ApprovedHealthSources, ("topic", true), ("jurisdiction", true), ("language", true)),
             [EllaiToolNames.CaseTimeline] = Contract(EllaiToolNames.CaseTimeline, ("case_id", true)),
             [EllaiToolNames.PublicSessions] = Contract(EllaiToolNames.PublicSessions, ("status", false)),
         });

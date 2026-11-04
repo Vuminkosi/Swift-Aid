@@ -9,7 +9,7 @@ public sealed class EllaiFrameworkExecutor(
     EllaiUsageLedger ledger, IEllaiUsageStore usageStore, TimeSpan? toolTimeout = null,
     IEllaiFrameworkAgentFactory? agentFactory = null, bool enableKnowledgeSpecialist = false,
     bool enableCaseSpecialist = false, bool enableAnalyticsSpecialist = false, bool enableUiSpecialist = false,
-    bool enableGeospatialSpecialist = false, bool enableWorkflowSpecialist = false, bool enableCommunitySessionsSpecialist = false, bool enableSurveillanceSpecialist = false, bool enableReportingSpecialist = false, bool enableSpatialSpecialist = false) : IEllaiReasoningExecutor, IEllaiHistoryAuthorizationRequired
+    bool enableGeospatialSpecialist = false, bool enableWorkflowSpecialist = false, bool enableCommunitySessionsSpecialist = false, bool enableSurveillanceSpecialist = false, bool enableReportingSpecialist = false, bool enableSpatialSpecialist = false, bool enableHealthResearchSpecialist = false) : IEllaiReasoningExecutor, IEllaiHistoryAuthorizationRequired
 {
     private static readonly System.Text.Json.JsonSerializerOptions CompactTraceJson = new()
     {
@@ -186,7 +186,7 @@ public sealed class EllaiFrameworkExecutor(
                     enableUiSpecialist: enableUiSpecialist, enableGeospatialSpecialist: enableGeospatialSpecialist,
                     enableWorkflowSpecialist: enableWorkflowSpecialist, enableCommunitySessionsSpecialist: enableCommunitySessionsSpecialist,
                     enableSurveillanceSpecialist: enableSurveillanceSpecialist, enableReportingSpecialist: enableReportingSpecialist,
-                    enableSpatialSpecialist: enableSpatialSpecialist).ConfigureAwait(false);
+                    enableSpatialSpecialist: enableSpatialSpecialist, enableHealthResearchSpecialist: enableHealthResearchSpecialist).ConfigureAwait(false);
             }
             catch (EllaiFrameworkFailureException failure) when (failure.Code is not ("ProviderUnavailable" or "UsageUnavailable"))
             {

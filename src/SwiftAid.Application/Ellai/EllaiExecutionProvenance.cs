@@ -34,7 +34,8 @@ public sealed record EllaiObservedToolResult(
     EllaiClassificationReplayScope? ClassificationReplayScope = null,
     string? ImportDestinationsDigest = null,
     EllaiLocationReplayScope? LocationReplayScope = null, string? PublicSessionsDigest = null,
-    string? PublicSessionsStatus = null, EllaiSignalReplayScope? SignalReplayScope = null)
+    string? PublicSessionsStatus = null, EllaiSignalReplayScope? SignalReplayScope = null,
+    EllaiLocationReplayScope? HealthSourceReplayScope = null)
 {
     public const string CurrentStaticFeatureVersion = "state-feature/1";
     public const string CurrentClockVersion = "server-clock/1";
@@ -132,7 +133,11 @@ public sealed record EllaiObservedToolResult(
                 request.Arguments.Count == 1 && request.Arguments.TryGetValue("case_id", out var signalCaseId) &&
                 Guid.TryParseExact(signalCaseId, "D", out var signalCase) && signalCase != Guid.Empty &&
                 result.Evidence.All(reference => reference.SourceKind == "SurveillanceSignal" && reference.ResourceId == signalCase.ToString("D"))
-                    ? new EllaiSignalReplayScope(signalCase, ResultFingerprint(result)) : null);
+                    ? new EllaiSignalReplayScope(signalCase, ResultFingerprint(result)) : null,
+            request.ToolName == EllaiToolNames.ApprovedHealthSources && result.ToolName == request.ToolName && result.Allowed &&
+                result.DenialReason is null && result.ReasonCode == EllaiToolReasonCodes.Ok && !result.Truncated &&
+                result.HealthSourceReplayScope is { } healthScope && healthScope.IsValid() &&
+                healthScope.ResultDigest == ResultFingerprint(result) ? healthScope : null);
     }
 
     public static bool IsPublicSessionStatus(string? status) => status is "Scheduled" or "Completed" or "Cancelled";

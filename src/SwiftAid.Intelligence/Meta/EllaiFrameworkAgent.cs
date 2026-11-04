@@ -37,7 +37,7 @@ public sealed class EllaiFrameworkAgent
         bool enableKnowledgeSpecialist = false, bool enableCaseSpecialist = false, bool enableAnalyticsSpecialist = false,
         bool allowEmptyCaseQueue = false, bool enableUiSpecialist = false, bool enableGeospatialSpecialist = false,
         bool enableWorkflowSpecialist = false, bool enableCommunitySessionsSpecialist = false, bool enableSurveillanceSpecialist = false,
-        bool enableReportingSpecialist = false, bool enableSpatialSpecialist = false)
+        bool enableReportingSpecialist = false, bool enableSpatialSpecialist = false, bool enableHealthResearchSpecialist = false)
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentException.ThrowIfNullOrWhiteSpace(instructions);
@@ -78,6 +78,8 @@ public sealed class EllaiFrameworkAgent
         EllaiToolRequest? countRequest = null;
         EllaiToolResult? spatialResult = null;
         EllaiToolRequest? spatialRequest = null;
+        EllaiToolResult? healthSourceResult = null;
+        EllaiToolRequest? healthSourceRequest = null;
         EllaiToolResult? emptyQueueResult = null;
         EllaiToolRequest? emptyQueueRequest = null;
         var toolCalls = 0;
@@ -110,6 +112,11 @@ public sealed class EllaiFrameworkAgent
                     spatialResult = result;
                     spatialRequest = request;
                 }
+                if (request.ToolName == EllaiToolNames.ApprovedHealthSources && result.Allowed)
+                {
+                    healthSourceResult = result;
+                    healthSourceRequest = request;
+                }
                 if ((enableCaseSpecialist || allowEmptyCaseQueue) && IsEmptyQueueObservation(request, result))
                 {
                     emptyQueueResult = result;
@@ -130,7 +137,7 @@ public sealed class EllaiFrameworkAgent
             var result = await guard.InvokeAsync(toolContext, request, token).ConfigureAwait(false);
             // Only stop after the guard's post-call authorization has passed.
             // The final count is constructed from a fresh authorized read below.
-            if (((request.ToolName == EllaiToolNames.OwnedCaseCount || request.ToolName == EllaiToolNames.OwnedRegionCounts) && result.Allowed ||
+            if (((request.ToolName == EllaiToolNames.OwnedCaseCount || request.ToolName == EllaiToolNames.OwnedRegionCounts || request.ToolName == EllaiToolNames.ApprovedHealthSources) && result.Allowed ||
                  (enableCaseSpecialist || allowEmptyCaseQueue) && IsEmptyQueueObservation(request, result)) && toolCalls == 1 &&
                 FunctionInvokingChatClient.CurrentContext is { FunctionCount: 1 } invocation)
                 invocation.Terminate = true;
@@ -262,6 +269,35 @@ public sealed class EllaiFrameworkAgent
             }
             tools.Add(AIFunctionFactory.Create(DelegateAnalytics, name: "ellai_delegate_analytics",
                 description: "Delegate one authorized owned-case count with an explicit 1 to 365 day window."));
+        }
+        if (enableHealthResearchSpecialist && context.Actor is not null && context.AllowedTools?.Contains(EllaiToolNames.ApprovedHealthSources) == true)
+        {
+            var delegationCount = 0;
+            async Task<string> DelegateHealthResearch(string topic, string jurisdiction, string language, CancellationToken token)
+            {
+                token.ThrowIfCancellationRequested();
+                if (Interlocked.Increment(ref delegationCount) != 1) return "Health-source delegation limit reached.";
+                using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
+                deadline.CancelAfter(TimeSpan.FromSeconds(SwiftAid.Application.Ellai.Specialists.EllaiSpecialistRegistry.TryGet(
+                    SwiftAid.Application.Ellai.Specialists.EllaiSpecialistRegistry.HealthResearch, out var profile) ? profile.TimeoutSeconds : 1));
+                try
+                {
+                    var result = await new EllaiHealthResearchSpecialist().RunAsync(topic, jurisdiction, language, true, context, usage,
+                        Current, InvokeGuardedTool, revalidateTool ?? invoke, deadline.Token).ConfigureAwait(false);
+                    if (result.Outcome != EllaiSpecialistOutcome.Completed || result.Decision is null)
+                    { Interlocked.Exchange(ref invalidDelegation, 1); return "Approved source references could not be verified."; }
+                    var json = System.Text.Json.JsonSerializer.Serialize(result.Decision);
+                    if (json.Length <= 12000) return json;
+                    Interlocked.Exchange(ref invalidDelegation, 1);
+                    return "Approved source references exceeded their limit.";
+                }
+                catch (OperationCanceledException) when (!token.IsCancellationRequested && deadline.IsCancellationRequested)
+                { Interlocked.Exchange(ref invalidDelegation, 1); return "Approved source search timed out."; }
+                catch (EllaiFrameworkFailureException)
+                { Interlocked.Exchange(ref invalidDelegation, 1); return "Approved source references could not be retrieved."; }
+            }
+            tools.Add(AIFunctionFactory.Create(DelegateHealthResearch, name: "ellai_delegate_health_research",
+                description: "List approved source references for an exact topic, jurisdiction, and language. Do not generate advice or health education."));
         }
         if (enableSpatialSpecialist && context.Actor is not null && context.AllowedTools?.Contains(EllaiToolNames.OwnedRegionCounts) == true)
         {
@@ -624,7 +660,7 @@ public sealed class EllaiFrameworkAgent
         if (Volatile.Read(ref invalidDelegation) != 0) { LastFailureCode = EllaiToolReasonCodes.DeniedByPolicy; return null; }
         EllaiDecision? decision = null;
         if (guard.FailureCode is not null) { LastFailureCode = guard.FailureCode; return null; }
-        while (countResult is null && spatialResult is null && emptyQueueResult is null)
+        while (countResult is null && spatialResult is null && healthSourceResult is null && emptyQueueResult is null)
         {
             LastModelCallCount = guardedClient.CallSequence + Volatile.Read(ref delegatedModelCalls);
             if (guard.FailureCode is not null) { LastFailureCode = guard.FailureCode; return null; }
@@ -661,6 +697,40 @@ public sealed class EllaiFrameworkAgent
                     session, cancellationToken: ct).ConfigureAwait(false);
             }
             finally { LastModelCallCount = guardedClient.CallSequence + Volatile.Read(ref delegatedModelCalls); }
+        }
+        if (healthSourceResult is not null)
+        {
+            if (streamedSegments.Count != 0 || toolCalls != 1 || healthSourceRequest is null || healthSourceResult.Truncated ||
+                healthSourceResult.HealthSourceReplayScope is not { } originalScope || !originalScope.IsValid() ||
+                healthSourceResult.Evidence.Count != 1 || healthSourceResult.Evidence[0] is not
+                    { SourceKind: "HealthSourceRegistry", ResourceId: "approved-sources", Version: "metadata/1" } ||
+                !await Current(ct).ConfigureAwait(false))
+            { LastFailureCode = EllaiToolReasonCodes.Unavailable; return null; }
+            async Task<EllaiToolResult> ReadCurrentSources(CancellationToken token) =>
+                await (revalidateTool ?? invoke)(context, healthSourceRequest, token).ConfigureAwait(false);
+            var fresh = await ReadCurrentSources(ct).ConfigureAwait(false);
+            if (!fresh.Allowed || fresh.Truncated || !fresh.Evidence.SequenceEqual(healthSourceResult.Evidence) ||
+                EllaiObservedToolResult.ResultFingerprint(fresh) != originalScope.ResultDigest || !await Current(ct).ConfigureAwait(false))
+            { LastFailureCode = EllaiToolReasonCodes.Unavailable; return null; }
+            decision = new EllaiDecision(EllaiDecision.CurrentSchemaVersion, DecisionKind.Answer,
+                fresh.ResultSummary, fresh.ResultSummary,
+                [new GroundedClaim("approved-health-sources", fresh.ResultSummary, ClaimKind.Observed, fresh.Evidence)],
+                [], [], null, [], null, null);
+            if (EllaiDecisionValidator.Validate(decision).Count != 0)
+            { LastFailureCode = EllaiToolReasonCodes.Unavailable; return null; }
+            async Task<bool> SourcePublicationCurrent(CancellationToken token)
+            {
+                if (!await Current(token).ConfigureAwait(false)) return false;
+                var current = await ReadCurrentSources(token).ConfigureAwait(false);
+                return current.Allowed && !current.Truncated && current.Evidence.SequenceEqual(fresh.Evidence) &&
+                    EllaiObservedToolResult.ResultFingerprint(current) == originalScope.ResultDigest && await Current(token).ConfigureAwait(false);
+            }
+            if (onTextDelta is not null && !await PublishValidatedTextAsync(decision.DisplayText, onTextDelta, SourcePublicationCurrent, ct).ConfigureAwait(false))
+            { LastFailureCode = EllaiToolReasonCodes.DeniedByPolicy; return null; }
+            if (!await SourcePublicationCurrent(ct).ConfigureAwait(false))
+            { LastFailureCode = EllaiToolReasonCodes.DeniedByPolicy; return null; }
+            await SaveSessionAsync().ConfigureAwait(false);
+            return decision;
         }
         if (spatialResult is not null)
         {

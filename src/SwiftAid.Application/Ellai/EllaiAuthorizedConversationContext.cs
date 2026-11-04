@@ -79,6 +79,26 @@ public static class EllaiAuthorizedConversationContext
                     observation.CapabilityVersion == EllaiObservedToolResult.CurrentCapabilityVersion &&
                     observation.ReasonCode == EllaiToolReasonCodes.Ok && observation.Evidence.Count == 0)
                     continue;
+                if (observation.ToolName == EllaiToolNames.ApprovedHealthSources)
+                {
+                    var scope = observation.HealthSourceReplayScope;
+                    if (scope is null || !scope.IsValid() || observation.ReasonCode != EllaiToolReasonCodes.Ok || observation.Truncated ||
+                        toolContext is null || invokeTool is null || locationReplayProtector is null || toolContext.SessionId != turn.SessionId ||
+                        toolContext.Actor is null || toolContext.Actor.ActorId != actor.ActorId || toolContext.Actor.AccessEpoch != actor.AccessEpoch)
+                        return decisions[turn.ClientUtteranceId] = false;
+                    try
+                    {
+                        var arguments = locationReplayProtector.Unprotect(toolContext, scope.ProtectedArguments);
+                        if (arguments is null) return decisions[turn.ClientUtteranceId] = false;
+                        var current = await invokeTool(toolContext, new EllaiToolRequest(EllaiToolNames.ApprovedHealthSources, arguments), ct).ConfigureAwait(false);
+                        if (!current.Allowed || current.Truncated || !current.Evidence.SequenceEqual(observation.Evidence) ||
+                            EllaiObservedToolResult.ResultFingerprint(current) != scope.ResultDigest)
+                            return decisions[turn.ClientUtteranceId] = false;
+                    }
+                    catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+                    catch (Exception error) when (error is not OutOfMemoryException) { return decisions[turn.ClientUtteranceId] = false; }
+                    continue;
+                }
                 if (observation.ToolName == EllaiToolNames.OwnedRegionCounts)
                 {
                     if (observation.ReasonCode != EllaiToolReasonCodes.Ok || observation.Truncated || observation.Evidence.Count != 1 ||
