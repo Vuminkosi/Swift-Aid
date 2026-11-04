@@ -17,7 +17,7 @@ public sealed class EllaiSpecialistRegistryTests
         Assert.Equal(parent.SessionId, child.SessionId);
         Assert.Equal(parent.ScopeEpoch, child.ScopeEpoch);
         Assert.Equal(parent.Actor, child.Actor);
-        Assert.Equal(parent.RemainingCalls, child.RemainingCalls);
+        Assert.Equal(2, child.RemainingCalls);
     }
 
     [Fact]
@@ -27,6 +27,14 @@ public sealed class EllaiSpecialistRegistryTests
         Assert.False(EllaiSpecialistRegistry.TryCreateToolContext(EllaiSpecialistRegistry.Knowledge, false, parent, out _));
         Assert.False(EllaiSpecialistRegistry.TryCreateToolContext("unknown", true, parent, out _));
         Assert.False(EllaiSpecialistRegistry.TryCreateToolContext(EllaiSpecialistRegistry.Knowledge, true, Context(null), out _));
+    }
+
+    [Fact]
+    public void SpecialistCannotIncreaseParentBudget()
+    {
+        var parent = Context(new HashSet<string> { EllaiToolNames.DocsSearch }) with { RemainingCalls = 1 };
+        Assert.True(EllaiSpecialistRegistry.TryCreateToolContext(EllaiSpecialistRegistry.Knowledge, true, parent, out var child));
+        Assert.Equal(1, child!.RemainingCalls);
     }
 
     private static EllaiToolContext Context(IReadOnlySet<string>? tools) =>

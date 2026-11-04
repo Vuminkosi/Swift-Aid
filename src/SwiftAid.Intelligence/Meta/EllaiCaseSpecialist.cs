@@ -26,7 +26,7 @@ public sealed class EllaiCaseSpecialist(IChatClient client, IEllaiFrameworkAgent
             context!.AllowedTools is not { Count: > 0 })
             return new(EllaiSpecialistOutcome.Denied, null);
 
-        context = context with { RemainingCalls = Math.Min(context.RemainingCalls, 2) };
+        if (!EllaiSpecialistRegistry.TryGet(EllaiSpecialistRegistry.Case, out var profile)) return new(EllaiSpecialistOutcome.Denied, null);
         var observations = new List<(EllaiToolRequest Request, EllaiToolResult Result)>();
         async Task<EllaiToolResult> InvokeCaseTool(EllaiToolContext child, EllaiToolRequest request, CancellationToken token)
         {
@@ -54,7 +54,7 @@ public sealed class EllaiCaseSpecialist(IChatClient client, IEllaiFrameworkAgent
                 "evidence copied exactly from the tool result: sourceKind, resourceId, version, fieldPath, evidenceId. " +
                 "Use empty arrays and null for unused fields.",
                 [new ChatMessage(ChatRole.User, task)], 2048, isCurrent, InvokeCaseTool, usage, ct,
-                revalidateTool: revalidate ?? invoke, maxModelCalls: 3, allowEmptyCaseQueue: true).ConfigureAwait(false);
+                revalidateTool: revalidate ?? invoke, maxModelCalls: profile.MaxModelCalls, allowEmptyCaseQueue: true).ConfigureAwait(false);
         }
         finally { onModelCalls?.Invoke(agent.LastModelCallCount); }
         var verifiedEmpty = observations.Count == 1 &&

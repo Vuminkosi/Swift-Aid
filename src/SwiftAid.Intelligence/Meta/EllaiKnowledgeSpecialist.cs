@@ -38,7 +38,7 @@ public sealed class EllaiKnowledgeSpecialist(IChatClient client, IEllaiFramework
             context!.AllowedTools is not { Count: > 0 })
             return new(EllaiSpecialistOutcome.Denied, null);
 
-        context = context with { RemainingCalls = Math.Min(context.RemainingCalls, 2) };
+        if (!EllaiSpecialistRegistry.TryGet(EllaiSpecialistRegistry.Knowledge, out var profile)) return new(EllaiSpecialistOutcome.Denied, null);
         var agent = new EllaiFrameworkAgent(client, agentFactory);
         EllaiDecision? decision;
         try
@@ -52,7 +52,7 @@ public sealed class EllaiKnowledgeSpecialist(IChatClient client, IEllaiFramework
                 "Each factual claim must have claimId, text, kind Observed, and evidence copied exactly from a tool result. " +
                 "Each evidence entry has sourceKind, resourceId, version, fieldPath and evidenceId. " +
                 "Use empty arrays for unused collections and null for unused optional values.",
-                [new ChatMessage(ChatRole.User, task)], 2048, isCurrent, invoke, usage, ct, maxModelCalls: 3).ConfigureAwait(false);
+                [new ChatMessage(ChatRole.User, task)], 2048, isCurrent, invoke, usage, ct, maxModelCalls: profile.MaxModelCalls).ConfigureAwait(false);
         }
         finally
         {

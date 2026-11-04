@@ -27,7 +27,7 @@ public sealed class EllaiAnalyticsSpecialist(IChatClient client, IEllaiFramework
             context!.AllowedTools is not { Count: > 0 })
             return new(EllaiSpecialistOutcome.Denied, null);
 
-        context = context with { RemainingCalls = Math.Min(context.RemainingCalls, 2) };
+        if (!EllaiSpecialistRegistry.TryGet(EllaiSpecialistRegistry.Analytics, out var profile)) return new(EllaiSpecialistOutcome.Denied, null);
         var agent = new EllaiFrameworkAgent(client, agentFactory);
         EllaiDecision? decision;
         try
@@ -38,7 +38,7 @@ public sealed class EllaiAnalyticsSpecialist(IChatClient client, IEllaiFramework
                 "Do not infer a window, calculate counts from samples, infer incidence, or invent evidence. " +
                 "If the window is missing, return a question instead of calling a tool.",
                 [new ChatMessage(ChatRole.User, task)], 1024, isCurrent, invoke, usage, ct,
-                revalidateTool: revalidate, maxModelCalls: 3).ConfigureAwait(false);
+                revalidateTool: revalidate, maxModelCalls: profile.MaxModelCalls).ConfigureAwait(false);
         }
         finally { onModelCalls?.Invoke(agent.LastModelCallCount); }
         if (decision is null || decision.Kind != DecisionKind.Answer || decision.Claims.Count != 1 ||

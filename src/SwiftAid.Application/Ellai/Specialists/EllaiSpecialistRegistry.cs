@@ -4,7 +4,7 @@ namespace SwiftAid.Application.Ellai.Specialists;
 
 /// <summary>A server-owned profile. A profile does not itself grant access to any tool.</summary>
 public sealed record EllaiSpecialistProfile(string AgentId, int Version, string FeatureFlag,
-    IReadOnlySet<string> ToolAllowlist);
+    IReadOnlySet<string> ToolAllowlist, int MaxToolCalls = 2, int MaxModelCalls = 3);
 
 /// <summary>Initial registry for bounded, read-only specialist work.</summary>
 public static class EllaiSpecialistRegistry
@@ -43,7 +43,7 @@ public static class EllaiSpecialistRegistry
         var allowed = profile.ToolAllowlist.Where(parent.AllowedTools.Contains)
             .Where(EllaiToolContractCatalog.All.ContainsKey)
             .ToFrozenSet(StringComparer.Ordinal);
-        specialist = parent with { AllowedTools = allowed };
+        specialist = parent with { AllowedTools = allowed, RemainingCalls = Math.Min(parent.RemainingCalls, profile.MaxToolCalls) };
         return true;
     }
 }
