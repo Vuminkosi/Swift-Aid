@@ -235,7 +235,7 @@ public static class EllaiAuthorizedConversationContext
                     if (queue is null || query is null || !query.IsValid() ||
                         observation.QueueProjectionVersion != EllaiObservedToolResult.CurrentQueueProjectionVersion)
                         return decisions[decisionKey] = false;
-                    if (query.PlaceId is not null || query.GroupBy is not null)
+                    if (query.PlaceId is not null || query.GroupBy is not null || query.ObservedTerm is not null)
                     {
                         if (toolContext is null || invokeTool is null || toolContext.SessionId != turn.SessionId ||
                             toolContext.Actor is null || toolContext.Actor.ActorId != actor.ActorId ||
@@ -254,6 +254,7 @@ public static class EllaiAuthorizedConversationContext
                             if (query.GroupBy is not null) arguments["group_by"] = query.GroupBy;
                             if (query.ReportedFrom is not null) arguments["reported_from"] = query.ReportedFrom;
                             if (query.ReportedBefore is not null) arguments["reported_before"] = query.ReportedBefore;
+                            if (query.ObservedTerm is not null) arguments["observed_term"] = query.ObservedTerm;
                             var request = new EllaiToolRequest(EllaiToolNames.State, arguments);
                             var current = await invokeTool(toolContext with { RevalidationOnly = true }, request, ct).ConfigureAwait(false);
                             ct.ThrowIfCancellationRequested();

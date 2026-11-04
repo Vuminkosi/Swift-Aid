@@ -9,7 +9,7 @@ namespace SwiftAid.Application.Ellai;
 /// formats and authorization after this structural validation.</summary>
 public static class EllaiToolContractCatalog
 {
-    public const int CurrentSchemaVersion = 5;
+    public const int CurrentSchemaVersion = 6;
 
     private const int ReferenceLength = 120;
     private const int ObservationJsonLength = 16_384;
@@ -24,9 +24,10 @@ public static class EllaiToolContractCatalog
             ["place_id"] = "Exact selected occurrence-place identifier from the geographic registry; provide the matching country.",
             ["workflow"] = "Recorded case workflow filter.",
             ["sort"] = "Supported queue ordering.",
-            ["group_by"] = "Optional authorized case grouping dimension; for retained evidence, groups only the exact earlier result set.",
+            ["group_by"] = "Optional authorized case grouping dimension; for retained evidence, groups only the exact earlier result set. Evidence also supports reported-day in UTC.",
             ["reported_from"] = "Inclusive UTC calendar date for managed-case creation/report time; use with reported_before.",
             ["reported_before"] = "Exclusive UTC calendar date for managed-case creation/report time; use with reported_from.",
+            ["observed_term"] = "Optional literal substring to match case-insensitively in currently authorized verbatim reported observations; it is not a diagnosis or clinical classifier.",
             ["field"] = "Optional country, workflow, verbatim reported observations or recorded submitter attribution for retained cases.",
             ["classification_filter"] = "Filter retained, currently authorized case results by recorded classified or unclassified status; does not return classifier labels or scores.",
             ["feature"] = "Feature identifier in the current authorized scope.",
@@ -59,7 +60,7 @@ public static class EllaiToolContractCatalog
             [EllaiToolNames.State] = Contract(EllaiToolNames.State,
                 ("projection", false), ("limit", false),
                 ("country", false), ("workflow", false), ("sort", false), ("place_id", false),
-                ("reported_from", false), ("reported_before", false), ("group_by", false)),
+                ("reported_from", false), ("reported_before", false), ("group_by", false), ("observed_term", false)),
             [EllaiToolNames.Evidence] = Contract(EllaiToolNames.Evidence, ("ref", true), ("field", false), ("classification_filter", false), ("group_by", false), ("country", false), ("place_id", false), ("case_id", false)),
             [EllaiToolNames.Topic] = Contract(EllaiToolNames.Topic, ("ref", true)),
             [EllaiToolNames.Capabilities] = Contract(EllaiToolNames.Capabilities, ("feature", false)),

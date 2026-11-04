@@ -188,7 +188,7 @@ public sealed class EllaiToolBroker
     /// consent applies only to explicitly consent-scoped processing lanes.</summary>
     private static readonly string[] ToolDescriptions =
     {
-        $"{EllaiToolNames.State}(projection=[feature|queue], limit=1..20, country?, workflow?, sort?, place_id?, reported_from?, reported_before?, group_by=[region|locality]?) — permitted feature or cases the actor may Search and ReadCase. country is an uppercase two-letter code (Zimbabwe=ZW, Eswatini=SZ); workflow is Reported, UnderReview, Active, AwaitingFollowUp or Resolved; sort=latest-reported or latest-updated. reported_from and reported_before are an inclusive/exclusive UTC date pair (YYYY-MM-DD), filter case creation/report time, and span at most 365 days; they are not occurrence dates. For an occurrence-place search, select an exact registry ID using ellai_locations and supply country, place_id and sort=latest-reported; workflow is not supported with place_id. To group by recorded region or locality, supply country and optionally workflow and report-date filters. Unknown locations and incomplete scans mean the displayed counts are partial. Reported is a recorded workflow, not proof that no human reviewed a case. For retained results, use ellai_evidence with classification_filter=Classified or Unclassified to check recorded status; this does not return classifier labels or establish a diagnosis.",
+        $"{EllaiToolNames.State}(projection=[feature|queue], limit=1..20, country?, workflow?, sort?, place_id?, reported_from?, reported_before?, observed_term?, group_by=[region|locality]?) — permitted feature or cases the actor may Search and ReadCase. country is an uppercase two-letter code (Zimbabwe=ZW, Eswatini=SZ); workflow is Reported, UnderReview, Active, AwaitingFollowUp or Resolved; sort=latest-reported or latest-updated. reported_from and reported_before are an inclusive/exclusive UTC date pair (YYYY-MM-DD), filter case creation/report time, and span at most 365 days; they are not occurrence dates. observed_term is a literal case-insensitive substring filter over verbatim report observations, not diagnosis or classification. For an occurrence-place search, select an exact registry ID using ellai_locations and supply country, place_id and sort=latest-reported; workflow is not supported with place_id. To group by recorded region or locality, supply country and optionally workflow and report-date filters. Unknown locations and incomplete scans mean the displayed counts are partial. Reported is a recorded workflow, not proof that no human reviewed a case. For retained results, use ellai_evidence with classification_filter=Classified or Unclassified to check recorded status; this does not return classifier labels or establish a diagnosis.",
         $"{EllaiToolNames.Evidence}(ref=[case-results|case-results-original], field=[country|workflow|observations|submitter]?, classification_filter=[Classified|Unclassified]?, group_by=[region|locality|reported-day]?, country?, place_id?, case_id?) — re-read retained cases under current access. Use group_by=region or locality after a case list when 'them' means those exact cases; use reported-day to group them by managed-case creation/report date in UTC. Grouping operates only on that retained set and returns case evidence references; it does not run a new search. Report-day grouping is not occurrence-time or symptom-onset grouping. The case data do not establish cross-case duplicate identity: unique case IDs prevent counting a retained case twice, but do not prove separately submitted reports are distinct events. field=observations returns only verbatim reported observations, labeled unverified reports and not diagnoses; field=submitter returns authorized recorded attribution and distinguishes promoted guest intake from its accepting staff member. Use case_id from the retained results to answer about one selected case; it must belong to that result set. Neither projection returns narrative or coordinates. Classification and exact place filters can combine with observations. Place filtering requires a selected registry ID and matching country. Reauthorizes each case; unavailable rows are omitted and marked incomplete.",
         $"{EllaiToolNames.Topic}(ref) — session topic candidates with checkpoints. Use ref=case-results for the latest retained list or case-results-original for the first retained list; never invent a remembered result set.",
         $"{EllaiToolNames.Capabilities}(feature?) — capability readiness, no credentials.",
@@ -708,8 +708,8 @@ public sealed class EllaiToolBroker
                 EllaiToolReasonCodes.InvalidArguments);
         }
 
-        if (request.Arguments.Keys.Any(key => key is not ("projection" or "limit" or "country" or "workflow" or "sort" or "place_id" or "reported_from" or "reported_before" or "group_by")))
-            return Deny(request.ToolName, "This queue supports country, workflow, sort, exact place, region or locality grouping and reported-date filters only.",
+        if (request.Arguments.Keys.Any(key => key is not ("projection" or "limit" or "country" or "workflow" or "sort" or "place_id" or "reported_from" or "reported_before" or "group_by" or "observed_term")))
+            return Deny(request.ToolName, "This queue supports country, workflow, sort, exact place, region or locality grouping, reported-date filters and literal reported-observation filtering only.",
                 EllaiToolReasonCodes.InvalidArguments);
 
         request.Arguments.TryGetValue("country", out var country);
@@ -719,6 +719,14 @@ public sealed class EllaiToolBroker
         request.Arguments.TryGetValue("reported_from", out var reportedFromText);
         request.Arguments.TryGetValue("reported_before", out var reportedBeforeText);
         request.Arguments.TryGetValue("group_by", out var groupBy);
+        request.Arguments.TryGetValue("observed_term", out var observedTerm);
+        if (observedTerm is not null && (observedTerm.Length is < 1 or > 80 || observedTerm != observedTerm.Trim() || observedTerm.Any(char.IsControl)))
+            return Deny(request.ToolName, "observed_term must be a trimmed literal substring of 1 to 80 printable characters.",
+                EllaiToolReasonCodes.InvalidArguments);
+        if (observedTerm is not null && _caseReports is null)
+            return Deny(request.ToolName, "Authorized report observations are unavailable for this session.", EllaiToolReasonCodes.Unavailable);
+        if (observedTerm is not null && (groupBy is not null || placeId is not null))
+            return Deny(request.ToolName, "observed_term cannot be combined with grouped or exact-place queue searches.", EllaiToolReasonCodes.InvalidArguments);
         if (!TryReportedRange(reportedFromText, reportedBeforeText, out var reportedFromUtc, out var reportedBeforeUtc))
             return Deny(request.ToolName, "reported_from and reported_before must be a valid inclusive/exclusive UTC date pair spanning at most 365 days.",
                 EllaiToolReasonCodes.InvalidArguments);
@@ -864,16 +872,46 @@ public sealed class EllaiToolBroker
                 EllaiToolReasonCodes.DeniedByPolicy);
         }
 
-        var items = result.Items.Take(limit).ToList();
-        if (items.Any(item => item.CaseId == Guid.Empty) || items.Select(item => item.CaseId).Distinct().Count() != items.Count)
+        var candidates = result.Items.Take(limit).ToList();
+        if (candidates.Any(item => item.CaseId == Guid.Empty) || candidates.Select(item => item.CaseId).Distinct().Count() != candidates.Count)
             return Deny(request.ToolName, "The work queue returned an inconsistent result. Try again.", EllaiToolReasonCodes.Unavailable);
+        var observationSearchIncomplete = false;
+        var items = candidates;
+        if (observedTerm is not null)
+        {
+            items = [];
+            foreach (var candidate in candidates)
+            {
+                ct.ThrowIfCancellationRequested();
+                CaseReportDetails? report;
+                try
+                {
+                    report = await _caseReports!.GetAsync(context.Actor, candidate.CaseId, ct).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+                catch (Exception error) when (error is not OutOfMemoryException)
+                {
+                    observationSearchIncomplete = true;
+                    continue;
+                }
+                ct.ThrowIfCancellationRequested();
+                if (report is null || report.CaseId != candidate.CaseId)
+                {
+                    observationSearchIncomplete = true;
+                    continue;
+                }
+                if (report.Observations.Any(observation => observation.Contains(observedTerm, StringComparison.OrdinalIgnoreCase)))
+                    items.Add(candidate);
+            }
+        }
         var recallNotice = "";
+        var queueSearchIncomplete = result.NextCursor is not null || result.Items.Count > limit;
         if (_topics is not null)
         {
             try
             {
                 await new EllaiCaseResultMemory(_topics, queue, _referenceIndex).RememberAsync(context, items, ct,
-                    searchIncomplete: result.NextCursor is not null || result.Items.Count > limit).ConfigureAwait(false);
+                    searchIncomplete: queueSearchIncomplete || observationSearchIncomplete).ConfigureAwait(false);
                 recallNotice = " Result references retained for this session; recall with ellai_topic(ref=case-results).";
             }
             catch (Exception error) when (error is not OperationCanceledException)
@@ -889,9 +927,12 @@ public sealed class EllaiToolBroker
         return new EllaiToolResult(request.ToolName, true, null, evidence,
             "Cases require current Search and ReadCase permission; review status is not supplied." +
             (reportedFromUtc is null ? string.Empty : $" Managed-case report time is from {reportedFromText} inclusive to {reportedBeforeText} exclusive (UTC); this is not event occurrence time.") +
+            (observedTerm is null ? string.Empty : $" Filtered to currently readable reports whose verbatim observation text contains the literal substring '{observedTerm}' (case-insensitive); this is not a diagnosis or inferred classification." +
+                (queueSearchIncomplete ? " The search checked only a bounded page and more cases remain, so additional matches may exist." : "") +
+                (observationSearchIncomplete ? " Some observations could not be checked, so matching cases may be missing." : "")) +
             recallNotice + "\n" +
-            (items.Count == 0 ? "The permitted work queue is empty." : string.Join("\n", lines)),
-            items.Count, result.NextCursor is not null || result.Items.Count > limit, EllaiToolReasonCodes.Ok);
+            (items.Count == 0 ? observedTerm is null ? "The permitted work queue is empty." : "No matching reported observations were found in the checked cases." : string.Join("\n", lines)),
+            items.Count, queueSearchIncomplete || observationSearchIncomplete, EllaiToolReasonCodes.Ok);
     }
 
     private static bool TryReportedRange(string? fromText, string? beforeText,
