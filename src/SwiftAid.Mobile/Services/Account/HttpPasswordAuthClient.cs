@@ -181,7 +181,7 @@ public sealed class HttpPasswordAuthClient(CookieSessionHttpClient session)
         }
         finally
         {
-            await _session.ClearCookiesAsync(CancellationToken.None).ConfigureAwait(false);
+            await _session.ClearAccountCookiesAsync(CancellationToken.None).ConfigureAwait(false);
         }
 
         return new PasswordAuthOutcome(PasswordAuthStatus.Succeeded);
