@@ -31,7 +31,8 @@ public sealed class WebGuestIntakeServiceTests
         var limits = IntakeLimits.Default;
         var authority = new PostgresIntakeSessionAuthority(db, limits, Options.Create(new IntakeSessionOptions()));
         var sessions = new IntakeSessionEndpointService(authority, new PostgresIntakeReceiptReader(db), TimeProvider.System);
-        var submissions = new PostgresIntakeSubmissionStore(db, limits, new EphemeralDataProtectionProvider());
+        var protection = new EphemeralDataProtectionProvider();
+        var submissions = new PostgresIntakeSubmissionStore(db, limits, protection);
         var countries = new FixtureCountries();
         var intake = new IntakeService(submissions, new PostgresIntakeDecisionStore(db), new UnusedPromotion(),
             new PostgresIntakeAttachmentAuthority(db), new CoverageRouter(new NoCoverage()),
@@ -43,7 +44,7 @@ public sealed class WebGuestIntakeServiceTests
             .SetValue(page, client);
         var draft = new PublicReportDraft
         {
-            SubjectScope = IntakeSubjectScope.Human, Narrative = "Synthetic observation", CountryCode = "ZA",
+            SubjectScope = IntakeSubjectScope.Human, Narrative = "Synthetic observation", AgeYearsText = "26", CountryCode = "ZA",
             CountryConfirmed = true, ReportReviewConfirmed = true, ProcessingConfirmed = true
         };
         var command = draft.ToSubmission("fixture-catalogue", "https://fixture.invalid/policy", "v1",
@@ -73,6 +74,13 @@ public sealed class WebGuestIntakeServiceTests
         Assert.Equal(receipt.ClientSubmissionId, persisted.ClientSubmissionId);
         Assert.Equal(receipt.Status, persisted.Status);
         Assert.Equal(receipt.RoutingStatus, persisted.RoutingStatus);
+        var stored = await db.Set<IntakeReportEntity>().AsNoTracking().SingleAsync(item => item.ReceiptId == receipt.ReceiptId);
+        var reopened = await new PostgresIntakeSubmissionOpener(protection).OpenAsync(stored.ProtectedPayload, default);
+        Assert.Equal(26, reopened.AgeYears);
+        var promoted = Assert.IsType<SwiftAid.Domain.Cases.CaseReportEventData.HumanV2>(
+            IntakePromotionMapper.ToReport(receipt.ReceiptId, reopened));
+        Assert.Equal(26, promoted.Report.AgeYears.Value.Value);
+        Assert.Equal(SwiftAid.Domain.Cases.ReportSourceKind.ReporterObservation, promoted.Report.AgeYears.Provenance.Source);
         Assert.InRange((receipt.ReceivedAtUtc - persisted.ReceivedAtUtc).Duration(), TimeSpan.Zero, TimeSpan.FromTicks(9));
         Assert.Null(await sessions.GetReceiptAsync(receipt.ReceiptId, RandomNumberGenerator.GetBytes(32), default));
         await (Task)send.Invoke(page, [command])!;
