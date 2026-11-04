@@ -54,6 +54,24 @@ public sealed partial class CaseCommandProcessingPostgresTests
         var policy = new CaseAccessPolicy(new PostgresCurrentAccessGrantStore(db, unit), new PostgresCaseAccessDescriptorStore(db, unit));
         var officers = new PostgresEligibleHealthOfficerStore(db, unit);
         var settings = new HealthOfficerDirectoryOptions { Enabled = true, EscalationApprovalsEnabled = true, EscalationAssignmentsEnabled = true };
+        var reviewStore = new PostgresHealthOfficerEscalationReviewStore(db, unit);
+        await using (var lease = await unit.BeginCaseAsync(fixture.CreateActor(), fixture.CaseId, [], CaseLeaseMode.Write, default))
+            await Assert.ThrowsAsync<UnauthorizedAccessException>(() => reviewStore.GetAsync(lease, fixture.CaseId, default));
+        await using (var lease = await unit.BeginCaseAsync(fixture.CreateActor(), fixture.CaseId, [], CaseLeaseMode.Read, default))
+            await Assert.ThrowsAsync<InvalidOperationException>(() => reviewStore.GetAsync(lease, Guid.NewGuid(), default));
+        var review = new HealthOfficerEscalationReviewQuery(unit, policy, reviewStore, officers, settings);
+        Assert.Null(await review.GetAsync(fixture.CreateActor(16), fixture.CaseId, default));
+        var reviewContext = await review.GetAsync(fixture.CreateActor(), fixture.CaseId, default);
+        Assert.Equal(3, reviewContext!.CaseVersion);
+        Assert.Equal(escalationId, Assert.Single(reviewContext.Escalations).EscalationId);
+        Assert.Equal(designationId, Assert.Single(reviewContext.Officers).DesignationId);
+        await db.AccessGrantOperations.Where(item => item.GrantGroupId == fixture.GrantGroupId && item.Operation == CaseOperation.ManageFollowUp)
+            .ExecuteDeleteAsync();
+        Assert.Null(await review.GetAsync(fixture.CreateActor(), fixture.CaseId, default));
+        await AddOperationAsync(fixture, CaseOperation.ManageFollowUp);
+        settings.EscalationAssignmentsEnabled = false;
+        Assert.Null(await review.GetAsync(fixture.CreateActor(), fixture.CaseId, default));
+        settings.EscalationAssignmentsEnabled = true;
         var approvals = new PostgresHealthOfficerEscalationApprovalService(db, unit, policy, officers, settings);
         var approved = new HealthOfficerEscalationApprovalRequest(Guid.NewGuid(), Guid.NewGuid(), fixture.CaseId, escalationId, 3,
             fixture.NewOwnerActorId, designationId, 1, Guid.NewGuid(), DateTimeOffset.UtcNow.AddHours(2), DateTimeOffset.UtcNow.AddDays(1));
@@ -145,6 +163,9 @@ public sealed partial class CaseCommandProcessingPostgresTests
         Assert.True(await db.DomainOutbox.AnyAsync(item => item.EventId == recorded.FollowUpEventId));
         Assert.False(await db.NotificationItems.AnyAsync(item => item.AcceptedEventId == recorded.FollowUpEventId));
         Assert.Equal(1, await db.Database.SqlQuery<int>($"SELECT count(*)::int AS \"Value\" FROM health_officer_escalation_assignments WHERE approval_id = {approved.ApprovalId}").SingleAsync());
+        var afterAssignment = await review.GetAsync(fixture.CreateActor(), fixture.CaseId, default);
+        Assert.Equal(4, afterAssignment!.CaseVersion);
+        Assert.Empty(afterAssignment.Escalations);
         var timelineStore = new PostgresCaseTimelineStore(db);
         await using (var readLease = await unit.BeginCaseAsync(fixture.CreateActor(), fixture.CaseId, [], CaseLeaseMode.Read, default))
         {

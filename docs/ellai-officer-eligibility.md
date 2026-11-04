@@ -51,6 +51,11 @@ work from historical assignments. Ellai's case-history tool uses the same
 permission-filtered projection and does not emit opaque officer identifiers.
 There is no public or model execution endpoint, no escalation acknowledgment
 linkage, reassignment flow, or scheduled supervisor escalation yet.
+An internal review query supplies a bounded list of raised, unassigned
+escalations, the current case version and eligible officers under one authorized
+case read lease. This is a point-in-time review context; approval and execution
+still revalidate all authority and versions under a write lease. No public review
+or assignment entry point is supplied yet.
 Availability, workload and category-specific policy are not currently represented,
 and must not be inferred from this lookup. Controlled designation provisioning,
 operator authorization, data stewardship and production database grants remain

@@ -405,6 +405,11 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IFollowUpRecommendationReviewService, PostgresFollowUpRecommendationReviewService>();
         services.Configure<HealthOfficerDirectoryOptions>(configuration.GetSection("Ellai:Operational:OfficerDirectory"));
         services.AddScoped<IEligibleHealthOfficerStore, PostgresEligibleHealthOfficerStore>();
+        services.AddScoped<IHealthOfficerEscalationReviewStore, PostgresHealthOfficerEscalationReviewStore>();
+        services.AddScoped<IHealthOfficerEscalationReviewQuery>(provider => new HealthOfficerEscalationReviewQuery(
+            provider.GetRequiredService<ICaseCommandUnitOfWork>(), provider.GetRequiredService<ICaseAccessPolicy>(),
+            provider.GetRequiredService<IHealthOfficerEscalationReviewStore>(), provider.GetRequiredService<IEligibleHealthOfficerStore>(),
+            provider.GetRequiredService<IOptions<HealthOfficerDirectoryOptions>>().Value));
         services.AddScoped<IHealthOfficerDesignationAdministration>(provider => new PostgresHealthOfficerDesignationAdministration(
             provider.GetRequiredService<SwiftAidDbContext>(), provider.GetRequiredService<IOptions<HealthOfficerDirectoryOptions>>().Value));
         services.AddScoped<IHealthOfficerDesignationQuery>(provider => new PostgresHealthOfficerDesignationQuery(
