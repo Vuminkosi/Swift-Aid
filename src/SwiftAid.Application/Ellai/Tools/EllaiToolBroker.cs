@@ -188,7 +188,7 @@ public sealed class EllaiToolBroker
     /// consent applies only to explicitly consent-scoped processing lanes.</summary>
     private static readonly string[] ToolDescriptions =
     {
-        $"{EllaiToolNames.State}(projection=[feature|queue], limit=1..20, country?, workflow?, sort?, place_id?, reported_from?, reported_before?) — permitted feature or owned-case queue. country is an uppercase two-letter code (Zimbabwe=ZW, Eswatini=SZ); workflow is Reported, UnderReview, Active, AwaitingFollowUp or Resolved; sort=latest-reported or latest-updated. reported_from and reported_before are an inclusive/exclusive UTC date pair (YYYY-MM-DD), filter case creation/report time, and span at most 365 days; they are not occurrence dates. For an occurrence-place search, select an exact registry ID using ellai_locations and supply country, place_id and sort=latest-reported; workflow is not supported with place_id. Unknown locations and incomplete scans cannot establish a complete list. Reported is a recorded workflow, not proof that no human reviewed a case. For retained results, use ellai_evidence with classification_filter=Classified or Unclassified to check recorded status; this does not return classifier labels or establish a diagnosis.",
+        $"{EllaiToolNames.State}(projection=[feature|queue], limit=1..20, country?, workflow?, sort?, place_id?, reported_from?, reported_before?) — permitted feature or cases the actor may Search and ReadCase. country is an uppercase two-letter code (Zimbabwe=ZW, Eswatini=SZ); workflow is Reported, UnderReview, Active, AwaitingFollowUp or Resolved; sort=latest-reported or latest-updated. reported_from and reported_before are an inclusive/exclusive UTC date pair (YYYY-MM-DD), filter case creation/report time, and span at most 365 days; they are not occurrence dates. For an occurrence-place search, select an exact registry ID using ellai_locations and supply country, place_id and sort=latest-reported; workflow is not supported with place_id. Unknown locations and incomplete scans cannot establish a complete list. Reported is a recorded workflow, not proof that no human reviewed a case. For retained results, use ellai_evidence with classification_filter=Classified or Unclassified to check recorded status; this does not return classifier labels or establish a diagnosis.",
         $"{EllaiToolNames.Evidence}(ref=[case-results|case-results-original], field=[country|workflow|observations|submitter]?, classification_filter=[Classified|Unclassified]?, country?, place_id?, case_id?) — re-read retained cases under current access. field=observations returns only verbatim reported observations, labeled unverified reports and not diagnoses; field=submitter returns authorized recorded attribution and distinguishes promoted guest intake from its accepting staff member. Use case_id from the retained results to answer about one selected case; it must belong to that result set. Neither projection returns narrative or coordinates. Classification and exact place filters can combine with observations. Place filtering requires a selected registry ID and matching country. Reauthorizes each case; unavailable rows are omitted and marked incomplete.",
         $"{EllaiToolNames.Topic}(ref) — session topic candidates with checkpoints. Use ref=case-results for the latest retained list or case-results-original for the first retained list; never invent a remembered result set.",
         $"{EllaiToolNames.Capabilities}(feature?) — capability readiness, no credentials.",
@@ -669,9 +669,9 @@ public sealed class EllaiToolBroker
 
     /// <summary>Live <c>ellai_state</c> projections. Without a projection
     /// argument the static permitted-feature description applies. The
-    /// <c>queue</c> projection runs the ordinary scoped "my cases" query for
-    /// the trusted actor: same handlers, same per-case authorization, no
-    /// Ellai-only query path.</summary>
+    /// <c>queue</c> projection runs the ordinary scoped case search for
+    /// the trusted actor: candidates are grant-bounded and each result is
+    /// reauthorized for Search and ReadCase.</summary>
     private async Task<EllaiToolResult> ReadStateAsync(
         EllaiToolContext context, EllaiToolRequest request, ICaseQueueQuery? queue, CancellationToken ct)
     {
@@ -753,7 +753,7 @@ public sealed class EllaiToolBroker
                 item.AggregateVersion.ToString(System.Globalization.CultureInfo.InvariantCulture), null, item.CaseId.ToString("D"))).ToArray();
             var foundLines = foundItems.Select(item => $"case {item.CaseId:D}; workflow {item.Workflow}; country {item.CountryCode}; v{item.AggregateVersion}");
             return new(request.ToolName, true, null, foundEvidence,
-                "Owned readable cases matching the recorded occurrence place. " +
+                "Searchable, readable cases matching the recorded occurrence place. " +
                 (reportedFromUtc is null ? string.Empty : $"Managed-case report time is from {reportedFromText} inclusive to {reportedBeforeText} exclusive (UTC); this is not event occurrence time. ") +
                 (found.UnknownLocations ? "Some readable cases have unknown or incomplete locations. " : "") +
                 (found.LocationReadUnavailable ? "A case location could not be checked; remaining cases were not searched. " : "") +
@@ -764,11 +764,11 @@ public sealed class EllaiToolBroker
         CaseQueueResult result;
         try
         {
-            result = country is null && workflow is null && sort is null && reportedFromUtc is null
-                ? await queue.GetMineAsync(context.Actor, limit, ct).ConfigureAwait(false)
-                : await queue.GetMineAsync(context.Actor, limit,
-                    new CaseQueueFilter(country, workflow, sort == "latest-reported" || sort is null && reportedFromUtc is not null,
-                        ReportedFromUtc: reportedFromUtc, ReportedBeforeUtc: reportedBeforeUtc), ct).ConfigureAwait(false);
+            result = await queue.GetSearchableAsync(context.Actor, limit,
+                country is null && workflow is null && sort is null && reportedFromUtc is null
+                    ? null
+                    : new CaseQueueFilter(country, workflow, sort == "latest-reported" || sort is null && reportedFromUtc is not null,
+                        ReportedFromUtc: reportedFromUtc, ReportedBeforeUtc: reportedBeforeUtc), null, ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -816,7 +816,7 @@ public sealed class EllaiToolBroker
             "CaseQueue", item.CaseId.ToString("D"), item.AggregateVersion.ToString(System.Globalization.CultureInfo.InvariantCulture), null,
             item.CaseId.ToString("D"))).ToList();
         return new EllaiToolResult(request.ToolName, true, null, evidence,
-            "Owned cases only; review status is not supplied." +
+            "Cases require current Search and ReadCase permission; review status is not supplied." +
             (reportedFromUtc is null ? string.Empty : $" Managed-case report time is from {reportedFromText} inclusive to {reportedBeforeText} exclusive (UTC); this is not event occurrence time.") +
             recallNotice + "\n" +
             (items.Count == 0 ? "The permitted work queue is empty." : string.Join("\n", lines)),

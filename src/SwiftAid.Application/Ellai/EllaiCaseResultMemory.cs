@@ -7,7 +7,7 @@ using SwiftAid.Contracts.Ellai;
 namespace SwiftAid.Application.Ellai;
 
 /// <summary>Session-local result references. PostgreSQL topics hold no case narratives;
-/// every recall uses the ordinary owner-filtered, per-case authorized query.</summary>
+/// every recall rechecks current Search and ReadCase authorization.</summary>
 public sealed class EllaiCaseResultMemory(EllaiTopicService topics, ICaseQueueQuery queue,
     IEllaiExactReferenceIndex? index = null, ICaseOccurrenceLocationQuery? occurrenceLocations = null,
     ICaseReportReadQuery? caseReports = null, ICaseReportAttributionQuery? caseAttributions = null)
@@ -147,8 +147,8 @@ public sealed class EllaiCaseResultMemory(EllaiTopicService topics, ICaseQueueQu
                 (original ? "The original retained case result set was empty." : "The last retained case result set was empty."), 0, incomplete)
                 { HistoryValidUntilUtc = snapshot.ExpiresAtUtc };
 
-        var current = await queue.GetMineAsync(context.Actor, 20,
-            new CaseQueueFilter(CaseIds: snapshot.Cases.Select(item => item.Id).ToArray()), ct).ConfigureAwait(false);
+        var current = await queue.GetSearchableAsync(context.Actor, 20,
+            new CaseQueueFilter(CaseIds: snapshot.Cases.Select(item => item.Id).ToArray()), null, ct).ConfigureAwait(false);
         ct.ThrowIfCancellationRequested();
         if (current.Access != CaseQueueAccess.Allowed || current.NextCursor is not null) return Unavailable();
         if (current.Items.Any(item => item.CaseId == Guid.Empty) ||

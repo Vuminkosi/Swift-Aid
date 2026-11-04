@@ -265,12 +265,13 @@ public static class EllaiAuthorizedConversationContext
                     {
                         if (!query.TryGetReportedRange(out var reportedFromUtc, out var reportedBeforeUtc))
                             return decisions[decisionKey] = false;
-                        var current = query.Country is null && query.Workflow is null && query.Sort is null && reportedFromUtc is null
-                            ? await queue.GetMineAsync(actor, query.Limit, ct).ConfigureAwait(false)
-                            : await queue.GetMineAsync(actor, query.Limit,
-                                new CaseQueueFilter(query.Country, query.Workflow,
+                        var current = await queue.GetSearchableAsync(actor, query.Limit,
+                            query.Country is null && query.Workflow is null && query.Sort is null && reportedFromUtc is null
+                                ? null
+                                : new CaseQueueFilter(query.Country, query.Workflow,
                                     query.Sort == "latest-reported" || query.Sort is null && reportedFromUtc is not null,
-                                    ReportedFromUtc: reportedFromUtc, ReportedBeforeUtc: reportedBeforeUtc), ct).ConfigureAwait(false);
+                                    ReportedFromUtc: reportedFromUtc, ReportedBeforeUtc: reportedBeforeUtc), null, ct)
+                            .ConfigureAwait(false);
                         ct.ThrowIfCancellationRequested();
                         var items = current.Items.Take(query.Limit).ToArray();
                         if (current.Access != CaseQueueAccess.Allowed ||
@@ -440,7 +441,7 @@ public static class EllaiAuthorizedConversationContext
                         .Select(pair => pair.Key).ToArray();
                     foreach (var batch in uncheckedIds.Chunk(20))
                     {
-                        var result = await queue.GetMineAsync(actor, 20, new CaseQueueFilter(CaseIds: batch), ct).ConfigureAwait(false);
+                        var result = await queue.GetSearchableAsync(actor, 20, new CaseQueueFilter(CaseIds: batch), null, ct).ConfigureAwait(false);
                         ct.ThrowIfCancellationRequested();
                         foreach (var id in batch)
                             caseChecks[(id, references[id])] = result.Access == CaseQueueAccess.Allowed && result.NextCursor is null &&

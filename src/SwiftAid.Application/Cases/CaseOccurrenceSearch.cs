@@ -3,7 +3,7 @@ using SwiftAid.Contracts.Cases;
 
 namespace SwiftAid.Application.Cases;
 
-/// <summary>Finds owned, readable cases using recorded occurrence places, never access-region links.</summary>
+/// <summary>Finds searchable, readable cases using recorded occurrence places, never access-region links.</summary>
 public sealed class CaseOccurrenceSearch(ICaseQueueQuery queue, ICaseOccurrenceLocationQuery locations)
 {
     public const int MaximumCandidates = 200;
@@ -33,7 +33,7 @@ public sealed class CaseOccurrenceSearch(ICaseQueueQuery queue, ICaseOccurrenceL
             do
             {
                 ct.ThrowIfCancellationRequested();
-                var page = await queue.GetMineAsync(actor, PageSize, filter, cursor, ct).ConfigureAwait(false);
+                var page = await queue.GetSearchableAsync(actor, PageSize, filter, cursor, ct).ConfigureAwait(false);
                 ct.ThrowIfCancellationRequested();
                 if (page.Access != CaseQueueAccess.Allowed || page.Items.Count > PageSize ||
                     page.Items.Any(item => item.CaseId == Guid.Empty || !seenCases.Add(item.CaseId)))

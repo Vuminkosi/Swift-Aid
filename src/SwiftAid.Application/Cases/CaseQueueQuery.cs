@@ -26,7 +26,7 @@ public sealed record CaseQueueContinuation(DateTimeOffset SortTimestampUtc, Guid
 public sealed record CaseQueueFilter(string? CountryCode = null, string? Workflow = null, bool NewestReportedFirst = false,
     IReadOnlyList<Guid>? CaseIds = null, DateTimeOffset? ReportedFromUtc = null, DateTimeOffset? ReportedBeforeUtc = null);
 
-/// <summary>Persistence port for the "my cases" queue. Rows arrive newest-first.</summary>
+/// <summary>Persistence port for owner queue and grant-scoped case search. Rows arrive newest-first.</summary>
 public interface ICaseQueueStore
 {
     Task<IReadOnlyList<CaseQueueCandidate>> GetOwnedCasesAsync(
@@ -45,6 +45,11 @@ public interface ICaseQueueStore
             ? GetOwnedCasesAsync(ownerActorId, take, ct)
             : GetOwnedCasesAsync(ownerActorId, take, filter, ct);
     }
+
+    Task<IReadOnlyList<CaseQueueCandidate>> GetSearchableCasesAfterAsync(
+        string actorId, long accessEpoch, int take, CaseQueueFilter? filter, CaseQueueContinuation? after,
+        CancellationToken ct) =>
+        throw new NotSupportedException("Searchable case queries are unavailable.");
 }
 
 /// <summary>Bounded map candidates; callers must authorize each report before using its evidence.</summary>
@@ -73,14 +78,18 @@ public interface ICaseQueueQuery
         string? cursor, CancellationToken ct) => cursor is null
             ? GetMineAsync(actor, limit, filter, ct)
             : Task.FromResult(new CaseQueueResult(CaseQueueAccess.Unavailable, []));
+
+    Task<CaseQueueResult> GetSearchableAsync(ActorContext actor, int? limit, CaseQueueFilter? filter,
+        string? cursor, CancellationToken ct) =>
+        Task.FromResult(new CaseQueueResult(CaseQueueAccess.Unavailable, []));
 }
 
 /// <summary>
-/// Authorized "my cases" queue. Lists cases owned by the calling officer ordered by
-/// the most recently recorded journal event, then enforces <c>ReadCase</c> through
-/// the shared case resource policy inside one read-mode lease per returned case.
-/// Denied, missing, and vanished cases are skipped and never listed. Like the
-/// timeline, an empty identifier or a case the officer may not read yields no row.
+/// Authorized case queues. Owner listing remains scoped to the calling officer;
+/// searchable listing uses grant-bounded candidates and requires both <c>Search</c>
+/// and <c>ReadCase</c>. Both paths authorize each case through the shared resource
+/// policy inside one read-mode lease. Denied, missing, and vanished cases are
+/// skipped and never listed.
 /// </summary>
 public sealed class CaseQueueQuery(
     ICaseQueueStore store,
@@ -96,17 +105,17 @@ public sealed class CaseQueueQuery(
         unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
 
     public Task<CaseQueueResult> GetMineAsync(ActorContext actor, int? limit, CancellationToken ct) =>
-        ReadAsync(actor, limit, null, null, ct);
+        ReadAsync(actor, limit, null, null, false, ct);
 
     public Task<CaseQueueResult> GetMineAsync(ActorContext actor, int? limit, string? cursor, CancellationToken ct) =>
-        ReadAsync(actor, limit, null, cursor, ct);
+        ReadAsync(actor, limit, null, cursor, false, ct);
 
     public Task<CaseQueueResult> GetMineAsync(ActorContext actor, int? limit, CaseQueueFilter filter,
         string? cursor, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(filter);
         ValidateFilter(filter);
-        return ReadAsync(actor, limit, filter, cursor, ct);
+        return ReadAsync(actor, limit, filter, cursor, false, ct);
     }
 
     public Task<CaseQueueResult> GetMineAsync(ActorContext actor, int? limit, CaseQueueFilter filter,
@@ -114,7 +123,14 @@ public sealed class CaseQueueQuery(
     {
         ArgumentNullException.ThrowIfNull(filter);
         ValidateFilter(filter);
-        return ReadAsync(actor, limit, filter, null, ct);
+        return ReadAsync(actor, limit, filter, null, false, ct);
+    }
+
+    public Task<CaseQueueResult> GetSearchableAsync(ActorContext actor, int? limit, CaseQueueFilter? filter,
+        string? cursor, CancellationToken ct)
+    {
+        if (filter is not null) ValidateFilter(filter);
+        return ReadAsync(actor, limit, filter, cursor, true, ct);
     }
 
     private static void ValidateFilter(CaseQueueFilter filter)
@@ -132,7 +148,7 @@ public sealed class CaseQueueQuery(
     }
 
     private async Task<CaseQueueResult> ReadAsync(ActorContext actor, int? limit, CaseQueueFilter? filter,
-        string? cursor, CancellationToken ct)
+        string? cursor, bool requireSearch, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(actor);
         var take = limit ?? DefaultLimit;
@@ -151,8 +167,11 @@ public sealed class CaseQueueQuery(
         {
             while (true)
             {
-                candidates = await _store.GetOwnedCasesAfterAsync(
-                    actor.ActorId, candidateBatchSize, filter, continuation, ct).ConfigureAwait(false);
+                candidates = requireSearch
+                    ? await _store.GetSearchableCasesAfterAsync(actor.ActorId, actor.AccessEpoch,
+                        candidateBatchSize, filter, continuation, ct).ConfigureAwait(false)
+                    : await _store.GetOwnedCasesAfterAsync(
+                        actor.ActorId, candidateBatchSize, filter, continuation, ct).ConfigureAwait(false);
                 foreach (var candidate in candidates)
                 {
                     continuation = new CaseQueueContinuation(GetSortTimestamp(candidate, filter), candidate.CaseId);
@@ -171,7 +190,10 @@ public sealed class CaseQueueQuery(
 
                     await using (lease.ConfigureAwait(false))
                     {
-                        var decision = await _policy.AuthorizeAsync(actor, candidate.CaseId, CaseOperation.ReadCase, ct).ConfigureAwait(false);
+                        var decision = requireSearch
+                            ? await _policy.AuthorizeAllAsync(actor, candidate.CaseId,
+                                [CaseOperation.Search, CaseOperation.ReadCase], ct).ConfigureAwait(false)
+                            : await _policy.AuthorizeAsync(actor, candidate.CaseId, CaseOperation.ReadCase, ct).ConfigureAwait(false);
                         if (!decision.IsAllowed) continue;
 
                         await lease.CommitAsync(ct).ConfigureAwait(false);
