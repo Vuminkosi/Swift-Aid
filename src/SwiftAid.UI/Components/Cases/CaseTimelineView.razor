@@ -124,7 +124,7 @@
                                     <ul aria-label="Ellai activity for this event">
                                         @foreach (var activity in entry.AgentActivities)
                                         {
-                                            <li>Ellai - @CaseAgentActivityPresentation.RoleLabel(activity.RoleId): @CaseAgentActivityPresentation.ActivityLabel(activity.RoleId)
+                                            <li>Ellai - @CaseAgentActivityPresentation.RoleLabel(activity.RoleId): @CaseAgentActivityPresentation.ActivityLabel(activity.RoleId, activity.RecommendationKind)
                                                 <time datetime="@activity.RecordedAtUtc.ToString("O")">@activity.RecordedAtUtc.ToLocalTime().ToString("g")</time>
                                                 @if (activity.FollowUpReviewedAtUtc is { } reviewedAt)
                                                 {

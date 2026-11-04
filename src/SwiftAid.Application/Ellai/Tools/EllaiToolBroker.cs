@@ -472,7 +472,7 @@ public sealed class EllaiToolBroker
                        (officer.IsCurrent ? "This assignment is current at the time of this read." : "This assignment is historical; the work has changed or closed.")]
                     : Array.Empty<string>())
                 .Concat((entry.AgentActivities ?? []).Take(MaxItems).Select(activity =>
-                    $"{activity.RecordedAtUtc:O}: Ellai {CaseAgentActivityPresentation.RoleLabel(activity.RoleId)}: {CaseAgentActivityPresentation.ActivityLabel(activity.RoleId)}." +
+                    $"{activity.RecordedAtUtc:O}: Ellai {CaseAgentActivityPresentation.RoleLabel(activity.RoleId)}: {CaseAgentActivityPresentation.ActivityLabel(activity.RoleId, activity.RecommendationKind)}." +
                     (activity.RoleId == "ops.followup" ? activity.FollowUpIsCurrent switch
                     {
                         true => " This recommendation is current at the time of this read.",

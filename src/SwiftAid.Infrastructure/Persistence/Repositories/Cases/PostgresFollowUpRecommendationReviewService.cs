@@ -30,16 +30,31 @@ public sealed class PostgresFollowUpRecommendationReviewService(
                 SELECT recommendation_id AS "RecommendationId", case_id AS "CaseId", actor_id AS "ActorId"
                 FROM ellai_follow_up_reviews WHERE command_id = {commandId}
                 """).SingleOrDefaultAsync(ct).ConfigureAwait(false);
-            if (previous is not null)
-                return previous.RecommendationId == recommendationId && previous.CaseId == caseId && previous.ActorId == actor.ActorId
-                    ? FollowUpRecommendationReviewOutcome.Replayed : FollowUpRecommendationReviewOutcome.Conflict;
+            if (previous is not null && (previous.RecommendationId != recommendationId || previous.CaseId != caseId || previous.ActorId != actor.ActorId))
+                return FollowUpRecommendationReviewOutcome.Conflict;
+            var kind = await db.Database.SqlQuery<string>($"""
+                SELECT recommendation_kind AS "Value" FROM ellai_follow_up_recommendations
+                WHERE activity_id = {recommendationId} AND case_id = {caseId}
+                """).SingleOrDefaultAsync(ct).ConfigureAwait(false);
+            if (kind is null) return FollowUpRecommendationReviewOutcome.NotFoundOrNotAuthorized;
+            if (kind == "OfficerAcknowledgementDue")
+            {
+                var officerDecision = await policy.AuthorizeAllAsync(actor, caseId,
+                    [CaseOperation.ReadCase, CaseOperation.ManageFollowUp, CaseOperation.ManageEscalation], ct).ConfigureAwait(false);
+                if (!officerDecision.IsAllowed) return FollowUpRecommendationReviewOutcome.NotFoundOrNotAuthorized;
+            }
+            if (previous is not null) return FollowUpRecommendationReviewOutcome.Replayed;
             var current = await db.Database.SqlQuery<RecommendationRow>($"""
-                SELECT (f.current_schedule_version = r.schedule_version AND f.current_schedule_event_id = r.source_event_id
-                    AND f.due_at_utc = r.due_at_utc AND f.status IN ('Scheduled', 'Acknowledged') AND c.workflow <> 'Resolved') AS "IsCurrent",
+                SELECT CASE WHEN r.recommendation_kind = 'OfficerAcknowledgementDue' THEN
+                    (f.assignee_actor_id = a.officer_actor_id AND f.status = 'Scheduled' AND e.status <> 'Closed' AND c.workflow <> 'Resolved')
+                    ELSE (f.current_schedule_version = r.schedule_version AND f.current_schedule_event_id = r.source_event_id
+                    AND f.due_at_utc = r.due_at_utc AND f.status IN ('Scheduled', 'Acknowledged') AND c.workflow <> 'Resolved') END AS "IsCurrent",
                     EXISTS (SELECT 1 FROM ellai_follow_up_reviews review WHERE review.recommendation_id = r.activity_id) AS "IsReviewed"
                 FROM ellai_follow_up_recommendations r
                 JOIN managed_case_follow_ups f ON f.follow_up_id = r.follow_up_id AND f.case_id = r.case_id
                 JOIN managed_cases c ON c.case_id = r.case_id
+                LEFT JOIN health_officer_escalation_assignments a ON a.assignment_id = r.officer_assignment_id
+                LEFT JOIN managed_case_escalations e ON e.escalation_id = a.escalation_id AND e.case_id = a.case_id
                 WHERE r.activity_id = {recommendationId} AND r.case_id = {caseId}
                 """).SingleOrDefaultAsync(ct).ConfigureAwait(false);
             if (current is null) return FollowUpRecommendationReviewOutcome.NotFoundOrNotAuthorized;

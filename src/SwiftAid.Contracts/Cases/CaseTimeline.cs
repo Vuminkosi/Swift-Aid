@@ -63,6 +63,7 @@ public sealed record CaseAgentActivity(Guid ActivityId, string RoleId, string La
     public bool? FollowUpIsCurrent { get; init; }
     public DateTimeOffset? FollowUpDueAtUtc { get; init; }
     public DateTimeOffset? FollowUpReviewedAtUtc { get; init; }
+    public string? RecommendationKind { get; init; }
 }
 
 /// <summary>Closed, non-model-authored activity labels shared by timeline clients and Ellai.</summary>
@@ -75,10 +76,11 @@ public static class CaseAgentActivityPresentation
         _ => "Agent"
     };
 
-    public static string ActivityLabel(string? roleId) => roleId switch
+    public static string ActivityLabel(string? roleId, string? recommendationKind = null) => (roleId, recommendationKind) switch
     {
-        "ops.quality" => "Reported-data quality assessed",
-        "ops.followup" => "Overdue follow-up review recommended",
+        ("ops.quality", _) => "Reported-data quality assessed",
+        ("ops.followup", "OfficerAcknowledgementDue") => "Overdue officer acknowledgment review recommended",
+        ("ops.followup", _) => "Overdue follow-up review recommended",
         _ => "Activity recorded"
     };
 }

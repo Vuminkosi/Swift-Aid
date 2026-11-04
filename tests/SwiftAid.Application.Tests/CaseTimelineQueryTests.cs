@@ -344,7 +344,7 @@ public sealed class CaseTimelineQueryTests
         public IReadOnlyList<CaseAgentActivityRow> Activities { get; set; } = [];
 
         public Task<IReadOnlyList<CaseAgentActivityRow>> GetAgentActivitiesAsync(Guid caseId, IReadOnlyList<Guid> eventIds,
-            bool includeFollowUp, CancellationToken ct)
+            bool includeFollowUp, bool includeOfficerEscalation, CancellationToken ct)
         {
             IncludeFollowUp = includeFollowUp;
             return Task.FromResult<IReadOnlyList<CaseAgentActivityRow>>(Activities.Where(item => eventIds.Contains(item.SourceEventId) &&

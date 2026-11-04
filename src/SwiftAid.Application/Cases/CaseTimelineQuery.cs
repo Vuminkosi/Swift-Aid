@@ -20,7 +20,7 @@ public sealed record CaseTimelineRow(
 public sealed record CaseAgentActivityRow(Guid SourceEventId, Guid ActivityId, string RoleId,
     string Version, DateTimeOffset RecordedAtUtc, Guid? FollowUpId = null,
     bool? FollowUpIsCurrent = null, DateTimeOffset? FollowUpDueAtUtc = null,
-    DateTimeOffset? FollowUpReviewedAtUtc = null);
+    DateTimeOffset? FollowUpReviewedAtUtc = null, string? RecommendationKind = null);
 
 public sealed record CaseOfficerEscalationRow(Guid EventId, Guid EscalationId, Guid FollowUpId, string OfficerActorId,
     string? OfficerDisplayLabel, DateTimeOffset AcknowledgementDueUtc, DateTimeOffset FollowUpDueUtc, bool IsCurrent, bool? FollowUpAcknowledged);
@@ -45,7 +45,7 @@ public interface ICaseTimelineStore
         Task.FromResult<CaseTimelineWorkSummary?>(null);
 
     Task<IReadOnlyList<CaseAgentActivityRow>> GetAgentActivitiesAsync(Guid caseId, IReadOnlyList<Guid> eventIds,
-        bool includeFollowUp, CancellationToken ct) => Task.FromResult<IReadOnlyList<CaseAgentActivityRow>>([]);
+        bool includeFollowUp, bool includeOfficerEscalation, CancellationToken ct) => Task.FromResult<IReadOnlyList<CaseAgentActivityRow>>([]);
 
     Task<IReadOnlyList<CaseOfficerEscalationRow>> GetOfficerEscalationsAsync(ICaseCommandLease lease, Guid caseId, IReadOnlyList<Guid> eventIds,
         CancellationToken ct) => Task.FromResult<IReadOnlyList<CaseOfficerEscalationRow>>([]);
@@ -159,10 +159,10 @@ public sealed class CaseTimelineQuery(
                 .ToArray();
             var followUpDecision = await _policy.AuthorizeAllAsync(actor, caseId,
                 [CaseOperation.ReadCase, CaseOperation.ManageFollowUp], ct).ConfigureAwait(false);
-            var activityRows = await _store.GetAgentActivitiesAsync(caseId, pageRows.Select(row => row.EventId).ToArray(),
-                followUpDecision.IsAllowed, ct).ConfigureAwait(false);
             var officerDecision = await _policy.AuthorizeAllAsync(actor, caseId,
                 [CaseOperation.ReadCase, CaseOperation.ManageEscalation, CaseOperation.ManageFollowUp], ct).ConfigureAwait(false);
+            var activityRows = await _store.GetAgentActivitiesAsync(caseId, pageRows.Select(row => row.EventId).ToArray(),
+                followUpDecision.IsAllowed, officerDecision.IsAllowed, ct).ConfigureAwait(false);
             var officerRows = officerDecision.IsAllowed
                 ? await _store.GetOfficerEscalationsAsync(lease, caseId, pageRows.Select(row => row.EventId).ToArray(), ct).ConfigureAwait(false)
                 : [];
@@ -177,12 +177,13 @@ public sealed class CaseTimelineQuery(
                         officer.OfficerDisplayLabel is { Length: > 0 and <= 120 } label && !label.Any(char.IsControl) ? label : null,
                         officer.AcknowledgementDueUtc, officer.FollowUpDueUtc, officer.IsCurrent, officer.FollowUpAcknowledged),
                     AgentActivities = activities.Take(20).Select(activity => new CaseAgentActivity(activity.ActivityId,
-                        activity.RoleId, CaseAgentActivityPresentation.ActivityLabel(activity.RoleId), activity.Version, activity.RecordedAtUtc)
+                        activity.RoleId, CaseAgentActivityPresentation.ActivityLabel(activity.RoleId, activity.RecommendationKind), activity.Version, activity.RecordedAtUtc)
                     {
                         FollowUpId = activity.FollowUpId,
                         FollowUpIsCurrent = activity.FollowUpIsCurrent,
                         FollowUpDueAtUtc = activity.FollowUpDueAtUtc,
-                        FollowUpReviewedAtUtc = activity.FollowUpReviewedAtUtc
+                        FollowUpReviewedAtUtc = activity.FollowUpReviewedAtUtc,
+                        RecommendationKind = activity.RecommendationKind
                     }).ToArray(),
                     AgentActivitiesTruncated = activities.Length > 20
                 };
