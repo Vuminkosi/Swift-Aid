@@ -56,7 +56,12 @@ public sealed class CaseTranslationService(SwiftAidDbContext db, ICaseAccessPoli
         db.Add(new TranslationReviewEntity { DecisionId = request.DecisionId, ArtifactId = artifactId, ActorId = actor.ActorId,
             Approved = request.Approve, Version = artifact.ReviewVersion, RecordedAtUtc = clock.GetUtcNow() });
         // Approval applies to this scoped immutable artifact. Replay every current associated source.
-        var sources = await db.Set<TranslationAssociationEntity>().Where(x => x.ArtifactId == artifactId).Select(x => x.SourceEventId).ToArrayAsync(ct);
+        var sources = await (from association in db.Set<TranslationAssociationEntity>().AsNoTracking()
+                             join current in db.ManagedCases.AsNoTracking() on association.CaseId equals current.CaseId
+                             where association.ArtifactId == artifactId && association.ReportRevision == current.ReportRevision &&
+                                 current.WorkspaceId == artifact.WorkspaceId && current.OrganizationId == artifact.OrganizationId
+                             orderby current.CreatedAtUtc descending, current.CaseId, association.SourceEventId
+                             select association.SourceEventId).ToArrayAsync(ct);
         foreach (var source in sources)
             db.Add(new TranslationOutboxEntity { Id = Guid.NewGuid(), ArtifactId = artifactId, SourceEventId = source,
                 ReviewVersion = artifact.ReviewVersion, AvailableAtUtc = clock.GetUtcNow() });
