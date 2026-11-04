@@ -4153,3 +4153,20 @@ and a deliberately unavailable Redis endpoint. The TRX is retained under the
 integration project's `TestResults` directory, and the disposable database
 container was removed. The skipped tests and deployed behavior remain unverified
 by this run.
+
+### Spoken decision size boundary — 2026-11-04
+
+The decision validator limited spoken text to 120 whitespace-separated words
+but accepted a 2,001-character single word. A boundary test reproduced the
+acceptance before the fix (1 passed, 1 failed). The validator now also caps
+spoken text at 2,000 characters, matching the existing display limit while
+preserving empty speech and the 120-word limit. The framework contract test
+confirms an oversized synthetic provider decision is repaired before completion.
+
+PASS: the `EllaiContractTests|EllaiAgentFrameworkContractTests` application
+filter passed 155/155 with `dotnet test
+tests/SwiftAid.Application.Tests/SwiftAid.Application.Tests.csproj --no-restore
+-m:1 -nr:false`. After commit `80fd5406`, the full application suite passed
+1,246, failed 0 and skipped 19 with `--no-build --no-restore -m:1 -nr:false`;
+the two focused boundary and repair filters passed 7/7. These synthetic tests
+do not establish deployed Gateway or live speech synthesis behavior.
