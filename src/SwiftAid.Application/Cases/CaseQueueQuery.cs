@@ -23,7 +23,8 @@ public sealed record CaseQueueCandidate(
 public sealed record CaseQueueContinuation(DateTimeOffset SortTimestampUtc, Guid CaseId);
 
 /// <summary>Recorded routing filters, not clinical or classification-review inference.</summary>
-public sealed record CaseQueueFilter(string? CountryCode = null, string? Workflow = null, bool NewestReportedFirst = false, IReadOnlyList<Guid>? CaseIds = null);
+public sealed record CaseQueueFilter(string? CountryCode = null, string? Workflow = null, bool NewestReportedFirst = false,
+    IReadOnlyList<Guid>? CaseIds = null, DateTimeOffset? ReportedFromUtc = null, DateTimeOffset? ReportedBeforeUtc = null);
 
 /// <summary>Persistence port for the "my cases" queue. Rows arrive newest-first.</summary>
 public interface ICaseQueueStore
@@ -124,6 +125,10 @@ public sealed class CaseQueueQuery(
             throw new ArgumentException("Unknown recorded workflow.", nameof(filter));
         if (filter.CaseIds is { } ids && (ids.Count > 20 || ids.Any(id => id == Guid.Empty)))
             throw new ArgumentException("At most 20 nonempty case IDs are supported.", nameof(filter));
+        if ((filter.ReportedFromUtc is null) != (filter.ReportedBeforeUtc is null) ||
+            filter.ReportedFromUtc is { } from && filter.ReportedBeforeUtc is { } before &&
+            (from.Offset != TimeSpan.Zero || before.Offset != TimeSpan.Zero || before <= from || before - from > TimeSpan.FromDays(365)))
+            throw new ArgumentException("Reported-time filters require a bounded UTC range of at most 365 days.", nameof(filter));
     }
 
     private async Task<CaseQueueResult> ReadAsync(ActorContext actor, int? limit, CaseQueueFilter? filter,

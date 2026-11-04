@@ -14,25 +14,27 @@ public sealed class PostgresCaseQueueStore(SwiftAidDbContext dbContext) : ICaseQ
     private readonly SwiftAidDbContext _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
 
     public Task<IReadOnlyList<CaseQueueCandidate>> GetOwnedCasesAsync(string ownerActorId, int take, CancellationToken ct) =>
-        ReadAsync(ownerActorId, take, null, null, null, ct, null, false, null, null);
+        ReadAsync(ownerActorId, take, null, null, null, ct, null, false, null, null, null, null);
 
     public Task<IReadOnlyList<CaseQueueCandidate>> GetOwnedCasesAsync(
         string ownerActorId, int take, CaseQueueFilter filter, CancellationToken ct) =>
-        ReadAsync(ownerActorId, take, null, filter.CountryCode, null, ct, filter.Workflow, filter.NewestReportedFirst, filter.CaseIds, null);
+        ReadAsync(ownerActorId, take, null, filter.CountryCode, null, ct, filter.Workflow, filter.NewestReportedFirst,
+            filter.CaseIds, filter.ReportedFromUtc, filter.ReportedBeforeUtc, null);
 
     public Task<IReadOnlyList<CaseQueueCandidate>> GetOwnedCasesAfterAsync(
         string ownerActorId, int take, CaseQueueFilter? filter, CaseQueueContinuation? after, CancellationToken ct) =>
         ReadAsync(ownerActorId, take, null, filter?.CountryCode, null, ct, filter?.Workflow,
-            filter?.NewestReportedFirst ?? false, filter?.CaseIds, after);
+            filter?.NewestReportedFirst ?? false, filter?.CaseIds, filter?.ReportedFromUtc,
+            filter?.ReportedBeforeUtc, after);
 
     public Task<IReadOnlyList<CaseQueueCandidate>> GetAsync(string ownerActorId, string workspaceId,
         string countryCode, DateTimeOffset sinceUtc, int take, CancellationToken ct) =>
-        ReadAsync(ownerActorId, take, workspaceId, countryCode, sinceUtc, ct, null, false, null, null);
+        ReadAsync(ownerActorId, take, workspaceId, countryCode, sinceUtc, ct, null, false, null, null, null, null);
 
     private async Task<IReadOnlyList<CaseQueueCandidate>> ReadAsync(
         string ownerActorId, int take, string? workspaceId, string? countryCode, DateTimeOffset? sinceUtc,
         CancellationToken ct, string? workflow, bool newestReportedFirst, IReadOnlyList<Guid>? caseIds,
-        CaseQueueContinuation? after)
+        DateTimeOffset? reportedFromUtc, DateTimeOffset? reportedBeforeUtc, CaseQueueContinuation? after)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(ownerActorId);
         if (take < 1)
@@ -49,6 +51,8 @@ public sealed class PostgresCaseQueueStore(SwiftAidDbContext dbContext) : ICaseQ
             .Where(item => countryCode == null || item.CountryCode == countryCode)
             .Where(item => workflowValue == null || item.Workflow == workflowValue)
             .Where(item => sinceUtc == null || item.CreatedAtUtc >= sinceUtc)
+            .Where(item => reportedFromUtc == null || item.CreatedAtUtc >= reportedFromUtc)
+            .Where(item => reportedBeforeUtc == null || item.CreatedAtUtc < reportedBeforeUtc)
             .Select(item => new
             {
                 item.CaseId,

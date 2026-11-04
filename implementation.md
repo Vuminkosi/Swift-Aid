@@ -4539,3 +4539,9 @@ PASS: Application, Infrastructure, and Gateway builds; zero warnings and errors.
 The submitter projection now uses ICaseReportAttributionQuery instead of loading a full 500-entry timeline per case. One focused store query returns the CaseReported event ID/version, an allowed display name, and an EXISTS result for intake promotion; the query is wrapped in a current ReadCase lease. Actor IDs and report content are excluded. This reduces unnecessary event reads and keeps attribution-specific data inside the authorized projection.
 
 PASS: Application, Infrastructure, and Gateway builds; zero warnings and errors. PASS: git diff --check. No tests added or run. NOT VERIFIED: live PostgreSQL query plan, live attribution data, browser/provider behavior, or deployment.
+
+### Ellai owned-case reported-date filters (2026-11-04)
+
+`ellai_state(projection=queue)` accepts `reported_from` inclusive and `reported_before` exclusive UTC dates (`YYYY-MM-DD`) spanning at most 365 days. The authorized queue pushes these bounds into PostgreSQL before ordering and paging; exact occurrence-place searches carry the same bounds through their candidate scan. Model instructions anchor relative dates with `ellai_now` and distinguish managed-case creation/report time from event occurrence or symptom-onset time. Results remain limited to the current actor's owned, readable cases; filters do not expose classifier labels or establish disease incidence. The tool input schema version is now 2.
+
+PASS: Gateway build with Application and Infrastructure project references, zero warnings and errors. PASS: `git diff --check`. No tests added or run, per user instruction. NOT VERIFIED: live query results, provider interpretation/tool selection, browser/session replay, or deployed behavior. No migration.

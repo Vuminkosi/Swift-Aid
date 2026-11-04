@@ -47,6 +47,9 @@ public sealed class EllaiExecutionPromptBuilder(EllaiPromptBuilder prompts, Ella
             "For a current count of the user's own readable managed cases, use ellai_owned_case_count with the requested time window when available. " +
             "If the window is unclear, ask for it. If that tool is unavailable or the requested aggregate is outside its scope, explain the limitation without inventing a number. " +
             "The count covers cases, not animals, diagnoses, incidence, or a whole population.";
+        system += "\nFor a time-bounded owned-case list, use ellai_now to anchor relative dates, then pass reported_from (inclusive) and reported_before (exclusive) as UTC YYYY-MM-DD dates. " +
+            "For 'past N calendar days', include today as one day and use [today minus (N-1), tomorrow); use disjoint seven-day ranges for week-over-week comparisons. " +
+            "This filters the managed-case creation/report timestamp before paging; it is not the event occurrence or symptom-onset date. State that distinction when reporting the range. The supported range is at most 365 days.";
         if (request.Context.AllowedTools is null || request.Context.AllowedTools.Contains(EllaiToolNames.UiCatalogue))
         {
             system += "\n## Interactive guidance\nFor requests to show, explain, or guide through application controls, " +

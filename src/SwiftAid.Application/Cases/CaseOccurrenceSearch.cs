@@ -10,7 +10,7 @@ public sealed class CaseOccurrenceSearch(ICaseQueueQuery queue, ICaseOccurrenceL
     public const int PageSize = 50;
 
     public async Task<CaseOccurrenceSearchResult> SearchAsync(ActorContext actor, string country, string placeId,
-        int limit, CancellationToken ct)
+        int limit, CancellationToken ct, DateTimeOffset? reportedFromUtc = null, DateTimeOffset? reportedBeforeUtc = null)
     {
         ArgumentNullException.ThrowIfNull(actor);
         if (country is not { Length: 2 } || country.Any(c => c is < 'A' or > 'Z'))
@@ -26,7 +26,8 @@ public sealed class CaseOccurrenceSearch(ICaseQueueQuery queue, ICaseOccurrenceL
         var incomplete = false;
         string? cursor = null;
         var scanned = 0;
-        var filter = new CaseQueueFilter(country, NewestReportedFirst: true);
+        var filter = new CaseQueueFilter(country, NewestReportedFirst: true,
+            ReportedFromUtc: reportedFromUtc, ReportedBeforeUtc: reportedBeforeUtc);
         try
         {
             do
