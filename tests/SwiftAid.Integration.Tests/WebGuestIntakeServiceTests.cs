@@ -13,12 +13,85 @@ using SwiftAid.Infrastructure.Persistence.Entities.Intake;
 using SwiftAid.Infrastructure.Persistence.Repositories.Intake;
 using System.Security.Cryptography;
 using System.Text.Json;
+using System.Reflection;
+using SwiftAid.Gateway.Components.Pages;
+using SwiftAid.UI.Components.Public;
+using SwiftAid.Application.Authorization;
+using SwiftAid.Contracts.Commands;
 
 namespace SwiftAid.Integration.Tests;
 
 [Collection(IntakePostgresCollection.Name)]
 public sealed class WebGuestIntakeServiceTests
 {
+    [IntakePostgresFact]
+    public async Task ServerReportFormReachesAuthoritativeReceiptAndRetriesOnce()
+    {
+        await using var db = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
+        var limits = IntakeLimits.Default;
+        var authority = new PostgresIntakeSessionAuthority(db, limits, Options.Create(new IntakeSessionOptions()));
+        var sessions = new IntakeSessionEndpointService(authority, new PostgresIntakeReceiptReader(db), TimeProvider.System);
+        var submissions = new PostgresIntakeSubmissionStore(db, limits, new EphemeralDataProtectionProvider());
+        var intake = new IntakeService(submissions, new PostgresIntakeDecisionStore(db), new UnusedPromotion(),
+            new PostgresIntakeAttachmentAuthority(db), new CoverageRouter(new NoCoverage()),
+            new IntakeSubmissionValidator(new FixtureCountries(), new FixturePolicy()), limits, TimeProvider.System);
+        var web = new WebGuestIntakeService(sessions, intake);
+        var page = new Report();
+        typeof(Report).GetProperty("IntakeSubmissionClient", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .SetValue(page, new WebPublicIntakeSubmissionClient(web));
+        var draft = new PublicReportDraft
+        {
+            SubjectScope = IntakeSubjectScope.Human, Narrative = "Synthetic observation", CountryCode = "ZA",
+            CountryConfirmed = true, ReportReviewConfirmed = true, ProcessingConfirmed = true
+        };
+        var command = draft.ToSubmission("fixture-catalogue", "https://fixture.invalid/policy", "v1",
+            [new PublicCountryOption("ZA", "Synthetic country")], true);
+        Assert.Equal(Guid.Empty, command.ClientSubmissionId);
+        var send = typeof(Report).GetMethod("SendReportAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
+
+        await (Task)send.Invoke(page, [command])!;
+        var receipt = (IntakeReceipt?)typeof(Report).GetField("_receipt", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(page);
+        Assert.NotNull(receipt);
+        Assert.NotEqual(Guid.Empty, receipt.ClientSubmissionId);
+        var persisted = await web.GetReceiptAsync(receipt.ReceiptId);
+        Assert.NotNull(persisted);
+        Assert.Equal(receipt.ReceiptId, persisted.ReceiptId);
+        Assert.Equal(receipt.ClientSubmissionId, persisted.ClientSubmissionId);
+        Assert.Equal(receipt.Status, persisted.Status);
+        Assert.Equal(receipt.RoutingStatus, persisted.RoutingStatus);
+        Assert.InRange((receipt.ReceivedAtUtc - persisted.ReceivedAtUtc).Duration(), TimeSpan.Zero, TimeSpan.FromTicks(9));
+        Assert.Null(await sessions.GetReceiptAsync(receipt.ReceiptId, RandomNumberGenerator.GetBytes(32), default));
+        await (Task)send.Invoke(page, [command])!;
+        var retried = (IntakeReceipt?)typeof(Report).GetField("_receipt", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(page);
+        Assert.Equal(receipt.ReceiptId, retried!.ReceiptId);
+        Assert.Equal(1, await db.Set<IntakeReportEntity>().CountAsync(item => item.ClientSubmissionId == receipt.ClientSubmissionId));
+        Assert.Equal(1, await db.Set<IntakeOutboxEntity>().CountAsync(item => item.ReceiptId == receipt.ReceiptId));
+    }
+
+    private sealed class FixtureCountries : IIntakeCountryCatalogue
+    {
+        public Task<bool> IsKnownCountryAsync(string countryCode, string catalogueVersion, CancellationToken ct) =>
+            Task.FromResult(countryCode == "ZA" && catalogueVersion == "fixture-catalogue");
+    }
+
+    private sealed class FixturePolicy : IIntakeConsentPolicy
+    {
+        public Task<bool> IsCurrentAsync(IntakeConfirmations confirmations, bool includesAudio, CancellationToken ct) =>
+            Task.FromResult(confirmations.ProcessingPolicyVersion == "v1" && !includesAudio);
+    }
+
+    private sealed class NoCoverage : IIntakeCoverageCatalog
+    {
+        public Task<IntakeCoverageDecision> FindAsync(LocationContext location, CaseKind kind, CancellationToken ct) =>
+            Task.FromResult(new IntakeCoverageDecision(IntakeCoverageMatch.None, null));
+    }
+
+    private sealed class UnusedPromotion : IIntakePromotionService
+    {
+        public Task<IntakeDecisionResult> PromoteAsync(IntakeDecision command, ActorContext actor, CancellationToken ct) =>
+            throw new NotSupportedException();
+    }
+
     [IntakePostgresFact]
     public async Task LostAcknowledgementAndExpiredCapabilityReturnOriginalPostgresReceipt()
     {
