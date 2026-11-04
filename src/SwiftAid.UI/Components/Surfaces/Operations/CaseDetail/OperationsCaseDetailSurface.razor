@@ -151,7 +151,13 @@
         <MudTabPanel Text="Follow-ups" data-ellai-control="case-detail.follow-ups" data-bonboarding-anchor="ellai-case-detail-follow-ups" Icon="@Icons.Material.Outlined.EventNote">
             @if (_followUpReviewMessage is not null)
             {
-                <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" role="status">@_followUpReviewMessage</MudAlert>
+                <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" role="status">
+                    @_followUpReviewMessage
+                    @if (OnWorkRetry.HasDelegate)
+                    {
+                        <MudButton Variant="Variant.Text" Color="Color.Primary" Disabled="@WorkIsBusy" OnClick="RefreshFollowUpWorkAsync">Refresh work list</MudButton>
+                    }
+                </MudAlert>
             }
             <OperationsWorkManagementSurface RequestedSelection="_followUpSelection" Title="Follow-ups" Description="Schedule visits, manage deadlines, and record completion outcomes." State="WorkState" Items="FollowUpItems" IsBusy="WorkIsBusy" StatusMessage="@WorkStatusMessage" StatusIsError="WorkStatusIsError" OnAction="HandleWorkActionAsync" OnRetry="OnWorkRetry" />
         </MudTabPanel>
@@ -537,6 +543,13 @@
             _followUpSelection = new(Guid.NewGuid(), CaseId, key);
         }
         await SelectTab(2);
+    }
+
+    private async Task RefreshFollowUpWorkAsync()
+    {
+        var caseId = CaseId;
+        await OnWorkRetry.InvokeAsync();
+        if (CaseId == caseId) _followUpReviewMessage = null;
     }
 
     private async Task HandleWorkActionAsync(OperationsWorkManagementSurface.OperationsWorkActionRequest request)
