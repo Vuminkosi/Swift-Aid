@@ -29,10 +29,14 @@ const { chromium } = require(process.env.SWIFTAID_PLAYWRIGHT_PACKAGE || 'playwri
             assert.match(await page.locator('main').innerText(), /Follow-up acknowledged/);
             assert.match(await page.locator('main').innerText(), /Historical assignment/);
             assert.match(await page.locator('main').innerText(), /Originally approved follow-up due/);
+            assert.match(await page.locator('main').innerText(), /Overdue officer acknowledgment review recommended/);
             assert.doesNotMatch(await page.locator('main').innerText(), /private-officer/);
             await page.getByRole('combobox', { name: 'Filter history' }).click();
             await page.getByRole('option', { name: 'Escalations', exact: true }).click();
             assert.equal(await page.locator('.case-timeline__officer-assignment').count(), 2);
+            await page.getByRole('combobox', { name: 'Filter history' }).click();
+            await page.getByRole('option', { name: 'Ellai follow-ups', exact: true }).click();
+            await page.getByText('Overdue officer acknowledgment review recommended', { exact: false }).waitFor();
             assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
             assert.deepEqual(errors, []);
             await page.close();

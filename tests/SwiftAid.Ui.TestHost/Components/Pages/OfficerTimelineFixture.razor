@@ -25,7 +25,11 @@
             var entries = new[]
             {
                 new CaseTimelineEntry(Guid.NewGuid(), "CaseFollowUpScheduled", "Follow-up scheduled", CaseTimelineEntryKind.Authoritative, 2, 1, Guid.NewGuid(), "private-actor", null, now, 1)
-                { OfficerEscalation = new(Guid.NewGuid(), Guid.NewGuid(), "private-officer", "Synthetic Officer", now.AddHours(1), now.AddDays(1), true, true) },
+                {
+                    OfficerEscalation = new(Guid.NewGuid(), Guid.NewGuid(), "private-officer", "Synthetic Officer", now.AddHours(1), now.AddDays(1), true, true),
+                    AgentActivities = [new(Guid.NewGuid(), "ops.followup", "ignored", "policy/1", now)
+                    { RecommendationKind = "OfficerAcknowledgementDue", FollowUpId = Guid.NewGuid(), FollowUpIsCurrent = false }]
+                },
                 new CaseTimelineEntry(Guid.NewGuid(), "CaseFollowUpScheduled", "Follow-up scheduled", CaseTimelineEntryKind.Authoritative, 3, 1, Guid.NewGuid(), "private-actor", null, now.AddMinutes(1), 1)
                 { OfficerEscalation = new(Guid.NewGuid(), Guid.NewGuid(), "private-officer-2", null, now.AddHours(2), now.AddDays(2), false) }
             };

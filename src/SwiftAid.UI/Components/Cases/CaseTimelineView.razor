@@ -355,7 +355,8 @@
             _reviewError = result.Status is not (FollowUpReviewStatus.Recorded or FollowUpReviewStatus.Replayed or FollowUpReviewStatus.AlreadyReviewed);
             _reviewMessage = result.Status switch
             {
-                FollowUpReviewStatus.Recorded or FollowUpReviewStatus.Replayed or FollowUpReviewStatus.AlreadyReviewed => "Review recorded. No follow-up action was submitted.",
+                FollowUpReviewStatus.Recorded or FollowUpReviewStatus.Replayed => "Review recorded. No follow-up action was submitted.",
+                FollowUpReviewStatus.AlreadyReviewed => "A review was already recorded. No follow-up action was submitted.",
                 FollowUpReviewStatus.Stale => "This recommendation is no longer current. Refresh the follow-up before taking action.",
                 FollowUpReviewStatus.Denied => "The recommendation is unavailable or you cannot review it.",
                 FollowUpReviewStatus.Conflict => "The review request conflicted with an earlier request. Refresh before trying again.",
