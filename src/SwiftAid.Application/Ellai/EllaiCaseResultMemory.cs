@@ -9,7 +9,8 @@ namespace SwiftAid.Application.Ellai;
 /// <summary>Session-local result references. PostgreSQL topics hold no case narratives;
 /// every recall uses the ordinary owner-filtered, per-case authorized query.</summary>
 public sealed class EllaiCaseResultMemory(EllaiTopicService topics, ICaseQueueQuery queue,
-    IEllaiExactReferenceIndex? index = null, ICaseOccurrenceLocationQuery? occurrenceLocations = null)
+    IEllaiExactReferenceIndex? index = null, ICaseOccurrenceLocationQuery? occurrenceLocations = null,
+    ICaseReportReadQuery? caseReports = null)
 {
     public const string Reference = "case-results";
     public const string OriginalReference = "case-results-original";
@@ -72,15 +73,16 @@ public sealed class EllaiCaseResultMemory(EllaiTopicService topics, ICaseQueueQu
         bool original = false, string? country = null, string? placeId = null)
     {
         ct.ThrowIfCancellationRequested();
-        if (field is not null && field is not ("country" or "workflow"))
+        if (field is not null && field is not ("country" or "workflow" or "observations"))
             return new(EllaiToolNames.Topic, false, "Unsupported case-result field selector.", [], "", 0, false,
                 EllaiToolReasonCodes.InvalidArguments);
-        if (classificationFilter is not null && (classificationFilter is not ("Classified" or "Unclassified") || field is not null || placeId is not null))
+        if (classificationFilter is not null && (classificationFilter is not ("Classified" or "Unclassified") ||
+            field is not null and not "observations" || placeId is not null && field != "observations"))
             return new(EllaiToolNames.Topic, false, "Unsupported case-result classification filter.", [], "", 0, false,
                 EllaiToolReasonCodes.InvalidArguments);
         if ((country is null) != (placeId is null) ||
             country is not null && (country.Length != 2 || country.Any(character => character is < 'A' or > 'Z')) ||
-            placeId is not null && (placeId.Length is < 1 or > 120 || placeId != placeId.Trim() || field is not null))
+            placeId is not null && (placeId.Length is < 1 or > 120 || placeId != placeId.Trim() || field is not null and not "observations"))
             return new(EllaiToolNames.Topic, false, "An exact occurrence-place filter requires a country and cannot be combined with a field selector.", [], "", 0, false,
                 EllaiToolReasonCodes.InvalidArguments);
         if (context.Actor is null) return Unavailable();
@@ -182,6 +184,36 @@ public sealed class EllaiCaseResultMemory(EllaiTopicService topics, ICaseQueueQu
             }
             rows = matched.ToArray();
         }
+        if (field == "observations")
+        {
+            if (caseReports is null) return Unavailable();
+            var reports = new List<(CaseReference Old, CaseReportDetails Report)>();
+            foreach (var pair in rows)
+            {
+                ct.ThrowIfCancellationRequested();
+                var report = await caseReports.GetAsync(context.Actor, pair.row.CaseId, ct).ConfigureAwait(false);
+                ct.ThrowIfCancellationRequested();
+                if (report is null || report.CaseId != pair.row.CaseId) continue;
+                reports.Add((pair.old, report));
+            }
+            var visibleReports = new List<(CaseReference Old, CaseReportDetails Report)>();
+            var outputTruncated = reports.Count != rows.Length;
+            foreach (var pair in reports)
+            {
+                visibleReports.Add(pair);
+                if (CreateObservationResult(visibleReports, completeness, classificationFilter, country, placeId,
+                    false, incomplete || unknownLocations || reports.Count != rows.Length || authorizedRows.Length != snapshot.Cases.Count)
+                    is { } candidate && EllaiToolBroker.MeasureEnvelopeBytes(candidate with { ToolName = EllaiToolNames.Evidence }) > EllaiToolBroker.MaxResultBytes)
+                {
+                    visibleReports.RemoveAt(visibleReports.Count - 1);
+                    outputTruncated = true;
+                }
+            }
+            var result = CreateObservationResult(visibleReports, completeness, classificationFilter, country, placeId,
+                outputTruncated, incomplete || unknownLocations || reports.Count != rows.Length || authorizedRows.Length != snapshot.Cases.Count);
+            return result with
+            { HistoryValidUntilUtc = snapshot.ExpiresAtUtc };
+        }
         var evidence = rows.Select(pair => new EvidenceRef("CaseQueue", pair.row.CaseId.ToString("D"),
             pair.row.AggregateVersion.ToString(CultureInfo.InvariantCulture), null, pair.row.CaseId.ToString("D"))).ToArray();
         var evidenceField = classificationFilter is not null ? "classification" : placeId is not null ? "place" : field;
@@ -216,6 +248,25 @@ public sealed class EllaiCaseResultMemory(EllaiTopicService topics, ICaseQueueQu
 
     public static string SourceVersion(string snapshot) => Convert.ToHexString(
         System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(snapshot)));
+
+    private static EllaiToolResult CreateObservationResult(
+        IReadOnlyList<(CaseReference Old, CaseReportDetails Report)> reports, string completeness,
+        string? classificationFilter, string? country, string? placeId, bool outputTruncated, bool incomplete)
+    {
+        var evidence = reports.Select(pair => new EvidenceRef("CaseReport", pair.Report.CaseId.ToString("D"),
+            pair.Report.ReportRevision.ToString(CultureInfo.InvariantCulture), "observations", pair.Report.CaseId.ToString("D"))).ToArray();
+        var observationSummary = JsonSerializer.Serialize(new
+        {
+            context = "Verbatim observations recorded in reports. These are unverified reports, not diagnoses.",
+            cases = reports.Select(pair => new { caseId = pair.Report.CaseId, observations = pair.Report.Observations }).ToArray()
+        });
+        return new EllaiToolResult(EllaiToolNames.Topic, true, null, evidence, completeness +
+            "Reported observations from previously retrieved cases, checked against current access; this is not a new search. " +
+            (classificationFilter is null ? "" : $"Filtered by recorded case classification status: {classificationFilter}. ") +
+            (placeId is null ? "" : $"Filtered to the exact recorded occurrence place {placeId} in {country}. ") +
+            (outputTruncated ? "The authorized output-size limit omitted some case observations. " : "") +
+            "Unavailable records are omitted. " + observationSummary, reports.Count, incomplete || outputTruncated);
+    }
 
     private static bool IsValidSnapshot(Snapshot snapshot, bool history) =>
         !string.IsNullOrWhiteSpace(snapshot.ActorId) && !string.IsNullOrWhiteSpace(snapshot.ScopeEpoch) &&

@@ -189,7 +189,7 @@ public sealed class EllaiToolBroker
     private static readonly string[] ToolDescriptions =
     {
         $"{EllaiToolNames.State}(projection=[feature|queue], limit=1..20, country?, workflow?, sort?, place_id?) — permitted feature or owned-case queue. country is an uppercase two-letter code (Zimbabwe=ZW, Eswatini=SZ); workflow is Reported, UnderReview, Active, AwaitingFollowUp or Resolved; sort=latest-reported or latest-updated. For an occurrence-place search, select an exact registry ID using ellai_locations and supply country, place_id and sort=latest-reported; workflow is not supported with place_id. Unknown locations and incomplete scans cannot establish a complete list. Reported is a recorded workflow, not proof that no human reviewed a case. For retained results, use ellai_evidence with classification_filter=Classified or Unclassified to check recorded status; this does not return classifier labels or establish a diagnosis.",
-        $"{EllaiToolNames.Evidence}(ref=[case-results|case-results-original], field=[country|workflow]?, classification_filter=[Classified|Unclassified]?, country?, place_id?) — re-read the latest or first retained case list under current access. The first retained search can precede an interrupted response or an unrelated discussion; use conversation context or ask which set the user means. It reauthorizes each case. To filter a retained set to a place, first select the exact ID with ellai_locations, then provide its country and place_id; place filtering cannot be combined with field or classification_filter. Unknown places are omitted and marked incomplete.",
+        $"{EllaiToolNames.Evidence}(ref=[case-results|case-results-original], field=[country|workflow|observations]?, classification_filter=[Classified|Unclassified]?, country?, place_id?) — re-read retained cases under current access. field=observations returns only verbatim reported observations, labeled unverified reports and not diagnoses; it never returns narrative or coordinates. Classification and exact place filters can combine with observations. Place filtering requires a selected registry ID and matching country. Reauthorizes each case; unavailable rows are omitted and marked incomplete.",
         $"{EllaiToolNames.Topic}(ref) — session topic candidates with checkpoints. Use ref=case-results for the latest retained list or case-results-original for the first retained list; never invent a remembered result set.",
         $"{EllaiToolNames.Capabilities}(feature?) — capability readiness, no credentials.",
         $"{EllaiToolNames.Receipts}(receipt?) — durable receipts, session-bound.",
@@ -238,6 +238,7 @@ public sealed class EllaiToolBroker
     private readonly EllaiTechnicalDocs? _docs;
     private readonly ICaseQueueQuery? _queue;
     private readonly ICaseOccurrenceLocationQuery? _occurrenceLocations;
+    private readonly ICaseReportReadQuery? _caseReports;
     private readonly IEllaiApprovalStore? _receipts;
     private readonly EllaiTopicService? _topics;
     private readonly IEllaiExactReferenceIndex? _referenceIndex;
@@ -273,13 +274,15 @@ public sealed class EllaiToolBroker
         SwiftAid.Application.Classification.ICaseClassificationQuery? classification = null,
         SwiftAid.Application.Surveillance.ISignalReviewService? signals = null,
         EllaiUiAuthorityResolver? uiAuthority = null, IEllaiExactReferenceIndex? referenceIndex = null,
-        IDashboardAggregateQuery? dashboard = null, ICaseOccurrenceLocationQuery? occurrenceLocations = null)
+        IDashboardAggregateQuery? dashboard = null, ICaseOccurrenceLocationQuery? occurrenceLocations = null,
+        ICaseReportReadQuery? caseReports = null)
     {
         _policy = policy ?? throw new ArgumentNullException(nameof(policy));
         _consent = consent ?? throw new ArgumentNullException(nameof(consent));
         _docs = docs;
         _queue = queue;
         _occurrenceLocations = occurrenceLocations;
+        _caseReports = caseReports;
         _receipts = receipts;
         _topics = topics;
         _referenceIndex = referenceIndex;
@@ -506,24 +509,30 @@ public sealed class EllaiToolBroker
         }
 
         var field = request.Arguments.GetValueOrDefault("field");
-        if (field is not null && field is not ("country" or "workflow"))
+        if (field is not null && field is not ("country" or "workflow" or "observations"))
         {
-            return Deny(request.ToolName, "field must be country or workflow.",
+            return Deny(request.ToolName, "field must be country, workflow or observations.",
                 EllaiToolReasonCodes.InvalidArguments);
         }
         var country = request.Arguments.GetValueOrDefault("country");
         var placeId = request.Arguments.GetValueOrDefault("place_id");
         var classificationFilter = request.Arguments.GetValueOrDefault("classification_filter");
         if ((country is null) != (placeId is null) ||
-            placeId is not null && (placeId.Length is < 1 or > 120 || placeId != placeId.Trim() || field is not null || classificationFilter is not null))
+            placeId is not null && (placeId.Length is < 1 or > 120 || placeId != placeId.Trim() ||
+                field is not null and not "observations" || classificationFilter is not null && field != "observations") ||
+            classificationFilter is not null && field is not null and not "observations")
         {
-            return Deny(request.ToolName, "place_id requires country and cannot be combined with field or classification_filter.",
+            return Deny(request.ToolName, "place_id requires country; place and classification filters can combine only with field=observations.",
                 EllaiToolReasonCodes.InvalidArguments);
         }
 
+        if (field == "observations" && _caseReports is null)
+            return Deny(request.ToolName, "Authorized report observations are unavailable for this session.",
+                EllaiToolReasonCodes.Unavailable);
+
         try
         {
-            var result = await new EllaiCaseResultMemory(_topics, _queue, referenceIndex, _occurrenceLocations)
+            var result = await new EllaiCaseResultMemory(_topics, _queue, referenceIndex, _occurrenceLocations, _caseReports)
                 .RecallAsync(context, ct, field, classificationFilter,
                     original: request.Arguments["ref"] == EllaiCaseResultMemory.OriginalReference,
                     country: country, placeId: placeId).ConfigureAwait(false);

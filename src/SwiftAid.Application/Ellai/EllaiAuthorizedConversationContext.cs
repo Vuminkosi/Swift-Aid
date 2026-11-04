@@ -78,7 +78,8 @@ public static class EllaiAuthorizedConversationContext
                     return decisions[decisionKey] = false;
                 if (observation.RetainedCaseReplay is { } retainedCase)
                 {
-                    if (!retainedCase.IsValid() || observation.Truncated && retainedCase.ClassificationFilter is null ||
+                    if (!retainedCase.IsValid() || observation.Truncated && retainedCase.ClassificationFilter is null &&
+                        retainedCase.PlaceId is null && retainedCase.Field != "observations" ||
                         observation.CaseSnapshotExpiresAtUtc is not { } expiry || expiry <= DateTimeOffset.UtcNow ||
                         toolContext is null || invokeTool is null || toolContext.SessionId != turn.SessionId ||
                         toolContext.Actor is null || toolContext.Actor.ActorId != actor.ActorId ||
@@ -99,7 +100,8 @@ public static class EllaiAuthorizedConversationContext
                             current.DenialReason is not null || current.ReasonCode != EllaiToolReasonCodes.Ok ||
                             current.HistoryValidUntilUtc != expiry || current.ItemCount != observation.Evidence.Count ||
                             !current.Evidence.SequenceEqual(observation.Evidence) ||
-                            EllaiObservedToolResult.CaseListFingerprint(current) != retainedCase.Digest)
+                            (retainedCase.Field == "observations" ? EllaiObservedToolResult.CaseReportFingerprint(current) :
+                                EllaiObservedToolResult.CaseListFingerprint(current)) != retainedCase.Digest)
                             return decisions[decisionKey] = false;
                     }
                     catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
