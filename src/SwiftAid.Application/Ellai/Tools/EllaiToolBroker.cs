@@ -561,6 +561,7 @@ public sealed class EllaiToolBroker
             if (!page.Allowed) return Deny(request.ToolName, "The case was not found or is not accessible.", EllaiToolReasonCodes.DeniedByPolicy);
             var relatedLines = page.Candidates.Select(candidate =>
                 $"Possible related case {candidate.RelatedCaseId:D}; review {(candidate.Decision?.ToString() ?? "Pending")}; " +
+                $"recorded matching criteria: {DescribeCorrelationReasons(candidate.Reasons)}; " +
                 "shared attributes do not establish identity or causation.").ToArray();
             var related = relatedLines.Length == 0
                 ? new[] { "No currently accessible related-case suggestions were found." }
@@ -578,6 +579,21 @@ public sealed class EllaiToolBroker
             HistoryValidUntilUtc = DateTimeOffset.UtcNow.AddMinutes(5)
         };
         return output with { CaseTimelineReplayScope = EllaiCaseTimelineReplayScope.Create(id, output, includeRelated) };
+    }
+
+    private static string DescribeCorrelationReasons(IReadOnlyList<string>? reasons)
+    {
+        if (reasons is null || reasons.Count == 0) return "unavailable";
+        var labels = reasons.Select(reason => reason switch
+        {
+            nameof(CorrelationReason.SameSourceIdentifier) => "matching source identifier",
+            nameof(CorrelationReason.SameSector) => "same sector",
+            nameof(CorrelationReason.SharedRegion) => "shared region",
+            nameof(CorrelationReason.ReportsCloseInTime) => "reports close in time",
+            nameof(CorrelationReason.SemanticCandidate) => "semantic retrieval hint",
+            _ => "unrecognized recorded criterion"
+        }).Distinct(StringComparer.Ordinal).ToArray();
+        return string.Join(", ", labels);
     }
 
     private async Task<EllaiToolResult> ReadApprovedHealthSourcesAsync(EllaiToolContext context, EllaiToolRequest request, CancellationToken ct)
