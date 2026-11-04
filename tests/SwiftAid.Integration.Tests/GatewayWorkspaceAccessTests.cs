@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using SwiftAid.Application.Authorization;
+using SwiftAid.Application.Identity;
 using SwiftAid.Client.Presentation;
 using SwiftAid.Gateway.Presentation;
 using SwiftAid.Gateway.Ingestion;
@@ -25,6 +26,7 @@ public sealed class GatewayWorkspaceAccessTests
         services.AddSingleton<AuthenticationStateProvider>(auth);
         services.AddScoped(_ => new SwiftAidDbContext(new DbContextOptionsBuilder<SwiftAidDbContext>()
             .UseNpgsql(fixture.Db.Database.GetConnectionString()).UseOpenIddict().Options));
+        services.AddScoped<IOrganizationOwnerAuthorizer, PostgresOrganizationOwnerAuthorizer>();
         services.AddScoped<IOrganizationMembershipService, OrganizationMembershipService>();
         services.AddScoped<GatewayWorkspaceAccessClient>();
         await using var provider = services.BuildServiceProvider();
@@ -89,7 +91,8 @@ public sealed class GatewayWorkspaceAccessTests
     public async Task Creator_backfill_is_idempotent_and_preserves_restrictions_and_unproven_members()
     {
         await using var fixture = await CaseImportPostgresTests.Fixture.CreateAsync();
-        var service = new OrganizationMembershipService(fixture.Db, TimeProvider.System);
+        var service = new OrganizationMembershipService(fixture.Db, TimeProvider.System,
+            new PostgresOrganizationOwnerAuthorizer(fixture.Db, TimeProvider.System));
         var names = Enumerable.Range(0, 4).Select(_ => "creator-test-" + Guid.NewGuid().ToString("N")).ToArray();
         foreach (var name in names)
             Assert.Equal(OrganizationCreateStatus.Created, (await service.CreateAsync("officer-1", name, default)).Status);

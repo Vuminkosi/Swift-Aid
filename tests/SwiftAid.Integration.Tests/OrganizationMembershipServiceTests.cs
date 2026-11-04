@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using SwiftAid.Application.Identity;
 using SwiftAid.Infrastructure.Identity;
 using SwiftAid.Infrastructure.Persistence;
 
@@ -18,6 +19,7 @@ public sealed class OrganizationMembershipServiceTests : IAsyncDisposable
         services.AddLogging();
         services.AddSingleton<TimeProvider>(_timeProvider);
         services.AddDbContext<SwiftAidDbContext>(options => options.UseSqlite("DataSource=:memory:"));
+        services.AddScoped<IOrganizationOwnerAuthorizer, PostgresOrganizationOwnerAuthorizer>();
         services.AddScoped<IOrganizationMembershipService, OrganizationMembershipService>();
         _provider = services.BuildServiceProvider();
         _dbContext = _provider.GetRequiredService<SwiftAidDbContext>();
