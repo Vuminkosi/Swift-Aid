@@ -1,8 +1,8 @@
 # Ellai health-officer eligibility boundary
 
 The officer lookup is disabled by default (`Ellai:Operational:OfficerDirectory:Enabled`).
-It has no model tool, public endpoint, assignment action, or designation-writing
-API in this slice. A designation is a controlled organizational role record,
+It has an authenticated case-scoped candidate endpoint, but no model tool,
+assignment action, or designation-writing API in this slice. A designation is a controlled organizational role record,
 not evidence of professional licensure. The registry is initially empty and its
 versioned rows are append-only; a later version supersedes an earlier one. The
 migration refuses rollback when records exist.
