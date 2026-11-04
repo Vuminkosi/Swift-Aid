@@ -104,9 +104,12 @@ public sealed class ReportVoiceEndpointTests
         app.UseAuthentication();
         app.UseAuthorization();
         var group = app.MapGroup("/sessions/{sessionId}").RequireAuthorization();
-        group.MapPost("/consent", ReportVoiceEndpoints.ConsentAsync);
-        group.MapPost("/extract", ReportVoiceEndpoints.ExtractAsync);
-        group.MapPost("/saved", ReportVoiceEndpoints.TranscribeSavedAsync);
+        var consentHandler = ReportVoiceEndpoints.ConsentAsync;
+        group.MapPost("/consent", consentHandler);
+        var extractHandler = ReportVoiceEndpoints.ExtractAsync;
+        group.MapPost("/extract", extractHandler);
+        var savedHandler = ReportVoiceEndpoints.TranscribeSavedAsync;
+        group.MapPost("/saved", savedHandler);
         await app.StartAsync();
         using var client = app.GetTestClient();
 
@@ -195,9 +198,12 @@ public sealed class ReportVoiceEndpointTests
         app.UseAuthentication();
         app.UseAuthorization();
         var group = app.MapGroup("/sessions/{sessionId}").RequireAuthorization();
-        group.MapPost("/consent", ReportVoiceEndpoints.ConsentAsync);
-        group.MapPost("/extract", ReportVoiceEndpoints.ExtractAsync);
-        group.MapPost("/saved", ReportVoiceEndpoints.TranscribeSavedAsync);
+        var consentHandler = ReportVoiceEndpoints.ConsentAsync;
+        group.MapPost("/consent", consentHandler);
+        var extractHandler = ReportVoiceEndpoints.ExtractAsync;
+        group.MapPost("/extract", extractHandler);
+        var savedHandler = ReportVoiceEndpoints.TranscribeSavedAsync;
+        group.MapPost("/saved", savedHandler);
         await app.StartAsync();
         using var client = app.GetTestClient();
         Assert.Equal(HttpStatusCode.NoContent,

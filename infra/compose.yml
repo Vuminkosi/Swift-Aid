@@ -34,6 +34,7 @@ services:
       # allowances below (redis/minio/nats/qdrant are plaintext inside this network).
       # Production deployments must override this to Production with TLS endpoints.
       ASPNETCORE_ENVIRONMENT: Development
+      DemoAccess__Enabled: "true"
       ASPNETCORE_HTTP_PORTS: "8080"
       Logging__LogLevel__SwiftAid: Information
       Logging__LogLevel__Microsoft.AspNetCore.Hosting: Warning

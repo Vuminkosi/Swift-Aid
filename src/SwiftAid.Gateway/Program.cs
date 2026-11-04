@@ -100,7 +100,13 @@ GatewayAuthenticationRegistration.Configure(builder.Services, builder.Configurat
 builder.Services.AddSwiftAidInfrastructure(builder.Configuration, builder.Environment);
 GatewayAuthenticationRegistration.ConfigurePersistentCookieDataProtection(builder.Services);
 builder.Services.AddScoped<SwiftAid.Application.Authorization.IScopeService,
-    SwiftAid.Application.Authorization.ScopeService>();
+    SwiftAid.Gateway.Ellai.GatewaySessionScopeService>();
+builder.Services.AddScoped<SwiftAid.Infrastructure.Authorization.PostgresSessionScopeService>();
+builder.Services.AddScoped<SwiftAid.Infrastructure.Demo.DemoAccessProvisioner>();
+if (builder.Configuration.GetValue<bool>("DemoAccess:Enabled") && !builder.Environment.IsDevelopment())
+{
+    throw new InvalidOperationException("Demo access requires the Development environment.");
+}
 builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiSessionScopeResolver>();
 builder.Services.AddScoped<WebGuestIntakeService>(services =>
     new WebGuestIntakeService(services.GetRequiredService<IServiceScopeFactory>()));
@@ -323,6 +329,19 @@ app.UseWhen(
 app.UseHttpsRedirection();
 app.UseWebSockets();
 app.UseAuthentication();
+if (app.Configuration.GetValue<bool>("DemoAccess:Enabled"))
+{
+    app.Use(async (context, next) =>
+    {
+        if (context.User.Identity?.IsAuthenticated == true)
+        {
+            var actor = SwiftAid.Application.Authorization.ActorContext.FromValidatedPrincipal(context.User);
+            await context.RequestServices.GetRequiredService<SwiftAid.Infrastructure.Demo.DemoAccessProvisioner>()
+                .EnsureAsync(actor, context.RequestAborted);
+        }
+        await next(context);
+    });
+}
 app.UseAuthorization();
 app.UseRateLimiter();
 app.UseAntiforgery();
