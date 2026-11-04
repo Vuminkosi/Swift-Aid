@@ -14,6 +14,7 @@ public sealed class EllaiQualityScheduleOptions
     public string PolicyVersion { get; set; } = "";
     public int BatchSize { get; set; } = 10;
     public int PollSeconds { get; set; } = 60;
+    public int CadenceHours { get; set; } = 4;
 
     public void Validate()
     {
@@ -21,7 +22,7 @@ public sealed class EllaiQualityScheduleOptions
             Workspaces.Any(x => string.IsNullOrWhiteSpace(x) || x.Length > 120 || x != x.Trim()) ||
             Workspaces.Distinct(StringComparer.Ordinal).Count() != Workspaces.Length ||
             string.IsNullOrWhiteSpace(PolicyVersion) || PolicyVersion.Length > 120 ||
-            BatchSize is < 1 or > 100 || PollSeconds is < 30 or > 3600)
+            BatchSize is < 1 or > 100 || PollSeconds is < 30 or > 3600 || CadenceHours is not (4 or 8))
             throw new InvalidOperationException("Quality scheduling requires bounded, explicit workspace and policy configuration.");
     }
 }
@@ -58,8 +59,13 @@ public sealed class EllaiQualitySweep(SwiftAidDbContext db, EllaiQualityWork wor
         // Stable workspace jitter spreads new schedules across the first five minutes.
         var hash = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(workspaceId));
         var jitter = System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(hash) % 300;
-        await schedule.CreateAsync(workspaceId, "ops.quality", 4, options.PolicyVersion,
+        await schedule.CreateAsync(workspaceId, "ops.quality", options.CadenceHours, options.PolicyVersion,
             DateTimeOffset.UtcNow.AddSeconds(jitter), ct);
+        var cadence = await db.Database.SqlQuery<int>($"""
+            SELECT cadence_hours AS "Value" FROM ellai_operational_schedules
+            WHERE workspace_id = {workspaceId} AND role_id = 'ops.quality'
+            """).SingleAsync(ct);
+        if (cadence != options.CadenceHours) return "cadence-mismatch";
         var lease = await schedule.TryClaimAsync(workspaceId, "ops.quality", TimeSpan.FromMinutes(5), ct);
         if (lease is null) return "not-due";
         var finished = false;

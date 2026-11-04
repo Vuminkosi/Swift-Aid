@@ -39,7 +39,8 @@ public sealed class EllaiFollowUpScheduleWorker(IServiceScopeFactory scopes,
                     });
                     var result = await services.GetRequiredService<EllaiFollowUpSweep>().RunAsync(workspace, options,
                         token => agent.CreateSessionAsync(cancellationToken: token).AsTask(), progress, stoppingToken);
-                    var level = result == "not-due" ? LogLevel.Debug : LogLevel.Information;
+                    var level = result == "not-due" ? LogLevel.Debug :
+                        result is "cadence-mismatch" or "policy-mismatch" ? LogLevel.Warning : LogLevel.Information;
                     logger.Log(level, "Ellai operational run {RunId} role {Role} finished {Outcome}; turns {WorkTurns}, changes {ChangesCommitted}, model calls {ModelCalls}, started {StartedUtc}, finished {FinishedUtc}, elapsed ms {ElapsedMilliseconds}",
                         progress.RunId, "ops.followup", result, progress.WorkTurns, progress.ChangesCommitted, 0,
                         startedUtc, DateTimeOffset.UtcNow, Stopwatch.GetElapsedTime(started).TotalMilliseconds);
