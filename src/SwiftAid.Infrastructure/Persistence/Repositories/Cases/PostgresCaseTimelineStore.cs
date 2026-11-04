@@ -139,6 +139,16 @@ public sealed class PostgresCaseTimelineStore(SwiftAidDbContext dbContext) : ICa
                         NULL::timestamptz AS "FollowUpReviewedAtUtc", NULL::text AS "RecommendationKind"
                     FROM ellai_case_quality_activity WHERE case_id = {caseId} AND source_event_id = ANY({ids})
                     UNION ALL
+                    SELECT claim.source_event_id, claim.claim_id, 'ops.enrichment', r."ConfigurationId", r."CompletedAtUtc",
+                        NULL::uuid, NULL::boolean, NULL::timestamptz, NULL::timestamptz, NULL::text
+                    FROM ellai_enrichment_claims claim
+                    JOIN case_events source ON source.event_id = claim.source_event_id AND source.case_id = {caseId}
+                    JOIN swiftaid_classification.associations association
+                        ON association."SourceEventId" = claim.source_event_id AND association."ResultId" = claim.result_id
+                    JOIN swiftaid_classification.results r ON r."Id" = claim.result_id
+                    WHERE claim.source_event_id = ANY({ids}) AND r."State" = 'Completed' AND r."CompletedAtUtc" IS NOT NULL
+                        AND r."PredictionsJson" ->> 'leaseId' = claim.lease_id::text
+                    UNION ALL
                     SELECT r.source_event_id, r.activity_id, 'ops.followup', r.policy_version, r.recorded_at_utc,
                         r.follow_up_id, CASE WHEN r.recommendation_kind = 'OfficerAcknowledgementDue' THEN
                             (f.assignee_actor_id = a.officer_actor_id AND f.status = 'Scheduled'

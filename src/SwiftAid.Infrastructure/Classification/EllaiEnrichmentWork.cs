@@ -10,11 +10,12 @@ namespace SwiftAid.Infrastructure.Classification;
 public sealed class EllaiEnrichmentWork(SwiftAidDbContext db, IOptions<ClassificationOptions> configured, TimeProvider clock)
 {
     public async Task<EllaiFencedWorkOutcome> RunOneAsync(EllaiOperationalLease lease, string organizationId,
-        Guid jobId, int batchSize, CancellationToken ct)
+        Guid jobId, Guid runId, Guid workTurnId, int batchSize, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(lease);
         var options = configured.Value;
-        if (!options.Enabled || lease.RoleId != "ops.enrichment" || jobId == Guid.Empty ||
+        if (!options.Enabled || lease.RoleId != "ops.enrichment" || jobId == Guid.Empty || runId == Guid.Empty ||
+            workTurnId == Guid.Empty || runId == workTurnId ||
             batchSize is < 1 or > 100 || !options.Organizations.Contains(organizationId, StringComparer.Ordinal))
             throw new InvalidOperationException("The enrichment work scope is unavailable.");
         options.Validate();
@@ -92,6 +93,10 @@ public sealed class EllaiEnrichmentWork(SwiftAidDbContext db, IOptions<Classific
             if (count == 0) return false;
             await db.Database.ExecuteSqlInterpolatedAsync($"""
                 UPDATE swiftaid_classification.backfills SET "Eligible" = {count}, "Pending" = {count} WHERE "Id" = {jobId}
+                """, token).ConfigureAwait(false);
+            await db.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO ellai_enrichment_jobs (job_id, run_id, work_turn_id, policy_version)
+                VALUES ({jobId}, {runId}, {workTurnId}, {lease.PolicyVersion})
                 """, token).ConfigureAwait(false);
             return true;
         }, ct).ConfigureAwait(false);

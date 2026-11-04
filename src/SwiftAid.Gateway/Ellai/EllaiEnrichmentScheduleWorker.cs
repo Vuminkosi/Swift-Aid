@@ -108,7 +108,7 @@ public sealed class EllaiEnrichmentScheduleWorker(IServiceScopeFactory scopes,
                     var identity = string.Join('\n', "ellai-enrichment-job/1", workspace, organization,
                         lease.DueAtUtc.ToUniversalTime().ToString("O"), settings.Profile.Hash, lease.PolicyVersion);
                     var jobId = new Guid(SHA256.HashData(Encoding.UTF8.GetBytes(identity)).AsSpan(0, 16));
-                    var outcome = await work.RunOneAsync(lease, organization, jobId, options.BatchSize, ct).ConfigureAwait(false);
+                    var outcome = await work.RunOneAsync(lease, organization, jobId, runId, Guid.NewGuid(), options.BatchSize, ct).ConfigureAwait(false);
                     if (outcome == EllaiFencedWorkOutcome.StaleLease) return;
                     if (outcome == EllaiFencedWorkOutcome.Committed) jobsCreated++;
                 }

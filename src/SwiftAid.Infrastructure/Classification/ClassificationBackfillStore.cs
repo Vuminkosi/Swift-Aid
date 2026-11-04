@@ -159,7 +159,7 @@ public sealed class ClassificationBackfillStore(SwiftAidDbContext db, IOptions<C
             throw new UnauthorizedAccessException();
     }
 
-    public async Task BindResultAsync(Guid id, Guid sourceEventId, string configuration, CancellationToken ct, string? claimState = null)
+    public async Task BindResultAsync(Guid id, Guid sourceEventId, string configuration, CancellationToken ct, string? claimState = null, Guid? claimLeaseId = null)
     {
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         await LockAsync(id, ct);
@@ -193,6 +193,20 @@ public sealed class ClassificationBackfillStore(SwiftAidDbContext db, IOptions<C
         if (item.ResultId is not null && item.ResultId != resultId) throw new InvalidOperationException("Bound backfill artifact changed.");
         item.ResultId = resultId;
         await db.SaveChangesAsync(ct);
+        if (claimState == "Leased" && claimLeaseId is { } leaseId && leaseId != Guid.Empty)
+        {
+            // Record only a server-observed lease for a scheduled job. Timeline
+            // projection additionally requires completion by this exact lease.
+            await db.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO ellai_enrichment_claims (claim_id, job_id, source_event_id, result_id, lease_id, recorded_at_utc)
+                SELECT gen_random_uuid(), j.job_id, {sourceEventId}, r."Id", {leaseId}, {clock.GetUtcNow()}
+                FROM ellai_enrichment_jobs j JOIN swiftaid_classification.results r ON r."Id" = {resultId}
+                WHERE j.job_id = {id} AND r."State" = 'Leased' AND r."LeaseId" = {leaseId}
+                    AND r."ConfigurationId" = {configuration} AND r."WorkspaceId" = {job.WorkspaceId}
+                    AND r."OrganizationId" = {job.OrganizationId}
+                ON CONFLICT (job_id, source_event_id, lease_id) DO NOTHING
+                """, ct).ConfigureAwait(false);
+        }
         await transaction.CommitAsync(ct);
     }
 
