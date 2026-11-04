@@ -5,6 +5,10 @@ using SwiftAid.Application.Ellai;
 using SwiftAid.Intelligence.Meta;
 using EvidenceRef = SwiftAid.Contracts.Ellai.EvidenceRef;
 using EllaiDecision = SwiftAid.Contracts.Ellai.EllaiDecision;
+using DecisionKind = SwiftAid.Contracts.Ellai.DecisionKind;
+using AdminActionKind = SwiftAid.Contracts.Ellai.AdminActionKind;
+using AdminActionProposal = SwiftAid.Contracts.Ellai.AdminActionProposal;
+using PlanProposal = SwiftAid.Contracts.Ellai.PlanProposal;
 
 namespace SwiftAid.Application.Tests.Ellai;
 
@@ -374,6 +378,54 @@ public sealed class EllaiAgentFrameworkContractTests
                 _ => throw new InvalidOperationException()
             } : ValidDecision;
             return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant, response)));
+        }
+        public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+        public void Dispose() { }
+    }
+
+    [Theory]
+    [InlineData("valid")]
+    [InlineData("obligation")]
+    [InlineData("evidence")]
+    [InlineData("null-action")]
+    public async Task ProposedActionRequiresObservedEvidenceAndValidShape(string defect)
+    {
+        using var model = new PlanEvidenceClient(defect);
+        var agent = new EllaiFrameworkAgent(model);
+        var context = new EllaiToolContext("session", "epoch", "cases", null, 4, true,
+            AllowedTools: new HashSet<string> { EllaiToolNames.State });
+        var result = await agent.RunAsync(context, "Synthetic policy", [new ChatMessage(ChatRole.User, "Review")], 256,
+            _ => Task.FromResult(true), (_, request, _) => Task.FromResult(new EllaiToolResult(request.ToolName,
+                true, null, [StreamEvidence], "Done.", 1, false)),
+            new EllaiFrameworkUsage("session", new EllaiUsageLedger(), new InMemoryEllaiUsageStore()), default,
+            revalidateStreamObservations: _ => Task.FromResult(true));
+
+        Assert.NotNull(result);
+        Assert.Equal(defect == "valid" ? DecisionKind.ProposePlan : DecisionKind.Answer, result.Kind);
+        Assert.Equal(defect != "valid", agent.LastRepairUsed);
+    }
+
+    private sealed class PlanEvidenceClient(string defect) : IChatClient
+    {
+        private int _calls;
+        public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null,
+            CancellationToken cancellationToken = default)
+        {
+            if (++_calls == 1)
+                return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant,
+                    [new FunctionCallContent("plan-read", EllaiToolNames.State, new Dictionary<string, object?> { ["projection"] = "queue" })])));
+            if (_calls > 2) return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant, ValidDecision)));
+            var forged = StreamEvidence with { ResourceId = "unobserved" };
+            var action = new AdminActionProposal("review", AdminActionKind.CreateAdministrativeReviewTask,
+                defect == "obligation" ? forged : StreamEvidence, null, null,
+                [defect == "evidence" ? forged : StreamEvidence], "Review the observed item.");
+            var original = EllaiModelTurnParser.Parse(ValidDecision).Turn!.FinalDecision!;
+            var decision = original with { Kind = DecisionKind.ProposePlan,
+                PlanProposal = new PlanProposal("Review", defect == "null-action" ? [null!] : [action]) };
+            return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant,
+                System.Text.Json.JsonSerializer.Serialize(new { final_decision = decision }, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web)))));
         }
         public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages,
             ChatOptions? options = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();

@@ -221,6 +221,8 @@ public sealed class EllaiFrameworkAgent
             decision = EllaiModelTurnParser.Parse(guardedClient.LastText).Turn?.FinalDecision;
             if (decision is not null && EllaiDecisionValidator.Validate(decision).Count == 0 &&
                 !decision.Claims.Any(claim => claim?.Evidence is { } refs && refs.Any(reference => reference is null || !evidence.Contains(reference))) &&
+                (decision.PlanProposal is null || !decision.PlanProposal.Actions.Any(action =>
+                    !evidence.Contains(action.Obligation) || action.Evidence.Any(reference => !evidence.Contains(reference)))) &&
                 !HasKnownMisattribution(decision, evidenceSources))
                 break;
             decision = null;

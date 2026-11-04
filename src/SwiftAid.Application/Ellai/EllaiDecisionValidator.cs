@@ -83,6 +83,15 @@ public static class EllaiDecisionValidator
         {
             errors.Add("At most 3 administrative actions per plan.");
         }
+        if (decision.PlanProposal is { } plan &&
+            (string.IsNullOrWhiteSpace(plan.Objective) || plan.Actions is { Count: 0 } ||
+             plan.Actions is not null && plan.Actions.Any(action => action is null ||
+                string.IsNullOrWhiteSpace(action.ProposalLabel) || !Enum.IsDefined(action.Kind) ||
+                action.Obligation is null || string.IsNullOrWhiteSpace(action.FactualRationale) ||
+                action.Evidence is null || action.Evidence.Count == 0 || action.Evidence.Any(reference => reference is null))))
+        {
+            errors.Add("Plan proposals require an objective and valid evidence-backed actions.");
+        }
 
         if (decision.TopicRefs is null)
         {
