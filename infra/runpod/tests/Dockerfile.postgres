@@ -1,0 +1,9 @@
+FROM python:3.12.15-slim-bookworm AS python
+FROM postgis/postgis:17-3.6@sha256:5d4c5c5d10b415bec52b0b9cea1ae93ace3a451ff10ab8f8974988e336274452
+COPY --from=python /usr/local/ /usr/local/
+RUN ldconfig && groupadd --gid 10001 swiftaid && useradd --uid 10001 -g swiftaid swiftaid
+COPY config.py start.py /test/
+COPY tests/smoke_postgres.py /test/tests/
+ENV PATH=/usr/lib/postgresql/17/bin:$PATH
+ENTRYPOINT ["python", "/test/tests/smoke_postgres.py"]
+CMD []
