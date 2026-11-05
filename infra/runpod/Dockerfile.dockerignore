@@ -12,6 +12,8 @@
 !infra/nats.conf
 !scripts/ellai/native-models.lock.json
 !scripts/ellai/provision_native_models.py
+!docs/
+!docs/ellai/
 !docs/ellai/ellai-system-instruction.md
 !docs/TECHNICAL.md
 **/bin/**

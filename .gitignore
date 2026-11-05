@@ -500,3 +500,8 @@ src/SwiftAid.Domain/packages.lock.json
 src/SwiftAid.GuestIntake/packages.lock.json
 src/SwiftAid.Intelligence/packages.lock.json
 checklist.md
+
+# Runtime build input: include only the policy, not the other local Ellai documents.
+!/docs/ellai/
+/docs/ellai/*
+!/docs/ellai/ellai-system-instruction.md

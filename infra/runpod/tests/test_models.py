@@ -2,6 +2,8 @@ import hashlib
 import importlib
 from pathlib import Path
 import sys
+import subprocess
+import shutil
 import tempfile
 import unittest
 import zipfile
@@ -11,10 +13,20 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT.parents[1] / 'scripts/ellai'))
 from provision_native_models import verify
 from provision_models import extract_spacy
-from build import allowed
+from build import allowed, FILES
 
 
 class ModelTests(unittest.TestCase):
+    @unittest.skipUnless(shutil.which('git'), 'Checkout packaging check requires Git')
+    def test_required_build_inputs_are_available_in_a_git_checkout(self):
+        repository = ROOT.parents[1]
+        tracked = set(subprocess.check_output(
+            ['git', 'ls-files', '--cached'], cwd=repository, text=True).splitlines())
+        for name in FILES:
+            with self.subTest(path=name):
+                self.assertIn(name, tracked, 'Required build input is missing from version control')
+                self.assertTrue((repository / name).is_file())
+
     def test_same_size_model_corruption_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
             file = Path(directory) / 'model'
