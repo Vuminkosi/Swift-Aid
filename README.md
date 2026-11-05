@@ -1,6 +1,6 @@
 # SwiftAid | AI-Powered Community Disease Surveillance and Early Outbreak Intelligence
 
-**Meta Global AI Hackathon 2026**
+**Meta Global AI Hackathon 202 | https://www.youtube.com/watch?v=qRBZZgjN7TE6**
 
 **Give underserved communities an earlier voice in public health surveillance.**
 
