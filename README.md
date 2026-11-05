@@ -1,6 +1,7 @@
 # SwiftAid | AI-Powered Community Disease Surveillance and Early Outbreak Intelligence
 
-*Meta Global AI Hackathon 2026*
+**Meta Global AI Hackathon 2026**
+
 **Give underserved communities an earlier voice in public health surveillance.**
 
 SwiftAid is an offline-first, AI-powered community health platform being built to help underserved communities in **Zimbabwe and Eswatini** report concerns earlier and connect frontline health workers with actionable public health intelligence. Its vision is to turn fragmented community reports into explainable early-warning signals that authorized health officials can investigate.
