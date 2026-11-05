@@ -1,0 +1,30 @@
+# One running container. Runpod Pods deploy the built image, not this Compose file.
+name: swiftaid-runpod
+services:
+  swiftaid:
+    image: ${RUNPOD_IMAGE:-swiftaid/runpod:local}
+    platform: linux/amd64
+    build:
+      context: ..
+      dockerfile: infra/runpod/Dockerfile
+      target: runtime
+    env_file:
+      - path: ${RUNPOD_ENV_FILE:-./runpod/runtime.env}
+        required: false
+    environment:
+      SWIFTAID_STATE: /workspace/swiftaid
+    ports:
+      - "127.0.0.1:${RUNPOD_LOCAL_PORT:-8088}:8080"
+    volumes:
+      - runpod-state:/workspace
+    shm_size: 1gb
+    stop_grace_period: 90s
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "/opt/runpod/health.py"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30m
+      retries: 3
+volumes:
+  runpod-state:

@@ -1,0 +1,4 @@
+**
+!config.py
+!start.py
+!tests/smoke_postgres.py
