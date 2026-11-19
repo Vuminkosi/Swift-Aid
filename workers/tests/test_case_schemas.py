@@ -13,11 +13,13 @@ from referencing import Registry, Resource
 ROOT = Path(__file__).resolve().parents[2]
 GOLDEN_EVENT_FIXTURE_DIR = ROOT / "contracts/fixtures/case-events"
 GOLDEN_EVENT_FIXTURE_NAMES = (
+    "action-owner-changed.v1.json",
     "case-action-requested.v1.json",
     "case-action-review-approved.v1.json",
     "case-action-review-denied.v1.json",
     "case-assigned.v1.json",
     "case-escalation-acknowledged.v1.json",
+    "case-escalation-action-recorded.v1.json",
     "case-escalation-closed.v1.json",
     "case-escalation-raised.v1.json",
     "case-follow-up-outcome-missed.v1.json",
@@ -206,3 +208,87 @@ def test_golden_case_event_fixtures_validate_against_event_schema() -> None:
         event = json.loads(fixture_path.read_text(encoding="utf-8"))
         errors = list(VALIDATORS["event"].iter_errors(event))
         assert not errors, f"{fixture_path.name} violates the event schema: {errors}"
+
+
+def test_event_discriminator_accepts_existing_overlapping_payload_shapes() -> None:
+    payload = {
+        "escalationId": "40000000-0000-4000-8000-000000000003",
+        "actionSummary": "Synthetic action marker",
+        "reason": "Synthetic reason marker",
+    }
+    for event_type in ("CaseEscalationAcknowledged", "CaseEscalationActionRecorded"):
+        event = _event_fixture("40000000-0000-4000-8000-000000000004", event_type, payload)
+        errors = list(VALIDATORS["event"].iter_errors(event))
+        assert not errors, f"{event_type}: {errors}"
+
+
+def test_event_discriminator_rejects_mismatched_or_invalid_payloads() -> None:
+    event = _event_fixture(
+        "40000000-0000-4000-8000-000000000004",
+        "CaseEscalationActionRecorded",
+        {
+            "escalationId": "40000000-0000-4000-8000-000000000003",
+            "actionSummary": "Synthetic action marker",
+            "reason": "Synthetic reason marker",
+        },
+    )
+    invalid = []
+    for event_type in ("CaseEscalationClosed", "CaseAssigned", "UnknownEvent"):
+        candidate = copy.deepcopy(event)
+        candidate["eventType"] = event_type
+        invalid.append(candidate)
+    missing_type = copy.deepcopy(event)
+    del missing_type["eventType"]
+    invalid.append(missing_type)
+    for field in ("escalationId", "actionSummary", "reason"):
+        candidate = copy.deepcopy(event)
+        del candidate["payload"][field]
+        invalid.append(candidate)
+    for field, value in (("actionSummary", None), ("actionSummary", ""),
+                         ("escalationId", "not-a-uuid"), ("unexpected", "value")):
+        candidate = copy.deepcopy(event)
+        candidate["payload"][field] = value
+        invalid.append(candidate)
+    for payload in (None, [], "not-an-object", {}):
+        candidate = copy.deepcopy(event)
+        candidate["payload"] = payload
+        invalid.append(candidate)
+    for candidate in invalid:
+        assert not VALIDATORS["event"].is_valid(candidate), candidate
+
+
+def test_every_event_type_has_exactly_one_existing_payload_discriminator() -> None:
+    schema = SCHEMAS["event"]
+    expected = {
+        "CaseReported": "report", "CaseAssigned": "assignment",
+        "CaseReportCorrected": "correction", "CaseActionRequested": "actionRequest",
+        "CaseActionRequestReviewed": "actionReview", "CaseResolved": "resolution",
+        "CaseReopened": "reopening", "CaseDiscussionPosted": "discussionPosted",
+        "CaseObservationRecorded": "observationRecorded", "CaseFollowUpScheduled": "followUpScheduled",
+        "CaseFollowUpAcknowledged": "followUpAcknowledged", "CaseFollowUpOutcomeRecorded": "followUpOutcomeRecorded",
+        "ActionOwnerChanged": "actionOwnerChanged", "CaseEscalationRaised": "escalationRaised",
+        "CaseEscalationAcknowledged": "escalationAcknowledged", "CaseEscalationActionRecorded": "escalationActionRecorded",
+        "CaseEscalationClosed": "escalationClosed", "CaseAssignmentAcknowledged": "assignmentAcknowledged",
+        "CaseCollaboratorGranted": "collaboratorGranted", "CaseCollaboratorRevoked": "collaboratorRevoked",
+        "AssistanceRequested": "assistanceRequested", "AssistanceAccepted": "assistanceActivity",
+        "AssistanceProgressRecorded": "assistanceActivity", "AssistanceProvided": "assistanceActivity",
+        "AssistanceUnfulfilled": "assistanceActivity", "AssistanceCancelled": "assistanceActivity",
+        "AssistanceReceiptConfirmed": "assistanceReceipt",
+    }
+    covered = []
+    for condition in schema["allOf"]:
+        selector = condition["if"]
+        assert selector["required"] == ["eventType"]
+        event_type = selector["properties"]["eventType"]
+        covered.extend(event_type.get("enum", [event_type.get("const")]))
+        reference = condition["then"]["properties"]["payload"]["$ref"]
+        for name in event_type.get("enum", [event_type.get("const")]):
+            assert reference == f"#/$defs/{expected[name]}"
+        assert reference.startswith("#/$defs/")
+        definition = schema["$defs"][reference.removeprefix("#/$defs/")]
+        assert definition["type"] == "object"
+        assert definition["additionalProperties"] is False
+        assert definition["required"]
+    assert len(covered) == len(set(covered)) == len(expected) == 27
+    assert set(covered) == set(schema["properties"]["eventType"]["enum"])
+    assert "eventType" in schema["required"]

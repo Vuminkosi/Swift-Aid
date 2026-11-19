@@ -16,32 +16,7 @@
     "actorId": { "type": "string", "minLength": 1 },
     "occurredAtUtc": { "type": ["string", "null"], "format": "date-time" },
     "recordedAtUtc": { "type": "string", "format": "date-time" },
-    "payload": {
-      "oneOf": [
-        { "$ref": "#/$defs/report" },
-        { "$ref": "#/$defs/assignment" },
-        { "$ref": "#/$defs/correction" },
-        { "$ref": "#/$defs/actionRequest" },
-        { "$ref": "#/$defs/actionReview" },
-        { "$ref": "#/$defs/resolution" },
-        { "$ref": "#/$defs/reopening" },
-        { "$ref": "#/$defs/observationRecorded" },
-        { "$ref": "#/$defs/followUpScheduled" },
-        { "$ref": "#/$defs/followUpAcknowledged" },
-        { "$ref": "#/$defs/followUpOutcomeRecorded" },
-        { "$ref": "#/$defs/escalationRaised" },
-        { "$ref": "#/$defs/escalationAcknowledged" },
-        { "$ref": "#/$defs/escalationActionRecorded" },
-        { "$ref": "#/$defs/escalationClosed" },
-        { "$ref": "#/$defs/assignmentAcknowledged" },
-        { "$ref": "#/$defs/collaboratorGranted" },
-        { "$ref": "#/$defs/collaboratorRevoked" },
-        { "$ref": "#/$defs/assistanceRequested" },
-        { "$ref": "#/$defs/assistanceActivity" },
-        { "$ref": "#/$defs/assistanceReceipt" },
-        { "$ref": "#/$defs/actionOwnerChanged" }
-      ]
-    }
+    "payload": { "type": "object" }
   },
   "allOf": [
     { "if": { "properties": { "eventType": { "const": "CaseReported" } }, "required": ["eventType"] }, "then": { "properties": { "aggregateVersion": { "const": 1 }, "reportRevision": { "const": 1 }, "payload": { "$ref": "#/$defs/report" } } } },

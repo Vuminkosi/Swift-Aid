@@ -1,6 +1,17 @@
 # Paired-document integrity snapshot
 
-## Current pair: 2 November 2026 — spec v1.5 / implementation v2.5
+## Current checked pair: 19 November 2026 — spec v1.5 / implementation v2.5
+
+| Path | Version | Bytes | SHA-256 |
+|---|---:|---:|---|
+| `spec.md` | 1.5 | 230181 | `77f701f1e13796423a213c2f9de519dbfdb1646407bab56c0aa054a18d5c8361` |
+| `implementation.md` | 2.5 | 629572 | `6138485ef1c3d1d50874a7cc643aa01651ddb80993f103a4e49e323f19a971da` |
+
+Authority: commit `45bd07b3175eb60c63b9fd9595226bb624a29994` explicitly revised AGENTS and the paired source documents to v1.5/v2.5, adding SA-ELV-01–14, AT-77–86 and P8.7. Commit `daa4e5547dd7f7a1be6d4c0c06ec2119e157042c` subsequently added SA-REP-15. Current extraction finds 380 unique specification requirements, 86 scenarios and 45 plan task IDs/headings. Every requirement, scenario and task identifier from the bootstrap's historical `1cb34eb6` source pair remains present. These are source-inventory checks, not completed traceability or product acceptance.
+
+The snapshot is based on master `1c98e0a1efc94ac517805a6454216fde7b6e8743` plus the encoding-only repair of three invalid Windows-1252 dash bytes in implementation headings to UTF-8 em dashes; all other source bytes were preserved. The exact bootstrap digest/version/count pins now guard this pair, retaining existing safety and UI decision checks and adding explicit checks for the additive identifiers. No requirements, clinical policy, feature gates or runtime behavior were changed. Older snapshots and reported execution evidence below remain historical; they do not verify current software or live capabilities.
+
+## Historical snapshot: 2 November 2026 — spec v1.5 / implementation v2.5
 
 | Path | Version | Bytes | SHA-256 |
 |---|---:|---:|---|
