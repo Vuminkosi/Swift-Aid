@@ -767,3 +767,28 @@ SW-05-001 PostgreSQL verification (3 November 2026): current disposable PostgreS
 SW-05-002 keyset pagination follow-up (3 November 2026): added cursor continuation to the authorized owned-case queue and PostgreSQL store, preserving per-candidate ReadCase checks and requiring an additional authorized row before returning a cursor. Gateway and Mobile workspace clients follow queue pages and derive filter options across them. Focused Integration.Tests PASS 34/34 and focused Client.Tests PASS 14/14, zero skips; earlier full Client.Tests run PASS 339/339 before the final added assertions. `git diff --check` PASS. Live browser/Gateway authorization, Android, and snapshot-consistent paging NOT VERIFIED. SW-05-002 remains partial because activity/next-action and other parity requirements remain open.
 
 Community Sessions owner scope follow-up (4 November 2026): session records now carry nullable organization scope for backward compatibility; new creates require an active organization owner. The application rechecks current owner authority for staff commands, reads and history. Migration seeds explicit owner assignments from the existing organization owner field and assigns legacy sessions only when their creator maps to exactly one active owner organization; ambiguous/unmatched rows remain inaccessible. Owner review records exact-version source/reuse-rights evidence with the session revision; current approvals gate publication and public material references, and owners can revoke approvals. Gateway and Android compile and migration application remain to be verified; tests were not run per instruction. Owner attestations are not independently confirmed by a canonical rights provider.
+
+
+## Issue #5: local guest-queue concurrency parity (19 November 2026)
+
+Scope: P3.4 / SA-PUB-13–15 and SA-REP-11 local persistence only. Mobile inherited default interface methods that discarded expected versions. Its encrypted store now snapshots each batch before awaiting the existing file gate, validates current/expected/next versions under that gate, and writes only after every entry and existing invariant passes. Insert requires absent identity and version 1; updates require exact positive expected version and next = expected + 1. Stale/invalid versions raise the existing conflict exception. Encryption envelope, keys, associated data, immutable payload/audio checks, unversioned legacy saves, and public constructors are unchanged.
+
+Coordinator conflicts reload persisted state and defer the stale transition to a later run; they never replay an old receipt or failure over a winner. This includes the non-retryable transport-failure save and receipt refresh. Reload failures defer only that item; caller cancellation still propagates. The draft gate is not held during transport I/O. Existing idempotent identity handles a later retry; this is not a claim of exactly-once network delivery.
+
+Test-first evidence (Linux, SDK 10.0.404, net10.0, synthetic metadata/fake transport/temp encrypted files): initial Mobile RED 6/6 failed because conflicts were not raised; coordinator RED 2/2 failed (missing reload and escaping nested conflict); review-discovered mutable-list regression RED 1/1 failed before batch snapshot fix. Final focused regression PASS 48/48, no skips, with 17 new concurrency cases plus 31 existing journey/audio-retake tests. Audio coverage uses inert asset metadata to prove rejected stale writes retain original attachment/hash references; no recording, inference, provider or Gateway requests ran.
+
+Commands (from repository root, select the SDK permitted by `global.json`; verification used SDK 10.0.404):
+
+```sh
+dotnet test tests/SwiftAid.Client.Tests -c Release -m:1 -nr:false --filter FullyQualifiedName~GuestPersistenceConcurrencyTests
+dotnet restore tests/SwiftAid.Client.Tests --locked-mode -m:1 -nr:false
+# Subsequent focused runs use --no-restore.
+dotnet test tests/SwiftAid.Client.Tests -c Release --no-restore -m:1 -nr:false --filter 'FullyQualifiedName~GuestPersistenceConcurrencyTests|FullyQualifiedName~GuestSubmissionJourneyTests|FullyQualifiedName~GuestDraftAudioRetakePersistenceTests'
+dotnet format whitespace . --folder --verify-no-changes --include src/SwiftAid.Client/Intake/GuestSubmissionCoordinator.cs src/SwiftAid.Mobile/Services/Intake/EncryptedGuestSubmissionStore.cs tests/SwiftAid.Client.Tests/GuestPersistenceConcurrencyTests.cs
+node --check tests/SwiftAid.Browser.Tests/guest-storage.browser.cjs
+git diff --check
+```
+
+Locked restore, scoped folder whitespace verification, JS syntax and diff checks passed. Project-based formatter could not connect its build-host named pipe (socket permission denied); full project formatting is NOT VERIFIED.
+
+`GuestOfflineTests` is the plan's named filter but no class with that name currently exists; no device/offline acceptance is inferred from it. `tests/Shared/guest-version-contract.json` supplies four identical valid/stale-version scenarios to Mobile and the existing production IndexedDB browser harness. Browser runtime execution is NOT VERIFIED; syntax checking is not IndexedDB evidence. Existing Browser invalid-request handling for malformed next/expected versions differs from Mobile's conflict exception and is unchanged; shared cases cover well-formed operations and stale persisted state. Android workload/device, keystore integration, actual browser, full Client suite, real Gateway and provider checks remain NOT VERIFIED. No auth, clinical policy, capability gate, migration, or cross-tenant behavior was changed. These checks do not establish full issue acceptance.

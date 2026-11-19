@@ -1,0 +1,122 @@
+[
+  {
+    "name": "insert-and-update",
+    "steps": [
+      {
+        "writes": [
+          {
+            "id": "a",
+            "expected": null,
+            "version": 1,
+            "marker": "initial"
+          }
+        ],
+        "result": "saved"
+      },
+      {
+        "writes": [
+          {
+            "id": "a",
+            "expected": 1,
+            "version": 2,
+            "marker": "winner"
+          }
+        ],
+        "result": "saved"
+      }
+    ]
+  },
+  {
+    "name": "stale-batch-no-prefix",
+    "steps": [
+      {
+        "writes": [
+          {
+            "id": "a",
+            "expected": null,
+            "version": 1,
+            "marker": "initial"
+          },
+          {
+            "id": "b",
+            "expected": null,
+            "version": 1,
+            "marker": "initial"
+          }
+        ],
+        "result": "saved"
+      },
+      {
+        "writes": [
+          {
+            "id": "a",
+            "expected": 1,
+            "version": 2,
+            "marker": "winner"
+          }
+        ],
+        "result": "saved"
+      },
+      {
+        "writes": [
+          {
+            "id": "b",
+            "expected": 1,
+            "version": 2,
+            "marker": "must-not-persist"
+          },
+          {
+            "id": "a",
+            "expected": 1,
+            "version": 2,
+            "marker": "stale"
+          }
+        ],
+        "result": "conflict"
+      }
+    ]
+  },
+  {
+    "name": "insert-collision",
+    "steps": [
+      {
+        "writes": [
+          {
+            "id": "a",
+            "expected": null,
+            "version": 1,
+            "marker": "initial"
+          }
+        ],
+        "result": "saved"
+      },
+      {
+        "writes": [
+          {
+            "id": "a",
+            "expected": null,
+            "version": 1,
+            "marker": "collision"
+          }
+        ],
+        "result": "conflict"
+      }
+    ]
+  },
+  {
+    "name": "missing-update",
+    "steps": [
+      {
+        "writes": [
+          {
+            "id": "a",
+            "expected": 1,
+            "version": 2,
+            "marker": "missing"
+          }
+        ],
+        "result": "conflict"
+      }
+    ]
+  }
+]

@@ -384,12 +384,44 @@ async function testCleanupRestartAndExactVersionMatching(browser, baseUrl) {
     }
 }
 
+// The same version scenarios run against Mobile's encrypted store in Client tests.
+async function testSharedVersionContract(browser, baseUrl) {
+    const scenarios = JSON.parse(fs.readFileSync(path.resolve("tests/Shared/guest-version-contract.json"), "utf8"));
+    for (const scenario of scenarios) {
+        const { context, page } = await createPage(browser, baseUrl);
+        const ids = { a: submissionA, b: submissionB };
+        const expected = new Map();
+        try {
+            for (const step of scenario.steps) {
+                const writes = step.writes.map(write => ({
+                    record: makeRecord(ids[write.id], write.version, write.marker),
+                    expectedVersion: write.expected
+                }));
+                const result = await page.evaluate(async values => {
+                    const { guestStorage } = await import("/guest-storage.js");
+                    return guestStorage.saveBatchVersionedResult(values);
+                }, writes);
+                assert.equal(result.code, step.result, scenario.name);
+                if (step.result === "saved") {
+                    for (const write of writes) expected.set(write.record.clientSubmissionId, write.record);
+                }
+                for (const id of Object.values(ids)) {
+                    assert.deepEqual(await getRecord(page, id), expected.get(id) ?? null, scenario.name);
+                }
+            }
+        } finally {
+            await context.close();
+        }
+    }
+}
+
 async function main() {
     const server = createServer();
     const baseUrl = await listen(server);
     let browser;
     try {
         browser = await chromium.launch({ channel: "chrome", headless: true });
+        await run(browser, baseUrl, "shared Mobile/Browser version contract", testSharedVersionContract);
         await run(browser, baseUrl, "encrypted form snapshot survives page restart", testEncryptedFormSnapshotSurvivesPageRestart);
         await run(browser, baseUrl, "two-instance same-version CAS has one winner", testConcurrentVersionRace);
         await run(browser, baseUrl, "stale member batch aborts all writes", testStaleBatchAtomicity);
