@@ -40,4 +40,8 @@
     <Compile Include="..\..\src\SwiftAid.Mobile\Services\Account\HttpEventSubscriptionClient.cs" Link="Linked\Mobile\HttpEventSubscriptionClient.cs" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Include="../Shared/guest-version-contract.json" Link="guest-version-contract.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

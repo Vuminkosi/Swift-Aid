@@ -137,8 +137,29 @@ public sealed class GuestSubmissionCoordinator(
                         UpdatedAtUtc = _timeProvider.GetUtcNow(),
                         Version = checked(item.Version + 1)
                     };
-                    await persistence.SaveVersionedAsync(updatedRecord, item.Version, cancellationToken).ConfigureAwait(false);
-                    needsAttention++;
+                    try
+                    {
+                        await persistence.SaveVersionedAsync(updatedRecord, item.Version, cancellationToken).ConfigureAwait(false);
+                        needsAttention++;
+                    }
+                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                    {
+                        throw;
+                    }
+                    catch (GuestSubmissionPersistenceConflictException)
+                    {
+                        await ReloadAfterConflictAsync(item.ClientSubmissionId, cancellationToken).ConfigureAwait(false);
+                        retryPending++;
+                    }
+                    catch (Exception)
+                    {
+                        retryPending++;
+                    }
+                }
+                catch (GuestSubmissionPersistenceConflictException)
+                {
+                    await ReloadAfterConflictAsync(item.ClientSubmissionId, cancellationToken).ConfigureAwait(false);
+                    retryPending++;
                 }
                 catch (Exception)
                 {
@@ -201,6 +222,11 @@ public sealed class GuestSubmissionCoordinator(
                 {
                     throw;
                 }
+                catch (GuestSubmissionPersistenceConflictException)
+                {
+                    await ReloadAfterConflictAsync(item.ClientSubmissionId, cancellationToken).ConfigureAwait(false);
+                    retryPending++;
+                }
                 catch (Exception)
                 {
                     retryPending++;
@@ -212,6 +238,25 @@ public sealed class GuestSubmissionCoordinator(
         finally
         {
             Gate.Release();
+        }
+    }
+
+    private async Task ReloadAfterConflictAsync(Guid submissionId, CancellationToken cancellationToken)
+    {
+        // Discard this run's stale transition, including any returned receipt. A later run
+        // starts from persisted state and may retry using the existing idempotent identity.
+        // Never replay the stale write over the winner or hold the draft gate during I/O.
+        try
+        {
+            _ = await persistence.GetAsync(submissionId, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            // Unavailable local storage also defers this item, not unrelated queue entries.
         }
     }
 

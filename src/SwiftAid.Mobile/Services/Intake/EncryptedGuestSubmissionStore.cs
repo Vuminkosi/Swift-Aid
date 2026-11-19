@@ -48,8 +48,31 @@ public sealed class EncryptedGuestSubmissionStore : IGuestSubmissionPersistence
         await SaveBatchAsync([submission], cancellationToken).ConfigureAwait(false);
     }
 
-    public async Task SaveBatchAsync(
+    public Task SaveBatchAsync(
         IReadOnlyList<GuestSubmissionRecord> submissions,
+        CancellationToken cancellationToken) => SaveBatchCoreAsync(submissions, null, cancellationToken);
+
+    public Task SaveVersionedAsync(
+        GuestSubmissionRecord submission,
+        long? expectedVersion,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(submission);
+        return SaveBatchVersionedAsync([new(submission, expectedVersion)], cancellationToken);
+    }
+
+    public Task SaveBatchVersionedAsync(
+        IReadOnlyList<GuestSubmissionWrite> writes,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(writes);
+        var batch = writes.ToArray();
+        return SaveBatchCoreAsync(batch.Select(write => write.Record).ToArray(), batch, cancellationToken);
+    }
+
+    private async Task SaveBatchCoreAsync(
+        IReadOnlyList<GuestSubmissionRecord> submissions,
+        IReadOnlyList<GuestSubmissionWrite>? writes,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(submissions);
@@ -63,6 +86,21 @@ public sealed class EncryptedGuestSubmissionStore : IGuestSubmissionPersistence
         {
             var stored = await ReadAllCoreAsync(cancellationToken).ConfigureAwait(false);
             var index = stored.ToDictionary(item => item.ClientSubmissionId);
+            // Validate every expectation against the same snapshot while holding the file gate.
+            // No encrypted replacement is written unless the complete batch is valid.
+            if (writes is not null)
+            {
+                foreach (var write in writes)
+                {
+                    var expected = write.ExpectedVersion;
+                    index.TryGetValue(write.Record.ClientSubmissionId, out var current);
+                    if (current?.Version != expected || expected is < 1 or long.MaxValue ||
+                        write.Record.Version != (expected is null ? 1 : expected.Value + 1))
+                    {
+                        throw new GuestSubmissionPersistenceConflictException(write.Record.ClientSubmissionId);
+                    }
+                }
+            }
             foreach (var item in submissions)
             {
                 Validate(item);
@@ -99,6 +137,10 @@ public sealed class EncryptedGuestSubmissionStore : IGuestSubmissionPersistence
                 .ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (GuestSubmissionPersistenceConflictException)
         {
             throw;
         }
