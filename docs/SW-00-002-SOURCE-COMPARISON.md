@@ -33,9 +33,13 @@ The repository search scope covered `designs/`, `docs/`, `fixtures/`, `resources
 
 ## Status
 
-## Requirement and task identifier reconciliation — 2 November 2026
+## Current requirement checklist coverage — 21 November 2026
 
-Automated read-only comparison of the current source files and master checklist found:
+The operative v1.5/v2.5 pair has 380 unique specification requirements. Root `checklist.md` has exactly one row per specification requirement, including the unchecked P1 row for `SA-REP-15`. This is an inventory match, not implementation evidence. The design checklist remains the historical source checklist rather than the current master.
+
+## Historical requirement and task identifier reconciliation — 2 November 2026
+
+Automated read-only comparison of the source files and master checklist at that snapshot found:
 
 | Identifier set | Source count | Checklist/crosswalk count | Result |
 |---|---:|---:|---|
@@ -44,7 +48,7 @@ Automated read-only comparison of the current source files and master checklist 
 | Implementation task IDs `P*` | 45 implementation headings | 45 rows in `spec.md` §29 | Exact set match; each task row supplies its SA/AT scope. These IDs are not copied verbatim into the master checklist; traceability is through shared SA/AT identifiers. |
 | `SW-*` execution checks | 171 unique in `designs/checklist.md` | 171 unique in root `checklist.md` | Exact set match. |
 
-Root `checklist.md` and `designs/checklist.md` have the same phase count and the same SW, SA and AT identifier sets. Their content differs: the root file carries current execution evidence, statuses, audit links and later clarifications, while the design copy remains the original unchecked source checklist.
+At that snapshot, root `checklist.md` and `designs/checklist.md` had the same phase count and the same SW, SA and AT identifier sets. Their content differs: the root file carries current execution evidence, statuses, audit links and later clarifications, while the design copy remains the original unchecked source checklist.
 
 Two detailed design sources define 73 local screen/flow/failure identifiers outside the canonical SA/AT/task namespaces: community sessions (46: `CM-01..15`, `CD-01..22`, `CW-01..09`) and onboarding (27 `M-*`/`W-*` screen IDs). These identify UI surfaces, transitions and failure probes, not a separate approved product requirement namespace.
 

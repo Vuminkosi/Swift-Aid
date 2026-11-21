@@ -4393,20 +4393,20 @@ Repeatable verification: `SWIFTAID_RUN_LIVE_GUIDANCE=1 node tests/SwiftAid.Ui.Te
 
 The real create-and-submit request reached `/report` but failed target-state validation after a roughly 50-second planning call. Inspection found that re-admission read a fresh observation, while validation still used the pre-inference observation. A controlled-clock regression reproduced InvalidPlan for unchanged freshly reported state after 60 seconds. Plan validation now uses the observation returned by re-admission; it does not retimestamp stale data or extend the 45-second window. Changed contexts, missing refreshes and newly disabled targets still fail closed. All 89 focused planning/admission/observed-guidance tests passed. The complete live submission journey remains unverified pending redeployment and rerun.
 
-### Guided report control anchors — 2 November 2026
+### Guided report control anchors â€” 2 November 2026
 
 - Real Chromium regression reproduced tours highlighting the subject heading instead of its radio choices. Narrative guidance likewise targeted a heading; the processing checkbox exposed its invisible native input as its observation target.
 - Shared report anchors now surround the visible subject choices, editable narrative, country selector and processing confirmation. Semantic IDs and server evidence/authorization rules are unchanged. This covers web and MAUI shared markup.
 - PASS: TestHost build (`dotnet build ... --no-restore -m:1 -nr:false -p:WasmBuildNative=false`), and `node tests/SwiftAid.Ui.Tests/ellai-report.browser.cjs` at 1280/390 pixels, including actual control containment, confirmation Ready state, validation, save failure/success and synthetic receipt behavior. The added anchor regression failed before the correction.
 - The real HTTPS Gateway/Muse walkthrough generated eight steps and reached confirmations but repeatedly returned Stale before this correction. Full live receipt acceptance after rebuild, tour narration, attached composer and physical-device behavior remain NOT VERIFIED.
 
-### Compact dashboard condition and map presentation — 2 November 2026
+### Compact dashboard condition and map presentation â€” 2 November 2026
 
 - Single-condition results use a compact count summary instead of a large mostly empty chart. Multi-condition charts retain count scales and now use defined MudBlazor palette colours and culture-invariant CSS percentages. Privacy-suppressed values remain suppressed.
 - Dashboard panels no longer stretch the condition card to match map height. Compact maps omit the redundant selected-country detail card; the full surveillance detail view is unchanged.
 - PASS: TestHost build and `node tests/SwiftAid.Ui.Tests/dashboard-presentation.browser.cjs` at 1280px light/390px dark. Verified compact height, visible category bars, map link and no horizontal page overflow. Screenshots visually reviewed in `.codex/dashboard-{summary,chart}-{1280,390}.png`. These are synthetic presentation checks, not live surveillance-data validation; basemap tile delivery and physical-device rendering NOT VERIFIED.
 
-### Ground generated presentation behavior in registered proof — 2 November 2026
+### Ground generated presentation behavior in registered proof â€” 2 November 2026
 
 - A real Muse plan marked every report step GuideHuman, including the entry heading and review panel. It passed planning but could never advance at the heading because there is no input-completion event for a heading.
 - The validator now normalizes GuideHuman to Explain only for registered Heading/Panel presentation with R0/R1 risk, proof-ui-observed, and no human confirmation requirement. Input validation, consent, submission and receipt proof are unchanged. Restored plans persist this normalized representation without another model call or replaying an action.
