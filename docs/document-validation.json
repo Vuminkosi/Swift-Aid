@@ -1,5 +1,6 @@
 {
-  "currentRevision": {
+  "currentAuthority": "DOCUMENT-INTEGRITY.md",
+  "historicalRevision2026_11_02": {
     "snapshotDate": "2026-11-02",
     "specVersion": "1.5",
     "implementationVersion": "2.5",

@@ -18,7 +18,7 @@ The snapshot is based on master `1c98e0a1efc94ac517805a6454216fde7b6e8743` plus 
 | `spec.md` | 1.5 | 227969 | `67cea198bad51abbb1b457a4a869e088a8b206521e6b67c430d0c2b8733ed365` |
 | `implementation.md` | 2.5 | 603169 | `887f78cb23afb07f41ea6222a179db609bbd36f348a85782a6a3656bb48fe5dc` |
 
-Static extraction found 379 unique `SA-*` identifiers and 379 individual priority-coded checklist rows, 86 acceptance scenarios and 86 scenario-owner rows, and 45 implementation task headings. All 379 source requirement IDs map to exactly one checklist row. The current pair's byte lengths and hashes were recomputed from root source files on 2 November 2026. These are document-structure checks; they do not verify application behavior, provider calls, device playback, rights, or deployment.
+Static extraction found 379 unique `SA-*` identifiers and 379 individual priority-coded checklist rows, 86 acceptance scenarios and 86 scenario-owner rows, and 45 implementation task headings. All 379 source requirement IDs map to exactly one checklist row. That snapshot's byte lengths and hashes were recomputed from root source files on 2 November 2026. These are document-structure checks; they do not verify application behavior, provider calls, device playback, rights, or deployment.
 
 ## Historical pair: 26 October 2026 — spec v1.4 / implementation v2.4
 
@@ -43,7 +43,7 @@ The prior docs baseline was `0bf4cf45abce753011803a80f029b45c8f8748dc` and descr
 
 ## Checks and evidence boundaries
 
-Hash, byte-length and inventory extraction are static document checks. `docs/document-validation.json` records those checks and independently reported, scope-limited build/test/review evidence. The latest bootstrap run passed 4/4; the earlier transient failure is superseded. The integrated .NET test snapshot passed 50 tests across Domain and Application, while three assemblies reported no tests. P1.2A has a disputed residual test-severity finding and production authorization remains NOT VERIFIED. This documentation task did not run product builds or tests. No product release acceptance is claimed. Earlier 41-check results apply to an earlier document pair only.
+Hash, byte-length and inventory extraction are static document checks. [The machine-readable historical ledger](document-validation.json) records earlier checks and independently reported, scope-limited build/test/review evidence. The current checked pair is listed above. The latest bootstrap run passed 4/4; the earlier transient failure is superseded. The integrated .NET test snapshot passed 50 tests across Domain and Application, while three assemblies reported no tests. P1.2A has a disputed residual test-severity finding and production authorization remains NOT VERIFIED. This documentation task did not run product builds or tests. No product release acceptance is claimed. Earlier 41-check results apply to an earlier document pair only.
 
 ## Historical source-label discrepancy
 
