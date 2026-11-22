@@ -353,8 +353,14 @@ public sealed class CaseEventSerializationTests
         using var schema = JsonDocument.Parse(File.ReadAllBytes(schemaPath));
         var root = schema.RootElement;
         Assert.Equal(2, root.GetProperty("properties").GetProperty("schemaVersion").GetProperty("const").GetInt32());
-        Assert.Equal(new[] { "CaseReported", "CaseReportCorrected" }, root.GetProperty("properties").GetProperty("eventType")
+        Assert.Equal(new[] { "CaseReported", "CaseReportCorrected", "CaseObservationRecorded" }, root.GetProperty("properties").GetProperty("eventType")
             .GetProperty("enum").EnumerateArray().Select(value => value.GetString()).ToArray());
+        var observationBranch = Assert.Single(root.GetProperty("allOf").EnumerateArray(), branch =>
+            branch.GetProperty("if").GetProperty("properties").GetProperty("eventType").GetProperty("const").GetString() ==
+            nameof(CaseEventType.CaseObservationRecorded));
+        Assert.Equal("#/$defs/observation", observationBranch.GetProperty("then").GetProperty("properties")
+            .GetProperty("payload").GetProperty("$ref").GetString());
+        Assert.False(root.GetProperty("$defs").GetProperty("observation").GetProperty("additionalProperties").GetBoolean());
         var report = root.GetProperty("$defs").GetProperty("report");
         Assert.Contains("reportKind", report.GetProperty("required").EnumerateArray().Select(value => value.GetString()));
         Assert.Contains("confirmations", report.GetProperty("required").EnumerateArray().Select(value => value.GetString()));
@@ -379,19 +385,32 @@ public sealed class CaseEventSerializationTests
         var schemaEventTypes = schema.RootElement.GetProperty("properties").GetProperty("eventType")
             .GetProperty("enum").EnumerateArray().Select(value => value.GetString()).OrderBy(value => value, StringComparer.Ordinal).ToArray();
         var contractEventTypes = Enum.GetNames<CaseEventType>().OrderBy(value => value, StringComparer.Ordinal).ToArray();
-        var mappedEventTypes = schema.RootElement.GetProperty("allOf").EnumerateArray()
+        var branches = schema.RootElement.GetProperty("allOf").EnumerateArray().ToArray();
+        var mappedEventTypes = branches
             .Select(condition => condition.GetProperty("if").GetProperty("properties").GetProperty("eventType"))
             .SelectMany(eventType => eventType.TryGetProperty("const", out var constant)
                 ? [constant.GetString()]
                 : eventType.GetProperty("enum").EnumerateArray().Select(value => value.GetString()))
             .OrderBy(value => value, StringComparer.Ordinal).ToArray();
-        var payloadDefinitions = schema.RootElement.GetProperty("$defs").EnumerateObject().Select(definition => definition.Name).ToHashSet(StringComparer.Ordinal);
-        var payloadReferences = schema.RootElement.GetProperty("properties").GetProperty("payload").GetProperty("oneOf")
-            .EnumerateArray().Select(reference => reference.GetProperty("$ref").GetString()!.Replace("#/$defs/", "", StringComparison.Ordinal));
+        var payloadDefinitions = schema.RootElement.GetProperty("$defs");
+        const string definitionPrefix = "#/$defs/";
 
         Assert.Equal(contractEventTypes, schemaEventTypes);
         Assert.Equal(contractEventTypes, mappedEventTypes);
-        Assert.All(payloadReferences, reference => Assert.Contains(reference, payloadDefinitions));
+        Assert.False(schema.RootElement.GetProperty("properties").GetProperty("payload").TryGetProperty("oneOf", out _));
+        Assert.All(branches, branch =>
+        {
+            var requiredSelector = branch.GetProperty("if").GetProperty("required").EnumerateArray();
+            Assert.Equal("eventType", Assert.Single(requiredSelector).GetString());
+            var payloadReference = branch.GetProperty("then").GetProperty("properties")
+                .GetProperty("payload").GetProperty("$ref").GetString()!;
+            Assert.StartsWith(definitionPrefix, payloadReference);
+            Assert.True(payloadDefinitions.TryGetProperty(payloadReference[definitionPrefix.Length..], out var definition),
+                $"Missing local payload definition for {payloadReference}");
+            Assert.Equal("object", definition.GetProperty("type").GetString());
+            Assert.False(definition.GetProperty("additionalProperties").GetBoolean());
+            Assert.NotEmpty(definition.GetProperty("required").EnumerateArray());
+        });
     }
 
     [Fact]

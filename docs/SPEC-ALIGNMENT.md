@@ -2,7 +2,11 @@
 
 Snapshot date: 26 October 2026. This ledger records approved contracts and open source discrepancies; it is not proof that software behavior exists.
 
-## Current authoritative pair
+## Current authoritative pair: 19 November 2026 integrity reconciliation
+
+The operative requirements are root spec v1.5 and implementation v2.5, as explicitly adopted by commit `45bd07b3175eb60c63b9fd9595226bb624a29994`, current AGENTS.md and TASK-OWNERS.md. Later source commit `daa4e5547dd7f7a1be6d4c0c06ec2119e157042c` adds SA-REP-15. Current source inventories are 380 unique SA requirements, 86 AT scenarios and 45 implementation tasks; every historical bootstrap identifier remains. Exact current byte lengths and SHA-256 pins are in [DOCUMENT-INTEGRITY.md](DOCUMENT-INTEGRITY.md). That snapshot includes only a three-character encoding repair to the master source, not changed requirements or enabled capabilities. The dated v1.4/v2.4 entry below is historical provenance, not the current bootstrap target. This reconciliation does not resolve other source discrepancies or establish software acceptance.
+
+## Historical authoritative pair: 26 October 2026
 
 - Product specification: [spec.md](../spec.md), v1.4, SHA-256 `8900B57EA08C9DB0704D26B19AB6289D4E4D7891D2609CC253CAF1D3A66B4AEE`.
 - Implementation plan: [implementation.md](../implementation.md), v2.4, SHA-256 `09F9EB36683D8860D2904CB1604C6A5C65E7EC9C51A9380E3BFEF46A4A1F2023`.

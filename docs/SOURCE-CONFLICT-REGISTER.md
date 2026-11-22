@@ -4,7 +4,7 @@
 
 The active source pair is `spec.md` v1.5 and `implementation.md` v2.5. The byte lengths and SHA-256 hashes were recomputed from the root files and are recorded in [DOCUMENT-INTEGRITY.md](DOCUMENT-INTEGRITY.md). The prior 31 October current-pair hashes were stale; historical v1.4/v2.4 entries remain labeled historical.
 
-Static coverage check: the spec contains 379 unique `SA-*` identifiers, and the master checklist contains exactly 379 priority-coded SA rows. Every source identifier maps to one checklist row. The checklist rows retain their source priority labels, including the combined `P1/Gate` classification; this check does not validate implementation or acceptance status.
+Static coverage check: the spec contains 380 unique `SA-*` identifiers, and the master checklist contains exactly 380 individual SA rows, including the unchecked P1 row for `SA-REP-15`. Every source identifier maps to one checklist row. Existing priority and scope labels are unchanged; this check does not validate implementation or acceptance status.
 
 ## Owner decision records
 
